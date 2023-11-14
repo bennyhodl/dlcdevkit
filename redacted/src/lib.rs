@@ -34,7 +34,7 @@ impl ErnestWallet {
             &Secp256k1::new(),
         )?;
 
-        let db_filename = format!("./wallets/{}ernest.sqlite", wallet_name);
+        let db_filename = format!("./wallets/{}_ernest.sqlite", wallet_name);
         let database = SqliteDatabase::new(db_filename);
 
         let wallet = Wallet::new(
