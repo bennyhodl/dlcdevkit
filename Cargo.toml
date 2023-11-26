@@ -1,2 +1,2 @@
 [workspace]
-members = ["redacted"]
+members = ["wallet", "terminal/src-tauri"]

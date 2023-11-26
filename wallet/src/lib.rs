@@ -1,41 +1,56 @@
+mod dlc;
+#[cfg(test)]
+mod tests;
+pub use bdk::bitcoin::Network;
 use bdk::{
-    bitcoin::Network,
     blockchain::EsploraBlockchain,
     database::SqliteDatabase,
     template::Bip84,
     wallet::{AddressIndex, AddressInfo},
     Balance, KeychainKind, Wallet,
 };
-use bip39::Mnemonic;
-use bitcoin::{secp256k1::Secp256k1, util::bip32::ExtendedPrivKey};
-use getrandom::getrandom;
+use bitcoin::{
+    secp256k1::{PublicKey, Secp256k1},
+    util::bip32::ExtendedPrivKey,
+};
 use std::sync::{Arc, RwLock};
+mod io;
+
+use io::{create_ernest_dir_with_wallet, get_wallet_dir};
 
 #[derive(Debug)]
 pub struct ErnestWallet {
     pub blockchain: EsploraBlockchain,
     pub wallet: Arc<RwLock<Wallet<SqliteDatabase>>>,
+    pub name: String,
 }
 
 impl ErnestWallet {
-    pub fn new(network: Network) -> anyhow::Result<ErnestWallet> {
-        let mut entropy = [0u8; 16];
+    pub fn new(
+        wallet_name: String,
+        esplora_url: String,
+        network: Network,
+    ) -> anyhow::Result<ErnestWallet> {
+        let wallet_dir = create_ernest_dir_with_wallet(wallet_name.clone())?;
 
-        getrandom(&mut entropy)?;
+        // Save the seed to the OS keychain. Not in home directory.
+        let ernest_dir = wallet_dir
+            .clone()
+            .parent()
+            .unwrap()
+            .join(format!("{}_seed", wallet_name));
+        let seed = io::read_or_generate_seed(ernest_dir)?;
 
-        let _mnemonic = Mnemonic::from_entropy(&entropy)?;
+        let privkey = ExtendedPrivKey::new_master(network, &seed)?;
 
-        let privkey = ExtendedPrivKey::new_master(network, &entropy)?;
-
-        let wallet_name = bdk::wallet::wallet_name_from_descriptor(
+        let _wallet_name = bdk::wallet::wallet_name_from_descriptor(
             Bip84(privkey, KeychainKind::External),
             Some(Bip84(privkey, KeychainKind::Internal)),
             network,
             &Secp256k1::new(),
         )?;
 
-        let db_filename = format!("./wallets/{}_ernest.sqlite", wallet_name);
-        let database = SqliteDatabase::new(db_filename);
+        let database = SqliteDatabase::new(wallet_dir);
 
         let wallet = Wallet::new(
             Bip84(privkey, KeychainKind::External),
@@ -44,22 +59,37 @@ impl ErnestWallet {
             database,
         )?;
 
-        let blockchain =
-            EsploraBlockchain::new("https://mutinynet.com/api/v1", 20).with_concurrency(4);
+        let blockchain = EsploraBlockchain::new(&esplora_url, 20).with_concurrency(4);
 
         Ok(ErnestWallet {
             blockchain,
             wallet: Arc::new(RwLock::new(wallet)),
+            name: wallet_name,
         })
     }
 
-    pub fn get_balance(&self) -> anyhow::Result<Balance> {
+    pub fn get_pubkey(&self) -> anyhow::Result<PublicKey> {
+        let dir = get_wallet_dir(self.name.clone());
+        let seed = std::fs::read_to_string(dir.join(format!("{}_seed", self.name.clone())))?;
+
+        let pubkey = PublicKey::from_slice(&seed.as_bytes())?;
+
+        Ok(pubkey)
+    }
+
+    pub async fn get_balance(&self) -> anyhow::Result<Balance> {
+        self.wallet
+            .read()
+            .unwrap()
+            .sync(&self.blockchain, bdk::SyncOptions { progress: None })
+            .await?;
+
         let balance = self.wallet.try_read().unwrap().get_balance()?;
 
         Ok(balance)
     }
 
-    pub fn new_address(&self) -> anyhow::Result<AddressInfo> {
+    pub fn new_external_address(&self) -> anyhow::Result<AddressInfo> {
         let address = self
             .wallet
             .try_write()
@@ -68,17 +98,15 @@ impl ErnestWallet {
 
         Ok(address)
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+    pub fn new_change_address(&self) -> anyhow::Result<AddressInfo> {
+        let address = self
+            .wallet
+            .try_write()
+            .unwrap()
+            .get_internal_address(AddressIndex::New)?;
 
-    #[test]
-    fn create_wallet() {
-        let wallet = ErnestWallet::new(Network::Regtest);
-
-        assert_eq!(wallet.is_ok(), true)
+        Ok(address)
     }
 }
 
