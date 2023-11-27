@@ -1,112 +1,155 @@
 mod dlc;
+mod ernest;
+mod io;
+
 #[cfg(test)]
 mod tests;
+
 pub use bdk::bitcoin::Network;
+pub use ernest::{build, ErnestRuntime};
+
+use anyhow::anyhow;
 use bdk::{
+    bitcoin::{
+        secp256k1::{PublicKey, Secp256k1},
+        Address, Txid,
+    },
     blockchain::EsploraBlockchain,
     database::SqliteDatabase,
     template::Bip84,
     wallet::{AddressIndex, AddressInfo},
-    Balance, KeychainKind, Wallet,
+    Balance, FeeRate, KeychainKind, SignOptions, SyncOptions, Wallet,
 };
-use bitcoin::{
-    secp256k1::{PublicKey, Secp256k1},
-    util::bip32::ExtendedPrivKey,
-};
-use std::sync::{Arc, RwLock};
-mod io;
-
-use io::{create_ernest_dir_with_wallet, get_wallet_dir};
+use bitcoin::util::bip32::{ExtendedPrivKey, ExtendedPubKey};
+use std::sync::Mutex;
+use io::{create_ernest_dir_with_wallet, get_ernest_dir};
 
 #[derive(Debug)]
 pub struct ErnestWallet {
     pub blockchain: EsploraBlockchain,
-    pub wallet: Arc<RwLock<Wallet<SqliteDatabase>>>,
+    pub inner: Mutex<Wallet<SqliteDatabase>>,
     pub name: String,
+    pub runtime: ErnestRuntime,
 }
 
 impl ErnestWallet {
     pub fn new(
-        wallet_name: String,
+        name: String,
         esplora_url: String,
         network: Network,
+        runtime: ErnestRuntime,
     ) -> anyhow::Result<ErnestWallet> {
-        let wallet_dir = create_ernest_dir_with_wallet(wallet_name.clone())?;
+        let wallet_dir = create_ernest_dir_with_wallet(name.clone())?;
 
         // Save the seed to the OS keychain. Not in home directory.
         let ernest_dir = wallet_dir
             .clone()
             .parent()
             .unwrap()
-            .join(format!("{}_seed", wallet_name));
-        let seed = io::read_or_generate_seed(ernest_dir)?;
+            .join(format!("{}_seed", name));
 
-        let privkey = ExtendedPrivKey::new_master(network, &seed)?;
+        let xprv = io::read_or_generate_xprv(ernest_dir, network)?;
 
         let _wallet_name = bdk::wallet::wallet_name_from_descriptor(
-            Bip84(privkey, KeychainKind::External),
-            Some(Bip84(privkey, KeychainKind::Internal)),
+            Bip84(xprv, KeychainKind::External),
+            Some(Bip84(xprv, KeychainKind::Internal)),
             network,
             &Secp256k1::new(),
         )?;
 
         let database = SqliteDatabase::new(wallet_dir);
 
-        let wallet = Wallet::new(
-            Bip84(privkey, KeychainKind::External),
-            Some(Bip84(privkey, KeychainKind::Internal)),
+        let inner = Mutex::new(Wallet::new(
+            Bip84(xprv, KeychainKind::External),
+            Some(Bip84(xprv, KeychainKind::Internal)),
             network,
             database,
-        )?;
+        )?);
 
         let blockchain = EsploraBlockchain::new(&esplora_url, 20).with_concurrency(4);
 
         Ok(ErnestWallet {
             blockchain,
-            wallet: Arc::new(RwLock::new(wallet)),
-            name: wallet_name,
+            inner,
+            name,
+            runtime,
         })
     }
 
+    pub async fn sync(&self) -> anyhow::Result<()> {
+        let wallet_lock = self.inner.lock().unwrap();
+        let sync_opts = SyncOptions { progress: None };
+        let sync = wallet_lock.sync(&self.blockchain, sync_opts).await?;
+        Ok(sync)
+    }
+
     pub fn get_pubkey(&self) -> anyhow::Result<PublicKey> {
-        let dir = get_wallet_dir(self.name.clone());
-        let seed = std::fs::read_to_string(dir.join(format!("{}_seed", self.name.clone())))?;
+        let dir = get_ernest_dir();
 
-        let pubkey = PublicKey::from_slice(&seed.as_bytes())?;
+        let seed = std::fs::read(dir.join(format!("{}_seed", self.name.clone())))?;
 
-        Ok(pubkey)
+        let slice = seed.as_slice();
+
+        let xprv = ExtendedPrivKey::decode(slice)?;
+
+        let secp = Secp256k1::new();
+
+        let pubkey = ExtendedPubKey::from_priv(&secp, &xprv);
+
+        Ok(pubkey.public_key)
     }
 
     pub async fn get_balance(&self) -> anyhow::Result<Balance> {
-        self.wallet
-            .read()
-            .unwrap()
+        let guard = self.inner.lock().unwrap();
+        guard
             .sync(&self.blockchain, bdk::SyncOptions { progress: None })
             .await?;
 
-        let balance = self.wallet.try_read().unwrap().get_balance()?;
+        let balance = guard.get_balance()?;
 
         Ok(balance)
     }
 
     pub fn new_external_address(&self) -> anyhow::Result<AddressInfo> {
-        let address = self
-            .wallet
-            .try_write()
-            .unwrap()
-            .get_address(AddressIndex::New)?;
+        let guard = self.inner.lock().unwrap();
+        let address = guard.get_address(AddressIndex::New)?;
 
         Ok(address)
     }
 
     pub fn new_change_address(&self) -> anyhow::Result<AddressInfo> {
-        let address = self
-            .wallet
-            .try_write()
-            .unwrap()
-            .get_internal_address(AddressIndex::New)?;
+        let guard = self.inner.lock().unwrap();
+        let address = guard.get_internal_address(AddressIndex::New)?;
 
         Ok(address)
+    }
+
+    pub async fn send_to_address(
+        &self,
+        address: Address,
+        amount: u64,
+        sat_vbyte: f32,
+    ) -> anyhow::Result<Txid> {
+        let guard = self.inner.lock().unwrap();
+
+        let mut txn_builder = guard.build_tx();
+
+        txn_builder
+            .add_recipient(address.script_pubkey(), amount)
+            .fee_rate(FeeRate::from_sat_per_vb(sat_vbyte));
+
+        let (mut psbt, _details) = txn_builder.finish()?;
+
+        guard.sign(&mut psbt, SignOptions::default())?;
+
+        let tx = psbt.extract_tx();
+
+        match self.blockchain.broadcast(&tx).await {
+            Ok(_) => ..,
+            Err(e) => return Err(anyhow!("Could not broadcast txn {}", e)),
+        };
+
+        Ok(tx.txid())
     }
 }
 

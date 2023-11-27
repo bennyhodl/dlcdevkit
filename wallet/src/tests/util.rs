@@ -1,5 +1,6 @@
-use crate::{ErnestWallet, Network};
+use crate::{ErnestWallet, build, Network};
 use core::time::Duration;
+use std::sync::Arc;
 use electrsd::{
     bitcoind::{
         bitcoincore_rpc::{bitcoincore_rpc_json::AddressType, RpcApi},
@@ -9,7 +10,7 @@ use electrsd::{
     ElectrsD,
 };
 
-pub fn setup_bitcoind_and_electrsd_and_ernest_wallet() -> (BitcoinD, ElectrsD, ErnestWallet) {
+pub fn setup_bitcoind_and_electrsd_and_ernest_wallet() -> (BitcoinD, ElectrsD, Arc<ErnestWallet>) {
     let bitcoind = electrsd::bitcoind::downloaded_exe_path().expect("No link?");
     let mut bitcoind_conf = electrsd::bitcoind::Conf::default();
     bitcoind_conf.network = "regtest";
@@ -24,14 +25,14 @@ pub fn setup_bitcoind_and_electrsd_and_ernest_wallet() -> (BitcoinD, ElectrsD, E
 
     let esplora_url = format!("http://{}", electrsd.esplora_url.as_ref().unwrap());
 
-    let wallet = ErnestWallet::new(
-        "test".to_string(),
+    let wallet = build(
+        "test_wallet".to_string(),
         esplora_url.to_string(),
         Network::Regtest,
     )
     .unwrap();
 
-    (bitcoind, electrsd, wallet)
+    (bitcoind, electrsd, wallet.wallet)
 }
 
 pub fn generate_blocks_and_wait(bitcoind: &BitcoinD, electrsd: &ElectrsD, num: usize) {
