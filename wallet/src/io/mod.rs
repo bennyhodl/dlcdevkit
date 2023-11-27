@@ -1,24 +1,31 @@
-use bip39::Mnemonic;
+use bdk::bitcoin::{util::bip32::ExtendedPrivKey, Network};
 use getrandom::getrandom;
 use std::path::{Path, PathBuf};
 
-pub fn read_or_generate_seed(seed_path: PathBuf) -> anyhow::Result<[u8; 16]> {
+pub fn read_or_generate_xprv(
+    seed_path: PathBuf,
+    network: Network,
+) -> anyhow::Result<ExtendedPrivKey> {
     if Path::new(&seed_path).exists() {
         let seed = std::fs::read(seed_path)?;
-        let mut key = [0; 16];
+        let mut key = [0; 78];
         key.copy_from_slice(&seed);
 
-        Ok(key)
+        let xprv = ExtendedPrivKey::decode(&key)?;
+
+        Ok(xprv)
     } else {
-        let mut entropy = [0u8; 16];
+        let mut entropy = [0u8; 78];
 
         getrandom(&mut entropy)?;
 
-        let _mnemonic = Mnemonic::from_entropy(&entropy)?;
+        // let _mnemonic = Mnemonic::from_entropy(&entropy)?;
 
-        std::fs::write(seed_path, entropy)?;
+        let xprv = ExtendedPrivKey::new_master(network, &entropy)?;
 
-        Ok(entropy)
+        std::fs::write(seed_path, &xprv.encode())?;
+
+        Ok(xprv)
     }
 }
 
@@ -30,9 +37,9 @@ pub fn create_ernest_dir_with_wallet(wallet_name: String) -> anyhow::Result<Path
     Ok(file)
 }
 
-pub fn get_wallet_dir(name: String) -> PathBuf {
+pub fn get_ernest_dir() -> PathBuf {
     homedir::get_my_home()
         .unwrap()
         .unwrap()
-        .join(format!(".ernest/{}", name))
+        .join(format!(".ernest"))
 }

@@ -2,7 +2,7 @@ use crate::ErnestWallet;
 use dlc::PartyParams;
 
 impl ErnestWallet {
-    pub fn create_party_params(
+    pub async fn create_party_params(
         &self,
         input_amount: u64,
         collateral: u64,
@@ -25,5 +25,18 @@ impl ErnestWallet {
             collateral,
         };
         Ok(party_params)
+    }
+}
+
+#[cfg(test)]
+mod dlc_tests {
+    use crate::tests::util::setup_bitcoind_and_electrsd_and_ernest_wallet;
+    #[tokio::test]
+    async fn test_party_params() {
+        let (_, _, wallet) = setup_bitcoind_and_electrsd_and_ernest_wallet();
+
+        let party_params = wallet.create_party_params(10, 50).await;
+
+        assert_eq!(party_params.is_ok(), true)
     }
 }
