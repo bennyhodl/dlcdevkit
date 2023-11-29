@@ -1,62 +1,45 @@
-use crate::ErnestWallet;
+use crate::{oracle::Oracle, ErnestWallet, sled::SledStorageProvider, io::get_ernest_dir};
 use bdk::bitcoin::Network;
-use std::{
-    sync::{Arc, RwLock},
-    time::Duration,
-};
-use tokio::time::MissedTickBehavior;
+use dlc_manager::SystemTimeProvider;
+use std::{sync::Arc, collections::HashMap};
 
-pub type ErnestRuntime = Arc<RwLock<Option<tokio::runtime::Runtime>>>;
+type ErnestDlcManager = dlc_manager::manager::Manager<
+    Arc<ErnestWallet>,
+    Arc<ErnestWallet>,
+    Box<SledStorageProvider>,
+    Box<HashMap<String, Oracle>>,
+    Arc<SystemTimeProvider>,
+    Arc<ErnestWallet>,
+>;
 
 pub struct Ernest {
-    pub runtime: ErnestRuntime,
     pub wallet: Arc<ErnestWallet>,
+    pub manager: Arc<ErnestDlcManager>,
 }
 
 impl Ernest {
-    pub fn start(&self) {
-        let mut runtime_lock = self.runtime.write().unwrap();
+    pub fn new(name: String, esplora_url: String, network: Network) -> anyhow::Result<Ernest> {
+        let wallet = Arc::new(ErnestWallet::new(name, esplora_url, network)?);
 
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .unwrap();
+        let dir = get_ernest_dir();
 
-        let wallet = self.wallet.clone();
+        let sled = Box::new(SledStorageProvider::new(dir.join("sled").to_str().unwrap())?);
 
-        std::thread::spawn(move || {
-            tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .unwrap()
-                .block_on(async move {
-                    let mut sync_interval = tokio::time::interval(Duration::from_secs(10));
-                    sync_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        let _oracle = Box::new(Oracle::default());
 
-                    loop {
-                        tokio::select! {
-                            _ = sync_interval.tick() => {
-                                println!("Syncing to chain.");
-                                let _ = wallet.sync().await;
-                            }
-                        }
-                    }
-                })
-        });
+        let _oracles: HashMap<String, Oracle> = HashMap::new();
 
-        *runtime_lock = Some(runtime);
+        let time = Arc::new(SystemTimeProvider {});
+
+        let manager: ErnestDlcManager = dlc_manager::manager::Manager::new(
+            wallet.clone(),
+            wallet.clone(),
+            sled,
+            HashMap::new(),
+            time,
+            wallet.clone(),
+        );
+
+        Ok(Ernest { wallet, manager })
     }
-}
-
-pub fn build(name: String, esplora_url: String, network: Network) -> anyhow::Result<Ernest> {
-    let runtime = Arc::new(RwLock::new(None));
-
-    let wallet = Arc::new(ErnestWallet::new(
-        name,
-        esplora_url,
-        network,
-        runtime.clone(),
-    )?);
-
-    Ok(Ernest { runtime, wallet })
 }

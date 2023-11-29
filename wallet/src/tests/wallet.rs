@@ -2,8 +2,8 @@ use crate::tests::util::{generate_blocks_and_wait, setup_bitcoind_and_electrsd_a
 use bitcoin::Amount;
 use electrsd::bitcoind::bitcoincore_rpc::{bitcoincore_rpc_json::AddressType, RpcApi};
 
-#[tokio::test]
-async fn receive() {
+#[test]
+fn receive() {
     let (bitcoind, electrsd, wallet) = setup_bitcoind_and_electrsd_and_ernest_wallet();
 
     generate_blocks_and_wait(&bitcoind, &electrsd, 150);
@@ -26,13 +26,13 @@ async fn receive() {
 
     generate_blocks_and_wait(&bitcoind, &electrsd, 6);
 
-    let balance = wallet.get_balance().await.unwrap();
+    let balance = wallet.get_balance().unwrap();
 
     assert_eq!(balance.confirmed, 100_000_000)
 }
 
-#[tokio::test]
-async fn send() {
+#[test]
+fn send() {
     let (bitcoind, electrsd, wallet) = setup_bitcoind_and_electrsd_and_ernest_wallet();
 
     generate_blocks_and_wait(&bitcoind, &electrsd, 150);
@@ -55,7 +55,7 @@ async fn send() {
 
     generate_blocks_and_wait(&bitcoind, &electrsd, 6);
 
-    let wallet_balance = wallet.get_balance().await.unwrap();
+    let wallet_balance = wallet.get_balance().unwrap();
 
     assert_eq!(wallet_balance.confirmed, 100_000_000);
 
@@ -66,16 +66,15 @@ async fn send() {
 
     let txn = wallet
         .send_to_address(bitcoind_addr.clone(), 50_000_000, 1.0)
-        .await
         .unwrap();
-    //
+    
     generate_blocks_and_wait(&bitcoind, &electrsd, 10);
 
     let txn_seen = bitcoind.client.get_transaction(&txn, None).unwrap();
 
     assert_eq!(txn_seen.info.txid, txn);
 
-    let wallet_balance = wallet.get_balance().await.unwrap();
+    let wallet_balance = wallet.get_balance().unwrap();
 
     println!("Balance: {}", wallet_balance);
 }
