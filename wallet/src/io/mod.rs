@@ -3,11 +3,16 @@ use getrandom::getrandom;
 use std::path::{Path, PathBuf};
 
 pub fn read_or_generate_xprv(
-    seed_path: PathBuf,
+    wallet_name: String,
     network: Network,
 ) -> anyhow::Result<ExtendedPrivKey> {
-    if Path::new(&seed_path).exists() {
-        let seed = std::fs::read(seed_path)?;
+
+    let wallet_dir = get_ernest_dir().join(&wallet_name);
+
+    let seed_file = &wallet_dir.join("seed");
+
+    if Path::new(&seed_file).exists() {
+        let seed = std::fs::read(seed_file)?;
         let mut key = [0; 78];
         key.copy_from_slice(&seed);
 
@@ -15,6 +20,10 @@ pub fn read_or_generate_xprv(
 
         Ok(xprv)
     } else {
+        println!("{:?}", wallet_dir);
+        println!("{:?}", seed_file);
+        std::fs::create_dir_all(&wallet_dir)?;
+
         let mut entropy = [0u8; 78];
 
         getrandom(&mut entropy)?;
@@ -23,18 +32,10 @@ pub fn read_or_generate_xprv(
 
         let xprv = ExtendedPrivKey::new_master(network, &entropy)?;
 
-        std::fs::write(seed_path, &xprv.encode())?;
+        std::fs::write(seed_file, &xprv.encode())?;
 
         Ok(xprv)
     }
-}
-
-pub fn create_ernest_dir_with_wallet(wallet_name: String) -> anyhow::Result<PathBuf> {
-    let dir = homedir::get_my_home()?.unwrap().join(".ernest");
-    std::fs::create_dir_all(dir.clone())?;
-
-    let file = dir.join(wallet_name);
-    Ok(file)
 }
 
 pub fn get_ernest_dir() -> PathBuf {

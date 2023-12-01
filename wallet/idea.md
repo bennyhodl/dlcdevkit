@@ -140,3 +140,12 @@ pub fn build(name: String, esplora_url: String, network: Network) -> anyhow::Res
     Ok(Ernest { runtime, wallet })
 }
 ```
+
+```
+let wallet_name = bdk::wallet::wallet_name_from_descriptor(
+    Bip84(xprv, KeychainKind::External),
+    Some(Bip84(xprv, KeychainKind::Internal)),
+    network,
+    &Secp256k1::new(),
+)?;
+```

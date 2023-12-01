@@ -4,7 +4,7 @@ use ernest_wallet::ErnestWallet;
 #[tokio::main]
 async fn main() {
     let ernest = ErnestWallet::new(
-        "wallet".to_string(),
+        "ernest_example".to_string(),
         "http://localhost:30000".to_string(),
         Network::Regtest,
     )

@@ -24,7 +24,7 @@ use bdk::{
     wallet::{AddressIndex, AddressInfo},
     Balance, FeeRate, KeychainKind, SignOptions, SyncOptions, Wallet,
 };
-use io::{create_ernest_dir_with_wallet, get_ernest_dir};
+use io::get_ernest_dir;
 use lightning::chain::chaininterface::ConfirmationTarget;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
@@ -47,25 +47,11 @@ impl ErnestWallet {
         esplora_url: String,
         network: Network,
     ) -> anyhow::Result<ErnestWallet> {
-        let wallet_dir = create_ernest_dir_with_wallet(name.clone())?;
+        let xprv = io::read_or_generate_xprv(name.clone(), network)?;
 
-        // Save the seed to the OS keychain. Not in home directory.
-        let ernest_dir = wallet_dir
-            .clone()
-            .parent()
-            .unwrap()
-            .join(format!("{}_seed", name));
+        let db_path = get_ernest_dir().join(&name).join("wallet_db");
 
-        let xprv = io::read_or_generate_xprv(ernest_dir.clone(), network)?;
-
-        let _wallet_name = bdk::wallet::wallet_name_from_descriptor(
-            Bip84(xprv, KeychainKind::External),
-            Some(Bip84(xprv, KeychainKind::Internal)),
-            network,
-            &Secp256k1::new(),
-        )?;
-
-        let database = SqliteDatabase::new(wallet_dir);
+        let database = SqliteDatabase::new(db_path);
 
         let inner = Mutex::new(Wallet::new(
             Bip84(xprv, KeychainKind::External),

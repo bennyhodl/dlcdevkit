@@ -19,13 +19,12 @@ pub struct Ernest {
 
 impl Ernest {
     pub fn new(name: String, esplora_url: String, network: Network) -> anyhow::Result<Ernest> {
-        let wallet = Arc::new(ErnestWallet::new(name, esplora_url, network)?);
+        let wallet = Arc::new(ErnestWallet::new(name.clone(), esplora_url, network)?);
 
-        let dir = get_ernest_dir();
+        // TODO: Default path + config for storage
+        let sled_path = get_ernest_dir().join(&name).join("dlc_db");
 
-        let sled = Arc::new(SledStorageProvider::new(
-            dir.join("sled").to_str().unwrap(),
-        )?);
+        let sled = Arc::new(SledStorageProvider::new(sled_path.to_str().unwrap())?);
 
         // let mut oracles: Arc<HashMap<XOnlyPublicKey, ErnestOracle>> = Arc::new(HashMap::new());
         // let oracle = ErnestOracle::default();
