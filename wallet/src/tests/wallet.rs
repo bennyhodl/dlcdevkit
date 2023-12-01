@@ -67,7 +67,7 @@ fn send() {
     let txn = wallet
         .send_to_address(bitcoind_addr.clone(), 50_000_000, 1.0)
         .unwrap();
-    
+
     generate_blocks_and_wait(&bitcoind, &electrsd, 10);
 
     let txn_seen = bitcoind.client.get_transaction(&txn, None).unwrap();
