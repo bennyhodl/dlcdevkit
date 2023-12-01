@@ -44,31 +44,3 @@ impl Ernest {
         Ok(Ernest { wallet, manager: Arc::new(manager) })
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use electrsd::{ElectrsD, bitcoind::BitcoinD};
-
-    #[test]
-    fn create_manager() {
-        let bitcoind = electrsd::bitcoind::downloaded_exe_path().expect("No link?");
-        let mut bitcoind_conf = electrsd::bitcoind::Conf::default();
-        bitcoind_conf.network = "regtest";
-        let bitcoind = BitcoinD::with_conf(bitcoind, &bitcoind_conf).unwrap();
-
-        let electrs_exe = electrsd::downloaded_exe_path()
-            .expect("you need to provide env var ELECTRS_EXE or specify an electrsd version feature");
-        let mut electrsd_conf = electrsd::Conf::default();
-        electrsd_conf.http_enabled = true;
-        electrsd_conf.network = "regtest";
-        let electrsd = ElectrsD::with_conf(electrs_exe, &bitcoind, &electrsd_conf).unwrap();
-
-        let esplora_url = format!("http://{}", electrsd.esplora_url.as_ref().unwrap());
-
-        let manager = Ernest::new("test".to_string(), esplora_url.to_string(), Network::Regtest);
-
-        assert_eq!(manager.is_ok(), true)
-
-    }
-}

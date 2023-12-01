@@ -20,8 +20,6 @@ pub fn read_or_generate_xprv(
 
         Ok(xprv)
     } else {
-        println!("{:?}", wallet_dir);
-        println!("{:?}", seed_file);
         std::fs::create_dir_all(&wallet_dir)?;
 
         let mut entropy = [0u8; 78];

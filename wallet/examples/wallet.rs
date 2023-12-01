@@ -11,5 +11,6 @@ async fn main() {
     .unwrap();
 
     let address = ernest.new_external_address().unwrap();
+    
     println!("Address: {:?}", address);
 }
