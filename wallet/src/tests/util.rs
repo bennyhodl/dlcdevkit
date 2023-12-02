@@ -1,4 +1,4 @@
-use crate::{Network, ernest::Ernest};
+use crate::{Network, Ernest};
 use core::time::Duration;
 use electrsd::{
     bitcoind::{

@@ -1,177 +1,71 @@
 #![allow(dead_code)]
+#![allow(unused_imports)]
 mod dlc;
-mod ernest;
+mod wallet;
 mod error;
 mod io;
 mod oracle;
 mod sled;
+mod nostr;
 
 #[cfg(test)]
 mod tests;
 
 pub use bdk::bitcoin::Network;
+use dlc_messages::message_handler::MessageHandler;
+pub use crate::wallet::ErnestWallet;
 
-use anyhow::anyhow;
-use bdk::{
-    bitcoin::{
-        secp256k1::{PublicKey, Secp256k1},
-        util::bip32::{ExtendedPrivKey, ExtendedPubKey},
-        Address, Txid,
-    },
-    blockchain::EsploraBlockchain,
-    database::SqliteDatabase,
-    template::Bip84,
-    wallet::{AddressIndex, AddressInfo},
-    Balance, FeeRate, KeychainKind, SignOptions, SyncOptions, Wallet,
-};
-use io::get_ernest_dir;
-use lightning::chain::chaininterface::ConfirmationTarget;
-use std::sync::atomic::AtomicU32;
-use std::sync::Arc;
-use std::{collections::HashMap, sync::Mutex};
+use crate::{io::get_ernest_dir, oracle::Oracle as ErnestOracle, sled::SledStorageProvider, nostr::NostrDlcHandler};
+use dlc_manager::SystemTimeProvider;
+use std::{collections::HashMap, sync::{Arc, Mutex}};
+use serde::{Serialize, Deserialize};
 
-pub struct ErnestWallet {
-    pub blockchain: EsploraBlockchain,
-    pub inner: Mutex<Wallet<SqliteDatabase>>,
-    pub network: Network,
-    pub xprv: ExtendedPrivKey,
-    pub name: String,
-    fees: Arc<HashMap<ConfirmationTarget, AtomicU32>>,
+pub const RELAY_URL: &str = "https://localhost:8080";
+
+pub type ErnestDlcManager = dlc_manager::manager::Manager<
+    Arc<ErnestWallet>,
+    Arc<ErnestWallet>,
+    Arc<SledStorageProvider>,
+    Arc<ErnestOracle>,
+    Arc<SystemTimeProvider>,
+    Arc<ErnestWallet>,
+>;
+
+pub struct Ernest {
+    pub wallet: Arc<ErnestWallet>,
+    pub manager: Arc<Mutex<ErnestDlcManager>>,
+    pub message_handler: Arc<MessageHandler>,
+    pub nostr: Arc<NostrDlcHandler>
 }
 
-const MIN_FEERATE: u32 = 253;
+impl Ernest {
+    pub fn new(name: String, esplora_url: String, network: Network) -> anyhow::Result<Ernest> {
+        let wallet = Arc::new(ErnestWallet::new(name.clone(), esplora_url, network)?);
 
-impl ErnestWallet {
-    pub fn new(
-        name: String,
-        esplora_url: String,
-        network: Network,
-    ) -> anyhow::Result<ErnestWallet> {
-        let xprv = io::read_or_generate_xprv(name.clone(), network)?;
+        // TODO: Default path + config for storage
+        let sled_path = get_ernest_dir().join(&name).join("dlc_db");
 
-        let db_path = get_ernest_dir().join(&name).join("wallet_db");
+        let sled = Arc::new(SledStorageProvider::new(sled_path.to_str().unwrap())?);
 
-        let database = SqliteDatabase::new(db_path);
+        // let mut oracles: Arc<HashMap<XOnlyPublicKey, ErnestOracle>> = Arc::new(HashMap::new());
+        // let oracle = ErnestOracle::default();
+        // oracles.insert(oracle.get_public_key(), oracle);
 
-        let inner = Mutex::new(Wallet::new(
-            Bip84(xprv, KeychainKind::External),
-            Some(Bip84(xprv, KeychainKind::Internal)),
-            network,
-            database,
-        )?);
+        let time = Arc::new(SystemTimeProvider {});
 
-        let blockchain = EsploraBlockchain::new(&esplora_url, 20).with_concurrency(4);
+        let manager = Arc::new(Mutex::new(dlc_manager::manager::Manager::new(
+            wallet.clone(),
+            wallet.clone(),
+            sled,
+            HashMap::new(),
+            time,
+            wallet.clone(),
+        )?));
 
-        let mut fees: HashMap<ConfirmationTarget, AtomicU32> = HashMap::new();
-        fees.insert(ConfirmationTarget::OnChainSweep, AtomicU32::new(5000));
-        fees.insert(
-            ConfirmationTarget::MaxAllowedNonAnchorChannelRemoteFee,
-            AtomicU32::new(25 * 250),
-        );
-        fees.insert(
-            ConfirmationTarget::MinAllowedAnchorChannelRemoteFee,
-            AtomicU32::new(MIN_FEERATE),
-        );
-        fees.insert(
-            ConfirmationTarget::MinAllowedNonAnchorChannelRemoteFee,
-            AtomicU32::new(MIN_FEERATE),
-        );
-        fees.insert(
-            ConfirmationTarget::AnchorChannelFee,
-            AtomicU32::new(MIN_FEERATE),
-        );
-        fees.insert(
-            ConfirmationTarget::NonAnchorChannelFee,
-            AtomicU32::new(2000),
-        );
-        fees.insert(
-            ConfirmationTarget::ChannelCloseMinimum,
-            AtomicU32::new(MIN_FEERATE),
-        );
-        let fees = Arc::new(fees);
+        let nostr = Arc::new(NostrDlcHandler::new(name, RELAY_URL.to_string(), manager.clone())?);
 
-        Ok(ErnestWallet {
-            blockchain,
-            inner,
-            network,
-            xprv,
-            name,
-            fees,
-        })
-    }
+        let message_handler = Arc::new(MessageHandler::new());
 
-    pub fn sync(&self) -> anyhow::Result<()> {
-        let wallet_lock = self.inner.lock().unwrap();
-        let sync_opts = SyncOptions { progress: None };
-        let sync = wallet_lock.sync(&self.blockchain, sync_opts)?;
-        Ok(sync)
-    }
-
-    pub fn get_pubkey(&self) -> anyhow::Result<PublicKey> {
-        let dir = get_ernest_dir();
-
-        let seed = std::fs::read(dir.join(format!("{}_seed", self.name.clone())))?;
-
-        let slice = seed.as_slice();
-
-        let xprv = ExtendedPrivKey::decode(slice)?;
-
-        let secp = Secp256k1::new();
-
-        let pubkey = ExtendedPubKey::from_priv(&secp, &xprv);
-
-        Ok(pubkey.public_key)
-    }
-
-    pub fn get_balance(&self) -> anyhow::Result<Balance> {
-        let guard = self.inner.lock().unwrap();
-
-        guard.sync(&self.blockchain, bdk::SyncOptions { progress: None })?;
-
-        let balance = guard.get_balance()?;
-
-        Ok(balance)
-    }
-
-    pub fn new_external_address(&self) -> Result<AddressInfo, bdk::Error> {
-        let guard = self.inner.lock().unwrap();
-        let address = guard.get_address(AddressIndex::New)?;
-
-        Ok(address)
-    }
-
-    pub fn new_change_address(&self) -> anyhow::Result<AddressInfo> {
-        let guard = self.inner.lock().unwrap();
-        let address = guard.get_internal_address(AddressIndex::New)?;
-
-        Ok(address)
-    }
-
-    pub fn send_to_address(
-        &self,
-        address: Address,
-        amount: u64,
-        sat_vbyte: f32,
-    ) -> anyhow::Result<Txid> {
-        let guard = self.inner.lock().unwrap();
-
-        let mut txn_builder = guard.build_tx();
-
-        txn_builder
-            .add_recipient(address.script_pubkey(), amount)
-            .fee_rate(FeeRate::from_sat_per_vb(sat_vbyte));
-
-        let (mut psbt, _details) = txn_builder.finish()?;
-
-        guard.sign(&mut psbt, SignOptions::default())?;
-
-        let tx = psbt.extract_tx();
-
-        match self.blockchain.broadcast(&tx) {
-            Ok(_) => ..,
-            Err(e) => return Err(anyhow!("Could not broadcast txn {}", e)),
-        };
-
-        Ok(tx.txid())
+        Ok(Ernest { wallet, manager, message_handler, nostr })
     }
 }
