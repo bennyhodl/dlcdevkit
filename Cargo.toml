@@ -1,2 +1,3 @@
 [workspace]
-members = ["wallet", "terminal/src-tauri"]
+resolver = "2"
+members = ["wallet", "wasm"]
