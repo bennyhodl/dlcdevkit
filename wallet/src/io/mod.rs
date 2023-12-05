@@ -37,9 +37,8 @@ pub fn read_or_generate_xprv(
 }
 
 pub fn get_ernest_dir() -> PathBuf {
-    PathBuf::new()
-    // homedir::get_my_home()
-    //     .unwrap()
-    //     .unwrap()
-    //     .join(format!(".ernest"))
+    homedir::get_my_home()
+        .unwrap()
+        .unwrap()
+        .join(format!(".ernest"))
 }

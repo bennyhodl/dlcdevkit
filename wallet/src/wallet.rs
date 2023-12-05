@@ -6,25 +6,27 @@ use bdk::{
         Address, Txid, Network
     },
     blockchain::EsploraBlockchain,
-    database::SqliteDatabase,
     template::Bip84,
     wallet::{AddressIndex, AddressInfo},
     Balance, FeeRate, KeychainKind, SignOptions, SyncOptions, Wallet,
 };
 use crate::io;
 use lightning::chain::chaininterface::ConfirmationTarget;
-use std::sync::atomic::AtomicU32;
+use std::sync::{atomic::AtomicU32, RwLock};
 use std::sync::Arc;
 use std::{collections::HashMap, sync::Mutex};
-use serde::{Serialize, Deserialize};
+use serde::Deserialize;
+use sled::Tree;
 
+const SLED_TREE: &str = "bdk_store";
+
+// #[derive(Clone, Deserialize)]
 pub struct ErnestWallet {
-    pub blockchain: EsploraBlockchain,
-    pub inner: Mutex<Wallet<SqliteDatabase>>,
+    pub blockchain: Arc<EsploraBlockchain>,
+    pub inner: Arc<Mutex<Wallet<Tree>>>,
     pub network: Network,
     pub xprv: ExtendedPrivKey,
     pub name: String,
-    pub fees: Arc<HashMap<ConfirmationTarget, AtomicU32>>,
 }
 
 const MIN_FEERATE: u32 = 253;
@@ -39,16 +41,17 @@ impl ErnestWallet {
 
         let db_path = io::get_ernest_dir().join(&name).join("wallet_db");
 
-        let database = SqliteDatabase::new(db_path);
+        // let database = SqliteDatabase::new(db_path);
+        let sled = sled::open(db_path)?.open_tree(SLED_TREE)?;
 
-        let inner = Mutex::new(Wallet::new(
+        let inner = Arc::new(Mutex::new(Wallet::new(
             Bip84(xprv, KeychainKind::External),
             Some(Bip84(xprv, KeychainKind::Internal)),
             network,
-            database,
-        )?);
+            sled,
+        )?));
 
-        let blockchain = EsploraBlockchain::new(&esplora_url, 20).with_concurrency(4);
+        let blockchain = Arc::new(EsploraBlockchain::new(&esplora_url, 20).with_concurrency(4));
 
         let mut fees: HashMap<ConfirmationTarget, AtomicU32> = HashMap::new();
         fees.insert(ConfirmationTarget::OnChainSweep, AtomicU32::new(5000));
@@ -76,7 +79,7 @@ impl ErnestWallet {
             ConfirmationTarget::ChannelCloseMinimum,
             AtomicU32::new(MIN_FEERATE),
         );
-        let fees = Arc::new(fees);
+        let _fees = Arc::new(fees);
 
         Ok(ErnestWallet {
             blockchain,
@@ -84,14 +87,13 @@ impl ErnestWallet {
             network,
             xprv,
             name,
-            fees,
         })
     }
 
-    pub async fn sync(&self) -> anyhow::Result<()> {
+    pub fn sync(&self) -> anyhow::Result<()> {
         let wallet_lock = self.inner.lock().unwrap();
         let sync_opts = SyncOptions { progress: None };
-        let sync = wallet_lock.sync(&self.blockchain, sync_opts).await?;
+        let sync = wallet_lock.sync(&self.blockchain, sync_opts)?;
         Ok(sync)
     }
 
@@ -100,10 +102,10 @@ impl ErnestWallet {
         Ok(ExtendedPubKey::from_priv(&secp, &self.xprv).public_key)
     }
 
-    pub async fn get_balance(&self) -> anyhow::Result<Balance> {
+    pub fn get_balance(&self) -> anyhow::Result<Balance> {
         let guard = self.inner.lock().unwrap();
 
-        guard.sync(&self.blockchain, bdk::SyncOptions { progress: None }).await?;
+        guard.sync(&self.blockchain, bdk::SyncOptions { progress: None })?;
 
         let balance = guard.get_balance()?;
 
@@ -124,7 +126,7 @@ impl ErnestWallet {
         Ok(address)
     }
 
-    pub async fn send_to_address(
+    pub fn send_to_address(
         &self,
         address: Address,
         amount: u64,
@@ -144,7 +146,7 @@ impl ErnestWallet {
 
         let tx = psbt.extract_tx();
 
-        match self.blockchain.broadcast(&tx).await {
+        match self.blockchain.broadcast(&tx) {
             Ok(_) => ..,
             Err(e) => return Err(anyhow!("Could not broadcast txn {}", e)),
         };
