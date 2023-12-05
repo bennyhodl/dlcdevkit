@@ -66,6 +66,7 @@ fn send() {
 
     let txn = test.ernest.wallet
         .send_to_address(bitcoind_addr.clone(), 50_000_000, 1.0)
+        
         .unwrap();
 
     generate_blocks_and_wait(&test.bitcoind, &test.electrsd, 10);

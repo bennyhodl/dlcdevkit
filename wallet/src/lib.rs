@@ -18,9 +18,9 @@ pub use crate::wallet::ErnestWallet;
 use crate::{io::get_ernest_dir, oracle::Oracle as ErnestOracle, sled::SledStorageProvider, nostr::NostrDlcHandler};
 use dlc_manager::SystemTimeProvider;
 use std::{collections::HashMap, sync::{Arc, Mutex}};
-use serde::{Serialize, Deserialize};
+use serde::Deserialize;
 
-pub const RELAY_URL: &str = "https://localhost:8080";
+pub const RELAY_URL: &str = "http://localhost:8080";
 
 pub type ErnestDlcManager = dlc_manager::manager::Manager<
     Arc<ErnestWallet>,
@@ -31,6 +31,7 @@ pub type ErnestDlcManager = dlc_manager::manager::Manager<
     Arc<ErnestWallet>,
 >;
 
+// #[derive(Clone, Deserialize)]
 pub struct Ernest {
     pub wallet: Arc<ErnestWallet>,
     pub manager: Arc<Mutex<ErnestDlcManager>>,

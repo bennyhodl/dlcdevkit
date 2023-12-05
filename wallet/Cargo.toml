@@ -7,7 +7,8 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.75"
-bdk = { version = "0.28.0", default-features = false, features = ["std", "use-esplora-async", "async-interface", "sqlite-bundled"]}
+base64 = "0.13.0"
+bdk = { version = "0.28.0", default-features = false, features = ["std", "use-esplora-blocking", "key-value-db"]}
 # bdk = { version = "0.28.0", default-features = false, features = ["std", "use-esplora-blocking", "sqlite-bundled"]}
 bip39 = "2.0.0"
 bitcoin = { version = "0.29.2", features = ["rand", "serde"] }
@@ -16,23 +17,25 @@ bitcoin = { version = "0.29.2", features = ["rand", "serde"] }
 # dlc-manager = { version = "0.4.0", features = ["use-serde"] }
 # dlc-messages = "0.4.0"
 # dlc-trie = "0.4.0"
-# dlc = { git = "https://github.com/p2pderivatives/rust-dlc", branch = "master", features = ["use-serde"] }
-# dlc-manager = { git = "https://github.com/p2pderivatives/rust-dlc", branch = "master", features = ["use-serde"] }
-# dlc-messages = { git = "https://github.com/p2pderivatives/rust-dlc", branch = "master", features = [ "use-serde"] }
-# dlc-trie = { git = "https://github.com/p2pderivatives/rust-dlc", branch = "master", features = ["use-serde"] }
-dlc = { git = "https://github.com/benthecarman/rust-dlc", branch = "rand-std", features = ["use-serde"] }
-dlc-manager = { git = "https://github.com/benthecarman/rust-dlc", branch = "rand-std", features = ["use-serde"] }
-dlc-messages = { git = "https://github.com/benthecarman/rust-dlc", branch = "rand-std", features = [ "use-serde"] }
-dlc-trie = { git = "https://github.com/benthecarman/rust-dlc", branch = "rand-std", features = ["use-serde"] }
+dlc = { git = "https://github.com/p2pderivatives/rust-dlc", branch = "master", features = ["use-serde"] }
+dlc-manager = { git = "https://github.com/p2pderivatives/rust-dlc", branch = "master", features = ["use-serde"] }
+dlc-messages = { git = "https://github.com/p2pderivatives/rust-dlc", branch = "master", features = [ "use-serde"] }
+dlc-trie = { git = "https://github.com/p2pderivatives/rust-dlc", branch = "master", features = ["use-serde"] }
+
+# dlc = { git = "https://github.com/benthecarman/rust-dlc", branch = "rand-std", features = ["use-serde"] }
+# dlc-manager = { git = "https://github.com/benthecarman/rust-dlc", branch = "rand-std", features = ["use-serde"] }
+# dlc-messages = { git = "https://github.com/benthecarman/rust-dlc", branch = "rand-std", features = [ "use-serde"] }
+# dlc-trie = { git = "https://github.com/benthecarman/rust-dlc", branch = "rand-std", features = ["use-serde"] }
+# p2pd-oracle-client = { path = "../../rust-dlc/p2pd-oracle-client/" }
 getrandom = { version = "0.2.11", features = ["js"] }
-# homedir = "0.2.1"
+homedir = "0.2.1"
 lightning = { version = "0.0.118", default-features = false, features = ["grind_signatures", "std"] }
 nostr = { version = "0.25.0", features = ["std"] }
 nostr-sdk = "0.25.0"
 rand = "0.8.5"
-rusqlite = { version = "0.28.0", features = ["bundled"] }
 serde = { version = "1.0.192", features = ["derive"] }
 serde_json = "1.0.108"
+serde_with = "3.4.0"
 sled = "0.34.7"
 thiserror = "1.0.50"
 
