@@ -1,16 +1,15 @@
-use std::path::Path;
+use std::{path::Path, time::Duration};
 use crate::{io, ErnestDlcManager, RELAY_URL};
 use dlc_messages::{Message, message_handler::read_dlc_message, WireMessage};
 use dlc::secp256k1_zkp::PublicKey;
 use lightning::{util::ser::{Writeable, Readable}, ln::wire::Type};
-use nostr::{Keys, Kind, Filter, secp256k1::{SecretKey, Secp256k1, XOnlyPublicKey}, Url, EventId, Event, nips::nip04::{encrypt, decrypt}, EventBuilder, Tag};
-use nostr_sdk::Client;
+use nostr::{Keys, Kind, Filter, secp256k1::{Parity, PublicKey as NostrPublicKey, SecretKey, Secp256k1, XOnlyPublicKey}, Url, EventId, Event, nips::nip04::{encrypt, decrypt}, EventBuilder, Tag};
+use nostr_sdk::{Client, RelayPoolNotification};
 use std::sync::{Arc, Mutex};
 use serde::Deserialize;
 
-pub const DLC_MESSAGE_KIND: Kind = Kind::Ephemeral(34_343);
+pub const DLC_MESSAGE_KIND: Kind = Kind::TextNote;
 
-// #[derive(Deserialize)]
 pub struct NostrDlcHandler {
     pub keys: Keys,
     pub relay_url: Url,
@@ -22,8 +21,8 @@ impl NostrDlcHandler {
         let keys_file = io::get_ernest_dir().join(&wallet_name).join("nostr_keys");
         let keys = if Path::new(&keys_file).exists() {
             let secp = Secp256k1::new();
-            let contents = std::fs::read_to_string(&keys_file)?;
-            let secret_key = SecretKey::from_slice(contents.as_bytes())?;
+            let contents = std::fs::read(&keys_file)?;
+            let secret_key = SecretKey::from_slice(&contents)?;
             Keys::new_with_ctx(&secp, secret_key)
         } else {
             let keys = Keys::generate();
@@ -46,7 +45,7 @@ impl NostrDlcHandler {
     }
 
     pub fn create_dlc_message_filter(&self) -> Filter {
-        Filter::new().kind(DLC_MESSAGE_KIND).pubkey(self.public_key())
+        Filter::new().kind(DLC_MESSAGE_KIND)
     }
 
     pub fn create_dlc_msg_event(&self, to: XOnlyPublicKey, event_id: Option<EventId>, msg: Message) -> anyhow::Result<Event> {
@@ -112,15 +111,27 @@ impl NostrDlcHandler {
         Ok(None)
     }
 
-    pub async fn listen(&self) {
+    pub async fn listen(&self) -> anyhow::Result<Client> {
         let client = Client::new(&self.keys);
 
-        client.add_relay(RELAY_URL, None).await.unwrap();
-
-        client.connect().await;
+        client.add_relay(RELAY_URL, None).await?;
 
         let subscription = self.create_dlc_message_filter();
 
-        client.subscribe(vec![subscription]).await
+        client.subscribe(vec![subscription]).await;
+
+        client.connect().await;
+
+        Ok(client)
     }
 }
+
+pub fn handle_relay_event(event: RelayPoolNotification) {
+    match event {
+        RelayPoolNotification::Event(_, e) => {
+            println!("Received event: {}", e.content);
+        },
+        _ => ()
+    }
+}
+
