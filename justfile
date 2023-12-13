@@ -1,5 +1,7 @@
-pack:
-  wasm-pack build ./wasm --dev --weak-refs --target web --scope ernest
+env:
+  nigiri start
+  RUST_LOG=info /Users/ben/ernest/nostr-rs-relay/target/release/nostr-rs-relay -d /Users/ben/ernest/nostr-relay-db
 
-link:
-  wasm-pack build ./wasm --dev --weak-refs --target web --scope ernest && cd wasm/pkg && pnpm link --global
+relay:
+  RUST_LOG=info /Users/ben/ernest/nostr-rs-relay/target/release/nostr-rs-relay -d /Users/ben/ernest/nostr-relay-db
+  
