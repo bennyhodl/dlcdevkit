@@ -1,0 +1,47 @@
+use std::{sync::Arc, time::SystemTime};
+use dlc_messages::message_handler::MessageHandler as DlcMessageHandler;
+use lightning::{
+    ln::peer_handler::{ErroringMessageHandler, IgnoringMessageHandler, PeerManager as LdkPeerManager, MessageHandler},
+    sign::KeysManager,
+    util::logger::Logger,
+};
+use lightning_net_tokio::SocketDescriptor;
+
+pub struct ErnestLogger;
+
+impl Logger for ErnestLogger {
+    fn log(&self, record: &lightning::util::logger::Record) {
+        println!("LOG: {:?}", record);
+    }
+}
+
+pub type PeerManager = LdkPeerManager<
+    SocketDescriptor,
+    Arc<ErroringMessageHandler>,
+    Arc<IgnoringMessageHandler>,
+    Arc<IgnoringMessageHandler>,
+    Arc<ErnestLogger>,
+    Arc<DlcMessageHandler>,
+    Arc<KeysManager>,
+>;
+
+pub struct ErnestPeerManager {
+    pub peer_manager: Arc<PeerManager>
+}
+
+impl ErnestPeerManager {
+    pub fn new(seed: &[u8; 32]) -> ErnestPeerManager {
+        let time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap();
+        let key_signer = KeysManager::new(seed, time.as_secs(), time.as_nanos() as u32);
+        let message_handler = MessageHandler {
+            chan_handler: Arc::new(ErroringMessageHandler::new()),
+            route_handler: Arc::new(IgnoringMessageHandler {}),
+            onion_message_handler: Arc::new(IgnoringMessageHandler {}),
+            custom_message_handler: Arc::new(DlcMessageHandler::new()),
+        };
+
+        ErnestPeerManager{ 
+            peer_manager: Arc::new(PeerManager::new(message_handler, time.as_secs() as u32, seed, Arc::new(ErnestLogger {}), Arc::new(key_signer)))
+        }
+    }
+}
