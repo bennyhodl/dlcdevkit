@@ -1,10 +1,9 @@
-use crate::tests::util::{generate_blocks_and_wait, TestSuite};
+include!("./util.rs");
 use bitcoin::Amount;
-use electrsd::bitcoind::bitcoincore_rpc::{bitcoincore_rpc_json::AddressType, RpcApi};
 
 #[test]
-fn receive() {
-    let test = TestSuite::setup_bitcoind_and_electrsd_and_ernest("receive");
+fn wallet_receive_bitcoin() {
+    let test = OneWalletTest::setup_bitcoind_and_electrsd_and_ernest("receive");
 
     generate_blocks_and_wait(&test.bitcoind, &test.electrsd, 150);
 
@@ -32,8 +31,8 @@ fn receive() {
 }
 
 #[test]
-fn send() {
-    let test = TestSuite::setup_bitcoind_and_electrsd_and_ernest("send");
+fn wallet_send_bitcoin() {
+    let test = OneWalletTest::setup_bitcoind_and_electrsd_and_ernest("send");
 
     generate_blocks_and_wait(&test.bitcoind, &test.electrsd, 150);
 
@@ -74,4 +73,47 @@ fn send() {
     let txn_seen = test.bitcoind.client.get_transaction(&txn, None).unwrap();
 
     assert_eq!(txn_seen.info.txid, txn);
+}
+
+#[test]
+fn ernest_wallet_sending_to_ernest_wallet() {
+    let test = TwoWalletTest::setup_bitcoind_and_electrsd_and_ernest("two_ernest_one", "two_ernest_two");
+    
+    generate_blocks_and_wait(&test.bitcoind, &test.electrsd, 150);
+
+    let funding_address = test.ernest_one.wallet.new_external_address().unwrap();
+
+    test.bitcoind
+        .client
+        .send_to_address(
+            &funding_address.address,
+            Amount::from_sat(100_000_000),
+            None,
+            None,
+            Some(false),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+    generate_blocks_and_wait(&test.bitcoind, &test.electrsd, 6);
+
+    test.ernest_one.wallet.sync().unwrap();
+
+    let send_to_two = test.ernest_two.wallet.new_external_address().unwrap();
+
+    test.ernest_one.wallet.send_to_address(send_to_two.address, 50_000_000, 1.0).unwrap(); 
+
+    generate_blocks_and_wait(&test.bitcoind, &test.electrsd, 6);
+
+    let balance_one = test.ernest_one.wallet.get_balance().unwrap();
+
+    let balance_two = test.ernest_two.wallet.get_balance().unwrap();
+
+    test.ernest_one.wallet.sync().unwrap();
+    test.ernest_two.wallet.sync().unwrap();
+
+    assert!(balance_one.confirmed > 1);
+    assert_eq!(balance_two.confirmed, 50_000_000);   
 }
