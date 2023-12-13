@@ -1,1 +1,26 @@
 /target
+/terminal/src-tauri/target
+# Logs
+/terminal/logs
+/terminal*.log
+/terminal/npm-debug.log*
+/termainal/yarn-debug.log*
+/terminal/yarn-error.log*
+/terminal/pnpm-debug.log*
+/terminal/lerna-debug.log*
+
+/terminal/node_modules
+/terminal/dist
+/terminal/dist-ssr
+/terminal/*.local
+
+# Editor directories and files
+/terminal/.vscode/*
+/terminal/!.vscode/extensions.json
+/terminal/.idea
+/terminal/.DS_Store
+/terminal/*.suo
+/terminal/*.ntvs*
+/terminal/*.njsproj
+/terminal/*.sln
+/terminal/*.sw?
