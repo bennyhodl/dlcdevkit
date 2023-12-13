@@ -30,6 +30,10 @@ impl dlc_manager::Wallet for ErnestWallet {
             .new_external_address()
             .map_err(bdk_err_to_manager_err)?
             .address)
+    } 
+    
+    fn get_new_change_address(&self) -> Result<Address, ManagerError> { 
+        Ok(self.new_change_address().map_err(bdk_err_to_manager_err)?.address)
     }
 
     fn get_new_secret_key(&self) -> Result<bitcoin::secp256k1::SecretKey, ManagerError> {
@@ -88,13 +92,29 @@ impl dlc_manager::Wallet for ErnestWallet {
 
 impl dlc_manager::Signer for ErnestWallet {
     // Waiting for rust-dlc PR
+    // fn sign_psbt_input(
+    //         &self,
+    //         psbt: &mut bitcoin::psbt::PartiallySignedTransaction,
+    //         input_index: usize,
+    //     ) -> Result<(), ManagerError> {
+    //     let wallet = self.inner.lock().unwrap();
+    //
+    //     let mut input_signed = psbt.clone();
+    //
+    //     wallet.sign(&mut input_signed, bdk::SignOptions::default()).map_err(bdk_err_to_manager_err)?;
+    //
+    //     psbt.inputs[input_index] = input_signed.inputs[input_index].clone();
+    //
+    //     Ok(())        
+    // } 
+
     fn sign_tx_input(
-        &self,
-        _tx: &mut bitcoin::Transaction,
-        _input_index: usize,
-        _tx_out: &bitcoin::TxOut,
-        _redeem_script: Option<bitcoin::Script>,
-    ) -> Result<(), ManagerError> {
+            &self,
+            _tx: &mut bitcoin::Transaction,
+            _input_index: usize,
+            _tx_out: &bitcoin::TxOut,
+            _redeem_script: Option<Script>,
+        ) -> Result<(), ManagerError> {
         Ok(())
     }
 

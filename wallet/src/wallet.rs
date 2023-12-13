@@ -119,7 +119,7 @@ impl ErnestWallet {
         Ok(address)
     }
 
-    pub fn new_change_address(&self) -> anyhow::Result<AddressInfo> {
+    pub fn new_change_address(&self) -> Result<AddressInfo, bdk::Error> {
         let guard = self.inner.lock().unwrap();
         let address = guard.get_internal_address(AddressIndex::New)?;
 
