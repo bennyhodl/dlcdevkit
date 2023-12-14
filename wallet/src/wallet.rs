@@ -4,10 +4,10 @@ use bdk::{
     bitcoin::{
         secp256k1::{PublicKey, Secp256k1},
         util::bip32::{ExtendedPrivKey, ExtendedPubKey},
-        Address, Network, Txid,
+        Address, Network, Txid, XOnlyPublicKey, KeyPair
     },
     blockchain::EsploraBlockchain,
-    template::Bip84,
+    template::Bip86,
     wallet::{AddressIndex, AddressInfo},
     Balance, FeeRate, KeychainKind, SignOptions, SyncOptions, Wallet,
 };
@@ -20,7 +20,6 @@ use std::{collections::HashMap, sync::Mutex};
 
 const SLED_TREE: &str = "bdk_store";
 
-// #[derive(Clone, Deserialize)]
 pub struct ErnestWallet {
     pub blockchain: Arc<EsploraBlockchain>,
     pub inner: Arc<Mutex<Wallet<Tree>>>,
@@ -38,10 +37,10 @@ impl ErnestWallet {
         let db_path = io::get_ernest_dir().join(&name).join("wallet_db");
 
         let sled = sled::open(db_path)?.open_tree(SLED_TREE)?;
-
+    
         let inner = Arc::new(Mutex::new(Wallet::new(
-            Bip84(xprv, KeychainKind::External),
-            Some(Bip84(xprv, KeychainKind::Internal)),
+            Bip86(xprv, KeychainKind::External),
+            Some(Bip86(xprv, KeychainKind::Internal)),
             network,
             sled,
         )?));
@@ -92,9 +91,8 @@ impl ErnestWallet {
         Ok(sync)
     }
 
-    pub fn get_pubkey(&self) -> anyhow::Result<PublicKey> {
-        let secp = Secp256k1::new();
-        Ok(ExtendedPubKey::from_priv(&secp, &self.xprv).public_key)
+    pub fn get_pubkey(&self) -> anyhow::Result<XOnlyPublicKey> {
+        Ok(XOnlyPublicKey::from_slice(&self.xprv.private_key.secret_bytes())?)
     }
 
     pub fn get_balance(&self) -> anyhow::Result<Balance> {
