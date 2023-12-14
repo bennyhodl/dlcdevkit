@@ -3,7 +3,7 @@
 mod models;
 use std::sync::Arc;
 
-use ernest_wallet::{handle_relay_event, Ernest};
+use ernest_wallet::{handle_relay_event, Ernest, Network};
 use models::Pubkeys;
 
 #[tauri::command]
@@ -28,9 +28,9 @@ fn get_pubkeys(ernest: tauri::State<Arc<Ernest>>) -> Pubkeys {
 async fn main() {
     let ernest = Arc::new(
         Ernest::new(
-            "tauri".to_string(),
-            "http://localhost:30000".to_string(),
-            ernest_wallet::Network::Regtest,
+            "terminal",
+            "http://localhost:30000",
+            Network::Regtest,
         )
         .unwrap(),
     );

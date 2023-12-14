@@ -1,4 +1,4 @@
-use crate::io;
+use crate::io::{self, get_ernest_dir};
 use dlc_manager::chain_monitor::ChainMonitor;
 use dlc_manager::channel::accepted_channel::AcceptedChannel;
 use dlc_manager::channel::offered_channel::OfferedChannel;
@@ -486,14 +486,12 @@ mod tests {
         ($name: ident, $body: expr) => {
             #[test]
             fn $name() {
-                // let path = format!("{}{}", "../tests/data/dlc_storage/sleddb/", std::stringify!($name));
                 let dir = get_ernest_dir().join(std::stringify!($name)).join("dlc_db");
-                let path = format!("{}{}", dir.to_str().unwrap(), std::stringify!($name));
                 {
-                    let storage = SledStorageProvider::new(&path).expect("Error opening sled DB");
+                    let storage = SledStorageProvider::new(std::stringify!($name)).expect("Error opening sled DB");
                     $body(storage);
                 }
-                std::fs::remove_dir_all(path).unwrap();
+                std::fs::remove_dir_all(dir.parent().unwrap()).unwrap();
             }
         };
     }
