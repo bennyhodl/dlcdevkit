@@ -1,4 +1,4 @@
-use bitcoin::{XOnlyPublicKey, secp256k1::Secp256k1, KeyPair};
+use bitcoin::{secp256k1::Secp256k1, KeyPair, XOnlyPublicKey};
 
 #[derive(Default, Debug)]
 pub struct Oracle;

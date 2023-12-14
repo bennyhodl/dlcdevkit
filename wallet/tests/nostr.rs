@@ -1,7 +1,10 @@
 include!("./util.rs");
-use dlc_messages::OfferDlc;
 use dlc_messages::Message;
-use nostr::{Keys, secp256k1::{SecretKey, Secp256k1}};
+use dlc_messages::OfferDlc;
+use nostr::{
+    secp256k1::{Secp256k1, SecretKey},
+    Keys,
+};
 
 fn get_nostr_keys(name: &str) -> Keys {
     let nostr_key = io::get_ernest_dir().join(name).join("nostr_keys");
@@ -24,12 +27,16 @@ fn create_and_parse_nostr_dlc_offfer() {
 
     let recipient = get_nostr_keys(name).public_key();
 
-    let event = test.ernest.nostr.create_dlc_msg_event(recipient, None, msg).unwrap();
+    let event = test
+        .ernest
+        .nostr
+        .create_dlc_msg_event(recipient, None, msg)
+        .unwrap();
 
     let parse = test.ernest.nostr.parse_dlc_msg_event(&event).unwrap();
 
     match parse {
         Message::Offer(parse_offer) => assert_eq!(parse_offer, offer),
-        _ => panic!("Wrong message type")
+        _ => panic!("Wrong message type"),
     }
 }

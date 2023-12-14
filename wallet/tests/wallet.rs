@@ -58,14 +58,16 @@ fn wallet_send_bitcoin() {
 
     assert_eq!(wallet_balance.confirmed, 100_000_000);
 
-    let bitcoind_addr = test.bitcoind
+    let bitcoind_addr = test
+        .bitcoind
         .client
         .get_new_address(None, Some(AddressType::Bech32))
         .unwrap();
 
-    let txn = test.ernest.wallet
+    let txn = test
+        .ernest
+        .wallet
         .send_to_address(bitcoind_addr.clone(), 50_000_000, 1.0)
-        
         .unwrap();
 
     generate_blocks_and_wait(&test.bitcoind, &test.electrsd, 10);
@@ -77,8 +79,9 @@ fn wallet_send_bitcoin() {
 
 #[test]
 fn ernest_wallet_sending_to_ernest_wallet() {
-    let test = TwoWalletTest::setup_bitcoind_and_electrsd_and_ernest("two_ernest_one", "two_ernest_two");
-    
+    let test =
+        TwoWalletTest::setup_bitcoind_and_electrsd_and_ernest("two_ernest_one", "two_ernest_two");
+
     generate_blocks_and_wait(&test.bitcoind, &test.electrsd, 150);
 
     let funding_address = test.ernest_one.wallet.new_external_address().unwrap();
@@ -103,7 +106,10 @@ fn ernest_wallet_sending_to_ernest_wallet() {
 
     let send_to_two = test.ernest_two.wallet.new_external_address().unwrap();
 
-    test.ernest_one.wallet.send_to_address(send_to_two.address, 50_000_000, 1.0).unwrap(); 
+    test.ernest_one
+        .wallet
+        .send_to_address(send_to_two.address, 50_000_000, 1.0)
+        .unwrap();
 
     generate_blocks_and_wait(&test.bitcoind, &test.electrsd, 6);
 
@@ -115,5 +121,5 @@ fn ernest_wallet_sending_to_ernest_wallet() {
     test.ernest_two.wallet.sync().unwrap();
 
     assert!(balance_one.confirmed > 1);
-    assert_eq!(balance_two.confirmed, 50_000_000);   
+    assert_eq!(balance_two.confirmed, 50_000_000);
 }

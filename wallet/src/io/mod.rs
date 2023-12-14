@@ -6,7 +6,6 @@ pub fn read_or_generate_xprv(
     wallet_name: &str,
     network: Network,
 ) -> anyhow::Result<ExtendedPrivKey> {
-
     let wallet_dir = get_ernest_dir().join(&wallet_name);
 
     let seed_file = &wallet_dir.join("seed");

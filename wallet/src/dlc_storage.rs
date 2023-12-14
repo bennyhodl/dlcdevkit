@@ -1,3 +1,4 @@
+use crate::io;
 use dlc_manager::chain_monitor::ChainMonitor;
 use dlc_manager::channel::accepted_channel::AcceptedChannel;
 use dlc_manager::channel::offered_channel::OfferedChannel;
@@ -15,7 +16,6 @@ use sled::transaction::{ConflictableTransactionResult, UnabortableTransactionErr
 use sled::{Db, Transactional, Tree};
 use std::convert::TryInto;
 use std::io::{Cursor, Read};
-use crate::io;
 
 const CONTRACT_TREE: u8 = 1;
 const CHANNEL_TREE: u8 = 2;

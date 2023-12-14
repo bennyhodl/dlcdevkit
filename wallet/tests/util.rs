@@ -1,4 +1,3 @@
-use ernest_wallet::{io, Network, Ernest};
 use core::time::Duration;
 use electrsd::{
     bitcoind::{
@@ -8,12 +7,13 @@ use electrsd::{
     electrum_client::ElectrumApi,
     ElectrsD,
 };
+use ernest_wallet::{io, Ernest, Network};
 
 pub struct OneWalletTest {
     pub bitcoind: BitcoinD,
     pub electrsd: ElectrsD,
     pub ernest: Ernest,
-    pub name: String
+    pub name: String,
 }
 
 impl OneWalletTest {
@@ -23,8 +23,9 @@ impl OneWalletTest {
         bitcoind_conf.network = "regtest";
         let bitcoind = BitcoinD::with_conf(bitcoind, &bitcoind_conf).unwrap();
 
-        let electrs_exe = electrsd::downloaded_exe_path()
-            .expect("you need to provide env var ELECTRS_EXE or specify an electrsd version feature");
+        let electrs_exe = electrsd::downloaded_exe_path().expect(
+            "you need to provide env var ELECTRS_EXE or specify an electrsd version feature",
+        );
         let mut electrsd_conf = electrsd::Conf::default();
         electrsd_conf.http_enabled = true;
         electrsd_conf.network = "regtest";
@@ -32,9 +33,14 @@ impl OneWalletTest {
 
         let esplora_url = format!("http://{}", electrsd.esplora_url.as_ref().unwrap());
 
-        let ernest = Ernest::new(name, &esplora_url, Network::Regtest).unwrap(); 
+        let ernest = Ernest::new(name, &esplora_url, Network::Regtest).unwrap();
 
-        OneWalletTest { bitcoind, electrsd, ernest, name: name.to_string() }
+        OneWalletTest {
+            bitcoind,
+            electrsd,
+            ernest,
+            name: name.to_string(),
+        }
     }
 }
 
@@ -52,7 +58,7 @@ pub struct TwoWalletTest {
     pub ernest_one: Ernest,
     pub name_one: String,
     pub ernest_two: Ernest,
-    pub name_two: String
+    pub name_two: String,
 }
 
 impl TwoWalletTest {
@@ -62,8 +68,9 @@ impl TwoWalletTest {
         bitcoind_conf.network = "regtest";
         let bitcoind = BitcoinD::with_conf(bitcoind, &bitcoind_conf).unwrap();
 
-        let electrs_exe = electrsd::downloaded_exe_path()
-            .expect("you need to provide env var ELECTRS_EXE or specify an electrsd version feature");
+        let electrs_exe = electrsd::downloaded_exe_path().expect(
+            "you need to provide env var ELECTRS_EXE or specify an electrsd version feature",
+        );
         let mut electrsd_conf = electrsd::Conf::default();
         electrsd_conf.http_enabled = true;
         electrsd_conf.network = "regtest";
@@ -71,17 +78,27 @@ impl TwoWalletTest {
 
         let esplora_url = format!("http://{}", electrsd.esplora_url.as_ref().unwrap());
 
-        let ernest_one = Ernest::new(name_one, &esplora_url, Network::Regtest).unwrap(); 
+        let ernest_one = Ernest::new(name_one, &esplora_url, Network::Regtest).unwrap();
 
         let ernest_two = Ernest::new(name_two, &esplora_url, Network::Regtest).unwrap();
 
-        TwoWalletTest { bitcoind, electrsd, ernest_one, name_one: name_one.to_string(), ernest_two, name_two: name_two.to_string() }
+        TwoWalletTest {
+            bitcoind,
+            electrsd,
+            ernest_one,
+            name_one: name_one.to_string(),
+            ernest_two,
+            name_two: name_two.to_string(),
+        }
     }
 }
 
 impl Drop for TwoWalletTest {
     fn drop(&mut self) {
-        println!("Removing wallets: {:?} & {:?}", &self.name_one, &self.name_two);
+        println!(
+            "Removing wallets: {:?} & {:?}",
+            &self.name_one, &self.name_two
+        );
         let wallet_one = io::get_ernest_dir().join(&self.name_one);
         let wallet_two = io::get_ernest_dir().join(&self.name_two);
         std::fs::remove_dir_all(wallet_one).unwrap();

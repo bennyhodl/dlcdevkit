@@ -1,22 +1,22 @@
+use crate::io;
 use anyhow::anyhow;
 use bdk::{
     bitcoin::{
         secp256k1::{PublicKey, Secp256k1},
         util::bip32::{ExtendedPrivKey, ExtendedPubKey},
-        Address, Txid, Network
+        Address, Network, Txid,
     },
     blockchain::EsploraBlockchain,
     template::Bip84,
     wallet::{AddressIndex, AddressInfo},
     Balance, FeeRate, KeychainKind, SignOptions, SyncOptions, Wallet,
 };
-use crate::io;
 use lightning::chain::chaininterface::ConfirmationTarget;
-use std::sync::{atomic::AtomicU32, RwLock};
-use std::sync::Arc;
-use std::{collections::HashMap, sync::Mutex};
 use serde::Deserialize;
 use sled::Tree;
+use std::sync::Arc;
+use std::sync::{atomic::AtomicU32, RwLock};
+use std::{collections::HashMap, sync::Mutex};
 
 const SLED_TREE: &str = "bdk_store";
 
@@ -32,11 +32,7 @@ pub struct ErnestWallet {
 const MIN_FEERATE: u32 = 253;
 
 impl ErnestWallet {
-    pub fn new(
-        name: &str,
-        esplora_url: &str,
-        network: Network,
-    ) -> anyhow::Result<ErnestWallet> {
+    pub fn new(name: &str, esplora_url: &str, network: Network) -> anyhow::Result<ErnestWallet> {
         let xprv = io::read_or_generate_xprv(name, network)?;
 
         let db_path = io::get_ernest_dir().join(&name).join("wallet_db");

@@ -1,12 +1,19 @@
-use std::{path::Path, time::Duration};
 use crate::{io, ErnestDlcManager, RELAY_URL};
-use dlc_messages::{Message, message_handler::read_dlc_message, WireMessage};
 use dlc::secp256k1_zkp::PublicKey;
-use lightning::{util::ser::{Writeable, Readable}, ln::wire::Type};
-use nostr::{Keys, Kind, Filter, secp256k1::{Parity, PublicKey as NostrPublicKey, SecretKey, Secp256k1, XOnlyPublicKey}, Url, EventId, Event, nips::nip04::{encrypt, decrypt}, EventBuilder, Tag};
+use dlc_messages::{message_handler::read_dlc_message, Message, WireMessage};
+use lightning::{
+    ln::wire::Type,
+    util::ser::{Readable, Writeable},
+};
+use nostr::{
+    nips::nip04::{decrypt, encrypt},
+    secp256k1::{Parity, PublicKey as NostrPublicKey, Secp256k1, SecretKey, XOnlyPublicKey},
+    Event, EventBuilder, EventId, Filter, Keys, Kind, Tag, Url,
+};
 use nostr_sdk::{Client, RelayPoolNotification};
-use std::sync::{Arc, Mutex};
 use serde::Deserialize;
+use std::sync::{Arc, Mutex};
+use std::{path::Path, time::Duration};
 
 pub const DLC_MESSAGE_KIND: Kind = Kind::TextNote;
 
@@ -17,7 +24,11 @@ pub struct NostrDlcHandler {
 }
 
 impl NostrDlcHandler {
-    pub fn new(wallet_name: &str, relay_url: String, manager: Arc<Mutex<ErnestDlcManager>>) -> anyhow::Result<NostrDlcHandler> {
+    pub fn new(
+        wallet_name: &str,
+        relay_url: String,
+        manager: Arc<Mutex<ErnestDlcManager>>,
+    ) -> anyhow::Result<NostrDlcHandler> {
         let keys_file = io::get_ernest_dir().join(wallet_name).join("nostr_keys");
         let keys = if Path::new(&keys_file).exists() {
             let secp = Secp256k1::new();
@@ -36,7 +47,7 @@ impl NostrDlcHandler {
         Ok(NostrDlcHandler {
             keys,
             relay_url,
-            manager
+            manager,
         })
     }
 
@@ -48,7 +59,12 @@ impl NostrDlcHandler {
         Filter::new().kind(DLC_MESSAGE_KIND)
     }
 
-    pub fn create_dlc_msg_event(&self, to: XOnlyPublicKey, event_id: Option<EventId>, msg: Message) -> anyhow::Result<Event> {
+    pub fn create_dlc_msg_event(
+        &self,
+        to: XOnlyPublicKey,
+        event_id: Option<EventId>,
+        msg: Message,
+    ) -> anyhow::Result<Event> {
         let mut bytes = msg.type_id().encode();
         bytes.extend(msg.encode());
 
@@ -63,14 +79,17 @@ impl NostrDlcHandler {
             .flatten()
             .collect::<Vec<_>>();
 
-
         let event = EventBuilder::new(DLC_MESSAGE_KIND, content, &tags).to_event(&self.keys)?;
 
         Ok(event)
     }
 
     pub fn parse_dlc_msg_event(&self, event: &Event) -> anyhow::Result<Message> {
-        let decrypt = decrypt(&self.keys.secret_key().unwrap(), &event.pubkey, &event.content)?;
+        let decrypt = decrypt(
+            &self.keys.secret_key().unwrap(),
+            &event.pubkey,
+            &event.content,
+        )?;
 
         let bytes = base64::decode(decrypt)?;
 
@@ -79,9 +98,9 @@ impl NostrDlcHandler {
         let msg_type: u16 = Readable::read(&mut cursor).unwrap();
 
         let Some(wire) = read_dlc_message(msg_type, &mut cursor).unwrap() else {
-            return Err(anyhow::anyhow!("Couldn't read DLC message."))
+            return Err(anyhow::anyhow!("Couldn't read DLC message."));
         };
-        
+
         match wire {
             WireMessage::Message(msg) => Ok(msg),
             WireMessage::SegmentStart(_) | WireMessage::SegmentChunk(_) => {
@@ -92,12 +111,17 @@ impl NostrDlcHandler {
 
     pub fn handle_dlc_msg_event(&self, event: Event) -> anyhow::Result<Option<Event>> {
         if event.kind != DLC_MESSAGE_KIND {
-            return Ok(None)
+            return Ok(None);
         };
 
         let msg = self.parse_dlc_msg_event(&event)?;
 
-        let pubkey = PublicKey::from_slice(&event.pubkey.public_key(nostr::secp256k1::Parity::Even) .serialize())?;
+        let pubkey = PublicKey::from_slice(
+            &event
+                .pubkey
+                .public_key(nostr::secp256k1::Parity::Even)
+                .serialize(),
+        )?;
 
         let mut dlc = self.manager.lock().unwrap();
 
@@ -105,7 +129,7 @@ impl NostrDlcHandler {
 
         if let Some(msg) = msg_opts {
             let event = self.create_dlc_msg_event(event.pubkey, Some(event.id), msg)?;
-            return Ok(Some(event))
+            return Ok(Some(event));
         }
 
         Ok(None)
@@ -130,8 +154,7 @@ pub fn handle_relay_event(event: RelayPoolNotification) {
     match event {
         RelayPoolNotification::Event(_, e) => {
             println!("Received event: {}", e.content);
-        },
-        _ => ()
+        }
+        _ => (),
     }
 }
-

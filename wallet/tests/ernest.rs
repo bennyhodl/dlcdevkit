@@ -1,16 +1,26 @@
 #![allow(dead_code)]
 include!("./util.rs");
-use dlc::{secp256k1_zkp::{Secp256k1, KeyPair, ONE_KEY, rand::thread_rng, Message}, EnumerationPayout, Payout};
-use lightning::util::ser::Writeable;
 use bdk::bitcoin::XOnlyPublicKey;
-use dlc_manager::contract::{contract_input::{ContractInput, ContractInputInfo, OracleInput}, enum_descriptor::EnumDescriptor, ContractDescriptor};
-use dlc_messages::oracle_msgs::{OracleAnnouncement, EnumEventDescriptor, DigitDecompositionEventDescriptor, OracleEvent, EventDescriptor};
+use dlc::{
+    secp256k1_zkp::{rand::thread_rng, KeyPair, Message, Secp256k1, ONE_KEY},
+    EnumerationPayout, Payout,
+};
+use dlc_manager::contract::{
+    contract_input::{ContractInput, ContractInputInfo, OracleInput},
+    enum_descriptor::EnumDescriptor,
+    ContractDescriptor,
+};
+use dlc_messages::oracle_msgs::{
+    DigitDecompositionEventDescriptor, EnumEventDescriptor, EventDescriptor, OracleAnnouncement,
+    OracleEvent,
+};
+use lightning::util::ser::Writeable;
 use nostr::Keys;
 
-fn get_base_input() -> ContractInput { 
+fn get_base_input() -> ContractInput {
     // let secp = Secp256k1::new();
     let secp256k1: Secp256k1<bdk::bitcoin::secp256k1::All> = Secp256k1::new();
-    
+
     ContractInput {
         offer_collateral: 1000000,
         accept_collateral: 2000000,
@@ -36,11 +46,7 @@ fn get_base_input() -> ContractInput {
             }),
             oracles: OracleInput {
                 public_keys: vec![
-                    XOnlyPublicKey::from_keypair(&KeyPair::from_secret_key(
-                        &secp256k1,
-                        &ONE_KEY,
-                    ))
-                    .0,
+                    XOnlyPublicKey::from_keypair(&KeyPair::from_secret_key(&secp256k1, &ONE_KEY)).0,
                 ],
                 event_id: "1234".to_string(),
                 threshold: 1,
@@ -122,7 +128,14 @@ async fn send_dlc_offer_over_nostr() {
 
     let recipient = Keys::generate();
 
-    let send_offer = test.ernest.send_dlc_offer(&contract_input, &oracle_announcement, recipient.public_key()).await;
+    let send_offer = test
+        .ernest
+        .send_dlc_offer(
+            &contract_input,
+            &oracle_announcement,
+            recipient.public_key(),
+        )
+        .await;
 
     println!("SNED {:?}", send_offer);
 

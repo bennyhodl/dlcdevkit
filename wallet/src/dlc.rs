@@ -30,10 +30,13 @@ impl dlc_manager::Wallet for ErnestWallet {
             .new_external_address()
             .map_err(bdk_err_to_manager_err)?
             .address)
-    } 
-    
-    fn get_new_change_address(&self) -> Result<Address, ManagerError> { 
-        Ok(self.new_change_address().map_err(bdk_err_to_manager_err)?.address)
+    }
+
+    fn get_new_change_address(&self) -> Result<Address, ManagerError> {
+        Ok(self
+            .new_change_address()
+            .map_err(bdk_err_to_manager_err)?
+            .address)
     }
 
     fn get_new_secret_key(&self) -> Result<bitcoin::secp256k1::SecretKey, ManagerError> {
@@ -105,16 +108,16 @@ impl dlc_manager::Signer for ErnestWallet {
     //
     //     psbt.inputs[input_index] = input_signed.inputs[input_index].clone();
     //
-    //     Ok(())        
-    // } 
+    //     Ok(())
+    // }
 
     fn sign_tx_input(
-            &self,
-            _tx: &mut bitcoin::Transaction,
-            _input_index: usize,
-            _tx_out: &bitcoin::TxOut,
-            _redeem_script: Option<Script>,
-        ) -> Result<(), ManagerError> {
+        &self,
+        _tx: &mut bitcoin::Transaction,
+        _input_index: usize,
+        _tx_out: &bitcoin::TxOut,
+        _redeem_script: Option<Script>,
+    ) -> Result<(), ManagerError> {
         Ok(())
     }
 
@@ -183,7 +186,10 @@ impl dlc_manager::Blockchain for ErnestWallet {
     }
 
     fn get_blockchain_height(&self) -> Result<u64, ManagerError> {
-        Ok(self.blockchain.get_height().map_err(esplora_err_to_manager_err)? as u64)
+        Ok(self
+            .blockchain
+            .get_height()
+            .map_err(esplora_err_to_manager_err)? as u64)
     }
 
     fn get_transaction_confirmations(&self, tx_id: &Txid) -> Result<u32, ManagerError> {
