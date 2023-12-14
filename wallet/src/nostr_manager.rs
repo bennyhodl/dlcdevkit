@@ -17,8 +17,8 @@ pub struct NostrDlcHandler {
 }
 
 impl NostrDlcHandler {
-    pub fn new(wallet_name: String, relay_url: String, manager: Arc<Mutex<ErnestDlcManager>>) -> anyhow::Result<NostrDlcHandler> {
-        let keys_file = io::get_ernest_dir().join(&wallet_name).join("nostr_keys");
+    pub fn new(wallet_name: &str, relay_url: String, manager: Arc<Mutex<ErnestDlcManager>>) -> anyhow::Result<NostrDlcHandler> {
+        let keys_file = io::get_ernest_dir().join(wallet_name).join("nostr_keys");
         let keys = if Path::new(&keys_file).exists() {
             let secp = Secp256k1::new();
             let contents = std::fs::read(&keys_file)?;

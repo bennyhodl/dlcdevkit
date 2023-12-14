@@ -15,6 +15,7 @@ use sled::transaction::{ConflictableTransactionResult, UnabortableTransactionErr
 use sled::{Db, Transactional, Tree};
 use std::convert::TryInto;
 use std::io::{Cursor, Read};
+use crate::io;
 
 const CONTRACT_TREE: u8 = 1;
 const CHANNEL_TREE: u8 = 2;
@@ -124,7 +125,8 @@ where
 
 impl SledStorageProvider {
     /// Creates a new instance of a SledStorageProvider.
-    pub fn new(path: &str) -> Result<Self, sled::Error> {
+    pub fn new(name: &str) -> Result<Self, sled::Error> {
+        let path = io::get_ernest_dir().join(name).join("dlc_db");
         Ok(SledStorageProvider {
             db: sled::open(path)?,
         })
@@ -478,12 +480,15 @@ fn deserialize_channel(buff: &sled::IVec) -> Result<Channel, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::io::get_ernest_dir;
 
     macro_rules! sled_test {
         ($name: ident, $body: expr) => {
             #[test]
             fn $name() {
-                let path = format!("{}{}", "../tests/data/dlc_storage/sleddb/", std::stringify!($name));
+                // let path = format!("{}{}", "../tests/data/dlc_storage/sleddb/", std::stringify!($name));
+                let dir = get_ernest_dir().join(std::stringify!($name)).join("dlc_db");
+                let path = format!("{}{}", dir.to_str().unwrap(), std::stringify!($name));
                 {
                     let storage = SledStorageProvider::new(&path).expect("Error opening sled DB");
                     $body(storage);

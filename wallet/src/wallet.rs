@@ -33,15 +33,14 @@ const MIN_FEERATE: u32 = 253;
 
 impl ErnestWallet {
     pub fn new(
-        name: String,
-        esplora_url: String,
+        name: &str,
+        esplora_url: &str,
         network: Network,
     ) -> anyhow::Result<ErnestWallet> {
-        let xprv = io::read_or_generate_xprv(name.clone(), network)?;
+        let xprv = io::read_or_generate_xprv(name, network)?;
 
         let db_path = io::get_ernest_dir().join(&name).join("wallet_db");
 
-        // let database = SqliteDatabase::new(db_path);
         let sled = sled::open(db_path)?.open_tree(SLED_TREE)?;
 
         let inner = Arc::new(Mutex::new(Wallet::new(
@@ -86,7 +85,7 @@ impl ErnestWallet {
             inner,
             network,
             xprv,
-            name,
+            name: name.to_string(),
         })
     }
 

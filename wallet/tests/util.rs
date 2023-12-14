@@ -32,7 +32,7 @@ impl OneWalletTest {
 
         let esplora_url = format!("http://{}", electrsd.esplora_url.as_ref().unwrap());
 
-        let ernest = Ernest::new(name.to_string(), esplora_url.to_string(), Network::Regtest).unwrap(); 
+        let ernest = Ernest::new(name, &esplora_url, Network::Regtest).unwrap(); 
 
         OneWalletTest { bitcoind, electrsd, ernest, name: name.to_string() }
     }
@@ -71,9 +71,9 @@ impl TwoWalletTest {
 
         let esplora_url = format!("http://{}", electrsd.esplora_url.as_ref().unwrap());
 
-        let ernest_one = Ernest::new(name_one.to_string(), esplora_url.to_string(), Network::Regtest).unwrap(); 
+        let ernest_one = Ernest::new(name_one, &esplora_url, Network::Regtest).unwrap(); 
 
-        let ernest_two = Ernest::new(name_two.to_string(), esplora_url.to_string(), Network::Regtest).unwrap();
+        let ernest_two = Ernest::new(name_two, &esplora_url, Network::Regtest).unwrap();
 
         TwoWalletTest { bitcoind, electrsd, ernest_one, name_one: name_one.to_string(), ernest_two, name_two: name_two.to_string() }
     }

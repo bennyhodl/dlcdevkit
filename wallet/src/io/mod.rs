@@ -3,7 +3,7 @@ use getrandom::getrandom;
 use std::path::{Path, PathBuf};
 
 pub fn read_or_generate_xprv(
-    wallet_name: String,
+    wallet_name: &str,
     network: Network,
 ) -> anyhow::Result<ExtendedPrivKey> {
 

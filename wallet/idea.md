@@ -149,3 +149,10 @@ let wallet_name = bdk::wallet::wallet_name_from_descriptor(
     &Secp256k1::new(),
 )?;
 ```
+
+```
+// Oracles
+let mut oracles: Arc<HashMap<XOnlyPublicKey, ErnestOracle>> = Arc::new(HashMap::new());
+let oracle = ErnestOracle::default();
+oracles.insert(oracle.get_public_key(), oracle);
+```
