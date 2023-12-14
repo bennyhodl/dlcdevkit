@@ -54,9 +54,10 @@ fn get_base_input() -> ContractInput {
         }],
     }
 }
+
 fn enum_descriptor() -> EnumEventDescriptor {
     EnumEventDescriptor {
-        outcomes: vec!["1".to_string(), "2".to_string(), "3".to_string()],
+        outcomes: vec!["A".to_string(), "B".to_string()],
     }
 }
 
@@ -119,7 +120,6 @@ fn get_oracle_announcement() -> OracleAnnouncement {
 }
 
 #[tokio::test]
-#[ignore = "dont have test data yet"]
 async fn send_dlc_offer_over_nostr() {
     let test = OneWalletTest::setup_bitcoind_and_electrsd_and_ernest("send-dlc-offer");
 
