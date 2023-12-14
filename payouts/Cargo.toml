@@ -1,0 +1,10 @@
+[package]
+name = "payouts"
+version = "0.0.3"
+edition = "2021"
+
+[dependencies]
+dlc = { git = "https://github.com/p2pderivatives/rust-dlc", branch = "master", features = ["use-serde"] }
+dlc-manager = { git = "https://github.com/p2pderivatives/rust-dlc", branch = "master", features = ["use-serde"] }
+dlc-messages = { git = "https://github.com/p2pderivatives/rust-dlc", branch = "master", features = [ "use-serde"] }
+dlc-trie = { git = "https://github.com/p2pderivatives/rust-dlc", branch = "master", features = ["use-serde"] }
