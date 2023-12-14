@@ -3,24 +3,24 @@
 mod dlc;
 mod wallet;
 mod error;
-mod io;
+pub mod io;
 mod oracle;
-mod sled;
-mod nostr;
-
-#[cfg(test)]
-mod tests;
+mod dlc_storage;
+mod nostr_manager;
 
 pub use bdk::bitcoin::Network;
-use dlc_messages::message_handler::MessageHandler;
-pub use crate::wallet::ErnestWallet;
-
-use crate::{io::get_ernest_dir, oracle::Oracle as ErnestOracle, sled::SledStorageProvider, nostr::NostrDlcHandler};
-use dlc_manager::SystemTimeProvider;
+pub use dlc_manager::SystemTimeProvider;
+pub use nostr_manager::handle_relay_event;
+use dlc_messages::{message_handler::MessageHandler, oracle_msgs::OracleAnnouncement, OfferDlc, Message};
+use bdk::bitcoin::secp256k1::PublicKey;
+use nostr::{bitcoin::secp256k1::XOnlyPublicKey, ClientMessage, secp256k1::Parity};
+use nostr_sdk::Client;
+use crate::{wallet::ErnestWallet, io::get_ernest_dir, oracle::Oracle as ErnestOracle, dlc_storage::SledStorageProvider, nostr_manager::NostrDlcHandler};
+use dlc_manager::{manager::Manager, contract::contract_input::ContractInput, ContractId};
 use std::{collections::HashMap, sync::{Arc, Mutex}};
 use serde::Deserialize;
 
-pub const RELAY_URL: &str = "http://localhost:8080";
+pub const RELAY_URL: &str = "ws://localhost:8080";
 
 pub type ErnestDlcManager = dlc_manager::manager::Manager<
     Arc<ErnestWallet>,
@@ -31,33 +31,25 @@ pub type ErnestDlcManager = dlc_manager::manager::Manager<
     Arc<ErnestWallet>,
 >;
 
-// #[derive(Clone, Deserialize)]
 pub struct Ernest {
     pub wallet: Arc<ErnestWallet>,
     pub manager: Arc<Mutex<ErnestDlcManager>>,
+    pub nostr: Arc<NostrDlcHandler>,
     pub message_handler: Arc<MessageHandler>,
-    pub nostr: Arc<NostrDlcHandler>
 }
 
 impl Ernest {
-    pub fn new(name: String, esplora_url: String, network: Network) -> anyhow::Result<Ernest> {
-        let wallet = Arc::new(ErnestWallet::new(name.clone(), esplora_url, network)?);
+    pub fn new(name: &str, esplora_url: &str, network: Network) -> anyhow::Result<Ernest> {
+        let wallet = Arc::new(ErnestWallet::new(name, esplora_url, network)?);
 
-        // TODO: Default path + config for storage
-        let sled_path = get_ernest_dir().join(&name).join("dlc_db");
-
-        let sled = Arc::new(SledStorageProvider::new(sled_path.to_str().unwrap())?);
-
-        // let mut oracles: Arc<HashMap<XOnlyPublicKey, ErnestOracle>> = Arc::new(HashMap::new());
-        // let oracle = ErnestOracle::default();
-        // oracles.insert(oracle.get_public_key(), oracle);
+        let dlc_storage = Arc::new(SledStorageProvider::new(&name)?);
 
         let time = Arc::new(SystemTimeProvider {});
 
-        let manager = Arc::new(Mutex::new(dlc_manager::manager::Manager::new(
+        let manager = Arc::new(Mutex::new(Manager::new(
             wallet.clone(),
             wallet.clone(),
-            sled,
+            dlc_storage,
             HashMap::new(),
             time,
             wallet.clone(),
@@ -67,6 +59,50 @@ impl Ernest {
 
         let message_handler = Arc::new(MessageHandler::new());
 
-        Ok(Ernest { wallet, manager, message_handler, nostr })
+        Ok(Ernest { wallet, manager, nostr, message_handler })
+    }
+
+    pub async fn send_dlc_offer(&self, contract_input: &ContractInput, oracle_announcement: &OracleAnnouncement, xonly_pubkey: XOnlyPublicKey) -> anyhow::Result<()> {
+        let pubkey = PublicKey::from_slice(&xonly_pubkey.public_key(Parity::Even).serialize())?;
+
+        let mut manager = self.manager.lock().unwrap();
+
+        let offer_msg = manager.send_offer_with_announcements(contract_input, pubkey, vec![vec![oracle_announcement.clone()]])?;
+
+        let wire_msg = self.nostr.create_dlc_msg_event(xonly_pubkey, None, Message::Offer(offer_msg))?;
+
+        let client = Client::new(&self.nostr.keys); 
+
+        client.add_relay(&self.nostr.relay_url, None).await?;
+
+        client.connect().await;
+
+        client.send_event(wire_msg).await?;
+        
+        client.disconnect().await?;
+
+        Ok(())
+    }
+
+    pub async fn accept_dlc_offer(&self, contract: [u8; 32]) -> anyhow::Result<()> {
+        let mut dlc = self.manager.lock().unwrap();
+
+        let contract_id = ContractId::from(contract);
+        
+        let (_, public_key, accept_dlc) = dlc.accept_contract_offer(&contract_id)?;
+
+        let xonly_pubkey = XOnlyPublicKey::from_slice(&public_key.x_only_public_key().0.serialize())?;
+
+        let accept_dlc_event = self.nostr.create_dlc_msg_event(xonly_pubkey, None, Message::Accept(accept_dlc))?;
+
+        let client = Client::new(&self.nostr.keys);
+
+        client.add_relay(RELAY_URL, None).await?;
+
+        client.send_event(accept_dlc_event).await?;
+
+        client.disconnect().await?;
+
+        Ok(())
     }
 }

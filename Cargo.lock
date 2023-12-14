@@ -1004,7 +1004,7 @@ checksum = "5443807d6dff69373d433ab9ef5378ad8df50ca6298caf15de6e52e24aaf54d5"
 
 [[package]]
 name = "ernest-wallet"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "anyhow",
  "base64 0.13.1",
@@ -2557,6 +2557,16 @@ name = "pathdiff"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8835116a5c179084a830efb3adc117ab007512b535bc1a21c991d3b32a6b44dd"
+
+[[package]]
+name = "payouts"
+version = "0.0.3"
+dependencies = [
+ "dlc",
+ "dlc-manager",
+ "dlc-messages",
+ "dlc-trie",
+]
 
 [[package]]
 name = "percent-encoding"
