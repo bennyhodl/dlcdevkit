@@ -3,7 +3,7 @@
 mod models;
 use std::sync::Arc;
 
-use ernest_wallet::{nostr::handle_relay_event, Ernest};
+use ernest_wallet::{handle_relay_event, Ernest};
 use models::Pubkeys;
 
 #[tauri::command]
