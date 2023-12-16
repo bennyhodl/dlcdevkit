@@ -17,7 +17,7 @@ use dlc_messages::oracle_msgs::{
 use lightning::util::ser::Writeable;
 use nostr::Keys;
 
-fn get_base_input() -> ContractInput {
+fn get_base_input(diff: &str) -> ContractInput {
     // let secp = Secp256k1::new();
     let secp256k1: Secp256k1<bdk::bitcoin::secp256k1::All> = Secp256k1::new();
 
@@ -29,7 +29,7 @@ fn get_base_input() -> ContractInput {
             contract_descriptor: ContractDescriptor::Enum(EnumDescriptor {
                 outcome_payouts: vec![
                     EnumerationPayout {
-                        outcome: "A".to_string(),
+                        outcome: diff.to_string(),
                         payout: Payout {
                             offer: 3000000,
                             accept: 0,
@@ -55,9 +55,9 @@ fn get_base_input() -> ContractInput {
     }
 }
 
-fn enum_descriptor() -> EnumEventDescriptor {
+fn enum_descriptor(diff: &str) -> EnumEventDescriptor {
     EnumEventDescriptor {
-        outcomes: vec!["A".to_string(), "B".to_string()],
+        outcomes: vec![diff.to_string(), "B".to_string()],
     }
 }
 
@@ -86,20 +86,20 @@ fn digit_event(nb_nonces: usize) -> OracleEvent {
     }
 }
 
-fn enum_event(nb_nonces: usize) -> OracleEvent {
+fn enum_event(nb_nonces: usize, diff: &str) -> OracleEvent {
     OracleEvent {
         oracle_nonces: (0..nb_nonces).map(|_| some_schnorr_pubkey()).collect(),
         event_maturity_epoch: 10,
-        event_descriptor: EventDescriptor::EnumEvent(enum_descriptor()),
+        event_descriptor: EventDescriptor::EnumEvent(enum_descriptor(diff)),
         event_id: "1234".to_string(),
     }
 }
 
-fn get_oracle_announcement() -> OracleAnnouncement {
+fn get_oracle_announcement(diff: &str) -> OracleAnnouncement {
     let secp256k1: Secp256k1<bdk::bitcoin::secp256k1::All> = Secp256k1::new();
     let key_pair = KeyPair::new(&secp256k1, &mut thread_rng());
     let oracle_pubkey = XOnlyPublicKey::from_keypair(&key_pair).0;
-    let event = enum_event(1);
+    let event = enum_event(1, diff);
     let mut event_hex = Vec::new();
     event
         .write(&mut event_hex)
@@ -121,10 +121,10 @@ fn get_oracle_announcement() -> OracleAnnouncement {
 
 #[tokio::test]
 async fn send_dlc_offer_over_nostr() {
-    let test = OneWalletTest::setup_bitcoind_and_electrsd_and_ernest("send-dlc-offer");
+    let test = OneWalletTest::setup_bitcoind_and_electrsd_and_ernest("send-dlc-offer").await;
 
-    let contract_input = get_base_input();
-    let oracle_announcement = get_oracle_announcement();
+    let contract_input = get_base_input("A");
+    let oracle_announcement = get_oracle_announcement("A");
 
     let recipient = Keys::generate();
 
@@ -137,7 +137,35 @@ async fn send_dlc_offer_over_nostr() {
         )
         .await;
 
-    println!("SNED {:?}", send_offer);
+    let dlc = test.ernest.manager.lock().unwrap();
 
-    assert!(send_offer.is_ok())
+    let store = dlc.get_store();
+
+    let contract = store.contract_tree().unwrap().iter().count();
+
+    drop(dlc);
+    
+    assert!(send_offer.is_ok());
+    assert_eq!(contract, 1);
+
+    let contract_input_two = get_base_input("C");
+    let oracle_announcement_two = get_oracle_announcement("C");
+    
+    let send_offer_two = test
+        .ernest
+        .send_dlc_offer(
+            &contract_input_two,
+            &oracle_announcement_two,
+            recipient.public_key(),
+        )
+        .await;
+    
+    let dlc_two = test.ernest.manager.lock().unwrap();
+
+    let store_two = dlc_two.get_store();
+
+    let contract = store_two.contract_tree().unwrap().iter().count();
+
+    assert!(send_offer_two.is_ok());
+    assert_eq!(contract, 2)
 }

@@ -1,13 +1,37 @@
 use bitcoin::{secp256k1::Secp256k1, KeyPair, XOnlyPublicKey};
+use std::{marker::PhantomData, str::FromStr};
 
-#[derive(Default, Debug)]
-pub struct Oracle;
+const ORACLE_URL: &str = "http://localhost:8080";
 
-impl dlc_manager::Oracle for Oracle {
+fn get<T>(path: &str) -> anyhow::Result<T> where T: serde::de::DeserializeOwned {
+    let url = format!("{}{}", ORACLE_URL, path);
+    let request = reqwest::blocking::get(url)?.json::<T>()?;
+    
+    Ok(request)
+}
+
+#[derive(Debug)]
+pub struct ErnestOracle {
+    pubkey: XOnlyPublicKey
+}
+
+impl ErnestOracle {
+    pub fn new() -> anyhow::Result<ErnestOracle> {
+        let request: String = get("/pubkey")?;
+        let pubkey = XOnlyPublicKey::from_str(&request)?; 
+        Ok(ErnestOracle { pubkey })
+    }
+
+    pub fn get_pubkey(&self) -> anyhow::Result<XOnlyPublicKey> {
+        let request: String = get("/pubkey")?;
+        Ok(XOnlyPublicKey::from_str(&request)?)
+    }
+
+}
+
+impl dlc_manager::Oracle for ErnestOracle {
     fn get_public_key(&self) -> bitcoin::XOnlyPublicKey {
-        let secp = Secp256k1::new();
-        let keypair = KeyPair::new(&secp, &mut rand::thread_rng());
-        XOnlyPublicKey::from_keypair(&keypair).0
+        self.pubkey
     }
 
     fn get_attestation(

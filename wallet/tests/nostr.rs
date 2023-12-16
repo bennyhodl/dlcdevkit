@@ -14,10 +14,10 @@ fn get_nostr_keys(name: &str) -> Keys {
     Keys::new_with_ctx(&secp, secret_key)
 }
 
-#[test]
-fn create_and_parse_nostr_dlc_offfer() {
+#[tokio::test]
+async fn create_and_parse_nostr_dlc_offfer() {
     let name = "create-nostr-offer";
-    let test = OneWalletTest::setup_bitcoind_and_electrsd_and_ernest(name);
+    let test = OneWalletTest::setup_bitcoind_and_electrsd_and_ernest(name).await;
 
     let offer_str = include_str!("./data/dlc/offer.json");
 

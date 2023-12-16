@@ -15,7 +15,7 @@ use serde::Deserialize;
 use std::sync::{Arc, Mutex};
 use std::{path::Path, time::Duration};
 
-pub const DLC_MESSAGE_KIND: Kind = Kind::TextNote;
+pub const DLC_MESSAGE_KIND: Kind = Kind::Ephemeral(28_888);
 
 pub struct NostrDlcHandler {
     pub keys: Keys,

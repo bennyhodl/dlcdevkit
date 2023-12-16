@@ -5,17 +5,17 @@ mod dlc_storage;
 mod error;
 pub mod io;
 mod nostr_manager;
-mod oracle;
+pub mod oracle;
 mod wallet;
 
 use crate::{
     dlc_storage::SledStorageProvider, io::get_ernest_dir, nostr_manager::NostrDlcHandler,
-    oracle::Oracle as ErnestOracle, wallet::ErnestWallet,
+    oracle::ErnestOracle, wallet::ErnestWallet,
 };
 use bdk::bitcoin::secp256k1::PublicKey;
 pub use bdk::bitcoin::Network;
 pub use dlc_manager::SystemTimeProvider;
-use dlc_manager::{contract::contract_input::ContractInput, manager::Manager, ContractId};
+use dlc_manager::{contract::contract_input::ContractInput, manager::Manager, ContractId, Oracle};
 use dlc_messages::{
     message_handler::MessageHandler, oracle_msgs::OracleAnnouncement, Message, OfferDlc,
 };
@@ -28,7 +28,9 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-pub const RELAY_URL: &str = "ws://localhost:8080";
+pub const RELAY_URL: &str = "ws://localhost:8081";
+
+type ErnestOracles = HashMap<bdk::bitcoin::XOnlyPublicKey, ErnestOracle>;
 
 pub type ErnestDlcManager = dlc_manager::manager::Manager<
     Arc<ErnestWallet>,
@@ -47,18 +49,25 @@ pub struct Ernest {
 }
 
 impl Ernest {
-    pub fn new(name: &str, esplora_url: &str, network: Network) -> anyhow::Result<Ernest> {
+    pub async fn new(name: &str, esplora_url: &str, network: Network) -> anyhow::Result<Ernest> {
         let wallet = Arc::new(ErnestWallet::new(name, esplora_url, network)?);
 
         let dlc_storage = Arc::new(SledStorageProvider::new(&name)?);
 
         let time = Arc::new(SystemTimeProvider {});
 
+        // Ask carman!
+        let oracle = tokio::task::spawn_blocking(move || {
+            Arc::new(ErnestOracle::new().unwrap())
+        }).await.unwrap();
+        let mut oracles = HashMap::new();
+        oracles.insert(oracle.get_public_key(), oracle);
+
         let manager = Arc::new(Mutex::new(Manager::new(
             wallet.clone(),
             wallet.clone(),
             dlc_storage,
-            HashMap::new(),
+            oracles,
             time,
             wallet.clone(),
         )?));

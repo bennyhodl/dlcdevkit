@@ -1,9 +1,9 @@
 include!("./util.rs");
 use bitcoin::Amount;
 
-#[test]
-fn wallet_receive_bitcoin() {
-    let test = OneWalletTest::setup_bitcoind_and_electrsd_and_ernest("receive");
+#[tokio::test]
+async fn wallet_receive_bitcoin() {
+    let test = OneWalletTest::setup_bitcoind_and_electrsd_and_ernest("receive").await;
 
     generate_blocks_and_wait(&test.bitcoind, &test.electrsd, 150);
 
@@ -30,9 +30,9 @@ fn wallet_receive_bitcoin() {
     assert_eq!(balance.confirmed, 100_000_000)
 }
 
-#[test]
-fn wallet_send_bitcoin() {
-    let test = OneWalletTest::setup_bitcoind_and_electrsd_and_ernest("send");
+#[tokio::test]
+async fn wallet_send_bitcoin() {
+    let test = OneWalletTest::setup_bitcoind_and_electrsd_and_ernest("send").await;
 
     generate_blocks_and_wait(&test.bitcoind, &test.electrsd, 150);
 
@@ -77,10 +77,10 @@ fn wallet_send_bitcoin() {
     assert_eq!(txn_seen.info.txid, txn);
 }
 
-#[test]
-fn ernest_wallet_sending_to_ernest_wallet() {
+#[tokio::test]
+async fn ernest_wallet_sending_to_ernest_wallet() {
     let test =
-        TwoWalletTest::setup_bitcoind_and_electrsd_and_ernest("two_ernest_one", "two_ernest_two");
+        TwoWalletTest::setup_bitcoind_and_electrsd_and_ernest("two_ernest_one", "two_ernest_two").await;
 
     generate_blocks_and_wait(&test.bitcoind, &test.electrsd, 150);
 

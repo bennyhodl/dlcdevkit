@@ -31,7 +31,7 @@ async fn main() {
             "terminal",
             "http://localhost:30000",
             Network::Regtest,
-        )
+        ).await
         .unwrap(),
     );
 

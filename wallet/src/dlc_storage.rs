@@ -24,7 +24,7 @@ const CHAIN_MONITOR_KEY: u8 = 4;
 
 /// Implementation of Storage interface using the sled DB backend.
 pub struct SledStorageProvider {
-    db: Db,
+    pub db: Db,
 }
 
 macro_rules! convertible_enum {
@@ -163,7 +163,7 @@ impl SledStorageProvider {
             .map_err(|e| Error::StorageError(format!("Error opening contract tree: {}", e)))
     }
 
-    fn contract_tree(&self) -> Result<Tree, Error> {
+    pub fn contract_tree(&self) -> Result<Tree, Error> {
         self.open_tree(&[CONTRACT_TREE])
     }
 
