@@ -67,7 +67,7 @@ impl dlc_manager::Wallet for ErnestWallet {
     fn get_utxos_for_amount(
         &self,
         _amount: u64,
-        _fee_rate: Option<u64>,
+        _fee_rate: u64,
         _lock_utxos: bool,
     ) -> Result<Vec<dlc_manager::Utxo>, ManagerError> {
         let wallet = self.inner.lock().unwrap();
@@ -95,29 +95,19 @@ impl dlc_manager::Wallet for ErnestWallet {
 
 impl dlc_manager::Signer for ErnestWallet {
     // Waiting for rust-dlc PR
-    // fn sign_psbt_input(
-    //         &self,
-    //         psbt: &mut bitcoin::psbt::PartiallySignedTransaction,
-    //         input_index: usize,
-    //     ) -> Result<(), ManagerError> {
-    //     let wallet = self.inner.lock().unwrap();
-    //
-    //     let mut input_signed = psbt.clone();
-    //
-    //     wallet.sign(&mut input_signed, bdk::SignOptions::default()).map_err(bdk_err_to_manager_err)?;
-    //
-    //     psbt.inputs[input_index] = input_signed.inputs[input_index].clone();
-    //
-    //     Ok(())
-    // }
+    fn sign_psbt_input(
+            &self,
+            psbt: &mut bitcoin::psbt::PartiallySignedTransaction,
+            input_index: usize,
+        ) -> Result<(), ManagerError> {
+        let wallet = self.inner.lock().unwrap();
 
-    fn sign_tx_input(
-        &self,
-        _tx: &mut bitcoin::Transaction,
-        _input_index: usize,
-        _tx_out: &bitcoin::TxOut,
-        _redeem_script: Option<Script>,
-    ) -> Result<(), ManagerError> {
+        let mut input_signed = psbt.clone();
+
+        wallet.sign(&mut input_signed, bdk::SignOptions::default()).map_err(bdk_err_to_manager_err)?;
+
+        psbt.inputs[input_index] = input_signed.inputs[input_index].clone();
+
         Ok(())
     }
 
