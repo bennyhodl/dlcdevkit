@@ -40,3 +40,77 @@ async fn create_and_parse_nostr_dlc_offfer() {
         _ => panic!("Wrong message type"),
     }
 }
+
+#[tokio::test]
+async fn send_dlc_offer() {
+    let name = "send-dlc-offer";
+    let test = OneWalletTest::setup_bitcoind_and_electrsd_and_ernest(name).await;
+
+    let offer_str = include_str!("./data/dlc/offer.json");
+
+    let offer: OfferDlc = serde_json::from_str(offer_str).unwrap();
+
+    let msg = Message::Offer(offer.clone());
+
+    let recipient = get_nostr_keys(name).public_key();
+
+    let event = test
+        .ernest
+        .nostr
+        .create_dlc_msg_event(recipient, None, msg)
+        .unwrap();
+
+    println!("Created event with id: {}", event.id);
+
+    let client = test.ernest.nostr.listen().await.unwrap();
+
+    client.send_event(event).await.expect("Nostr event did not send.");
+}
+
+#[tokio::test]
+async fn send_and_receive_dlc_offer() {
+    let sender = "sender-dlc-offer";
+    let receiver = "receiver-dlc-offer";
+    let test = TwoWalletTest::setup_bitcoind_and_electrsd_and_ernest(sender, receiver).await;
+
+    let offer_str = include_str!("./data/dlc/offer.json");
+
+    let offer: OfferDlc = serde_json::from_str(offer_str).unwrap();
+
+    let msg = Message::Offer(offer.clone());
+
+    let recipient = get_nostr_keys(sender).public_key();
+
+    let event = test
+        .ernest_one
+        .nostr
+        .create_dlc_msg_event(recipient, None, msg)
+        .unwrap();
+
+    println!("Created event with id: {}", event.id);
+
+    let sender = test.ernest_one.nostr.listen().await.unwrap();
+
+    let receiver_nostr = test.ernest_two.nostr.clone();
+
+    let client = receiver_nostr.listen().await.unwrap();
+
+    client.handle_notifications(|e| async move {
+        match e {
+            nostr_sdk::RelayPoolNotification::Event(_, e) => {
+                println!("THERE WAS AN EVENT: {}", e.id);
+            },
+            nostr_sdk::RelayPoolNotification::Message(_, e) => {
+                println!("MESSAGE?: {:?}", e);
+            }
+            _ => println!("Other event.")
+        }
+        Ok(false)
+    }).await.unwrap();
+
+
+    sender.send_event(event).await.expect("Nostr event did not send.");
+}
+
+
+
