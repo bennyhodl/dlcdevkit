@@ -15,7 +15,7 @@ use serde::Deserialize;
 use std::sync::{Arc, Mutex};
 use std::{path::Path, time::Duration};
 
-pub const DLC_MESSAGE_KIND: Kind = Kind::Ephemeral(28_888);
+pub const DLC_MESSAGE_KIND: Kind = Kind::TextNote;
 
 pub struct NostrDlcHandler {
     pub keys: Keys,
@@ -135,6 +135,31 @@ impl NostrDlcHandler {
         Ok(None)
     }
 
+    pub fn handle_relay_event(&self, event: RelayPoolNotification) -> anyhow::Result<Option<Event>> {
+        match event {
+            RelayPoolNotification::Event(url, event) => {
+                println!("Received event: {} from {}", event.id, url.to_string());
+
+                if event.kind != DLC_MESSAGE_KIND {
+                    println!("Not a DLC message event.");
+                    return Ok(None)
+                }
+
+                Ok(self.handle_dlc_msg_event(event)?)
+                
+            },
+            RelayPoolNotification::RelayStatus { url, status } => {
+                println!("Status change on relay {} :: {}", url, status.to_string());
+                Ok(None)
+            },
+            RelayPoolNotification::Stop => {
+                println!("Relay is stopping!");
+                Ok(None)
+            }
+            _ => Ok(None),
+        }
+    }
+
     pub async fn listen(&self) -> anyhow::Result<Client> {
         let client = Client::new(&self.keys);
 
@@ -147,14 +172,5 @@ impl NostrDlcHandler {
         client.connect().await;
 
         Ok(client)
-    }
-}
-
-pub fn handle_relay_event(event: RelayPoolNotification) {
-    match event {
-        RelayPoolNotification::Event(_, e) => {
-            println!("Received event: {}", e.content);
-        }
-        _ => (),
     }
 }

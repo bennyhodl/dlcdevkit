@@ -20,7 +20,6 @@ use dlc_messages::{
     message_handler::MessageHandler, oracle_msgs::OracleAnnouncement, Message, OfferDlc,
 };
 use nostr::{bitcoin::secp256k1::XOnlyPublicKey, secp256k1::Parity, ClientMessage};
-pub use nostr_manager::handle_relay_event;
 use nostr_sdk::Client;
 use serde::Deserialize;
 use std::{
