@@ -24,3 +24,5 @@
 /terminal/*.njsproj
 /terminal/*.sln
 /terminal/*.sw?
+
+/regtest/bitcoin/*
