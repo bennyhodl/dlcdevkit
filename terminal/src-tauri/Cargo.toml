@@ -1,6 +1,6 @@
 [package]
 name = "terminal"
-version = "0.0.3"
+version = "0.0.4"
 description = "A Tauri App"
 authors = ["you"]
 license = ""
@@ -19,6 +19,8 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 anyhow = "1.0.75"
 tokio = { version = "1.35.0", features = ["full"] }
+nostr = "0.28.1"
+nostr-sdk = "0.28.0"
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem

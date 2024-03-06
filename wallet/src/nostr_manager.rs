@@ -1,21 +1,21 @@
 use crate::{io, ErnestDlcManager, RELAY_URL};
-use dlc::secp256k1_zkp::PublicKey;
 use dlc_messages::{message_handler::read_dlc_message, Message, WireMessage};
 use lightning::{
     ln::wire::Type,
     util::ser::{Readable, Writeable},
 };
 use nostr::{
-    nips::nip04::{decrypt, encrypt},
-    secp256k1::{Parity, PublicKey as NostrPublicKey, Secp256k1, SecretKey, XOnlyPublicKey},
-    Event, EventBuilder, EventId, Filter, Keys, Kind, Tag, Url,
+    PublicKey,
+    nips::nip04::{decrypt, encrypt}, secp256k1::{Parity, PublicKey as NostrPublicKey, Secp256k1, SecretKey, XOnlyPublicKey}, Event, EventBuilder, EventId, Filter, Keys, Kind, Tag, Timestamp, Url
 };
 use nostr_sdk::{Client, RelayPoolNotification};
 use serde::Deserialize;
 use std::sync::{Arc, Mutex};
 use std::{path::Path, time::Duration};
 
-pub const DLC_MESSAGE_KIND: Kind = Kind::TextNote;
+pub const DLC_MESSAGE_KIND: Kind = Kind::Custom(8_888);
+pub const ORACLE_ANNOUNCMENT_KIND: Kind = Kind::Custom(88);
+pub const ORACLE_ATTESTATION_KIND: Kind = Kind::Custom(89);
 
 pub struct NostrDlcHandler {
     pub keys: Keys,
@@ -34,7 +34,7 @@ impl NostrDlcHandler {
             let secp = Secp256k1::new();
             let contents = std::fs::read(&keys_file)?;
             let secret_key = SecretKey::from_slice(&contents)?;
-            Keys::new_with_ctx(&secp, secret_key)
+            Keys::new_with_ctx(&secp, secret_key.into())
         } else {
             let keys = Keys::generate();
             let secret_key = keys.secret_key()?;
@@ -51,35 +51,39 @@ impl NostrDlcHandler {
         })
     }
 
-    pub fn public_key(&self) -> XOnlyPublicKey {
+    pub fn public_key(&self) -> PublicKey {
         self.keys.public_key()
     }
 
-    pub fn create_dlc_message_filter(&self) -> Filter {
-        Filter::new().kind(DLC_MESSAGE_KIND)
+    pub fn create_dlc_message_filter(&self, since: Timestamp) -> Filter {
+        Filter::new().kind(DLC_MESSAGE_KIND).since(since)
+    }
+
+    pub fn create_oracle_message_filter(&self, since: Timestamp) -> Filter {
+        Filter::new().kinds([ORACLE_ANNOUNCMENT_KIND, ORACLE_ATTESTATION_KIND]).since(since)
     }
 
     pub fn create_dlc_msg_event(
         &self,
-        to: XOnlyPublicKey,
+        to: PublicKey,
         event_id: Option<EventId>,
         msg: Message,
     ) -> anyhow::Result<Event> {
         let mut bytes = msg.type_id().encode();
         bytes.extend(msg.encode());
 
-        let content = encrypt(&self.keys.secret_key()?, &to, base64::encode(&bytes))?;
+        let content = encrypt(&self.keys.secret_key()?.clone(), &to, base64::encode(&bytes))?;
 
-        let p_tags = Tag::PubKey(to, None);
+        let p_tags = Tag::PublicKey { public_key: self.public_key(), relay_url: None, alias: None, uppercase: false };
 
-        let e_tags = event_id.map(|e| Tag::Event(e, None, None));
+        let e_tags = event_id.map(|e| Tag::Event { event_id: e, relay_url: None, marker: None });
 
         let tags = [Some(p_tags), e_tags]
             .into_iter()
             .flatten()
             .collect::<Vec<_>>();
 
-        let event = EventBuilder::new(DLC_MESSAGE_KIND, content, &tags).to_event(&self.keys)?;
+        let event = EventBuilder::new(DLC_MESSAGE_KIND, content, tags).to_event(&self.keys)?;
 
         Ok(event)
     }
@@ -114,60 +118,38 @@ impl NostrDlcHandler {
             return Ok(None);
         };
 
-        let msg = self.parse_dlc_msg_event(&event)?;
+        // let msg = self.parse_dlc_msg_event(&event)?;
+        //
+        // let pubkey = PublicKey::from_slice(
+        //     &event
+        //         .pubkey
+        //         .public_key(nostr::secp256k1::Parity::Even)
+        //         .serialize(),
+        // )?;
 
-        let pubkey = PublicKey::from_slice(
-            &event
-                .pubkey
-                .public_key(nostr::secp256k1::Parity::Even)
-                .serialize(),
-        )?;
-
-        let mut dlc = self.manager.lock().unwrap();
-
-        let msg_opts = dlc.on_dlc_message(&msg, pubkey)?;
-
-        if let Some(msg) = msg_opts {
-            let event = self.create_dlc_msg_event(event.pubkey, Some(event.id), msg)?;
-            return Ok(Some(event));
-        }
+        // let mut dlc = self.manager.lock().unwrap();
+        //
+        // let msg_opts = dlc.on_dlc_message(&msg, pubkey)?;
+        //
+        // if let Some(msg) = msg_opts {
+        //     let event = self.create_dlc_msg_event(event.pubkey, Some(event.id), msg)?;
+        //     return Ok(Some(event));
+        // }
 
         Ok(None)
-    }
-
-    pub fn handle_relay_event(&self, event: RelayPoolNotification) -> anyhow::Result<Option<Event>> {
-        match event {
-            RelayPoolNotification::Event(url, event) => {
-                println!("Received event: {} from {}", event.id, url.to_string());
-
-                if event.kind != DLC_MESSAGE_KIND {
-                    println!("Not a DLC message event.");
-                    return Ok(None)
-                }
-
-                Ok(self.handle_dlc_msg_event(event)?)
-                
-            },
-            RelayPoolNotification::RelayStatus { url, status } => {
-                println!("Status change on relay {} :: {}", url, status.to_string());
-                Ok(None)
-            },
-            RelayPoolNotification::Stop => {
-                println!("Relay is stopping!");
-                Ok(None)
-            }
-            _ => Ok(None),
-        }
     }
 
     pub async fn listen(&self) -> anyhow::Result<Client> {
         let client = Client::new(&self.keys);
 
-        client.add_relay(RELAY_URL, None).await?;
+        let since = Timestamp::now();
 
-        let subscription = self.create_dlc_message_filter();
+        client.add_relay(RELAY_URL).await?;
 
-        client.subscribe(vec![subscription]).await;
+        let msg_subscription = self.create_dlc_message_filter(since);
+        let oracle_subscription = self.create_oracle_message_filter(since);
+
+        client.subscribe(vec![msg_subscription, oracle_subscription]).await;
 
         client.connect().await;
 

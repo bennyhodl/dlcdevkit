@@ -3,8 +3,9 @@
 mod models;
 use std::sync::Arc;
 
-use ernest_wallet::{handle_relay_event, Ernest, Network};
+use ernest_wallet::{Ernest, Network};
 use models::Pubkeys;
+use nostr_sdk::RelayPoolNotification;
 
 #[tauri::command]
 fn new_address(ernest: tauri::State<Arc<Ernest>>) -> String {
@@ -36,13 +37,18 @@ async fn main() {
     );
 
     let nostr_clone = ernest.nostr.clone();
-
     tokio::spawn(async move {
         let client = nostr_clone.listen().await.unwrap();
 
         let _handler = client
             .handle_notifications(|event| async move {
-                handle_relay_event(event);
+                match event {
+                    RelayPoolNotification::Event { relay_url: _, event } => {
+                        println!("Got event: {:?}", event);
+                        
+                    }
+                    _ => println!("other message")
+                }
                 Ok(false)
             })
             .await;

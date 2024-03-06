@@ -105,11 +105,11 @@ impl Ernest {
 
         let wire_msg =
             self.nostr
-                .create_dlc_msg_event(xonly_pubkey, None, Message::Offer(offer_msg))?;
+                .create_dlc_msg_event(xonly_pubkey.into(), None, Message::Offer(offer_msg))?;
 
         let client = Client::new(&self.nostr.keys);
 
-        client.add_relay(&self.nostr.relay_url, None).await?;
+        client.add_relay(&self.nostr.relay_url).await?;
 
         client.connect().await;
 
@@ -132,11 +132,11 @@ impl Ernest {
 
         let accept_dlc_event =
             self.nostr
-                .create_dlc_msg_event(xonly_pubkey, None, Message::Accept(accept_dlc))?;
+                .create_dlc_msg_event(xonly_pubkey.into(), None, Message::Accept(accept_dlc))?;
 
         let client = Client::new(&self.nostr.keys);
 
-        client.add_relay(RELAY_URL, None).await?;
+        client.add_relay(RELAY_URL).await?;
 
         client.send_event(accept_dlc_event).await?;
 
