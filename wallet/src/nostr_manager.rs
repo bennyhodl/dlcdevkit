@@ -1,4 +1,4 @@
-use crate::{io, ErnestDlcManager, RELAY_URL};
+use crate::{io, RELAY_URL};
 use dlc_messages::{message_handler::read_dlc_message, Message, WireMessage};
 use lightning::{
     ln::wire::Type,
@@ -20,14 +20,13 @@ pub const ORACLE_ATTESTATION_KIND: Kind = Kind::Custom(89);
 pub struct NostrDlcHandler {
     pub keys: Keys,
     pub relay_url: Url,
-    manager: Arc<Mutex<ErnestDlcManager>>,
+    pub client: Client
 }
 
 impl NostrDlcHandler {
     pub fn new(
         wallet_name: &str,
         relay_url: String,
-        manager: Arc<Mutex<ErnestDlcManager>>,
     ) -> anyhow::Result<NostrDlcHandler> {
         let keys_file = io::get_ernest_dir().join(wallet_name).join("nostr_keys");
         let keys = if Path::new(&keys_file).exists() {
@@ -43,11 +42,12 @@ impl NostrDlcHandler {
         };
 
         let relay_url = relay_url.parse()?;
+        let client = Client::new(&keys);
 
         Ok(NostrDlcHandler {
             keys,
             relay_url,
-            manager,
+            client
         })
     }
 
@@ -56,7 +56,7 @@ impl NostrDlcHandler {
     }
 
     pub fn create_dlc_message_filter(&self, since: Timestamp) -> Filter {
-        Filter::new().kind(DLC_MESSAGE_KIND).since(since)
+        Filter::new().kind(DLC_MESSAGE_KIND).since(since).pubkey(self.public_key())
     }
 
     pub fn create_oracle_message_filter(&self, since: Timestamp) -> Filter {
@@ -113,10 +113,13 @@ impl NostrDlcHandler {
         }
     }
 
-    pub fn handle_dlc_msg_event(&self, event: Event) -> anyhow::Result<Option<Event>> {
-        if event.kind != DLC_MESSAGE_KIND {
-            return Ok(None);
-        };
+    pub fn handle_dlc_msg_event(&self, event: Event) {
+        match event.kind {
+            Kind::Custom(89) => println!("Oracle attestation kind."),
+            Kind::Custom(88) => println!("Oracle announcement kind."),
+            Kind::Custom(8_888) => println!("DLC message."),
+            _ => println!("unknown")
+        }
 
         // let msg = self.parse_dlc_msg_event(&event)?;
         //
@@ -136,7 +139,7 @@ impl NostrDlcHandler {
         //     return Ok(Some(event));
         // }
 
-        Ok(None)
+        // Ok(None)
     }
 
     pub async fn listen(&self) -> anyhow::Result<Client> {
@@ -149,7 +152,7 @@ impl NostrDlcHandler {
         let msg_subscription = self.create_dlc_message_filter(since);
         let oracle_subscription = self.create_oracle_message_filter(since);
 
-        client.subscribe(vec![msg_subscription, oracle_subscription]).await;
+        client.subscribe(vec![msg_subscription, oracle_subscription], None).await;
 
         client.connect().await;
 

@@ -1,4 +1,7 @@
 use bitcoin::{secp256k1::Secp256k1, KeyPair, XOnlyPublicKey};
+use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
+use nostr_sdk::{Client, NostrDatabase};
+use tokio::runtime::Runtime;
 use std::{marker::PhantomData, str::FromStr};
 
 const ORACLE_URL: &str = "http://localhost:8080";
@@ -12,13 +15,14 @@ fn get<T>(path: &str) -> anyhow::Result<T> where T: serde::de::DeserializeOwned 
 
 #[derive(Debug)]
 pub struct ErnestOracle {
-    pubkey: XOnlyPublicKey
+    pubkey: XOnlyPublicKey,
 }
 
 impl ErnestOracle {
-    pub fn new() -> anyhow::Result<ErnestOracle> {
+    pub async fn new() -> anyhow::Result<ErnestOracle> {
         let request: String = get("/pubkey")?;
-        let pubkey = XOnlyPublicKey::from_str(&request)?; 
+        let pubkey = XOnlyPublicKey::from_str(&request)?;
+
         Ok(ErnestOracle { pubkey })
     }
 
@@ -38,13 +42,14 @@ impl dlc_manager::Oracle for ErnestOracle {
         &self,
         _event_id: &str,
     ) -> Result<dlc_messages::oracle_msgs::OracleAttestation, dlc_manager::error::Error> {
-        unimplemented!("attestation")
+        // get::<String>("attestation").map_err(|_| dlc_manager::error::Error::OracleError("Could not get attestation".into()))
+        unimplemented!()
     }
 
     fn get_announcement(
         &self,
         _event_id: &str,
     ) -> Result<dlc_messages::oracle_msgs::OracleAnnouncement, dlc_manager::error::Error> {
-        unimplemented!("announcement")
+        get::<OracleAnnouncement>("announcement").map_err(|_| dlc_manager::error::Error::OracleError("Could not get announcement".into()))
     }
 }

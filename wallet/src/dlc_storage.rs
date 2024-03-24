@@ -11,7 +11,8 @@ use dlc_manager::contract::signed_contract::SignedContract;
 use dlc_manager::contract::{
     ClosedContract, Contract, FailedAcceptContract, FailedSignContract, PreClosedContract,
 };
-use dlc_manager::{error::Error, ContractId, Storage};
+use dlc_manager::{error::Error, Storage};
+use nostr::EventId;
 use sled::transaction::{ConflictableTransactionResult, UnabortableTransactionError};
 use sled::{Db, Transactional, Tree};
 use std::convert::TryInto;
@@ -23,6 +24,7 @@ const CHAIN_MONITOR_TREE: u8 = 3;
 const CHAIN_MONITOR_KEY: u8 = 4;
 
 /// Implementation of Storage interface using the sled DB backend.
+#[derive(Debug)]
 pub struct SledStorageProvider {
     pub db: Db,
 }
@@ -172,8 +174,8 @@ impl SledStorageProvider {
     }
 }
 
-impl Storage for SledStorageProvider {
-    fn get_contract(&self, contract_id: &ContractId) -> Result<Option<Contract>, Error> {
+impl SledStorageProvider {
+    pub fn get_contract(&self, contract_id: &[u8;32]) -> Result<Option<Contract>, Error> {
         match self
             .contract_tree()?
             .get(contract_id)
@@ -184,7 +186,7 @@ impl Storage for SledStorageProvider {
         }
     }
 
-    fn get_contracts(&self) -> Result<Vec<Contract>, Error> {
+    pub fn get_contracts(&self) -> Result<Vec<Contract>, Error> {
         self.contract_tree()?
             .iter()
             .values()
@@ -192,7 +194,7 @@ impl Storage for SledStorageProvider {
             .collect::<Result<Vec<Contract>, Error>>()
     }
 
-    fn create_contract(&self, contract: &OfferedContract) -> Result<(), Error> {
+    pub fn create_contract(&self, contract: &OfferedContract) -> Result<(), Error> {
         let serialized = serialize_contract(&Contract::Offered(contract.clone()))?;
         self.contract_tree()?
             .insert(contract.id, serialized)
@@ -200,14 +202,14 @@ impl Storage for SledStorageProvider {
         Ok(())
     }
 
-    fn delete_contract(&self, contract_id: &ContractId) -> Result<(), Error> {
+    pub fn delete_contract(&self, contract_id: &[u8;32]) -> Result<(), Error> {
         self.contract_tree()?
             .remove(contract_id)
             .map_err(to_storage_error)?;
         Ok(())
     }
 
-    fn update_contract(&self, contract: &Contract) -> Result<(), Error> {
+    pub fn update_contract(&self, contract: &Contract) -> Result<(), Error> {
         let serialized = serialize_contract(contract)?;
         self.contract_tree()?
             .transaction::<_, _, UnabortableTransactionError>(|db| {
@@ -225,7 +227,7 @@ impl Storage for SledStorageProvider {
         Ok(())
     }
 
-    fn get_signed_contracts(&self) -> Result<Vec<SignedContract>, Error> {
+    pub fn get_signed_contracts(&self) -> Result<Vec<SignedContract>, Error> {
         self.get_data_with_prefix(
             &self.contract_tree()?,
             &[ContractPrefix::Signed.into()],
@@ -233,7 +235,7 @@ impl Storage for SledStorageProvider {
         )
     }
 
-    fn get_confirmed_contracts(&self) -> Result<Vec<SignedContract>, Error> {
+    pub fn get_confirmed_contracts(&self) -> Result<Vec<SignedContract>, Error> {
         self.get_data_with_prefix(
             &self.contract_tree()?,
             &[ContractPrefix::Confirmed.into()],
@@ -241,7 +243,7 @@ impl Storage for SledStorageProvider {
         )
     }
 
-    fn get_contract_offers(&self) -> Result<Vec<OfferedContract>, Error> {
+    pub fn get_contract_offers(&self) -> Result<Vec<OfferedContract>, Error> {
         self.get_data_with_prefix(
             &self.contract_tree()?,
             &[ContractPrefix::Offered.into()],
@@ -249,7 +251,7 @@ impl Storage for SledStorageProvider {
         )
     }
 
-    fn get_preclosed_contracts(&self) -> Result<Vec<PreClosedContract>, Error> {
+    pub fn get_preclosed_contracts(&self) -> Result<Vec<PreClosedContract>, Error> {
         self.get_data_with_prefix(
             &self.contract_tree()?,
             &[ContractPrefix::PreClosed.into()],
