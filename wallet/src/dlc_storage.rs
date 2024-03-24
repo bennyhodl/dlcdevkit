@@ -1,4 +1,3 @@
-use crate::io::{self, get_ernest_dir};
 use dlc_manager::chain_monitor::ChainMonitor;
 use dlc_manager::channel::accepted_channel::AcceptedChannel;
 use dlc_manager::channel::offered_channel::OfferedChannel;
@@ -12,7 +11,6 @@ use dlc_manager::contract::{
     ClosedContract, Contract, FailedAcceptContract, FailedSignContract, PreClosedContract,
 };
 use dlc_manager::{error::Error, Storage};
-use nostr::EventId;
 use sled::transaction::{ConflictableTransactionResult, UnabortableTransactionError};
 use sled::{Db, Transactional, Tree};
 use std::convert::TryInto;
@@ -128,7 +126,7 @@ where
 impl SledStorageProvider {
     /// Creates a new instance of a SledStorageProvider.
     pub fn new(name: &str) -> Result<Self, sled::Error> {
-        let path = io::get_ernest_dir().join(name).join("dlc_db");
+        let path = crate::io::get_ernest_dir().join(name).join("dlc_db");
         Ok(SledStorageProvider {
             db: sled::open(path)?,
         })
@@ -174,8 +172,8 @@ impl SledStorageProvider {
     }
 }
 
-impl SledStorageProvider {
-    pub fn get_contract(&self, contract_id: &[u8;32]) -> Result<Option<Contract>, Error> {
+impl Storage for SledStorageProvider {
+    fn get_contract(&self, contract_id: &[u8; 32]) -> Result<Option<Contract>, Error> {
         match self
             .contract_tree()?
             .get(contract_id)
@@ -186,7 +184,7 @@ impl SledStorageProvider {
         }
     }
 
-    pub fn get_contracts(&self) -> Result<Vec<Contract>, Error> {
+    fn get_contracts(&self) -> Result<Vec<Contract>, Error> {
         self.contract_tree()?
             .iter()
             .values()
@@ -194,7 +192,7 @@ impl SledStorageProvider {
             .collect::<Result<Vec<Contract>, Error>>()
     }
 
-    pub fn create_contract(&self, contract: &OfferedContract) -> Result<(), Error> {
+    fn create_contract(&self, contract: &OfferedContract) -> Result<(), Error> {
         let serialized = serialize_contract(&Contract::Offered(contract.clone()))?;
         self.contract_tree()?
             .insert(contract.id, serialized)
@@ -202,14 +200,14 @@ impl SledStorageProvider {
         Ok(())
     }
 
-    pub fn delete_contract(&self, contract_id: &[u8;32]) -> Result<(), Error> {
+    fn delete_contract(&self, contract_id: &[u8; 32]) -> Result<(), Error> {
         self.contract_tree()?
             .remove(contract_id)
             .map_err(to_storage_error)?;
         Ok(())
     }
 
-    pub fn update_contract(&self, contract: &Contract) -> Result<(), Error> {
+    fn update_contract(&self, contract: &Contract) -> Result<(), Error> {
         let serialized = serialize_contract(contract)?;
         self.contract_tree()?
             .transaction::<_, _, UnabortableTransactionError>(|db| {
@@ -227,7 +225,7 @@ impl SledStorageProvider {
         Ok(())
     }
 
-    pub fn get_signed_contracts(&self) -> Result<Vec<SignedContract>, Error> {
+    fn get_signed_contracts(&self) -> Result<Vec<SignedContract>, Error> {
         self.get_data_with_prefix(
             &self.contract_tree()?,
             &[ContractPrefix::Signed.into()],
@@ -235,7 +233,7 @@ impl SledStorageProvider {
         )
     }
 
-    pub fn get_confirmed_contracts(&self) -> Result<Vec<SignedContract>, Error> {
+    fn get_confirmed_contracts(&self) -> Result<Vec<SignedContract>, Error> {
         self.get_data_with_prefix(
             &self.contract_tree()?,
             &[ContractPrefix::Confirmed.into()],
@@ -243,7 +241,7 @@ impl SledStorageProvider {
         )
     }
 
-    pub fn get_contract_offers(&self) -> Result<Vec<OfferedContract>, Error> {
+    fn get_contract_offers(&self) -> Result<Vec<OfferedContract>, Error> {
         self.get_data_with_prefix(
             &self.contract_tree()?,
             &[ContractPrefix::Offered.into()],
@@ -251,7 +249,7 @@ impl SledStorageProvider {
         )
     }
 
-    pub fn get_preclosed_contracts(&self) -> Result<Vec<PreClosedContract>, Error> {
+    fn get_preclosed_contracts(&self) -> Result<Vec<PreClosedContract>, Error> {
         self.get_data_with_prefix(
             &self.contract_tree()?,
             &[ContractPrefix::PreClosed.into()],
@@ -490,7 +488,8 @@ mod tests {
             fn $name() {
                 let dir = get_ernest_dir().join(std::stringify!($name)).join("dlc_db");
                 {
-                    let storage = SledStorageProvider::new(std::stringify!($name)).expect("Error opening sled DB");
+                    let storage = SledStorageProvider::new(std::stringify!($name))
+                        .expect("Error opening sled DB");
                     $body(storage);
                 }
                 std::fs::remove_dir_all(dir.parent().unwrap()).unwrap();

@@ -5,29 +5,25 @@ use lightning::{
     util::ser::{Readable, Writeable},
 };
 use nostr::{
-    PublicKey,
-    nips::nip04::{decrypt, encrypt}, secp256k1::{Parity, PublicKey as NostrPublicKey, Secp256k1, SecretKey, XOnlyPublicKey}, Event, EventBuilder, EventId, Filter, Keys, Kind, Tag, Timestamp, Url
+    nips::nip04::{decrypt, encrypt},
+    secp256k1::Secp256k1,
+    Event, EventBuilder, EventId, Filter, Keys, Kind, PublicKey, SecretKey, Tag, Timestamp, Url,
 };
-use nostr_sdk::{Client, RelayPoolNotification};
-use serde::Deserialize;
-use std::sync::{Arc, Mutex};
-use std::{path::Path, time::Duration};
+use nostr_sdk::Client;
+use std::path::Path;
 
 pub const DLC_MESSAGE_KIND: Kind = Kind::Custom(8_888);
 pub const ORACLE_ANNOUNCMENT_KIND: Kind = Kind::Custom(88);
 pub const ORACLE_ATTESTATION_KIND: Kind = Kind::Custom(89);
 
-pub struct NostrDlcHandler {
+pub struct NostrDlcRelayHandler {
     pub keys: Keys,
     pub relay_url: Url,
-    pub client: Client
+    pub client: Client,
 }
 
-impl NostrDlcHandler {
-    pub fn new(
-        wallet_name: &str,
-        relay_url: String,
-    ) -> anyhow::Result<NostrDlcHandler> {
+impl NostrDlcRelayHandler {
+    pub fn new(wallet_name: &str, relay_url: String) -> anyhow::Result<NostrDlcRelayHandler> {
         let keys_file = io::get_ernest_dir().join(wallet_name).join("nostr_keys");
         let keys = if Path::new(&keys_file).exists() {
             let secp = Secp256k1::new();
@@ -44,10 +40,10 @@ impl NostrDlcHandler {
         let relay_url = relay_url.parse()?;
         let client = Client::new(&keys);
 
-        Ok(NostrDlcHandler {
+        Ok(NostrDlcRelayHandler {
             keys,
             relay_url,
-            client
+            client,
         })
     }
 
@@ -56,11 +52,16 @@ impl NostrDlcHandler {
     }
 
     pub fn create_dlc_message_filter(&self, since: Timestamp) -> Filter {
-        Filter::new().kind(DLC_MESSAGE_KIND).since(since).pubkey(self.public_key())
+        Filter::new()
+            .kind(DLC_MESSAGE_KIND)
+            .since(since)
+            .pubkey(self.public_key())
     }
 
     pub fn create_oracle_message_filter(&self, since: Timestamp) -> Filter {
-        Filter::new().kinds([ORACLE_ANNOUNCMENT_KIND, ORACLE_ATTESTATION_KIND]).since(since)
+        Filter::new()
+            .kinds([ORACLE_ANNOUNCMENT_KIND, ORACLE_ATTESTATION_KIND])
+            .since(since)
     }
 
     pub fn create_dlc_msg_event(
@@ -72,11 +73,24 @@ impl NostrDlcHandler {
         let mut bytes = msg.type_id().encode();
         bytes.extend(msg.encode());
 
-        let content = encrypt(&self.keys.secret_key()?.clone(), &to, base64::encode(&bytes))?;
+        let content = encrypt(
+            &self.keys.secret_key()?.clone(),
+            &to,
+            base64::encode(&bytes),
+        )?;
 
-        let p_tags = Tag::PublicKey { public_key: self.public_key(), relay_url: None, alias: None, uppercase: false };
+        let p_tags = Tag::PublicKey {
+            public_key: self.public_key(),
+            relay_url: None,
+            alias: None,
+            uppercase: false,
+        };
 
-        let e_tags = event_id.map(|e| Tag::Event { event_id: e, relay_url: None, marker: None });
+        let e_tags = event_id.map(|e| Tag::Event {
+            event_id: e,
+            relay_url: None,
+            marker: None,
+        });
 
         let tags = [Some(p_tags), e_tags]
             .into_iter()
@@ -118,7 +132,7 @@ impl NostrDlcHandler {
             Kind::Custom(89) => println!("Oracle attestation kind."),
             Kind::Custom(88) => println!("Oracle announcement kind."),
             Kind::Custom(8_888) => println!("DLC message."),
-            _ => println!("unknown")
+            _ => println!("unknown"),
         }
 
         // let msg = self.parse_dlc_msg_event(&event)?;
@@ -152,7 +166,9 @@ impl NostrDlcHandler {
         let msg_subscription = self.create_dlc_message_filter(since);
         let oracle_subscription = self.create_oracle_message_filter(since);
 
-        client.subscribe(vec![msg_subscription, oracle_subscription], None).await;
+        client
+            .subscribe(vec![msg_subscription, oracle_subscription], None)
+            .await;
 
         client.connect().await;
 

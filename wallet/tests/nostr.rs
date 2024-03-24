@@ -64,7 +64,10 @@ async fn send_dlc_offer() {
 
     let client = test.ernest.nostr.listen().await.unwrap();
 
-    client.send_event(event).await.expect("Nostr event did not send.");
+    client
+        .send_event(event)
+        .await
+        .expect("Nostr event did not send.");
 }
 
 #[tokio::test]
@@ -95,22 +98,24 @@ async fn send_and_receive_dlc_offer() {
 
     let client = receiver_nostr.listen().await.unwrap();
 
-    client.handle_notifications(|e| async move {
-        match e {
-            nostr_sdk::RelayPoolNotification::Event(_, e) => {
-                println!("THERE WAS AN EVENT: {}", e.id);
-            },
-            nostr_sdk::RelayPoolNotification::Message(_, e) => {
-                println!("MESSAGE?: {:?}", e);
+    client
+        .handle_notifications(|e| async move {
+            match e {
+                nostr_sdk::RelayPoolNotification::Event(_, e) => {
+                    println!("THERE WAS AN EVENT: {}", e.id);
+                }
+                nostr_sdk::RelayPoolNotification::Message(_, e) => {
+                    println!("MESSAGE?: {:?}", e);
+                }
+                _ => println!("Other event."),
             }
-            _ => println!("Other event.")
-        }
-        Ok(false)
-    }).await.unwrap();
+            Ok(false)
+        })
+        .await
+        .unwrap();
 
-
-    sender.send_event(event).await.expect("Nostr event did not send.");
+    sender
+        .send_event(event)
+        .await
+        .expect("Nostr event did not send.");
 }
-
-
-

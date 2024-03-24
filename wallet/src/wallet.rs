@@ -4,7 +4,7 @@ use bdk::{
     bitcoin::{
         secp256k1::{PublicKey, Secp256k1},
         util::bip32::{ExtendedPrivKey, ExtendedPubKey},
-        Address, Network, Txid, XOnlyPublicKey, KeyPair
+        Address, KeyPair, Network, Txid, XOnlyPublicKey,
     },
     blockchain::EsploraBlockchain,
     template::Bip86,
@@ -37,7 +37,7 @@ impl ErnestWallet {
         let db_path = io::get_ernest_dir().join(&name).join("wallet_db");
 
         let sled = sled::open(db_path)?.open_tree(SLED_TREE)?;
-    
+
         let inner = Arc::new(Mutex::new(Wallet::new(
             Bip86(xprv, KeychainKind::External),
             Some(Bip86(xprv, KeychainKind::Internal)),
@@ -92,7 +92,9 @@ impl ErnestWallet {
     }
 
     pub fn get_pubkey(&self) -> anyhow::Result<XOnlyPublicKey> {
-        Ok(XOnlyPublicKey::from_slice(&self.xprv.private_key.secret_bytes())?)
+        Ok(XOnlyPublicKey::from_slice(
+            &self.xprv.private_key.secret_bytes(),
+        )?)
     }
 
     pub fn get_balance(&self) -> anyhow::Result<Balance> {

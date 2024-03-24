@@ -80,7 +80,8 @@ async fn wallet_send_bitcoin() {
 #[tokio::test]
 async fn ernest_wallet_sending_to_ernest_wallet() {
     let test =
-        TwoWalletTest::setup_bitcoind_and_electrsd_and_ernest("two_ernest_one", "two_ernest_two").await;
+        TwoWalletTest::setup_bitcoind_and_electrsd_and_ernest("two_ernest_one", "two_ernest_two")
+            .await;
 
     generate_blocks_and_wait(&test.bitcoind, &test.electrsd, 150);
 

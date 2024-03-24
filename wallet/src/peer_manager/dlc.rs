@@ -1,6 +1,6 @@
 use crate::{
     error::{bdk_err_to_manager_err, esplora_err_to_manager_err},
-    ErnestWallet,
+    wallet::ErnestWallet,
 };
 use bdk::{
     bitcoin::{
@@ -12,7 +12,6 @@ use bdk::{
 };
 use dlc_manager::error::Error as ManagerError;
 use lightning::chain::chaininterface::{ConfirmationTarget, FeeEstimator};
-use std::sync::atomic::Ordering;
 
 impl FeeEstimator for ErnestWallet {
     fn get_est_sat_per_1000_weight(&self, _confirmation_target: ConfirmationTarget) -> u32 {
@@ -96,15 +95,17 @@ impl dlc_manager::Wallet for ErnestWallet {
 impl dlc_manager::Signer for ErnestWallet {
     // Waiting for rust-dlc PR
     fn sign_psbt_input(
-            &self,
-            psbt: &mut bitcoin::psbt::PartiallySignedTransaction,
-            input_index: usize,
-        ) -> Result<(), ManagerError> {
+        &self,
+        psbt: &mut bitcoin::psbt::PartiallySignedTransaction,
+        input_index: usize,
+    ) -> Result<(), ManagerError> {
         let wallet = self.inner.lock().unwrap();
 
         let mut input_signed = psbt.clone();
 
-        wallet.sign(&mut input_signed, bdk::SignOptions::default()).map_err(bdk_err_to_manager_err)?;
+        wallet
+            .sign(&mut input_signed, bdk::SignOptions::default())
+            .map_err(bdk_err_to_manager_err)?;
 
         psbt.inputs[input_index] = input_signed.inputs[input_index].clone();
 

@@ -1,15 +1,16 @@
-use bitcoin::{secp256k1::Secp256k1, KeyPair, XOnlyPublicKey};
-use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
-use nostr_sdk::{Client, NostrDatabase};
-use tokio::runtime::Runtime;
-use std::{marker::PhantomData, str::FromStr};
+use bitcoin::XOnlyPublicKey;
+use dlc_messages::oracle_msgs::OracleAnnouncement;
+use std::str::FromStr;
 
 const ORACLE_URL: &str = "http://localhost:8080";
 
-fn get<T>(path: &str) -> anyhow::Result<T> where T: serde::de::DeserializeOwned {
+fn get<T>(path: &str) -> anyhow::Result<T>
+where
+    T: serde::de::DeserializeOwned,
+{
     let url = format!("{}{}", ORACLE_URL, path);
     let request = reqwest::blocking::get(url)?.json::<T>()?;
-    
+
     Ok(request)
 }
 
@@ -19,7 +20,7 @@ pub struct ErnestOracle {
 }
 
 impl ErnestOracle {
-    pub async fn new() -> anyhow::Result<ErnestOracle> {
+    pub fn new() -> anyhow::Result<ErnestOracle> {
         let request: String = get("/pubkey")?;
         let pubkey = XOnlyPublicKey::from_str(&request)?;
 
@@ -30,7 +31,6 @@ impl ErnestOracle {
         let request: String = get("/pubkey")?;
         Ok(XOnlyPublicKey::from_str(&request)?)
     }
-
 }
 
 impl dlc_manager::Oracle for ErnestOracle {
@@ -50,6 +50,8 @@ impl dlc_manager::Oracle for ErnestOracle {
         &self,
         _event_id: &str,
     ) -> Result<dlc_messages::oracle_msgs::OracleAnnouncement, dlc_manager::error::Error> {
-        get::<OracleAnnouncement>("announcement").map_err(|_| dlc_manager::error::Error::OracleError("Could not get announcement".into()))
+        get::<OracleAnnouncement>("announcement").map_err(|_| {
+            dlc_manager::error::Error::OracleError("Could not get announcement".into())
+        })
     }
 }

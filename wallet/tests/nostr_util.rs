@@ -1,5 +1,5 @@
 use ernest_wallet::RELAY_URL;
-use nostr::{EventId, Keys, Event};
+use nostr::{Event, EventId, Keys};
 use nostr_sdk::Client;
 
 pub async fn send_event(event: &Event) -> EventId {

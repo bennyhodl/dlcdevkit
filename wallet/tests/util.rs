@@ -33,7 +33,9 @@ impl OneWalletTest {
 
         let esplora_url = format!("http://{}", electrsd.esplora_url.as_ref().unwrap());
 
-        let ernest = Ernest::new(name, &esplora_url, Network::Regtest).await.unwrap();
+        let ernest = Ernest::new(name, &esplora_url, Network::Regtest)
+            .await
+            .unwrap();
 
         OneWalletTest {
             bitcoind,
@@ -62,7 +64,10 @@ pub struct TwoWalletTest {
 }
 
 impl TwoWalletTest {
-    pub async fn setup_bitcoind_and_electrsd_and_ernest(name_one: &str, name_two: &str) -> TwoWalletTest {
+    pub async fn setup_bitcoind_and_electrsd_and_ernest(
+        name_one: &str,
+        name_two: &str,
+    ) -> TwoWalletTest {
         let bitcoind = electrsd::bitcoind::downloaded_exe_path().expect("No link?");
         let mut bitcoind_conf = electrsd::bitcoind::Conf::default();
         bitcoind_conf.network = "regtest";
@@ -78,9 +83,13 @@ impl TwoWalletTest {
 
         let esplora_url = format!("http://{}", electrsd.esplora_url.as_ref().unwrap());
 
-        let ernest_one = Ernest::new(name_one, &esplora_url, Network::Regtest).await.unwrap();
+        let ernest_one = Ernest::new(name_one, &esplora_url, Network::Regtest)
+            .await
+            .unwrap();
 
-        let ernest_two = Ernest::new(name_two, &esplora_url, Network::Regtest).await.unwrap();
+        let ernest_two = Ernest::new(name_two, &esplora_url, Network::Regtest)
+            .await
+            .unwrap();
 
         TwoWalletTest {
             bitcoind,

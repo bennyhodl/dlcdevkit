@@ -1,11 +1,14 @@
-use std::{sync::Arc, time::SystemTime};
 use dlc_messages::message_handler::MessageHandler as DlcMessageHandler;
 use lightning::{
-    ln::peer_handler::{ErroringMessageHandler, IgnoringMessageHandler, PeerManager as LdkPeerManager, MessageHandler},
+    ln::peer_handler::{
+        ErroringMessageHandler, IgnoringMessageHandler, MessageHandler,
+        PeerManager as LdkPeerManager,
+    },
     sign::KeysManager,
     util::logger::Logger,
 };
 use lightning_net_tokio::SocketDescriptor;
+use std::{sync::Arc, time::SystemTime};
 
 pub struct ErnestLogger;
 
@@ -26,12 +29,14 @@ pub type PeerManager = LdkPeerManager<
 >;
 
 pub struct ErnestPeerManager {
-    pub peer_manager: Arc<PeerManager>
+    pub peer_manager: Arc<PeerManager>,
 }
 
 impl ErnestPeerManager {
     pub fn new(seed: &[u8; 32]) -> ErnestPeerManager {
-        let time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap();
+        let time = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap();
         let key_signer = KeysManager::new(seed, time.as_secs(), time.as_nanos() as u32);
         let message_handler = MessageHandler {
             chan_handler: Arc::new(ErroringMessageHandler::new()),
@@ -40,8 +45,14 @@ impl ErnestPeerManager {
             custom_message_handler: Arc::new(DlcMessageHandler::new()),
         };
 
-        ErnestPeerManager{ 
-            peer_manager: Arc::new(PeerManager::new(message_handler, time.as_secs() as u32, seed, Arc::new(ErnestLogger {}), Arc::new(key_signer)))
+        ErnestPeerManager {
+            peer_manager: Arc::new(PeerManager::new(
+                message_handler,
+                time.as_secs() as u32,
+                seed,
+                Arc::new(ErnestLogger {}),
+                Arc::new(key_signer),
+            )),
         }
     }
 }
