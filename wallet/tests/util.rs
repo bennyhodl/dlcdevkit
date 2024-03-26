@@ -7,12 +7,12 @@ use electrsd::{
     electrum_client::ElectrumApi,
     ElectrsD,
 };
-use ernest_wallet::{io, Ernest, Network};
+use ernest_wallet::{get_ernest_dir, Ernest, ErnestNostr, Network};
 
 pub struct OneWalletTest {
     pub bitcoind: BitcoinD,
     pub electrsd: ElectrsD,
-    pub ernest: Ernest,
+    pub ernest: ErnestNostr,
     pub name: String,
 }
 
@@ -33,8 +33,7 @@ impl OneWalletTest {
 
         let esplora_url = format!("http://{}", electrsd.esplora_url.as_ref().unwrap());
 
-        let ernest = Ernest::new(name, &esplora_url, Network::Regtest)
-            .await
+        let ernest = ErnestNostr::new(name, &esplora_url, Network::Regtest)
             .unwrap();
 
         OneWalletTest {
@@ -48,7 +47,7 @@ impl OneWalletTest {
 
 impl Drop for OneWalletTest {
     fn drop(&mut self) {
-        let test_dir = io::get_ernest_dir().join(&self.name);
+        let test_dir = get_ernest_dir().join(&self.name);
         println!("Removing wallet at {:?}", test_dir);
         std::fs::remove_dir_all(test_dir).unwrap();
     }
@@ -57,9 +56,9 @@ impl Drop for OneWalletTest {
 pub struct TwoWalletTest {
     pub bitcoind: BitcoinD,
     pub electrsd: ElectrsD,
-    pub ernest_one: Ernest,
+    pub ernest_one: ErnestNostr,
     pub name_one: String,
-    pub ernest_two: Ernest,
+    pub ernest_two: ErnestNostr,
     pub name_two: String,
 }
 
@@ -83,12 +82,10 @@ impl TwoWalletTest {
 
         let esplora_url = format!("http://{}", electrsd.esplora_url.as_ref().unwrap());
 
-        let ernest_one = Ernest::new(name_one, &esplora_url, Network::Regtest)
-            .await
+        let ernest_one = ErnestNostr::new(name_one, &esplora_url, Network::Regtest)
             .unwrap();
 
-        let ernest_two = Ernest::new(name_two, &esplora_url, Network::Regtest)
-            .await
+        let ernest_two = ErnestNostr::new(name_two, &esplora_url, Network::Regtest)
             .unwrap();
 
         TwoWalletTest {
@@ -108,8 +105,8 @@ impl Drop for TwoWalletTest {
             "Removing wallets: {:?} & {:?}",
             &self.name_one, &self.name_two
         );
-        let wallet_one = io::get_ernest_dir().join(&self.name_one);
-        let wallet_two = io::get_ernest_dir().join(&self.name_two);
+        let wallet_one = get_ernest_dir().join(&self.name_one);
+        let wallet_two = get_ernest_dir().join(&self.name_two);
         std::fs::remove_dir_all(wallet_one).unwrap();
         std::fs::remove_dir_all(wallet_two).unwrap();
     }

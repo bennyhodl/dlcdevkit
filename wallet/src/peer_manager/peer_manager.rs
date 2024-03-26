@@ -1,10 +1,11 @@
+use bitcoin::secp256k1::PublicKey;
 use dlc_messages::message_handler::MessageHandler as DlcMessageHandler;
 use lightning::{
     ln::peer_handler::{
         ErroringMessageHandler, IgnoringMessageHandler, MessageHandler,
         PeerManager as LdkPeerManager,
     },
-    sign::KeysManager,
+    sign::{KeysManager, NodeSigner},
     util::logger::Logger,
 };
 use lightning_net_tokio::SocketDescriptor;
@@ -30,6 +31,7 @@ pub type PeerManager = LdkPeerManager<
 
 pub struct ErnestPeerManager {
     pub peer_manager: Arc<PeerManager>,
+    pub node_id: PublicKey
 }
 
 impl ErnestPeerManager {
@@ -38,6 +40,7 @@ impl ErnestPeerManager {
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap();
         let key_signer = KeysManager::new(seed, time.as_secs(), time.as_nanos() as u32);
+        let node_id = key_signer.get_node_id(lightning::sign::Recipient::Node).unwrap();
         let message_handler = MessageHandler {
             chan_handler: Arc::new(ErroringMessageHandler::new()),
             route_handler: Arc::new(IgnoringMessageHandler {}),
@@ -53,6 +56,7 @@ impl ErnestPeerManager {
                 Arc::new(ErnestLogger {}),
                 Arc::new(key_signer),
             )),
+            node_id
         }
     }
 }

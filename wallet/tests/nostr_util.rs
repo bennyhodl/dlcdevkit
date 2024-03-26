@@ -6,7 +6,7 @@ pub async fn send_event(event: &Event) -> EventId {
     let keys = Keys::generate();
     let client = Client::new(&keys);
 
-    client.add_relay(RELAY_URL, None).await.unwrap();
+    client.add_relay(RELAY_URL).await.unwrap();
 
     client.connect().await;
 

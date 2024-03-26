@@ -4557,6 +4557,7 @@ dependencies = [
  "ernest-wallet",
  "futures",
  "futures-util",
+ "lightning-net-tokio",
  "nostr 0.28.1",
  "nostr-relay-pool 0.29.0",
  "nostr-sdk 0.28.0",

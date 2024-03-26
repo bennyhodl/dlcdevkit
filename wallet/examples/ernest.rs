@@ -1,27 +1,26 @@
-use ernest_wallet::{Ernest, Network};
+use ernest_wallet::{ErnestNostr, Network};
 
 #[tokio::main]
 async fn main() {
-    let ernest = Ernest::new("example_ernest", "http://localhost:30000", Network::Regtest)
-        .await
+    ErnestNostr::new("example_ernest", "http://localhost:30000", Network::Regtest)
         .unwrap();
 
     // Use the BDK wallet.
-    ernest.wallet.new_external_address().unwrap().address;
+    // ernest.wallet.new_external_address().unwrap().address;
 
     // Listen for DLC events.
-    ernest.nostr.listen().await.unwrap();
+    // ernest.relays.listen().await.unwrap();
 
     // Use the DLC manager.
-    ernest
-        .manager
-        .lock()
-        .unwrap()
-        .periodic_check(false)
-        .unwrap();
+    // ernest
+    //     .manager
+    //     .lock()
+    //     .unwrap()
+    //     .periodic_check(false)
+    //     .unwrap();
 
     // Handle DLC messages.
-    ernest.message_handler.has_pending_messages();
+    // ernest.message_handler.has_pending_messages();
 
     // Ernest API for DLC functions
     // ernest.send_dlc_offer(ContractInput, OracleAnnouncement, XOnlyPublicKey);

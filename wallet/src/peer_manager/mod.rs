@@ -41,7 +41,9 @@ impl Ernest {
         let time = Arc::new(SystemTimeProvider {});
 
         // Ask carman!
-        let oracle = Arc::new(ErnestOracle::new()?);
+        let oracle = tokio::task::spawn_blocking(move || 
+            Arc::new(ErnestOracle::new().unwrap())
+        ).await.unwrap();
         let mut oracles = HashMap::new();
         oracles.insert(oracle.get_public_key(), oracle);
 

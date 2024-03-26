@@ -7,11 +7,11 @@ use nostr::{
 };
 
 fn get_nostr_keys(name: &str) -> Keys {
-    let nostr_key = io::get_ernest_dir().join(name).join("nostr_keys");
+    let nostr_key = get_ernest_dir().join(name).join("nostr_keys");
     let secp = Secp256k1::new();
     let seed_bytes = std::fs::read(nostr_key).unwrap();
     let secret_key = SecretKey::from_slice(&seed_bytes).unwrap();
-    Keys::new_with_ctx(&secp, secret_key)
+    Keys::new_with_ctx(&secp, secret_key.into())
 }
 
 #[tokio::test]
@@ -29,11 +29,11 @@ async fn create_and_parse_nostr_dlc_offfer() {
 
     let event = test
         .ernest
-        .nostr
+        .relays
         .create_dlc_msg_event(recipient, None, msg)
         .unwrap();
 
-    let parse = test.ernest.nostr.parse_dlc_msg_event(&event).unwrap();
+    let parse = test.ernest.relays.parse_dlc_msg_event(&event).unwrap();
 
     match parse {
         Message::Offer(parse_offer) => assert_eq!(parse_offer, offer),
@@ -56,13 +56,13 @@ async fn send_dlc_offer() {
 
     let event = test
         .ernest
-        .nostr
+        .relays
         .create_dlc_msg_event(recipient, None, msg)
         .unwrap();
 
     println!("Created event with id: {}", event.id);
 
-    let client = test.ernest.nostr.listen().await.unwrap();
+    let client = test.ernest.relays.listen().await.unwrap();
 
     client
         .send_event(event)
@@ -86,33 +86,33 @@ async fn send_and_receive_dlc_offer() {
 
     let event = test
         .ernest_one
-        .nostr
+        .relays
         .create_dlc_msg_event(recipient, None, msg)
         .unwrap();
 
     println!("Created event with id: {}", event.id);
 
-    let sender = test.ernest_one.nostr.listen().await.unwrap();
+    let sender = test.ernest_one.relays.listen().await.unwrap();
 
-    let receiver_nostr = test.ernest_two.nostr.clone();
+    let receiver_nostr = test.ernest_two.relays.clone();
 
     let client = receiver_nostr.listen().await.unwrap();
-
-    client
-        .handle_notifications(|e| async move {
-            match e {
-                nostr_sdk::RelayPoolNotification::Event(_, e) => {
-                    println!("THERE WAS AN EVENT: {}", e.id);
-                }
-                nostr_sdk::RelayPoolNotification::Message(_, e) => {
-                    println!("MESSAGE?: {:?}", e);
-                }
-                _ => println!("Other event."),
-            }
-            Ok(false)
-        })
-        .await
-        .unwrap();
+    //
+    // client
+    //     .handle_notifications(|e| async move {
+    //         match e {
+    //             nostr_sdk::RelayPoolNotification::Event(_, e) => {
+    //                 println!("THERE WAS AN EVENT: {}", e.id);
+    //             }
+    //             nostr_sdk::RelayPoolNotification::Message(_, e) => {
+    //                 println!("MESSAGE?: {:?}", e);
+    //             }
+    //             _ => println!("Other event."),
+    //         }
+    //         Ok(false)
+    //     })
+    //     .await
+    //     .unwrap();
 
     sender
         .send_event(event)

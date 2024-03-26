@@ -1,9 +1,9 @@
 import { invoke } from "@tauri-apps/api/tauri";
 
-export async function getPubkeys(): Promise<{nostr: string, bitcoin: string}> {
-  const keys = await invoke<{nostr: string, bitcoin: string}>("get_pubkeys");
+export async function getPubkeys(): Promise<{bitcoin: string, node_id: string}> {
+  const keys = await invoke<{bitcoin: string, node_id: string}>("get_pubkeys");
 
-  return { nostr: keys.nostr, bitcoin: keys.bitcoin }
+  return { bitcoin: keys.bitcoin, node_id: keys.node_id }
 }
 
 export async function newAddress(): Promise<string> {

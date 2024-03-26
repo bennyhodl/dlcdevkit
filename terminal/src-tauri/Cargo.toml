@@ -24,6 +24,7 @@ nostr-sdk = "0.28.0"
 futures = "0.3.30"
 futures-util = "0.3.30"
 nostr-relay-pool = "0.29.0"
+lightning-net-tokio = "0.0.118"
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem
