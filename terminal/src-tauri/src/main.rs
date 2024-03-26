@@ -31,10 +31,11 @@ fn get_pubkeys(ernest: State<Arc<Ernest>>, peer_manager: State<Arc<ErnestPeerMan
 
 #[tokio::main]
 async fn main() {
+    let name = "terminal".to_string();
     let ernest =
-        Arc::new(Ernest::new("terminal", "http://localhost:30000", Network::Regtest).await.unwrap());
+        Arc::new(Ernest::new(&name, "http://localhost:30000", Network::Regtest).await.unwrap());
 
-    let peer_manager = Arc::new(ErnestPeerManager::new(&[0u8; 32]));
+    let peer_manager = Arc::new(ErnestPeerManager::new(&name, Network::Regtest));
 
     let peer_manager_connection_handler = peer_manager.peer_manager.clone();
     tokio::spawn(async move {
