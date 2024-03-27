@@ -1,29 +1,29 @@
 pub mod dlc;
 pub mod peer_manager;
+pub use lightning_net_tokio;
+pub use peer_manager::ErnestPeerManager;
 
-use crate::{dlc_storage::SledStorageProvider, oracle::ErnestOracle, wallet::ErnestWallet};
-use bdk::bitcoin::secp256k1::PublicKey;
-pub use bdk::bitcoin::Network;
-use bitcoin::secp256k1::{Parity, XOnlyPublicKey};
-pub use dlc_manager::SystemTimeProvider;
-use dlc_manager::{contract::contract_input::ContractInput, manager::Manager, ContractId, Oracle};
+use bdk::bitcoin::Network;
+use crate::{oracle::ErnestOracle, wallet::ErnestWallet, ORACLE_HOST};
+use dlc_sled_storage_provider::SledStorageProvider;
+use bitcoin::secp256k1::{Parity, XOnlyPublicKey, PublicKey};
+use dlc_manager::{contract::contract_input::ContractInput, manager::Manager, ContractId, Oracle, CachedContractSignerProvider, SimpleSigner, SystemTimeProvider};
 use dlc_messages::{message_handler::MessageHandler, oracle_msgs::OracleAnnouncement};
+use p2pd_oracle_client::P2PDOracleClient;
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
 };
 
-pub const RELAY_URL: &str = "ws://localhost:8081";
-
-type ErnestOracles = HashMap<bdk::bitcoin::XOnlyPublicKey, ErnestOracle>;
-
 pub type ErnestDlcManager = dlc_manager::manager::Manager<
     Arc<ErnestWallet>,
+    Arc<CachedContractSignerProvider<Arc<ErnestWallet>, SimpleSigner>>,
     Arc<ErnestWallet>,
-    Arc<SledStorageProvider>,
-    Arc<ErnestOracle>,
+    Box<SledStorageProvider>,
+    Box<P2PDOracleClient>,
     Arc<SystemTimeProvider>,
     Arc<ErnestWallet>,
+    SimpleSigner,
 >;
 
 pub struct Ernest {
@@ -36,23 +36,27 @@ impl Ernest {
     pub async fn new(name: &str, esplora_url: &str, network: Network) -> anyhow::Result<Ernest> {
         let wallet = Arc::new(ErnestWallet::new(name, esplora_url, network)?);
 
-        let dlc_storage = Arc::new(SledStorageProvider::new(&name)?);
-
-        let time = Arc::new(SystemTimeProvider {});
+        let dlc_storage = Box::new(SledStorageProvider::new(&name)?);
 
         // Ask carman!
+        // let oracle = tokio::task::spawn_blocking(move || 
+        //     Arc::new(ErnestOracle::new().unwrap())
+        // ).await.unwrap();
+        // let mut oracles = HashMap::new();
+        // oracles.insert(oracle.get_public_key(), oracle);
         let oracle = tokio::task::spawn_blocking(move || 
-            Arc::new(ErnestOracle::new().unwrap())
+            P2PDOracleClient::new(ORACLE_HOST).unwrap()
         ).await.unwrap();
         let mut oracles = HashMap::new();
-        oracles.insert(oracle.get_public_key(), oracle);
+        oracles.insert(oracle.get_public_key(), Box::new(oracle));
 
         let manager = Arc::new(Mutex::new(Manager::new(
             wallet.clone(),
             wallet.clone(),
+            wallet.clone(),
             dlc_storage,
             oracles,
-            time,
+            Arc::new(SystemTimeProvider {}),
             wallet.clone(),
         )?));
 
@@ -69,15 +73,13 @@ impl Ernest {
         &self,
         contract_input: &ContractInput,
         oracle_announcement: &OracleAnnouncement,
-        xonly_pubkey: XOnlyPublicKey,
+        counter_party: PublicKey,
     ) -> anyhow::Result<()> {
-        let pubkey = PublicKey::from_slice(&xonly_pubkey.public_key(Parity::Even).serialize())?;
-
         let mut manager = self.manager.lock().unwrap();
 
         let _offer_msg = manager.send_offer_with_announcements(
             contract_input,
-            pubkey,
+            counter_party,
             vec![vec![oracle_announcement.clone()]],
         )?;
 

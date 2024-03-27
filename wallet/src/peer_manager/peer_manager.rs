@@ -1,4 +1,4 @@
-use bitcoin::secp256k1::PublicKey;
+use bitcoin::{secp256k1::PublicKey, Network};
 use dlc_messages::message_handler::MessageHandler as DlcMessageHandler;
 use lightning::{
     ln::peer_handler::{
@@ -6,7 +6,7 @@ use lightning::{
         PeerManager as LdkPeerManager,
     },
     sign::{KeysManager, NodeSigner},
-    util::logger::Logger,
+    util::logger::{Logger, Record},
 };
 use lightning_net_tokio::SocketDescriptor;
 use std::{sync::Arc, time::SystemTime};
@@ -14,7 +14,7 @@ use std::{sync::Arc, time::SystemTime};
 pub struct ErnestLogger;
 
 impl Logger for ErnestLogger {
-    fn log(&self, record: &lightning::util::logger::Record) {
+    fn log(&self, record: Record) {
         println!("LOG: {:?}", record);
     }
 }
@@ -35,11 +35,12 @@ pub struct ErnestPeerManager {
 }
 
 impl ErnestPeerManager {
-    pub fn new(seed: &[u8; 32]) -> ErnestPeerManager {
+    pub fn new(name: &str, network: Network) -> ErnestPeerManager {
+        let seed = crate::io::read_or_generate_xprv(&name, network).unwrap().private_key.secret_bytes();
         let time = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap();
-        let key_signer = KeysManager::new(seed, time.as_secs(), time.as_nanos() as u32);
+        let key_signer = KeysManager::new(&seed, time.as_secs(), time.as_nanos() as u32);
         let node_id = key_signer.get_node_id(lightning::sign::Recipient::Node).unwrap();
         let message_handler = MessageHandler {
             chan_handler: Arc::new(ErroringMessageHandler::new()),
@@ -52,7 +53,7 @@ impl ErnestPeerManager {
             peer_manager: Arc::new(PeerManager::new(
                 message_handler,
                 time.as_secs() as u32,
-                seed,
+                &seed,
                 Arc::new(ErnestLogger {}),
                 Arc::new(key_signer),
             )),

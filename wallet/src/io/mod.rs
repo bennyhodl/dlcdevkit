@@ -1,4 +1,4 @@
-use bdk::bitcoin::{util::bip32::ExtendedPrivKey, Network};
+use bdk::bitcoin::{bip32::ExtendedPrivKey, Network};
 use getrandom::getrandom;
 use std::path::{Path, PathBuf};
 

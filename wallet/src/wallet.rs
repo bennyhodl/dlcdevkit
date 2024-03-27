@@ -2,9 +2,10 @@ use crate::io;
 use anyhow::anyhow;
 use bdk::{
     bitcoin::{
-        secp256k1::{PublicKey, Secp256k1},
-        util::bip32::{ExtendedPrivKey, ExtendedPubKey},
-        Address, KeyPair, Network, Txid, XOnlyPublicKey,
+        secp256k1::{All, PublicKey, Secp256k1},
+        key::{KeyPair, XOnlyPublicKey},
+        bip32::{ExtendedPrivKey, ExtendedPubKey},
+        Address, Network, Txid,
     },
     blockchain::EsploraBlockchain,
     template::Bip86,
@@ -26,12 +27,14 @@ pub struct ErnestWallet {
     pub network: Network,
     pub xprv: ExtendedPrivKey,
     pub name: String,
+    secp: Secp256k1<All>
 }
 
 const MIN_FEERATE: u32 = 253;
 
 impl ErnestWallet {
     pub fn new(name: &str, esplora_url: &str, network: Network) -> anyhow::Result<ErnestWallet> {
+        let secp = Secp256k1::new();
         let xprv = io::read_or_generate_xprv(name, network)?;
 
         let db_path = io::get_ernest_dir().join(&name).join("wallet_db");
@@ -50,7 +53,7 @@ impl ErnestWallet {
         let mut fees: HashMap<ConfirmationTarget, AtomicU32> = HashMap::new();
         fees.insert(ConfirmationTarget::OnChainSweep, AtomicU32::new(5000));
         fees.insert(
-            ConfirmationTarget::MaxAllowedNonAnchorChannelRemoteFee,
+            ConfirmationTarget::MinAllowedAnchorChannelRemoteFee,
             AtomicU32::new(25 * 250),
         );
         fees.insert(
@@ -80,6 +83,7 @@ impl ErnestWallet {
             inner,
             network,
             xprv,
+            secp,
             name: name.to_string(),
         })
     }
@@ -91,10 +95,9 @@ impl ErnestWallet {
         Ok(sync)
     }
 
-    pub fn get_pubkey(&self) -> anyhow::Result<XOnlyPublicKey> {
-        Ok(XOnlyPublicKey::from_slice(
-            &self.xprv.private_key.secret_bytes(),
-        )?)
+    pub fn get_pubkey(&self) -> anyhow::Result<PublicKey> {
+        let pubkey = PublicKey::from_secret_key(&self.secp, &self.xprv.private_key);
+        Ok(pubkey)
     }
 
     pub fn get_balance(&self) -> anyhow::Result<Balance> {

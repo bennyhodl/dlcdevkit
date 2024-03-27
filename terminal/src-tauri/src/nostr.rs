@@ -1,5 +1,4 @@
-use ernest_wallet::{ErnestNostr, NostrDlcHandler, SledStorageProvider, Network};
-use nostr_relay_pool::RelayPoolNotification;
+use ernest_wallet::{nostr_manager::{ErnestNostr, RelayPoolNotification, NostrDlcHandler}, SledStorageProvider, Network};
 use std::sync::Arc;
 
 #[allow(dead_code)]
@@ -8,8 +7,6 @@ pub async fn run_ernest_nostr() {
         Arc::new(ErnestNostr::new("terminal", "http://localhost:30000", Network::Regtest).unwrap());
 
     let dlc_storage = SledStorageProvider::new("terminal").unwrap();
-
-    // let ernest_peer_manager =
 
     // TODO: I think a receiver might be a better arch so it doesn't block incoming messages
     // let (sender, receiver) = tokio::sync::mpsc::unbounded_channel::<Event>();

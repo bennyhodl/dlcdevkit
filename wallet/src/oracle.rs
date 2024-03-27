@@ -1,8 +1,8 @@
-use bitcoin::XOnlyPublicKey;
+use bitcoin::key::XOnlyPublicKey;
 use dlc_messages::oracle_msgs::OracleAnnouncement;
 use std::str::FromStr;
 
-const ORACLE_URL: &str = "http://localhost:8080";
+const ORACLE_URL: &str = "http://localhost:8082";
 
 fn get<T>(path: &str) -> anyhow::Result<T>
 where
@@ -34,7 +34,7 @@ impl ErnestOracle {
 }
 
 impl dlc_manager::Oracle for ErnestOracle {
-    fn get_public_key(&self) -> bitcoin::XOnlyPublicKey {
+    fn get_public_key(&self) -> bitcoin::key::XOnlyPublicKey {
         self.pubkey
     }
 

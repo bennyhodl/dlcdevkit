@@ -1,8 +1,13 @@
 pub mod dlc_handler;
 pub mod relay_handler;
 
-use crate::{wallet::ErnestWallet, RELAY_URL};
-use bitcoin::Network;
+pub use nostr;
+pub use nostr_sdk;
+pub use nostr_relay_pool::RelayPoolNotification;
+pub use dlc_handler::NostrDlcHandler;
+
+use crate::{wallet::ErnestWallet, RELAY_HOST};
+use bdk::bitcoin::Network;
 use relay_handler::NostrDlcRelayHandler;
 use std::sync::Arc;
 
@@ -15,7 +20,7 @@ impl ErnestNostr {
     pub fn new(name: &str, esplora_url: &str, network: Network) -> anyhow::Result<ErnestNostr> {
         let wallet = Arc::new(ErnestWallet::new(name, esplora_url, network)?);
 
-        let relays = Arc::new(NostrDlcRelayHandler::new(name, RELAY_URL.to_string())?);
+        let relays = Arc::new(NostrDlcRelayHandler::new(name, RELAY_HOST)?);
 
         Ok(ErnestNostr { wallet, relays })
     }

@@ -1,4 +1,4 @@
-use crate::{io, RELAY_URL};
+use crate::{io, RELAY_HOST};
 use dlc_messages::{message_handler::read_dlc_message, Message, WireMessage};
 use lightning::{
     ln::wire::Type,
@@ -23,7 +23,7 @@ pub struct NostrDlcRelayHandler {
 }
 
 impl NostrDlcRelayHandler {
-    pub fn new(wallet_name: &str, relay_url: String) -> anyhow::Result<NostrDlcRelayHandler> {
+    pub fn new(wallet_name: &str, relay_host: &str) -> anyhow::Result<NostrDlcRelayHandler> {
         let keys_file = io::get_ernest_dir().join(wallet_name).join("nostr_keys");
         let keys = if Path::new(&keys_file).exists() {
             let secp = Secp256k1::new();
@@ -37,7 +37,7 @@ impl NostrDlcRelayHandler {
             keys
         };
 
-        let relay_url = relay_url.parse()?;
+        let relay_url = relay_host.parse()?;
         let client = Client::new(&keys);
 
         Ok(NostrDlcRelayHandler {
@@ -134,26 +134,6 @@ impl NostrDlcRelayHandler {
             Kind::Custom(8_888) => println!("DLC message."),
             _ => println!("unknown"),
         }
-
-        // let msg = self.parse_dlc_msg_event(&event)?;
-        //
-        // let pubkey = PublicKey::from_slice(
-        //     &event
-        //         .pubkey
-        //         .public_key(nostr::secp256k1::Parity::Even)
-        //         .serialize(),
-        // )?;
-
-        // let mut dlc = self.manager.lock().unwrap();
-        //
-        // let msg_opts = dlc.on_dlc_message(&msg, pubkey)?;
-        //
-        // if let Some(msg) = msg_opts {
-        //     let event = self.create_dlc_msg_event(event.pubkey, Some(event.id), msg)?;
-        //     return Ok(Some(event));
-        // }
-
-        // Ok(None)
     }
 
     pub async fn listen(&self) -> anyhow::Result<Client> {
@@ -161,7 +141,7 @@ impl NostrDlcRelayHandler {
 
         let since = Timestamp::now();
 
-        client.add_relay(RELAY_URL).await?;
+        client.add_relay(RELAY_HOST).await?;
 
         let msg_subscription = self.create_dlc_message_filter(since);
         let oracle_subscription = self.create_oracle_message_filter(since);

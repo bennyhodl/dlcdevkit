@@ -1,11 +1,10 @@
 use std::io::Cursor;
 
-use crate::dlc_storage::SledStorageProvider;
+use dlc_sled_storage_provider::SledStorageProvider;
 use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
 use lightning::util::ser::Readable;
 use nostr_sdk::{Event, Kind};
 
-#[derive(Debug)]
 pub struct NostrDlcHandler {
     storage: SledStorageProvider,
 }
@@ -31,14 +30,14 @@ impl NostrDlcHandler {
     }
 }
 
-pub fn oracle_announcement_from_str(content: &str) -> anyhow::Result<OracleAnnouncement> {
+fn oracle_announcement_from_str(content: &str) -> anyhow::Result<OracleAnnouncement> {
     let bytes = base64::decode(content)?;
     let mut cursor = Cursor::new(bytes);
     Ok(OracleAnnouncement::read(&mut cursor)
         .map_err(|_| anyhow::anyhow!("could not get oracle announcement"))?)
 }
 
-pub fn oracle_attestation_from_str(content: &str) -> anyhow::Result<OracleAttestation> {
+fn oracle_attestation_from_str(content: &str) -> anyhow::Result<OracleAttestation> {
     let bytes = base64::decode(content)?;
     let mut cursor = Cursor::new(bytes);
     Ok(OracleAttestation::read(&mut cursor)

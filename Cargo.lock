@@ -236,13 +236,13 @@ checksum = "8c3c1a368f70d6cf7302d78f8f7093da241fb8e8807c05cc9e51a125895a6d5b"
 
 [[package]]
 name = "bdk"
-version = "0.28.2"
+version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b15adb2017ab6437b6704a779ab8bbefe857612f5af9d84b677a1767f965e099"
+checksum = "2fc1fc1a92e0943bfbcd6eb7d32c1b2a79f2f1357eb1e2eee9d7f36d6d7ca44a"
 dependencies = [
  "async-trait",
  "bdk-macros",
- "bitcoin 0.29.2",
+ "bitcoin 0.30.2",
  "esplora-client",
  "getrandom 0.2.11",
  "js-sys",
@@ -289,7 +289,6 @@ version = "0.29.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0694ea59225b0c5f3cb405ff3f670e4828358ed26aec49dc352f730f0cb1a8a3"
 dependencies = [
- "base64 0.13.1",
  "bech32",
  "bitcoin_hashes 0.11.0",
  "secp256k1 0.24.3",
@@ -302,6 +301,7 @@ version = "0.30.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1945a5048598e4189e239d3f809b19bdad4845c4b2ba400d304d2dcf26d2c462"
 dependencies = [
+ "base64 0.13.1",
  "bech32",
  "bitcoin-private",
  "bitcoin_hashes 0.12.0",
@@ -309,6 +309,12 @@ dependencies = [
  "secp256k1 0.27.0",
  "serde",
 ]
+
+[[package]]
+name = "bitcoin-internals"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f9997f8650dd818369931b5672a18dbef95324d0513aa99aae758de8ce86e5b"
 
 [[package]]
 name = "bitcoin-private"
@@ -615,8 +621,10 @@ checksum = "7f2c685bad3eb3d45a01354cedb7d5faa66194d1d58ba6e267a8de788f79db38"
 dependencies = [
  "android-tzdata",
  "iana-time-zone",
+ "js-sys",
  "num-traits",
  "serde",
+ "wasm-bindgen",
  "windows-targets 0.48.5",
 ]
 
@@ -977,11 +985,11 @@ checksum = "bd0c93bb4b0c6d9b77f4435b0ae98c24d17f1c45b2ff844c6151a07256ca923b"
 [[package]]
 name = "dlc"
 version = "0.4.0"
-source = "git+https://github.com/p2pderivatives/rust-dlc?branch=master#f303972af2e2b771e1c40a5cc89215f320bf26aa"
+source = "git+https://github.com/p2pderivatives/rust-dlc?branch=master#a3320600a7a01130f739e8b9a9c7d86e4f68ee89"
 dependencies = [
- "bitcoin 0.29.2",
+ "bitcoin 0.30.2",
  "miniscript",
- "secp256k1-sys 0.6.1",
+ "secp256k1-sys 0.8.1",
  "secp256k1-zkp",
  "serde",
 ]
@@ -989,13 +997,14 @@ dependencies = [
 [[package]]
 name = "dlc-manager"
 version = "0.4.0"
-source = "git+https://github.com/p2pderivatives/rust-dlc?branch=master#f303972af2e2b771e1c40a5cc89215f320bf26aa"
+source = "git+https://github.com/p2pderivatives/rust-dlc?branch=master#a3320600a7a01130f739e8b9a9c7d86e4f68ee89"
 dependencies = [
  "async-trait",
- "bitcoin 0.29.2",
+ "bitcoin 0.30.2",
  "dlc",
  "dlc-messages",
  "dlc-trie",
+ "hex-conservative",
  "lightning",
  "log",
  "secp256k1-zkp",
@@ -1005,9 +1014,9 @@ dependencies = [
 [[package]]
 name = "dlc-messages"
 version = "0.4.0"
-source = "git+https://github.com/p2pderivatives/rust-dlc?branch=master#f303972af2e2b771e1c40a5cc89215f320bf26aa"
+source = "git+https://github.com/p2pderivatives/rust-dlc?branch=master#a3320600a7a01130f739e8b9a9c7d86e4f68ee89"
 dependencies = [
- "bitcoin 0.29.2",
+ "bitcoin 0.30.2",
  "dlc",
  "lightning",
  "secp256k1-zkp",
@@ -1015,11 +1024,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "dlc-sled-storage-provider"
+version = "0.1.0"
+source = "git+https://github.com/p2pderivatives/rust-dlc?branch=master#a3320600a7a01130f739e8b9a9c7d86e4f68ee89"
+dependencies = [
+ "dlc-manager",
+ "sled",
+]
+
+[[package]]
 name = "dlc-trie"
 version = "0.4.0"
-source = "git+https://github.com/p2pderivatives/rust-dlc?branch=master#f303972af2e2b771e1c40a5cc89215f320bf26aa"
+source = "git+https://github.com/p2pderivatives/rust-dlc?branch=master#a3320600a7a01130f739e8b9a9c7d86e4f68ee89"
 dependencies = [
- "bitcoin 0.29.2",
+ "bitcoin 0.30.2",
  "dlc",
  "secp256k1-zkp",
  "serde",
@@ -1127,10 +1145,11 @@ dependencies = [
  "base64 0.13.1",
  "bdk",
  "bip39",
- "bitcoin 0.29.2",
+ "bitcoin 0.30.2",
  "dlc",
  "dlc-manager",
  "dlc-messages",
+ "dlc-sled-storage-provider",
  "dlc-trie",
  "electrsd",
  "electrum-client",
@@ -1140,8 +1159,10 @@ dependencies = [
  "lightning",
  "lightning-net-tokio",
  "nostr 0.29.0",
- "nostr-sdk 0.29.0",
+ "nostr-relay-pool",
+ "nostr-sdk",
  "nostr-sqlite",
+ "p2pd-oracle-client",
  "rand 0.8.5",
  "reqwest",
  "serde",
@@ -1164,11 +1185,12 @@ dependencies = [
 
 [[package]]
 name = "esplora-client"
-version = "0.4.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "847e59bd6ee1c3f2bdf217118ee3640b97a1b1d8becb55771e67e533b87da66f"
+checksum = "0cb1f7f2489cce83bc3bd92784f9ba5271eeb6e729b975895fc541f78cbfcdca"
 dependencies = [
- "bitcoin 0.29.2",
+ "bitcoin 0.30.2",
+ "bitcoin-internals",
  "log",
  "serde",
  "ureq",
@@ -1774,6 +1796,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
+name = "hex-conservative"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "30ed443af458ccb6d81c1e7e661545f94d3176752fb1df2f543b902a1e0f51e2"
+
+[[package]]
 name = "hex_lit"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2201,20 +2229,21 @@ dependencies = [
 
 [[package]]
 name = "lightning"
-version = "0.0.118"
+version = "0.0.121"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d52cec5fa9382154fe9671e8df93095b800c7d77abc66e2a5ef839d672521c5e"
+checksum = "5b0c1f811ae288f86c6767055c55b5f7a721ca1e61bf1897a9ae2ec663e8aba1"
 dependencies = [
- "bitcoin 0.29.2",
+ "bitcoin 0.30.2",
+ "hex-conservative",
 ]
 
 [[package]]
 name = "lightning-net-tokio"
-version = "0.0.118"
+version = "0.0.121"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86ee02c5a817b46a5fd6de4b2e196b58ae0e6eca5f3b8a6f0b0cd67bd9485ecc"
+checksum = "4813cca14ed984924a6975895e80cde8673a0a105a1c7ddf3b0fb3d1ce59e6bf"
 dependencies = [
- "bitcoin 0.29.2",
+ "bitcoin 0.30.2",
  "lightning",
  "tokio",
 ]
@@ -2371,11 +2400,12 @@ checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 
 [[package]]
 name = "miniscript"
-version = "9.0.2"
+version = "10.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5b106477a0709e2da253e5559ba4ab20a272f8577f1eefff72f3a905b5d35f5"
+checksum = "1eb102b66b2127a872dbcc73095b7b47aeb9d92f7b03c2b2298253ffc82c7594"
 dependencies = [
- "bitcoin 0.29.2",
+ "bitcoin 0.30.2",
+ "bitcoin-private",
  "serde",
 ]
 
@@ -2497,7 +2527,6 @@ version = "0.28.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "62abb4201e9d6b8b25660bebcad7bc0eb0cf25ecf9fd139c8d8c36ac455d37da"
 dependencies = [
- "aes",
  "base64 0.21.5",
  "bip39",
  "bitcoin 0.30.2",
@@ -2506,10 +2535,8 @@ dependencies = [
  "chacha20poly1305",
  "getrandom 0.2.11",
  "instant",
- "js-sys",
  "negentropy",
  "once_cell",
- "reqwest",
  "scrypt",
  "serde",
  "serde_json",
@@ -2517,8 +2544,6 @@ dependencies = [
  "unicode-normalization",
  "url",
  "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
 ]
 
 [[package]]
@@ -2582,49 +2607,15 @@ dependencies = [
 
 [[package]]
 name = "nostr-relay-pool"
-version = "0.28.2"
+version = "0.29.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1621a53bf1bde6fee89726be371931b96542d49e58a221f22c24ea02fb913c4e"
-dependencies = [
- "async-utility",
- "async-wsocket",
- "nostr 0.28.1",
- "nostr-database 0.28.1",
- "thiserror",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "nostr-relay-pool"
-version = "0.29.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83b39b3dc3f1fe912a0f530ad8bd2e71c55608679c8c427952f71c13f0a4c545"
+checksum = "e4c3431820082c850315218193c7e33a328b4b2cd0129d4fd5446a4dab87ddc4"
 dependencies = [
  "async-utility",
  "async-wsocket",
  "atomic-destructor",
  "nostr 0.29.0",
  "nostr-database 0.29.0",
- "thiserror",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "nostr-sdk"
-version = "0.28.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "531fbbb39aef79311b60488f2d4aacc5f8156d76a5fb1bb110486746b3cfe873"
-dependencies = [
- "async-utility",
- "lnurl-pay",
- "nostr 0.28.1",
- "nostr-database 0.28.1",
- "nostr-relay-pool 0.28.2",
- "nostr-signer 0.28.0",
- "nostr-zapper 0.28.0",
- "nwc 0.28.1",
  "thiserror",
  "tokio",
  "tracing",
@@ -2640,26 +2631,13 @@ dependencies = [
  "lnurl-pay",
  "nostr 0.29.0",
  "nostr-database 0.29.0",
- "nostr-relay-pool 0.29.0",
- "nostr-signer 0.29.0",
- "nostr-zapper 0.29.0",
- "nwc 0.29.0",
+ "nostr-relay-pool",
+ "nostr-signer",
+ "nostr-zapper",
+ "nwc",
  "thiserror",
  "tokio",
  "tracing",
-]
-
-[[package]]
-name = "nostr-signer"
-version = "0.28.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "305c33e0ddde9c4288af000cc3fee665190a4ebef4841ce5bcb3eb4a2f473e62"
-dependencies = [
- "async-utility",
- "nostr 0.28.1",
- "nostr-relay-pool 0.28.2",
- "thiserror",
- "tokio",
 ]
 
 [[package]]
@@ -2670,7 +2648,7 @@ checksum = "307bdc7c26887d7e65632e66872989a19892dfe9f2c6dbd9a1d3f959c5c524d5"
 dependencies = [
  "async-utility",
  "nostr 0.29.0",
- "nostr-relay-pool 0.29.0",
+ "nostr-relay-pool",
  "thiserror",
  "tokio",
 ]
@@ -2689,17 +2667,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
-]
-
-[[package]]
-name = "nostr-zapper"
-version = "0.28.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "523d787e19fbca8ad6ae4edf42db266a89d24aa3bfb1ce558ab87f3c5d10e2d5"
-dependencies = [
- "async-trait",
- "nostr 0.28.1",
- "thiserror",
 ]
 
 [[package]]
@@ -2786,28 +2753,14 @@ dependencies = [
 
 [[package]]
 name = "nwc"
-version = "0.28.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc11612a16af0252701ebd71d202e60343606e70a10bba875674dbddd36237e5"
-dependencies = [
- "async-utility",
- "nostr 0.28.1",
- "nostr-relay-pool 0.28.2",
- "nostr-zapper 0.28.0",
- "thiserror",
- "tracing",
-]
-
-[[package]]
-name = "nwc"
 version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d1894ffe54a1e5adf8dbb22b5a290c0748ec4a88aa07fa69c4359010edea49ed"
 dependencies = [
  "async-utility",
  "nostr 0.29.0",
- "nostr-relay-pool 0.29.0",
- "nostr-zapper 0.29.0",
+ "nostr-relay-pool",
+ "nostr-zapper",
  "thiserror",
  "tracing",
 ]
@@ -2920,6 +2873,19 @@ name = "overload"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b15813163c1d831bf4a13c3610c05c0d03b39feb07f7e09fa234dac9b15aaf39"
+
+[[package]]
+name = "p2pd-oracle-client"
+version = "0.1.0"
+source = "git+https://github.com/p2pderivatives/rust-dlc?branch=master#a3320600a7a01130f739e8b9a9c7d86e4f68ee89"
+dependencies = [
+ "chrono",
+ "dlc-manager",
+ "dlc-messages",
+ "reqwest",
+ "secp256k1-zkp",
+ "serde",
+]
 
 [[package]]
 name = "pango"
@@ -3757,7 +3723,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6b1629c9c557ef9b293568b338dddfc8208c98a18c59d722a9d53f859d9c9b62"
 dependencies = [
  "bitcoin_hashes 0.11.0",
- "rand 0.8.5",
  "secp256k1-sys 0.6.1",
  "serde",
 ]
@@ -3794,24 +3759,25 @@ dependencies = [
 
 [[package]]
 name = "secp256k1-zkp"
-version = "0.7.0"
+version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd403e9f0569b4131ab3fc9fa24a17775331b39382efd2cde851fdca655e3520"
+checksum = "026efcdacb95ee6aae5cc19144dc1549973eac36a4972700c28493de1ee5d69f"
 dependencies = [
+ "bitcoin-private",
  "rand 0.8.5",
- "secp256k1 0.24.3",
+ "secp256k1 0.27.0",
  "secp256k1-zkp-sys",
  "serde",
 ]
 
 [[package]]
 name = "secp256k1-zkp-sys"
-version = "0.7.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64e7a2beac087c1da2d21018a3b7f043fe2f138654ad9c1518d409061a4a0034"
+checksum = "d03ab1ca75a18e1899e8d9b8d28b5998ae1ddcb42fec5956769718543293c723"
 dependencies = [
  "cc",
- "secp256k1-sys 0.6.1",
+ "secp256k1-sys 0.8.1",
 ]
 
 [[package]]
@@ -4557,10 +4523,6 @@ dependencies = [
  "ernest-wallet",
  "futures",
  "futures-util",
- "lightning-net-tokio",
- "nostr 0.28.1",
- "nostr-relay-pool 0.29.0",
- "nostr-sdk 0.28.0",
  "serde",
  "serde_json",
  "tauri",

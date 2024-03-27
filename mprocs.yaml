@@ -2,7 +2,7 @@ procs:
   relay:
     shell: "RUST_LOG=info /Users/ben/ernest/relays/nostr-rs-relay/target/release/nostr-rs-relay -d /Users/ben/ernest/relays/nostr-relay-db -c /Users/ben/ernest/relays/config.toml"
   kormir:
-    shell: "RUST_LOG=info KORMIR_RELAYS=ws://localhost:8081 DATABASE_URL=postgres://kormir:kormir@localhost:5432 KORMIR_KEY=34d95a073eee38ecb968a0da8273926cda601802541a715c011fb340dd6d1706 /Users/ben/ernest/oracles/kormir/target/release/kormir-server"
+    shell: "RUST_LOG=info KORMIR_PORT=8082 KORMIR_RELAYS=ws://localhost:8081 DATABASE_URL=postgres://kormir:kormir@localhost:5433 KORMIR_KEY=34d95a073eee38ecb968a0da8273926cda601802541a715c011fb340dd6d1706 /Users/ben/ernest/oracles/kormir/target/release/kormir-server"
   tauri_check:
     cmd: ["bacon -p terminal/src-tauri"]
     autostart: false
