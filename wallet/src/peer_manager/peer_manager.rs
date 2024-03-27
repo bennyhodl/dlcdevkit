@@ -31,17 +31,22 @@ pub type PeerManager = LdkPeerManager<
 
 pub struct ErnestPeerManager {
     pub peer_manager: Arc<PeerManager>,
-    pub node_id: PublicKey
+    pub node_id: PublicKey,
 }
 
 impl ErnestPeerManager {
     pub fn new(name: &str, network: Network) -> ErnestPeerManager {
-        let seed = crate::io::read_or_generate_xprv(&name, network).unwrap().private_key.secret_bytes();
+        let seed = crate::io::read_or_generate_xprv(&name, network)
+            .unwrap()
+            .private_key
+            .secret_bytes();
         let time = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap();
         let key_signer = KeysManager::new(&seed, time.as_secs(), time.as_nanos() as u32);
-        let node_id = key_signer.get_node_id(lightning::sign::Recipient::Node).unwrap();
+        let node_id = key_signer
+            .get_node_id(lightning::sign::Recipient::Node)
+            .unwrap();
         let message_handler = MessageHandler {
             chan_handler: Arc::new(ErroringMessageHandler::new()),
             route_handler: Arc::new(IgnoringMessageHandler {}),
@@ -57,7 +62,7 @@ impl ErnestPeerManager {
                 Arc::new(ErnestLogger {}),
                 Arc::new(key_signer),
             )),
-            node_id
+            node_id,
         }
     }
 }

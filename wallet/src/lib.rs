@@ -9,8 +9,8 @@ pub mod peer_manager;
 mod wallet;
 
 pub use bitcoin::Network;
-pub use io::get_ernest_dir;
 pub use dlc_sled_storage_provider::SledStorageProvider;
+pub use io::get_ernest_dir;
 
 pub const RELAY_HOST: &str = "ws://localhost:8081";
 pub const ORACLE_HOST: &str = "http://localhost:8080";

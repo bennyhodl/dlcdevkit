@@ -2,9 +2,9 @@ use crate::io;
 use anyhow::anyhow;
 use bdk::{
     bitcoin::{
-        secp256k1::{All, PublicKey, Secp256k1},
-        key::{KeyPair, XOnlyPublicKey},
         bip32::{ExtendedPrivKey, ExtendedPubKey},
+        key::{KeyPair, XOnlyPublicKey},
+        secp256k1::{All, PublicKey, Secp256k1},
         Address, Network, Txid,
     },
     blockchain::EsploraBlockchain,
@@ -27,7 +27,7 @@ pub struct ErnestWallet {
     pub network: Network,
     pub xprv: ExtendedPrivKey,
     pub name: String,
-    secp: Secp256k1<All>
+    secp: Secp256k1<All>,
 }
 
 const MIN_FEERATE: u32 = 253;

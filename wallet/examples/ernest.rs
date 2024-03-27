@@ -2,8 +2,7 @@ use ernest_wallet::{ErnestNostr, Network};
 
 #[tokio::main]
 async fn main() {
-    ErnestNostr::new("example_ernest", "http://localhost:30000", Network::Regtest)
-        .unwrap();
+    ErnestNostr::new("example_ernest", "http://localhost:30000", Network::Regtest).unwrap();
 
     // Use the BDK wallet.
     // ernest.wallet.new_external_address().unwrap().address;

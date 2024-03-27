@@ -33,8 +33,7 @@ impl OneWalletTest {
 
         let esplora_url = format!("http://{}", electrsd.esplora_url.as_ref().unwrap());
 
-        let ernest = ErnestNostr::new(name, &esplora_url, Network::Regtest)
-            .unwrap();
+        let ernest = ErnestNostr::new(name, &esplora_url, Network::Regtest).unwrap();
 
         OneWalletTest {
             bitcoind,
@@ -82,11 +81,9 @@ impl TwoWalletTest {
 
         let esplora_url = format!("http://{}", electrsd.esplora_url.as_ref().unwrap());
 
-        let ernest_one = ErnestNostr::new(name_one, &esplora_url, Network::Regtest)
-            .unwrap();
+        let ernest_one = ErnestNostr::new(name_one, &esplora_url, Network::Regtest).unwrap();
 
-        let ernest_two = ErnestNostr::new(name_two, &esplora_url, Network::Regtest)
-            .unwrap();
+        let ernest_two = ErnestNostr::new(name_two, &esplora_url, Network::Regtest).unwrap();
 
         TwoWalletTest {
             bitcoind,

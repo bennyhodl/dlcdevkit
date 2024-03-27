@@ -1,10 +1,10 @@
 pub mod dlc_handler;
 pub mod relay_handler;
 
-pub use nostr;
-pub use nostr_sdk;
-pub use nostr_relay_pool::RelayPoolNotification;
 pub use dlc_handler::NostrDlcHandler;
+pub use nostr;
+pub use nostr_relay_pool::RelayPoolNotification;
+pub use nostr_sdk;
 
 use crate::{wallet::ErnestWallet, RELAY_HOST};
 use bdk::bitcoin::Network;

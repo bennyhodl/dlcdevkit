@@ -1,14 +1,19 @@
 pub mod dlc;
 pub mod peer_manager;
+pub use dlc_manager::Storage;
+pub use dlc_messages::message_handler::MessageHandler as DlcMessageHandler;
 pub use lightning_net_tokio;
-pub use peer_manager::ErnestPeerManager;
+pub use peer_manager::{ErnestPeerManager, PeerManager};
 
+use crate::{get_ernest_dir, oracle::ErnestOracle, wallet::ErnestWallet, ORACLE_HOST};
 use bdk::bitcoin::Network;
-use crate::{oracle::ErnestOracle, wallet::ErnestWallet, ORACLE_HOST};
-use dlc_sled_storage_provider::SledStorageProvider;
-use bitcoin::secp256k1::{Parity, XOnlyPublicKey, PublicKey};
-use dlc_manager::{contract::contract_input::ContractInput, manager::Manager, ContractId, Oracle, CachedContractSignerProvider, SimpleSigner, SystemTimeProvider};
+use bitcoin::secp256k1::{Parity, PublicKey, XOnlyPublicKey};
+use dlc_manager::{
+    contract::contract_input::ContractInput, manager::Manager, CachedContractSignerProvider,
+    ContractId, Oracle, SimpleSigner, SystemTimeProvider,
+};
 use dlc_messages::{message_handler::MessageHandler, oracle_msgs::OracleAnnouncement};
+use dlc_sled_storage_provider::SledStorageProvider;
 use p2pd_oracle_client::P2PDOracleClient;
 use std::{
     collections::HashMap,
@@ -36,17 +41,19 @@ impl Ernest {
     pub async fn new(name: &str, esplora_url: &str, network: Network) -> anyhow::Result<Ernest> {
         let wallet = Arc::new(ErnestWallet::new(name, esplora_url, network)?);
 
-        let dlc_storage = Box::new(SledStorageProvider::new(&name)?);
+        let db_path = get_ernest_dir().join(name);
+        let dlc_storage = Box::new(SledStorageProvider::new(db_path.to_str().unwrap())?);
 
         // Ask carman!
-        // let oracle = tokio::task::spawn_blocking(move || 
+        // let oracle = tokio::task::spawn_blocking(move ||
         //     Arc::new(ErnestOracle::new().unwrap())
         // ).await.unwrap();
         // let mut oracles = HashMap::new();
         // oracles.insert(oracle.get_public_key(), oracle);
-        let oracle = tokio::task::spawn_blocking(move || 
-            P2PDOracleClient::new(ORACLE_HOST).unwrap()
-        ).await.unwrap();
+        let oracle =
+            tokio::task::spawn_blocking(move || P2PDOracleClient::new(ORACLE_HOST).unwrap())
+                .await
+                .unwrap();
         let mut oracles = HashMap::new();
         oracles.insert(oracle.get_public_key(), Box::new(oracle));
 

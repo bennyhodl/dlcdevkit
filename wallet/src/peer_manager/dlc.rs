@@ -4,8 +4,8 @@ use crate::{
 };
 use bdk::{
     bitcoin::{
-        secp256k1::{PublicKey, Secp256k1},
         bip32::ChildNumber,
+        secp256k1::{PublicKey, Secp256k1},
         Address, Network, Script, Txid,
     },
     blockchain::esplora::EsploraError,
@@ -29,14 +29,17 @@ impl dlc_manager::ContractSignerProvider for ErnestWallet {
     type Signer = SimpleSigner;
 
     fn derive_signer_key_id(&self, _is_offer_party: bool, temp_id: [u8; 32]) -> [u8; 32] {
-       temp_id 
+        temp_id
     }
 
     fn derive_contract_signer(&self, _key_id: [u8; 32]) -> Result<Self::Signer, ManagerError> {
-        Ok(SimpleSigner::new(self.xprv.private_key)) 
+        Ok(SimpleSigner::new(self.xprv.private_key))
     }
 
-    fn get_secret_key_for_pubkey(&self, _pubkey: &bitcoin::secp256k1::PublicKey) -> Result<bitcoin::secp256k1::SecretKey, ManagerError> {
+    fn get_secret_key_for_pubkey(
+        &self,
+        _pubkey: &bitcoin::secp256k1::PublicKey,
+    ) -> Result<bitcoin::secp256k1::SecretKey, ManagerError> {
         unimplemented!()
     }
 
@@ -62,11 +65,15 @@ impl dlc_manager::Wallet for ErnestWallet {
 
     // TODO: Is this correct for the input?
     fn sign_psbt_input(
-            &self,
-            psbt: &mut bitcoin::psbt::PartiallySignedTransaction,
-            _input_index: usize,
-        ) -> Result<(), ManagerError> {
-        self.inner.lock().unwrap().sign(psbt, bdk::SignOptions::default()).map_err(bdk_err_to_manager_err)?;
+        &self,
+        psbt: &mut bitcoin::psbt::PartiallySignedTransaction,
+        _input_index: usize,
+    ) -> Result<(), ManagerError> {
+        self.inner
+            .lock()
+            .unwrap()
+            .sign(psbt, bdk::SignOptions::default())
+            .map_err(bdk_err_to_manager_err)?;
         Ok(())
     }
 
