@@ -29,9 +29,9 @@ services:
       - '19444:18444'
       - '28332:28332'
       - '28333:28333'
-  electrs:
+  ernest-electrs:
     image: ghcr.io/vulpemventures/electrs:latest
-    container_name: electrs
+    container_name: ernest-electrs
     entrypoint:
       - /build/electrs
     command:
