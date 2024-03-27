@@ -9,3 +9,7 @@ export async function getPubkeys(): Promise<{bitcoin: string, node_id: string}> 
 export async function newAddress(): Promise<string> {
   return await invoke("new_address")
 }
+
+export async function listPeers(): Promise<string[]> {
+  return await invoke("list_peers")
+}

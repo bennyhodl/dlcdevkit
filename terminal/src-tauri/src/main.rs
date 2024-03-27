@@ -5,9 +5,8 @@ mod nostr;
 use std::sync::Arc;
 
 use tauri::State;
-use ernest_wallet::{Ernest, ErnestPeerManager, Network};
+use ernest_wallet::{peer_manager::{Ernest, ErnestPeerManager, lightning_net_tokio::setup_inbound}, Network};
 use models::Pubkeys;
-// use nostr::run_ernest_nostr;
 use tokio::net::TcpListener;
 
 #[tauri::command]
@@ -29,6 +28,15 @@ fn get_pubkeys(ernest: State<Arc<Ernest>>, peer_manager: State<Arc<ErnestPeerMan
     Pubkeys { bitcoin, node_id }
 }
 
+#[tauri::command]
+fn list_peers(peer_manager: State<Arc<ErnestPeerManager>>) -> Vec<String> {
+    let mut node_ids = Vec::new();
+    for (node_id, _) in peer_manager.peer_manager.get_peer_node_ids() {
+        node_ids.push(node_id.to_string())
+    }
+    node_ids
+}
+
 #[tokio::main]
 async fn main() {
     let name = "terminal".to_string();
@@ -44,8 +52,7 @@ async fn main() {
             let peer_mgr = peer_manager_connection_handler.clone();
             let (tcp_stream, _) = listener.accept().await.unwrap();
             tokio::spawn(async move {
-                lightning_net_tokio::setup_inbound(peer_mgr.clone(), tcp_stream.into_std().unwrap()).await;
-                
+                setup_inbound(peer_mgr.clone(), tcp_stream.into_std().unwrap()).await;                
             });
         }
     });
@@ -53,7 +60,7 @@ async fn main() {
     tauri::Builder::default()
         .manage(ernest.clone()) 
         .manage(peer_manager.clone())
-        .invoke_handler(tauri::generate_handler![new_address, get_pubkeys])
+        .invoke_handler(tauri::generate_handler![new_address, get_pubkeys, list_peers])
         .run(tauri::generate_context!())
         .expect("error while running ernest");
 }
