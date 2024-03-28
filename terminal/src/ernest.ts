@@ -13,3 +13,12 @@ export async function newAddress(): Promise<string> {
 export async function listPeers(): Promise<string[]> {
   return await invoke("list_peers")
 }
+
+export async function listContracts(): Promise<null> {
+  return await invoke("list_contracts")
+}
+
+export async function listOffers(): Promise<any> {
+  const offers = await invoke("list_offers");
+  return offers
+}

@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { getPubkeys, listPeers, newAddress } from "./ernest";
+import { getPubkeys, listPeers, newAddress, listContracts, listOffers } from "./ernest";
 import "./App.css";
 
 function App() {
   const [address, setAddress] = useState<string>("")
   const [pubkeys, setPubkeys] = useState<{ node_id: string, bitcoin: string }>()
   const [peers, setPeers] = useState<string[]>([])
+  const [offers, setOffers] = useState<any[]>([])
 
   const getNewAddress = async () => {
     const addr = await newAddress()
@@ -17,8 +18,12 @@ function App() {
     setPubkeys(pubkeys)
   }
 
+  const getOffers = async () => {
+    const offers = await listOffers()
+    setOffers(offers)
+  }
+
   const getPeers = async () => {
-    console.log("gettings peers")
     const peers = await listPeers()
     setPeers(peers)
   }
@@ -39,6 +44,10 @@ function App() {
       <h3>Peers {peers?.length}</h3>
       <button onClick={() => getPeers()}>List Peers</button>
       {peers && peers.map(p => <p key={p}>{p}</p>)}
+      <h3>Offers {offers?.length}</h3>
+      <button onClick={() => getOffers()}>List Offers</button>
+      {offers && offers.map(o => <p>{JSON.stringify(o)}</p>)}
+      <button onClick={() => listContracts()}>List Contracts</button>
     </div>
   );
 }

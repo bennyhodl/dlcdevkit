@@ -1,4 +1,7 @@
-use ernest_wallet::{nostr_manager::{ErnestNostr, RelayPoolNotification, NostrDlcHandler}, SledStorageProvider, Network};
+use ernest_wallet::{
+    nostr_manager::{ErnestNostr, NostrDlcHandler, RelayPoolNotification},
+    Network, SledStorageProvider,
+};
 use std::sync::Arc;
 
 #[allow(dead_code)]

@@ -1,12 +1,22 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod dlc;
 mod models;
 mod nostr;
-use std::sync::Arc;
 
-use tauri::State;
-use ernest_wallet::{peer_manager::{Ernest, ErnestPeerManager, lightning_net_tokio::setup_inbound}, Network};
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
+
+use ernest_wallet::{
+    peer_manager::{
+        lightning_net_tokio::setup_inbound, DlcMessageHandler, Ernest, ErnestPeerManager,
+    },
+    Network,
+};
 use models::Pubkeys;
+use tauri::State;
 use tokio::net::TcpListener;
 
 #[tauri::command]
@@ -40,27 +50,76 @@ fn list_peers(peer_manager: State<Arc<ErnestPeerManager>>) -> Vec<String> {
 #[tokio::main]
 async fn main() {
     let name = "terminal".to_string();
-    let ernest =
-        Arc::new(Ernest::new(&name, "http://localhost:30000", Network::Regtest).await.unwrap());
+    let ernest = Arc::new(
+        Ernest::new(&name, "http://localhost:30000", Network::Regtest)
+            .await
+            .unwrap(),
+    );
 
     let peer_manager = Arc::new(ErnestPeerManager::new(&name, Network::Regtest));
 
     let peer_manager_connection_handler = peer_manager.peer_manager.clone();
     tokio::spawn(async move {
-        let listener = TcpListener::bind("0.0.0.0:9000").await.expect("Coldn't get port.");
+        let listener = TcpListener::bind("0.0.0.0:9000")
+            .await
+            .expect("Coldn't get port.");
         loop {
             let peer_mgr = peer_manager_connection_handler.clone();
             let (tcp_stream, _) = listener.accept().await.unwrap();
             tokio::spawn(async move {
-                setup_inbound(peer_mgr.clone(), tcp_stream.into_std().unwrap()).await;                
+                setup_inbound(peer_mgr.clone(), tcp_stream.into_std().unwrap()).await;
             });
         }
     });
 
+    let dlc_manager_clone = ernest.manager.clone();
+    let peer_manager_clone = peer_manager.peer_manager.clone();
+    let message_handler_clone = peer_manager.message_handler.clone();
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(Duration::from_secs(5));
+        loop {
+            ticker.tick().await;
+            process_incoming_messages(
+                &peer_manager_clone,
+                &dlc_manager_clone,
+                &message_handler_clone,
+            );
+        }
+    });
+
     tauri::Builder::default()
-        .manage(ernest.clone()) 
+        .manage(ernest.clone())
         .manage(peer_manager.clone())
-        .invoke_handler(tauri::generate_handler![new_address, get_pubkeys, list_peers])
+        .invoke_handler(tauri::generate_handler![
+            new_address,
+            get_pubkeys,
+            list_peers,
+            crate::dlc::list_contracts,
+            crate::dlc::list_offers
+        ])
         .run(tauri::generate_context!())
         .expect("error while running ernest");
+}
+
+pub fn process_incoming_messages(
+    peer_manager: &Arc<ernest_wallet::peer_manager::PeerManager>,
+    dlc_manager: &Arc<Mutex<ernest_wallet::peer_manager::ErnestDlcManager>>,
+    dlc_message_handler: &Arc<DlcMessageHandler>,
+) {
+    let messages = dlc_message_handler.get_and_clear_received_messages();
+
+    for (node_id, message) in messages {
+        let resp = dlc_manager
+            .lock()
+            .unwrap()
+            .on_dlc_message(&message, node_id)
+            .expect("Error processing message");
+        if let Some(msg) = resp {
+            dlc_message_handler.send_message(node_id, msg);
+        }
+    }
+
+    if dlc_message_handler.has_pending_messages() {
+        peer_manager.process_events();
+    }
 }
