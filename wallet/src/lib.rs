@@ -1,6 +1,5 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
-// mod dlc_storage;
 mod error;
 mod io;
 pub mod nostr_manager;
@@ -9,6 +8,8 @@ pub mod peer_manager;
 mod wallet;
 
 pub use bitcoin::Network;
+pub use dlc_manager;
+pub use dlc_messages;
 pub use dlc_sled_storage_provider::SledStorageProvider;
 pub use io::get_ernest_dir;
 

@@ -34,7 +34,6 @@ pub type ErnestDlcManager = dlc_manager::manager::Manager<
 pub struct Ernest {
     pub wallet: Arc<ErnestWallet>,
     pub manager: Arc<Mutex<ErnestDlcManager>>,
-    pub message_handler: Arc<MessageHandler>,
 }
 
 impl Ernest {
@@ -67,13 +66,7 @@ impl Ernest {
             wallet.clone(),
         )?));
 
-        let message_handler = Arc::new(MessageHandler::new());
-
-        Ok(Ernest {
-            wallet,
-            manager,
-            message_handler,
-        })
+        Ok(Ernest { wallet, manager })
     }
 
     pub async fn send_dlc_offer(

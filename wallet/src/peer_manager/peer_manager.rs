@@ -14,8 +14,8 @@ use std::{sync::Arc, time::SystemTime};
 pub struct ErnestLogger;
 
 impl Logger for ErnestLogger {
-    fn log(&self, record: Record) {
-        println!("LOG: {:?}", record);
+    fn log(&self, _record: Record) {
+        // println!("LOG: {:?}", record);
     }
 }
 
@@ -31,6 +31,7 @@ pub type PeerManager = LdkPeerManager<
 
 pub struct ErnestPeerManager {
     pub peer_manager: Arc<PeerManager>,
+    pub message_handler: Arc<DlcMessageHandler>,
     pub node_id: PublicKey,
 }
 
@@ -47,11 +48,13 @@ impl ErnestPeerManager {
         let node_id = key_signer
             .get_node_id(lightning::sign::Recipient::Node)
             .unwrap();
+        let dlc_message_handler = Arc::new(DlcMessageHandler::new());
+
         let message_handler = MessageHandler {
             chan_handler: Arc::new(ErroringMessageHandler::new()),
             route_handler: Arc::new(IgnoringMessageHandler {}),
             onion_message_handler: Arc::new(IgnoringMessageHandler {}),
-            custom_message_handler: Arc::new(DlcMessageHandler::new()),
+            custom_message_handler: dlc_message_handler.clone(),
         };
 
         ErnestPeerManager {
@@ -62,6 +65,7 @@ impl ErnestPeerManager {
                 Arc::new(ErnestLogger {}),
                 Arc::new(key_signer),
             )),
+            message_handler: dlc_message_handler,
             node_id,
         }
     }
