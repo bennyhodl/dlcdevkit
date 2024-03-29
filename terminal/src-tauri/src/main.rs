@@ -10,8 +10,8 @@ use std::{
 };
 
 use ernest_wallet::{
-    peer_manager::{
-        lightning_net_tokio::setup_inbound, DlcMessageHandler, Ernest, ErnestPeerManager,
+    p2p::{
+        lightning_net_tokio::setup_inbound, Ernest, ErnestPeerManager, ErnestDlcManager
     },
     Network,
 };
@@ -30,18 +30,17 @@ fn new_address(ernest: tauri::State<Arc<Ernest>>) -> String {
 }
 
 #[tauri::command]
-fn get_pubkeys(ernest: State<Arc<Ernest>>, peer_manager: State<Arc<ErnestPeerManager>>) -> Pubkeys {
-    // let nostr = ernest.relays.keys.public_key().to_string();
+fn get_pubkeys(ernest: State<Arc<Ernest>>, p2p: State<Arc<ErnestPeerManager>>) -> Pubkeys {
     let bitcoin = ernest.wallet.get_pubkey().unwrap().to_string();
-    let node_id = peer_manager.node_id.to_string();
+    let node_id = p2p.node_id.to_string();
 
     Pubkeys { bitcoin, node_id }
 }
 
 #[tauri::command]
-fn list_peers(peer_manager: State<Arc<ErnestPeerManager>>) -> Vec<String> {
+fn list_peers(p2p: State<Arc<ErnestPeerManager>>) -> Vec<String> {
     let mut node_ids = Vec::new();
-    for (node_id, _) in peer_manager.peer_manager.get_peer_node_ids() {
+    for (node_id, _) in p2p.peer_manager().get_peer_node_ids() {
         node_ids.push(node_id.to_string())
     }
     node_ids
@@ -56,9 +55,9 @@ async fn main() {
             .unwrap(),
     );
 
-    let peer_manager = Arc::new(ErnestPeerManager::new(&name, Network::Regtest));
+    let p2p = Arc::new(ErnestPeerManager::new(&name, Network::Regtest));
 
-    let peer_manager_connection_handler = peer_manager.peer_manager.clone();
+    let peer_manager_connection_handler = p2p.peer_manager();
     tokio::spawn(async move {
         let listener = TcpListener::bind("0.0.0.0:9000")
             .await
@@ -73,23 +72,21 @@ async fn main() {
     });
 
     let dlc_manager_clone = ernest.manager.clone();
-    let peer_manager_clone = peer_manager.peer_manager.clone();
-    let message_handler_clone = peer_manager.message_handler.clone();
+    let p2p_clone = p2p.clone();
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(Duration::from_secs(5));
         loop {
             ticker.tick().await;
             process_incoming_messages(
-                &peer_manager_clone,
+                &p2p_clone,
                 &dlc_manager_clone,
-                &message_handler_clone,
             );
         }
     });
 
     tauri::Builder::default()
         .manage(ernest.clone())
-        .manage(peer_manager.clone())
+        .manage(p2p.clone())
         .invoke_handler(tauri::generate_handler![
             new_address,
             get_pubkeys,
@@ -102,11 +99,12 @@ async fn main() {
 }
 
 pub fn process_incoming_messages(
-    peer_manager: &Arc<ernest_wallet::peer_manager::PeerManager>,
-    dlc_manager: &Arc<Mutex<ernest_wallet::peer_manager::ErnestDlcManager>>,
-    dlc_message_handler: &Arc<DlcMessageHandler>,
+    p2p: &Arc<ErnestPeerManager>,
+    dlc_manager: &Arc<Mutex<ErnestDlcManager>>,
 ) {
-    let messages = dlc_message_handler.get_and_clear_received_messages();
+    let message_handler = p2p.message_handler();
+    let peer_manager = p2p.peer_manager();
+    let messages = message_handler.get_and_clear_received_messages();
 
     for (node_id, message) in messages {
         let resp = dlc_manager
@@ -115,11 +113,11 @@ pub fn process_incoming_messages(
             .on_dlc_message(&message, node_id)
             .expect("Error processing message");
         if let Some(msg) = resp {
-            dlc_message_handler.send_message(node_id, msg);
+            message_handler.send_message(node_id, msg);
         }
     }
 
-    if dlc_message_handler.has_pending_messages() {
+    if message_handler.has_pending_messages() {
         peer_manager.process_events();
     }
 }

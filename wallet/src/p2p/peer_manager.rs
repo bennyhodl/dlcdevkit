@@ -14,8 +14,8 @@ use std::{sync::Arc, time::SystemTime};
 pub struct ErnestLogger;
 
 impl Logger for ErnestLogger {
-    fn log(&self, _record: Record) {
-        // println!("LOG: {:?}", record);
+    fn log(&self, record: Record) {
+        println!("LOG: {:?}", record);
     }
 }
 
@@ -30,8 +30,8 @@ pub type PeerManager = LdkPeerManager<
 >;
 
 pub struct ErnestPeerManager {
-    pub peer_manager: Arc<PeerManager>,
-    pub message_handler: Arc<DlcMessageHandler>,
+    peer_manager: Arc<PeerManager>,
+    message_handler: Arc<DlcMessageHandler>,
     pub node_id: PublicKey,
 }
 
@@ -68,5 +68,13 @@ impl ErnestPeerManager {
             message_handler: dlc_message_handler,
             node_id,
         }
+    }
+
+    pub fn peer_manager(&self) -> Arc<PeerManager> {
+        self.peer_manager.clone()
+    }
+
+    pub fn message_handler(&self) -> Arc<DlcMessageHandler> {
+        self.message_handler.clone()
     }
 }

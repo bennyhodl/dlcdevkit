@@ -46,7 +46,14 @@ function App() {
       {peers && peers.map(p => <p key={p}>{p}</p>)}
       <h3>Offers {offers?.length}</h3>
       <button onClick={() => getOffers()}>List Offers</button>
-      {offers && offers.map(o => <p>{JSON.stringify(o)}</p>)}
+      {offers && offers.map(o => {
+        return (
+          <div style={{display: "flex", flexDirection: "row", justifyContent: "space-around", padding: "10px 0"}}>
+            <p>{o.id}</p>
+            <button onClick={() => console.log("accept")}>Accept DLC</button>
+          </div>
+        )
+      })}
       <button onClick={() => listContracts()}>List Contracts</button>
     </div>
   );

@@ -1,4 +1,3 @@
-pub mod dlc;
 pub mod peer_manager;
 pub use dlc_manager::Storage;
 pub use dlc_messages::message_handler::MessageHandler as DlcMessageHandler;

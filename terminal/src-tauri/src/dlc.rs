@@ -1,6 +1,6 @@
 use ernest_wallet::{
     dlc_manager::contract::offered_contract::OfferedContract,
-    peer_manager::{Ernest, ErnestPeerManager, Storage},
+    p2p::{Ernest, ErnestPeerManager, Storage},
 };
 use std::sync::Arc;
 use tauri::State;
@@ -8,11 +8,10 @@ use tauri::State;
 use crate::process_incoming_messages;
 
 #[tauri::command]
-pub fn list_contracts(ernest: State<Arc<Ernest>>, peer_manager: State<Arc<ErnestPeerManager>>) {
+pub fn list_contracts(ernest: State<Arc<Ernest>>, p2p: State<Arc<ErnestPeerManager>>) {
     process_incoming_messages(
-        &peer_manager.peer_manager,
+        &p2p,
         &ernest.manager,
-        &peer_manager.message_handler,
     );
     let ernest_clone = ernest.manager.clone();
     ernest_clone.lock().unwrap().periodic_check(false).unwrap();
@@ -29,12 +28,11 @@ pub fn list_contracts(ernest: State<Arc<Ernest>>, peer_manager: State<Arc<Ernest
 #[tauri::command]
 pub fn list_offers(
     ernest: State<Arc<Ernest>>,
-    peer_manager: State<Arc<ErnestPeerManager>>,
+    p2p: State<Arc<ErnestPeerManager>>,
 ) -> Result<Vec<OfferedContract>, tauri::Error> {
     process_incoming_messages(
-        &peer_manager.peer_manager,
+        &p2p,
         &ernest.manager,
-        &peer_manager.message_handler,
     );
     let ernest_clone = ernest.manager.clone();
     ernest_clone.lock().unwrap().periodic_check(false).unwrap();

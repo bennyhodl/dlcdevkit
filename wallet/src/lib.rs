@@ -2,11 +2,12 @@
 #![allow(unused_imports)]
 mod error;
 mod io;
-pub mod nostr_manager;
 mod oracle;
-pub mod peer_manager;
 mod wallet;
+mod chain;
 
+pub mod nostr_manager;
+pub mod p2p;
 pub use bitcoin::Network;
 pub use dlc_manager;
 pub use dlc_messages;
