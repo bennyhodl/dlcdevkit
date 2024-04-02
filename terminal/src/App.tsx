@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getPubkeys, listPeers, newAddress, listContracts, listOffers } from "./ernest";
+import { getPubkeys, listPeers, newAddress, listContracts, listOffers, acceptOffer, getBalance } from "./ernest";
 import "./App.css";
 
 function App() {
@@ -7,6 +7,12 @@ function App() {
   const [pubkeys, setPubkeys] = useState<{ node_id: string, bitcoin: string }>()
   const [peers, setPeers] = useState<string[]>([])
   const [offers, setOffers] = useState<any[]>([])
+  const [balance, setBalance] = useState<any>({})
+
+  const getWalletBalance = async () => {
+    const balance = await getBalance()
+    setBalance(balance)
+  }
 
   const getNewAddress = async () => {
     const addr = await newAddress()
@@ -31,12 +37,16 @@ function App() {
   useEffect(() => {
     getNewAddress()
     getWalletPubkeys()
+    getWalletBalance()
   }, [])
 
   return (
     <div className="container">
       <h1>Ernest Money</h1>
       <p>{address}</p>
+      <h1>Balance</h1>
+      <p>{JSON.stringify(balance)}</p>
+      <button onClick={() => getWalletBalance()}>Get Balance</button>
       <h3>LDK Node Id</h3>
       <p>{pubkeys?.node_id}</p>
       <h3>Bitcoin Pubkey</h3>
@@ -50,7 +60,7 @@ function App() {
         return (
           <div style={{display: "flex", flexDirection: "row", justifyContent: "space-around", padding: "10px 0"}}>
             <p>{o.id}</p>
-            <button onClick={() => console.log("accept")}>Accept DLC</button>
+            <button onClick={async () => await acceptOffer(o.id)}>Accept DLC</button>
           </div>
         )
       })}

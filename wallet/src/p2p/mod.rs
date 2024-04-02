@@ -85,15 +85,15 @@ impl Ernest {
         Ok(())
     }
 
-    pub async fn accept_dlc_offer(&self, contract: [u8; 32]) -> anyhow::Result<()> {
+    pub fn accept_dlc_offer(&self, contract: [u8; 32]) -> anyhow::Result<()> {
         let mut dlc = self.manager.lock().unwrap();
 
         let contract_id = ContractId::from(contract);
 
+        println!("Before accept: {:?}", contract_id);
         let (_, public_key, _accept_dlc) = dlc.accept_contract_offer(&contract_id)?;
 
-        let _xonly_pubkey =
-            XOnlyPublicKey::from_slice(&public_key.x_only_public_key().0.serialize())?;
+        println!("Accepted");
 
         Ok(())
     }

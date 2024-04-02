@@ -12,7 +12,7 @@ use bdk::{
     wallet::{AddressIndex, AddressInfo},
     Balance, FeeRate, KeychainKind, SignOptions, SyncOptions, Wallet,
 };
-use bitcoin::ScriptBuf;
+use bitcoin::{secp256k1::SecretKey, ScriptBuf};
 use dlc_manager::{error::Error as ManagerError, SimpleSigner};
 use lightning::chain::chaininterface::{ConfirmationTarget, FeeEstimator};
 use serde::Deserialize;
@@ -181,11 +181,11 @@ impl dlc_manager::ContractSignerProvider for ErnestWallet {
         &self,
         _pubkey: &bitcoin::secp256k1::PublicKey,
     ) -> Result<bitcoin::secp256k1::SecretKey, ManagerError> {
-        unimplemented!()
+        Ok(self.xprv.private_key)
     }
 
     fn get_new_secret_key(&self) -> Result<bitcoin::secp256k1::SecretKey, ManagerError> {
-        unimplemented!()
+        Ok(self.xprv.private_key)
     }
 }
 

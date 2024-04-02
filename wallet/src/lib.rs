@@ -11,6 +11,7 @@ pub mod p2p;
 pub use bitcoin::Network;
 pub use dlc_manager;
 pub use dlc_messages;
+pub use bdk;
 pub use dlc_sled_storage_provider::SledStorageProvider;
 pub use io::get_ernest_dir;
 

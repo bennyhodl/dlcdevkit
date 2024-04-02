@@ -22,3 +22,11 @@ export async function listOffers(): Promise<any> {
   const offers = await invoke("list_offers");
   return offers
 }
+
+export async function acceptOffer(contractId: any): Promise<null> {
+  return await invoke("accept_dlc", { contractId })
+}
+
+export async function getBalance(): Promise<any> {
+  return await invoke("get_balance")
+}

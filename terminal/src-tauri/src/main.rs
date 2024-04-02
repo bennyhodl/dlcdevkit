@@ -1,6 +1,6 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-mod dlc;
+mod functions;
 mod models;
 mod nostr;
 
@@ -15,19 +15,10 @@ use ernest_wallet::{
     },
     Network,
 };
+use crate::functions::{wallet::{get_balance, new_address}, dlc::{accept_dlc, list_contracts, list_offers}};
 use models::Pubkeys;
 use tauri::State;
 use tokio::net::TcpListener;
-
-#[tauri::command]
-fn new_address(ernest: tauri::State<Arc<Ernest>>) -> String {
-    ernest
-        .wallet
-        .new_external_address()
-        .unwrap()
-        .address
-        .to_string()
-}
 
 #[tauri::command]
 fn get_pubkeys(ernest: State<Arc<Ernest>>, p2p: State<Arc<ErnestPeerManager>>) -> Pubkeys {
@@ -71,28 +62,50 @@ async fn main() {
         }
     });
 
-    let dlc_manager_clone = ernest.manager.clone();
-    let p2p_clone = p2p.clone();
-    tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(Duration::from_secs(5));
-        loop {
-            ticker.tick().await;
-            process_incoming_messages(
-                &p2p_clone,
-                &dlc_manager_clone,
-            );
-        }
-    });
+    // let dlc_manager_clone = ernest.manager.clone();
+    // let p2p_clone = p2p.clone();
+    // tokio::spawn(async move {
+    //     let mut ticker = tokio::time::interval(Duration::from_secs(5));
+    //     loop {
+    //         ticker.tick().await;
+    //         println!("timer tick");
+    //         let message_handler = p2p_clone.message_handler();
+    //         let peer_manager = p2p_clone.peer_manager();
+    //         let messages = message_handler.get_and_clear_received_messages();
+    //         for (node_id, message) in messages {
+    //             if let Ok(mut man) = dlc_manager_clone.lock() {
+    //                 println!("Checking msg lock");
+    //                 let resp = man.on_dlc_message(&message, node_id)
+    //                     .expect("Error processing message");
+    //
+    //                 if let Some(msg) = resp {
+    //                     message_handler.send_message(node_id, msg);
+    //                 }
+    //
+    //                 if message_handler.has_pending_messages() {
+    //                     peer_manager.process_events();
+    //                 }                    
+    //             } else {
+    //                 println!("Could acquire lock");
+    //                 continue;
+    //             }
+    //         }
+    //     }
+    // });
 
     tauri::Builder::default()
         .manage(ernest.clone())
         .manage(p2p.clone())
         .invoke_handler(tauri::generate_handler![
+            // wallet
             new_address,
             get_pubkeys,
+            get_balance,
+            // dlc
             list_peers,
-            crate::dlc::list_contracts,
-            crate::dlc::list_offers
+            list_contracts,
+            list_offers,
+            accept_dlc,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ernest");

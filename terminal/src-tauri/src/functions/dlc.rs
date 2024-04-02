@@ -1,11 +1,12 @@
 use ernest_wallet::{
-    dlc_manager::contract::offered_contract::OfferedContract,
+    dlc_manager::{contract::offered_contract::OfferedContract, ContractId},
     p2p::{Ernest, ErnestPeerManager, Storage},
 };
+// use futures::TryFutureExt;
 use std::sync::Arc;
 use tauri::State;
-
 use crate::process_incoming_messages;
+
 
 #[tauri::command]
 pub fn list_contracts(ernest: State<Arc<Ernest>>, p2p: State<Arc<ErnestPeerManager>>) {
@@ -46,6 +47,17 @@ pub fn list_offers(
     Ok(offers)
 }
 
+#[tauri::command]
+pub fn accept_dlc(
+    contract_id: ContractId,
+    ernest: State<Arc<Ernest>>,
+) -> Result<(), String> {
+    println!("USING CONTRACT ID {:?}", contract_id);
+    Ok(ernest.accept_dlc_offer(contract_id).map_err(|e| {
+        println!("ERRE: {:?}", e);
+        e.to_string()
+    })?)
+}
 // ASYNC example
 // #[tauri::command]
 // pub async fn list_offers(
