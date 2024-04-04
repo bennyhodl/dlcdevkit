@@ -262,6 +262,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "bdk_esplora"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9abd2ce171d0a10c44b847c0e4aaf2e6eb81d7b3f5ac8bde4e0e0b77edfc313f"
+dependencies = [
+ "async-trait",
+ "bdk_chain",
+ "esplora-client",
+ "futures",
+]
+
+[[package]]
 name = "bdk_file_store"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1159,6 +1171,7 @@ dependencies = [
  "anyhow",
  "base64 0.13.1",
  "bdk",
+ "bdk_esplora",
  "bdk_file_store",
  "bip39",
  "bitcoin 0.30.2",
@@ -1169,7 +1182,6 @@ dependencies = [
  "dlc-trie",
  "electrsd",
  "electrum-client",
- "esplora-client",
  "futures",
  "getrandom 0.2.11",
  "homedir",

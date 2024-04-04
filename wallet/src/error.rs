@@ -1,5 +1,5 @@
 use bdk::{chain::PersistBackend, wallet::ChangeSet};
-use esplora_client::Error as EsploraError;
+use bdk_esplora::esplora_client::Error as EsploraError;
 use dlc_manager::error::Error as ManagerError;
 
 #[derive(Debug)]

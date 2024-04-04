@@ -62,6 +62,17 @@ async fn main() {
         }
     });
 
+    let wallet_clone = ernest.wallet.clone();
+    tokio::spawn(async move {
+
+        let mut timer = tokio::time::interval(Duration::from_secs(10));
+        loop {
+            timer.tick().await;
+            println!("Syncing wallet...");
+            wallet_clone.sync().unwrap();
+        }
+    });
+
     // let dlc_manager_clone = ernest.manager.clone();
     // let p2p_clone = p2p.clone();
     // tokio::spawn(async move {

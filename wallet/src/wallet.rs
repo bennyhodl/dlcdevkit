@@ -1,4 +1,4 @@
-use crate::{io, chain::EsploraClient};
+use crate::{chain::EsploraClient, io};
 use anyhow::anyhow;
 use bdk::{
     bitcoin::{
@@ -6,15 +6,19 @@ use bdk::{
         key::{KeyPair, XOnlyPublicKey},
         secp256k1::{All, PublicKey, Secp256k1},
         Address, Network, Txid,
-    }, template::Bip86, wallet::{ChangeSet, AddressIndex, AddressInfo, Balance}, KeychainKind, SignOptions, Wallet
+    },
+    template::Bip86,
+    wallet::{AddressIndex, AddressInfo, Balance, ChangeSet, Update},
+    KeychainKind, SignOptions, Wallet,
 };
+use bdk_esplora::EsploraExt;
 use bdk_file_store::Store;
 use bitcoin::{secp256k1::SecretKey, FeeRate, ScriptBuf};
 use dlc_manager::{error::Error as ManagerError, SimpleSigner};
 use lightning::chain::chaininterface::{ConfirmationTarget, FeeEstimator};
 use serde::Deserialize;
-use std::sync::{atomic::Ordering, Arc};
 use std::sync::{atomic::AtomicU32, RwLock};
+use std::sync::{atomic::Ordering, Arc};
 use std::{collections::HashMap, sync::Mutex};
 
 const SLED_TREE: &str = "bdk_store";
@@ -39,7 +43,8 @@ impl ErnestWallet {
 
         let db_path = io::get_ernest_dir().join(&name).join("wallet_db");
 
-        let database = bdk_file_store::Store::<ChangeSet>::open_or_create_new(DB_MAGIC.as_bytes(), db_path)?;
+        let database =
+            bdk_file_store::Store::<ChangeSet>::open_or_create_new(DB_MAGIC.as_bytes(), db_path)?;
 
         let inner = Arc::new(Mutex::new(Wallet::new(
             Bip86(xprv, KeychainKind::External),
@@ -89,12 +94,29 @@ impl ErnestWallet {
         })
     }
 
-    // pub fn sync(&self) -> anyhow::Result<()> {
-    //     let wallet_lock = self.inner.lock().unwrap();
-    //     // let sync_opts = SyncOptions { progress: None };
-    //     let sync = wallet_lock.sync(&self.blockchain, sync_opts)?;
-    //     Ok(sync)
-    // }
+    pub fn sync(&self) -> anyhow::Result<()> {
+        let mut wallet = self.inner.lock().unwrap();
+        let prev_tip = wallet.latest_checkpoint();
+        let keychain_spks = wallet.all_unbounded_spk_iters().into_iter().collect();
+        let (update_graph, last_active_indices) =
+            self.blockchain
+                .blocking_client
+                .full_scan(keychain_spks, 5, 1)?;
+        let missing_height = update_graph.missing_heights(wallet.local_chain());
+        let chain_update = self
+            .blockchain
+            .blocking_client
+            .update_local_chain(prev_tip, missing_height)?;
+        let update = Update {
+            last_active_indices,
+            graph: update_graph,
+            chain: Some(chain_update),
+        };
+
+        wallet.apply_update(update)?;
+        wallet.commit()?;
+        Ok(())
+    }
 
     pub fn get_pubkey(&self) -> anyhow::Result<PublicKey> {
         let pubkey = PublicKey::from_secret_key(&self.secp, &self.xprv.private_key);
@@ -211,7 +233,7 @@ impl dlc_manager::Wallet for ErnestWallet {
             .unwrap()
             .sign(psbt, bdk::SignOptions::default())
             .unwrap();
-            // .map_err(bdk_err_to_manager_err)?;
+        // .map_err(bdk_err_to_manager_err)?;
         Ok(())
     }
 
@@ -236,7 +258,7 @@ impl dlc_manager::Wallet for ErnestWallet {
         let wallet = self.inner.lock().unwrap();
 
         let local_utxos = wallet.list_unspent();
-            // .map_err(bdk_err_to_manager_err)?;
+        // .map_err(bdk_err_to_manager_err)?;
 
         let dlc_utxos = local_utxos
             .map(|utxo| {

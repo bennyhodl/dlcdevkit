@@ -1,5 +1,6 @@
-use esplora_client::{BlockingClient, AsyncClient, Builder};
-use esplora_client::Error as EsploraError;
+use bdk_esplora::esplora_client::{BlockingClient, AsyncClient, Builder};
+use bdk_esplora::EsploraExt;
+use bdk_esplora::esplora_client::Error as EsploraError;
 use bitcoin::{Txid, Transaction};
 use bitcoin::Network;
 use crate::error::esplora_err_to_manager_err;
