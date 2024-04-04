@@ -5,6 +5,7 @@ pub use lightning_net_tokio;
 pub use peer_manager::{ErnestPeerManager, PeerManager};
 
 use crate::{get_ernest_dir, oracle::ErnestOracle, wallet::ErnestWallet, ORACLE_HOST};
+use crate::chain::EsploraClient;
 use bdk::bitcoin::Network;
 use bitcoin::secp256k1::{Parity, PublicKey, XOnlyPublicKey};
 use dlc_manager::{
@@ -22,7 +23,7 @@ use std::{
 pub type ErnestDlcManager = dlc_manager::manager::Manager<
     Arc<ErnestWallet>,
     Arc<CachedContractSignerProvider<Arc<ErnestWallet>, SimpleSigner>>,
-    Arc<ErnestWallet>,
+    Arc<EsploraClient>,
     Box<SledStorageProvider>,
     Box<P2PDOracleClient>,
     Arc<SystemTimeProvider>,
@@ -55,10 +56,12 @@ impl Ernest {
         let mut oracles = HashMap::new();
         oracles.insert(oracle.get_public_key(), Box::new(oracle));
 
+        let esplora_client = Arc::new(EsploraClient::new(esplora_url, network)?);
+
         let manager = Arc::new(Mutex::new(Manager::new(
             wallet.clone(),
             wallet.clone(),
-            wallet.clone(),
+            esplora_client.clone(),
             dlc_storage,
             oracles,
             Arc::new(SystemTimeProvider {}),
@@ -91,7 +94,7 @@ impl Ernest {
         let contract_id = ContractId::from(contract);
 
         println!("Before accept: {:?}", contract_id);
-        let (_, public_key, _accept_dlc) = dlc.accept_contract_offer(&contract_id)?;
+        let (_, _public_key, _accept_dlc) = dlc.accept_contract_offer(&contract_id)?;
 
         println!("Accepted");
 

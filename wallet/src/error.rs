@@ -1,20 +1,25 @@
-use bdk::blockchain::esplora::EsploraError;
+use bdk::{chain::PersistBackend, wallet::ChangeSet};
+use esplora_client::Error as EsploraError;
 use dlc_manager::error::Error as ManagerError;
 
 #[derive(Debug)]
 enum ErnestWalletError {
-    Bdk(bdk::Error),
-    Esplora(bdk::blockchain::esplora::EsploraError),
+    // Bdk(BdkError),
+    Esplora(EsploraError),
 }
 
-impl From<bdk::Error> for ErnestWalletError {
-    fn from(value: bdk::Error) -> ErnestWalletError {
-        ErnestWalletError::Bdk(value)
-    }
-}
+// #[derive(Debug)]
+// enum BdkError {
+//     WriteError
+// }
+// impl<D: PersistBackend<ChangeSet>> From<D::WriteError> for ErnestWalletError {
+//     fn from(value: D::WriteError) -> ErnestWalletError {
+//         ErnestWalletError::Bdk(value)
+//     }
+// }
 
-impl From<bdk::blockchain::esplora::EsploraError> for ErnestWalletError {
-    fn from(value: bdk::blockchain::esplora::EsploraError) -> Self {
+impl From<EsploraError> for ErnestWalletError {
+    fn from(value: EsploraError) -> Self {
         ErnestWalletError::Esplora(value)
     }
 }
@@ -22,15 +27,15 @@ impl From<bdk::blockchain::esplora::EsploraError> for ErnestWalletError {
 impl From<ErnestWalletError> for ManagerError {
     fn from(e: ErnestWalletError) -> ManagerError {
         match e {
-            ErnestWalletError::Bdk(e) => ManagerError::WalletError(Box::new(e)),
+            // ErnestWalletError::Bdk(e) => ManagerError::WalletError(Box::new(e)),
             ErnestWalletError::Esplora(e) => ManagerError::BlockchainError(e.to_string()),
         }
     }
 }
 
-pub fn bdk_err_to_manager_err(e: bdk::Error) -> ManagerError {
-    ErnestWalletError::Bdk(e).into()
-}
+// pub fn bdk_err_to_manager_err(e: impl PersistBackend<ChangeSet>::WriteError) -> ManagerError {
+//     ErnestWalletError::Bdk(e).into()
+// }
 
 pub fn esplora_err_to_manager_err(e: EsploraError) -> ManagerError {
     ErnestWalletError::Esplora(e).into()

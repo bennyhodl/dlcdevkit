@@ -1,5 +1,5 @@
-use ernest_wallet::{bdk::{bitcoin::Address, Balance}, p2p::Ernest};
-use std::{str::FromStr, sync::Arc};
+use ernest_wallet::{bdk::wallet::Balance, p2p::Ernest};
+use std::sync::Arc;
 use tauri::State;
 
 #[tauri::command]
@@ -14,7 +14,6 @@ pub fn new_address(ernest: State<Arc<Ernest>>) -> String {
 
 #[tauri::command]
 pub fn get_balance(ernest: State<Arc<Ernest>>) -> Balance {
-    ernest.wallet.sync().unwrap();
     let balance = ernest.wallet.get_balance().unwrap();
     println!("Balance: {:?}", balance);
     balance
