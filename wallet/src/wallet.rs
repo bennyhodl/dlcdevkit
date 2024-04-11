@@ -46,7 +46,7 @@ impl ErnestWallet {
         let database =
             bdk_file_store::Store::<ChangeSet>::open_or_create_new(DB_MAGIC.as_bytes(), db_path)?;
 
-        let inner = Arc::new(Mutex::new(Wallet::new(
+        let inner = Arc::new(Mutex::new(Wallet::new_or_load(
             Bip86(xprv, KeychainKind::External),
             Some(Bip86(xprv, KeychainKind::Internal)),
             database,
