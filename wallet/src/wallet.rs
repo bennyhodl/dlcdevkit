@@ -1,8 +1,8 @@
-use crate::{chain::EsploraClient, io};
+use crate::{chain::EsploraClient, io, signer::{SimpleDeriveSigner, DeriveSigner}};
 use anyhow::anyhow;
 use bdk::{
     bitcoin::{
-        bip32::{ExtendedPrivKey, ExtendedPubKey},
+        bip32::{ExtendedPrivKey, ExtendedPubKey, DerivationPath},
         key::{KeyPair, XOnlyPublicKey},
         secp256k1::{All, PublicKey, Secp256k1},
         Address, Network, Txid,
@@ -16,8 +16,9 @@ use bdk_file_store::Store;
 use bitcoin::{secp256k1::SecretKey, FeeRate, ScriptBuf};
 use dlc_manager::{error::Error as ManagerError, SimpleSigner};
 use lightning::chain::chaininterface::{ConfirmationTarget, FeeEstimator};
+use blake3::Hasher;
 use serde::Deserialize;
-use std::sync::{atomic::AtomicU32, RwLock};
+use std::{fmt::format, str::FromStr, sync::{atomic::AtomicU32, RwLock}};
 use std::sync::{atomic::Ordering, Arc};
 use std::{collections::HashMap, sync::Mutex};
 
@@ -30,6 +31,7 @@ pub struct ErnestWallet {
     pub xprv: ExtendedPrivKey,
     pub name: String,
     pub fees: Arc<HashMap<ConfirmationTarget, AtomicU32>>,
+    simple_derive_signer: SimpleDeriveSigner,
     secp: Secp256k1<All>,
 }
 
@@ -38,6 +40,7 @@ const DB_MAGIC: &str = "ernest-wallet";
 
 impl ErnestWallet {
     pub fn new(name: &str, esplora_url: &str, network: Network) -> anyhow::Result<ErnestWallet> {
+        log::info!("heyhowareya new wallet");
         let secp = Secp256k1::new();
         let xprv = io::read_or_generate_xprv(name, network)?;
 
@@ -89,6 +92,7 @@ impl ErnestWallet {
             network,
             xprv,
             fees,
+            simple_derive_signer: SimpleDeriveSigner {},
             secp,
             name: name.to_string(),
         })
@@ -185,23 +189,47 @@ impl FeeEstimator for ErnestWallet {
 impl dlc_manager::ContractSignerProvider for ErnestWallet {
     type Signer = SimpleSigner;
 
+    // Using the data deterministically generate a key id. From a child key.
     fn derive_signer_key_id(&self, _is_offer_party: bool, temp_id: [u8; 32]) -> [u8; 32] {
-        temp_id
+        let newest_index = self.inner.lock().unwrap().next_derivation_index(KeychainKind::External);
+        let derivation_path = format!("m/86'/0'/0'/0'/{}", newest_index);
+        let child_path = DerivationPath::from_str(&derivation_path).expect("Not a valid derivation path to derive signer key.");
+        let child_key = self.xprv.derive_priv(&self.secp, &child_path).expect("Could not get child key for derivation path.");
+        let mut hasher = Hasher::new();
+        hasher.update(&temp_id);
+        hasher.update(&child_key.encode());
+        let hash = hasher.finalize();
+
+        let mut key_id = [0u8;32];
+        key_id.copy_from_slice(hash.as_bytes());
+        let public_key = PublicKey::from_secret_key(&self.secp, &child_key.private_key);
+        self.simple_derive_signer.store_derived_key_id(newest_index, key_id, child_key.private_key, public_key);
+
+        key_id
     }
 
-    fn derive_contract_signer(&self, _key_id: [u8; 32]) -> Result<Self::Signer, ManagerError> {
-        Ok(SimpleSigner::new(self.xprv.private_key))
+    fn derive_contract_signer(&self, key_id: [u8; 32]) -> Result<Self::Signer, ManagerError> {
+        let index = self.simple_derive_signer.get_index_for_key_id(key_id);
+        let derivation_path = format!("m/86'/0'/0'/0'/{}", index);
+        let child_path = DerivationPath::from_str(&derivation_path).expect("Not a valid derivation path to derive signer key.");
+        let child_key = self.xprv.derive_priv(&self.secp, &child_path).expect("Could not get child key for derivation path.");
+
+        Ok(SimpleSigner::new(child_key.private_key))
     }
 
     fn get_secret_key_for_pubkey(
         &self,
-        _pubkey: &bitcoin::secp256k1::PublicKey,
+        pubkey: &bitcoin::secp256k1::PublicKey,
     ) -> Result<bitcoin::secp256k1::SecretKey, ManagerError> {
-        Ok(self.xprv.private_key)
+        Ok(self.simple_derive_signer.get_secret_key(pubkey))
     }
 
     fn get_new_secret_key(&self) -> Result<bitcoin::secp256k1::SecretKey, ManagerError> {
-        Ok(self.xprv.private_key)
+        let newest_index = self.inner.lock().unwrap().next_derivation_index(KeychainKind::External);
+        let derivation_path = format!("m/86'/0'/0'/0'/{}", newest_index);
+        let child_path = DerivationPath::from_str(&derivation_path).expect("Not a valid derivation path to derive signer key.");
+        let child_key = self.xprv.derive_priv(&self.secp, &child_path).expect("Could not get child key for derivation path.");
+        Ok(child_key.private_key)
     }
 }
 
@@ -242,9 +270,9 @@ impl dlc_manager::Wallet for ErnestWallet {
         Ok(())
     }
 
-    fn import_address(&self, _address: &bitcoin::Address) -> Result<(), ManagerError> {
+    fn import_address(&self, address: &bitcoin::Address) -> Result<(), ManagerError> {
         // might be ok, might not
-        Ok(())
+        Ok(self.simple_derive_signer.import_address_to_storage(address))
     }
 
     // return all utxos

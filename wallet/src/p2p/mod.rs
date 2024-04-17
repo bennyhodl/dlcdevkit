@@ -4,8 +4,8 @@ pub use dlc_messages::message_handler::MessageHandler as DlcMessageHandler;
 pub use lightning_net_tokio;
 pub use peer_manager::{ErnestPeerManager, PeerManager};
 
-use crate::{get_ernest_dir, oracle::ErnestOracle, wallet::ErnestWallet, ORACLE_HOST};
 use crate::chain::EsploraClient;
+use crate::{get_ernest_dir, oracle::ErnestOracle, wallet::ErnestWallet, ORACLE_HOST};
 use bdk::bitcoin::Network;
 use bitcoin::secp256k1::{Parity, PublicKey, XOnlyPublicKey};
 use dlc_manager::{

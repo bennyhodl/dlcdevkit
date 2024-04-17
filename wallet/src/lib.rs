@@ -1,17 +1,18 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
+mod chain;
 mod error;
 mod io;
 mod oracle;
 mod wallet;
-mod chain;
+mod signer;
 
 pub mod nostr_manager;
 pub mod p2p;
+pub use bdk;
 pub use bitcoin::Network;
 pub use dlc_manager;
 pub use dlc_messages;
-pub use bdk;
 pub use dlc_sled_storage_provider::SledStorageProvider;
 pub use io::get_ernest_dir;
 

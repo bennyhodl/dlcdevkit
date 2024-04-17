@@ -1,15 +1,15 @@
-use bdk_esplora::esplora_client::{BlockingClient, AsyncClient, Builder};
-use bdk_esplora::EsploraExt;
-use bdk_esplora::esplora_client::Error as EsploraError;
-use bitcoin::{Txid, Transaction};
-use bitcoin::Network;
 use crate::error::esplora_err_to_manager_err;
+use bdk_esplora::esplora_client::Error as EsploraError;
+use bdk_esplora::esplora_client::{AsyncClient, BlockingClient, Builder};
+use bdk_esplora::EsploraExt;
+use bitcoin::Network;
+use bitcoin::{Transaction, Txid};
 use dlc_manager::error::Error as ManagerError;
 
 pub struct EsploraClient {
     pub blocking_client: BlockingClient,
     pub async_client: AsyncClient,
-    network: Network
+    network: Network,
 }
 
 impl EsploraClient {
@@ -20,7 +20,7 @@ impl EsploraClient {
         Ok(EsploraClient {
             blocking_client,
             async_client,
-            network
+            network,
         })
     }
 }
@@ -31,13 +31,16 @@ impl dlc_manager::Blockchain for EsploraClient {
     }
 
     fn get_transaction(&self, tx_id: &Txid) -> Result<Transaction, ManagerError> {
-        let txn = self.blocking_client
+        let txn = self
+            .blocking_client
             .get_tx(&tx_id)
             .map_err(esplora_err_to_manager_err)?;
 
         match txn {
             Some(txn) => Ok(txn),
-            None => Err(esplora_err_to_manager_err(EsploraError::TransactionNotFound(*tx_id))),
+            None => Err(esplora_err_to_manager_err(
+                EsploraError::TransactionNotFound(*tx_id),
+            )),
         }
     }
 
