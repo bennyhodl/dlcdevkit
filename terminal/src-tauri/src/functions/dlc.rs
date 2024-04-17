@@ -3,17 +3,13 @@ use ernest_wallet::{
     p2p::{Ernest, ErnestPeerManager, Storage},
 };
 // use futures::TryFutureExt;
+use crate::process_incoming_messages;
 use std::sync::Arc;
 use tauri::State;
-use crate::process_incoming_messages;
-
 
 #[tauri::command]
 pub fn list_contracts(ernest: State<Arc<Ernest>>, p2p: State<Arc<ErnestPeerManager>>) {
-    process_incoming_messages(
-        &p2p,
-        &ernest.manager,
-    );
+    process_incoming_messages(&p2p, &ernest.manager);
     let ernest_clone = ernest.manager.clone();
     ernest_clone.lock().unwrap().periodic_check(false).unwrap();
     let contracts = ernest_clone
@@ -31,10 +27,7 @@ pub fn list_offers(
     ernest: State<Arc<Ernest>>,
     p2p: State<Arc<ErnestPeerManager>>,
 ) -> Result<Vec<OfferedContract>, tauri::Error> {
-    process_incoming_messages(
-        &p2p,
-        &ernest.manager,
-    );
+    process_incoming_messages(&p2p, &ernest.manager);
     let ernest_clone = ernest.manager.clone();
     ernest_clone.lock().unwrap().periodic_check(false).unwrap();
     let offers = ernest_clone
@@ -48,10 +41,7 @@ pub fn list_offers(
 }
 
 #[tauri::command]
-pub fn accept_dlc(
-    contract_id: ContractId,
-    ernest: State<Arc<Ernest>>,
-) -> Result<(), String> {
+pub fn accept_dlc(contract_id: ContractId, ernest: State<Arc<Ernest>>) -> Result<(), String> {
     println!("USING CONTRACT ID {:?}", contract_id);
     Ok(ernest.accept_dlc_offer(contract_id).map_err(|e| {
         println!("ERRE: {:?}", e);

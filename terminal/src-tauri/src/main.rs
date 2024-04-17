@@ -4,20 +4,22 @@ mod functions;
 mod models;
 mod nostr;
 
+use crate::functions::{
+    dlc::{accept_dlc, list_contracts, list_offers},
+    wallet::{get_balance, new_address},
+};
+use ernest_wallet::{
+    p2p::{lightning_net_tokio::setup_inbound, Ernest, ErnestDlcManager, ErnestPeerManager},
+    Network,
+};
+use log::{info, LevelFilter};
+use models::Pubkeys;
 use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
-
-use ernest_wallet::{
-    p2p::{
-        lightning_net_tokio::setup_inbound, Ernest, ErnestPeerManager, ErnestDlcManager
-    },
-    Network,
-};
-use crate::functions::{wallet::{get_balance, new_address}, dlc::{accept_dlc, list_contracts, list_offers}};
-use models::Pubkeys;
 use tauri::State;
+use tauri_plugin_log::{fern::colors::ColoredLevelConfig, LogTarget};
 use tokio::net::TcpListener;
 
 #[tauri::command]
@@ -34,11 +36,14 @@ fn list_peers(p2p: State<Arc<ErnestPeerManager>>) -> Vec<String> {
     for (node_id, _) in p2p.peer_manager().get_peer_node_ids() {
         node_ids.push(node_id.to_string())
     }
+    info!("{:?}", node_ids);
     node_ids
 }
 
 #[tokio::main]
 async fn main() {
+    env_logger::builder().filter_level(LevelFilter::Info).build();
+    info!("heyhowareya");
     let name = "terminal".to_string();
     let ernest = Arc::new(
         Ernest::new(&name, "http://localhost:30000", Network::Regtest)
@@ -64,7 +69,6 @@ async fn main() {
 
     let wallet_clone = ernest.wallet.clone();
     tokio::spawn(async move {
-
         let mut timer = tokio::time::interval(Duration::from_secs(10));
         loop {
             timer.tick().await;
@@ -95,7 +99,7 @@ async fn main() {
     //
     //                 if message_handler.has_pending_messages() {
     //                     peer_manager.process_events();
-    //                 }                    
+    //                 }
     //             } else {
     //                 println!("Could acquire lock");
     //                 continue;
@@ -105,6 +109,12 @@ async fn main() {
     // });
 
     tauri::Builder::default()
+        .plugin(
+            tauri_plugin_log::Builder::default()
+                .level(LevelFilter::Info)
+                .targets([LogTarget::Stdout, LogTarget::Webview, LogTarget::LogDir])
+                .build(),
+        )
         .manage(ernest.clone())
         .manage(p2p.clone())
         .invoke_handler(tauri::generate_handler![
