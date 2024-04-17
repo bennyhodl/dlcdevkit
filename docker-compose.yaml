@@ -62,15 +62,60 @@ services:
     volumes:
       - ./regtest/bitcoin/:/config
     restart: unless-stopped
-  oracle-db:
+  kormir-oracle-db:
     image: postgres:latest
-    container_name: oracle-db
-    hostname: oracle-db
+    container_name: kormir-oracle-db
+    hostname: kormir-oracle-db
     environment:
       - POSTGRES_PASSWORD=kormir
       - POSTGRES_USER=kormir
     ports:
       - "5433:5432"
+  oracle-server:
+    image: ghcr.io/p2pderivatives/oracle:v0.2.3
+    container_name: oracle-server
+    # profiles: [oracle]
+    command: |
+      -config /config
+      -appname p2pdoracle
+      -e integration
+      -migrate
+    environment:
+      - P2PDORACLE_DATABASE_HOST=oracle-db
+      - P2PDORACLE_ORACLE_KEYFILE=/key/key.pem
+      - P2PDORACLE_ORACLE_KEYPASS_FILE=/key/pass.txt
+    restart: always
+    depends_on:
+      - oracle-db
+    ports:
+      - 8080:8080
+    volumes:
+      - ./regtest/oracle:/config
+      - ./regtest/oracle/certs/oracle:/key
+
+  oracle-db:
+    image: oracledb:latest
+    build:
+      context: .
+      dockerfile: ./testconfig/oracle/oracledb.dockerfile
+    # profiles: [oracle]
+    command: |
+      -c log_statement=all
+      -c ssl=on
+      -c ssl_cert_file=/certs/db.crt
+      -c ssl_key_file=/certs/db.key
+    restart: always
+    ports:
+      - 5432:5432
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=1234
+      - POSTGRES_DB=db
+    volumes:
+      - oracle-db-data:/var/lib/postgresql/data/ # persist data even if container shuts down
+volumes:
+  oracle-db-data:
+
 networks:
   ernest:
     name: "ernest"

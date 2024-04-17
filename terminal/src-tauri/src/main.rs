@@ -55,7 +55,7 @@ async fn main() {
 
     let peer_manager_connection_handler = p2p.peer_manager();
     tokio::spawn(async move {
-        let listener = TcpListener::bind("0.0.0.0:9000")
+        let listener = TcpListener::bind("0.0.0.0:9002")
             .await
             .expect("Coldn't get port.");
         loop {
