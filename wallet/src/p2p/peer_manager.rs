@@ -10,12 +10,13 @@ use lightning::{
 };
 use lightning_net_tokio::SocketDescriptor;
 use std::{sync::Arc, time::SystemTime};
+use log::info;
 
 pub struct ErnestLogger;
 
 impl Logger for ErnestLogger {
     fn log(&self, record: Record) {
-        println!("LOG: {:?}", record);
+        info!("LOG: {:?}", record);
     }
 }
 

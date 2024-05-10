@@ -18,14 +18,14 @@ impl NostrDlcHandler {
         match event.kind {
             Kind::Custom(88) => {
                 let announcement = oracle_announcement_from_str(&event.content);
-                println!("Oracle Announcement: {:?}", announcement);
+                tracing::info!("Oracle Announcement: {:?}", announcement);
             }
             Kind::Custom(89) => {
                 let attestation = oracle_attestation_from_str(&event.content);
-                println!("Oracle attestation: {:?}", attestation);
+                tracing::info!("Oracle attestation: {:?}", attestation);
             }
-            Kind::Custom(8_888) => println!("DLC message."),
-            _ => println!("unknown {:?}", event),
+            Kind::Custom(8_888) => tracing::info!("DLC message."),
+            _ => tracing::info!("unknown {:?}", event),
         }
     }
 }

@@ -38,6 +38,7 @@ pub struct Ernest {
 
 impl Ernest {
     pub async fn new(name: &str, esplora_url: &str, network: Network) -> anyhow::Result<Ernest> {
+        log::info!("Creating new P2P Ernest wallet. name={}", name);
         let wallet = Arc::new(ErnestWallet::new(name, esplora_url, network)?);
 
         let db_path = get_ernest_dir().join(name);
@@ -93,10 +94,10 @@ impl Ernest {
 
         let contract_id = ContractId::from(contract);
 
-        println!("Before accept: {:?}", contract_id);
+        tracing::info!("Before accept: {:?}", contract_id);
         let (_, _public_key, _accept_dlc) = dlc.accept_contract_offer(&contract_id)?;
 
-        println!("Accepted");
+        tracing::info!("Accepted");
 
         Ok(())
     }

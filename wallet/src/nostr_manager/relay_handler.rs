@@ -129,10 +129,10 @@ impl NostrDlcRelayHandler {
 
     pub fn handle_dlc_msg_event(&self, event: Event) {
         match event.kind {
-            Kind::Custom(89) => println!("Oracle attestation kind."),
-            Kind::Custom(88) => println!("Oracle announcement kind."),
-            Kind::Custom(8_888) => println!("DLC message."),
-            _ => println!("unknown"),
+            Kind::Custom(89) => tracing::info!("Oracle attestation kind."),
+            Kind::Custom(88) => tracing::info!("Oracle announcement kind."),
+            Kind::Custom(8_888) => tracing::info!("DLC message."),
+            _ => tracing::info!("unknown"),
         }
     }
 

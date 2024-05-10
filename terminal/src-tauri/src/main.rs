@@ -18,9 +18,11 @@ use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
-use tauri::State;
-use tauri_plugin_log::{fern::colors::ColoredLevelConfig, LogTarget};
+use tauri::{Manager, State};
+use tauri_plugin_log::LogTarget;
 use tokio::net::TcpListener;
+use tracing_subscriber::FmtSubscriber;
+use tracing::Level;
 
 #[tauri::command]
 fn get_pubkeys(ernest: State<Arc<Ernest>>, p2p: State<Arc<ErnestPeerManager>>) -> Pubkeys {
@@ -42,8 +44,21 @@ fn list_peers(p2p: State<Arc<ErnestPeerManager>>) -> Vec<String> {
 
 #[tokio::main]
 async fn main() {
+    let _ = fix_path_env::fix();
+    // let _ = env_logger::init();
     env_logger::builder().filter_level(LevelFilter::Info).build();
-    info!("heyhowareya");
+    // a builder for `FmtSubscriber`.
+    let subscriber = FmtSubscriber::builder()
+        // all spans/events with a level higher than TRACE (e.g, debug, info, warn, etc.)
+        // will be written to stdout.
+        .with_max_level(Level::INFO)
+        // completes the builder.
+        .finish();
+
+    tracing::subscriber::set_global_default(subscriber)
+        .expect("setting default subscriber failed");
+
+    log::info!("heyhowareya");
     let name = "terminal".to_string();
     let ernest = Arc::new(
         Ernest::new(&name, "http://localhost:30000", Network::Regtest)
@@ -72,7 +87,7 @@ async fn main() {
         let mut timer = tokio::time::interval(Duration::from_secs(10));
         loop {
             timer.tick().await;
-            println!("Syncing wallet...");
+            log::info!("Syncing wallet...");
             wallet_clone.sync().unwrap();
         }
     });
@@ -128,6 +143,25 @@ async fn main() {
             list_offers,
             accept_dlc,
         ])
+        .setup(move |_app| {
+            // let p2p = Arc::new(ErnestPeerManager::new("terminal", Network::Regtest));
+            // let app_handle = app.app_handle();
+            //
+            // let p2p_clone = p2p.clone();
+            // let p2p_state = app_handle.state::<Arc<ErnestPeerManager>>().clone();
+            // tauri::async_runtime::spawn(async move {
+            //     peer_manager_server(p2p_state).await; 
+            // });
+            //
+            // let wallet_state = app_handle.state::<Arc<Ernest>>().clone();
+            // let wallet_clone = ernest.wallet.clone();
+            // tauri::async_runtime::spawn(async move {
+            //     wallet_watcher(wallet_state).await;
+            // });
+
+            Ok(())
+
+        })
         .run(tauri::generate_context!())
         .expect("error while running ernest");
 }
@@ -153,5 +187,32 @@ pub fn process_incoming_messages(
 
     if message_handler.has_pending_messages() {
         peer_manager.process_events();
+    }
+}
+
+async fn peer_manager_server(state: State<'_, Arc<ErnestPeerManager>>) {
+
+    let peer_manager_connection_handler = state.peer_manager();
+
+    let listener = TcpListener::bind("0.0.0.0:9002")
+        .await
+        .expect("Coldn't get port.");
+
+    loop {
+        let peer_mgr = peer_manager_connection_handler.clone();
+        let (tcp_stream, _) = listener.accept().await.unwrap();
+        tauri::async_runtime::spawn(async move {
+            setup_inbound(peer_mgr.clone(), tcp_stream.into_std().unwrap()).await;
+        });
+    }
+}
+
+async fn wallet_watcher(state: State<'_, Arc<Ernest>>) {
+
+    let mut timer = tokio::time::interval(Duration::from_secs(10));
+    loop {
+        timer.tick().await;
+        log::info!("Syncing wallet...");
+        state.wallet.sync().unwrap();
     }
 }

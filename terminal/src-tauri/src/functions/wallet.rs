@@ -15,7 +15,7 @@ pub fn new_address(ernest: State<Arc<Ernest>>) -> String {
 #[tauri::command]
 pub fn get_balance(ernest: State<Arc<Ernest>>) -> Balance {
     let balance = ernest.wallet.get_balance().unwrap();
-    println!("Balance: {:?}", balance);
+    log::info!("Balance: {:?}", balance);
     balance
 }
 

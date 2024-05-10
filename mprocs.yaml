@@ -1,4 +1,7 @@
 procs:
+  # bitcoin:
+  #   shell: "docker run --name ernest-bitcoin --hostname bitcoin --env USERID=1000 --env GROUPID=1000 polarlightning/bitcoind:26.0 bitcoind -server=1 -regtest=1 -rpcuser=ernest -rpcpassword=ernest -debug=1 -zmqpubrawblock=tcp://0.0.0.0:28333 -zmqpubrawtx=tcp://0.0.0.0:28332 -zmqpubhashblock=tcp://0.0.0.0:28334 -txindex=1 -dnsseed=0 -upnp=0 -rpcbind=0.0.0.0 -rpcallowip=0.0.0.0/0 -rpcport=18443 -rest -listen=1 -listenonion=0 -fallbackfee=0.0002 -blockfilterindex=1 -peerblockfilters=1"
+  #   stop: "hard-kill"
   relay:
     shell: "RUST_LOG=info /Users/ben/ernest/relays/nostr-rs-relay/target/release/nostr-rs-relay -d /Users/ben/ernest/relays/nostr-relay-db -c /Users/ben/ernest/relays/config.toml"
   kormir:
