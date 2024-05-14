@@ -1,3 +1,3 @@
 [workspace]
 resolver = "2"
-members = ["wallet", "terminal/src-tauri", "payouts"]
+members = ["ddk", "bella/src-tauri", "payouts"]

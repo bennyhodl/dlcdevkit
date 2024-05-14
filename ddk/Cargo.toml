@@ -1,0 +1,45 @@
+[package]
+name = "dlc-dev-kit"
+version = "0.0.5"
+edition = "2021"
+description = "DLC Development Kit"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.75"
+base64 = "0.13.0"
+bdk = "1.0.0-alpha.8"
+bdk_file_store = "0.8.0"
+bdk_esplora = { version = "0.10", features = ["blocking", "async"] }
+bitcoin = { version = "0.30.2", features = ["rand", "serde"] }
+dlc = { git = "https://github.com/p2pderivatives/rust-dlc", branch = "master", features = ["use-serde"] }
+dlc-manager = { git = "https://github.com/p2pderivatives/rust-dlc", branch = "master", features = ["use-serde"] }
+dlc-messages = { git = "https://github.com/p2pderivatives/rust-dlc", branch = "master", features = [ "use-serde"] }
+dlc-trie = { git = "https://github.com/p2pderivatives/rust-dlc", branch = "master", features = ["use-serde"] }
+p2pd-oracle-client = { git = "https://github.com/p2pderivatives/rust-dlc", branch = "master" }
+dlc-sled-storage-provider = { git = "https://github.com/p2pderivatives/rust-dlc", branch = "master" }
+getrandom = { version = "0.2.11", features = ["js"] }
+homedir = "0.2.1"
+lightning = { version = "0.0.121", default-features = false, features = ["grind_signatures", "std"] }
+nostr = { version = "0.29.0", features = ["std"] }
+nostr-sdk = "0.29.0"
+rand = "0.8.5"
+reqwest = { version = "0.11.22", features = ["blocking"] }
+serde = { version = "1.0.192", features = ["derive"] }
+serde_json = "1.0.108"
+serde_with = "3.4.0"
+thiserror = "1.0.50"
+tokio = { version = "1.34.0", features = ["full"] }
+nostr-sqlite = "0.28.0"
+lightning-net-tokio = "0.0.121"
+nostr-relay-pool = "0.29.1"
+bip39 = "2.0.0"
+blake3 = "1.5.1"
+log = "0.4.21"
+tracing = "0.1.40"
+
+[dev-dependencies]
+electrsd = { version = "0.22.0", features = ["legacy", "esplora_a33e97e1", "bitcoind_23_0"] }
+electrum-client = "0.12.0"
+futures = "0.3.29"
