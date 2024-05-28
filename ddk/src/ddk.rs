@@ -1,8 +1,6 @@
-pub mod peer_manager;
 pub use dlc_manager::Storage;
 pub use dlc_messages::message_handler::MessageHandler as DlcMessageHandler;
 pub use lightning_net_tokio;
-pub use peer_manager::{DlcDevKitPeerManager, PeerManager};
 
 use crate::chain::EsploraClient;
 use crate::{get_dlc_dev_kit_dir, oracle::DlcDevKitOracle, wallet::DlcDevKitWallet, ORACLE_HOST};
@@ -34,6 +32,9 @@ pub type DlcDevKitDlcManager = dlc_manager::manager::Manager<
 pub struct DlcDevKit {
     pub wallet: Arc<DlcDevKitWallet>,
     pub manager: Arc<Mutex<DlcDevKitDlcManager>>,
+    // transport
+    // storage
+    // entropy (get seed from any source)
 }
 
 impl DlcDevKit {
@@ -44,12 +45,6 @@ impl DlcDevKit {
         let db_path = get_dlc_dev_kit_dir().join(name);
         let dlc_storage = Box::new(SledStorageProvider::new(db_path.to_str().unwrap())?);
 
-        // Ask carman!
-        // let oracle = tokio::task::spawn_blocking(move ||
-        //     Arc::new(DlcDevKitOracle::new().unwrap())
-        // ).await.unwrap();
-        // let mut oracles = HashMap::new();
-        // oracles.insert(oracle.get_public_key(), oracle);
         let oracle =
             tokio::task::spawn_blocking(move || P2PDOracleClient::new(ORACLE_HOST).unwrap())
                 .await
