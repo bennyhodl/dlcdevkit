@@ -366,7 +366,7 @@ name = "bella"
 version = "0.0.5"
 dependencies = [
  "anyhow",
- "dlc-dev-kit",
+ "ddk",
  "env_logger",
  "fix-path-env",
  "futures",
@@ -1111,6 +1111,47 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7e962a19be5cfc3f3bf6dd8f61eb50107f356ad6270fbb3ed41476571db78be5"
 
 [[package]]
+name = "ddk"
+version = "0.0.5"
+dependencies = [
+ "anyhow",
+ "base64 0.13.1",
+ "bdk",
+ "bdk_esplora",
+ "bdk_file_store",
+ "bip39",
+ "bitcoin 0.30.2",
+ "blake3",
+ "chrono",
+ "dlc 0.4.0 (git+https://github.com/p2pderivatives/rust-dlc?rev=bd32cd5)",
+ "dlc-manager 0.4.0 (git+https://github.com/p2pderivatives/rust-dlc?rev=bd32cd5)",
+ "dlc-messages 0.4.0 (git+https://github.com/p2pderivatives/rust-dlc?rev=bd32cd5)",
+ "dlc-trie 0.4.0 (git+https://github.com/p2pderivatives/rust-dlc?rev=bd32cd5)",
+ "electrsd",
+ "electrum-client",
+ "futures",
+ "getrandom 0.2.11",
+ "homedir",
+ "lightning",
+ "lightning-net-tokio",
+ "log",
+ "nostr 0.29.0",
+ "nostr-relay-pool",
+ "nostr-sdk",
+ "nostr-sqlite",
+ "rand 0.8.5",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "sled",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "deadpool"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1225,44 +1266,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "dlc-dev-kit"
-version = "0.0.5"
+name = "dlc"
+version = "0.4.0"
+source = "git+https://github.com/p2pderivatives/rust-dlc?rev=bd32cd5#bd32cd5bd9e8156801e07bbdfcc9189ccbb6374c"
 dependencies = [
- "anyhow",
- "base64 0.13.1",
- "bdk",
- "bdk_esplora",
- "bdk_file_store",
- "bip39",
  "bitcoin 0.30.2",
- "blake3",
- "chrono",
- "dlc",
- "dlc-manager",
- "dlc-messages",
- "dlc-trie",
- "electrsd",
- "electrum-client",
- "futures",
- "getrandom 0.2.11",
- "homedir",
- "lightning",
- "lightning-net-tokio",
- "log",
- "nostr 0.29.0",
- "nostr-relay-pool",
- "nostr-sdk",
- "nostr-sqlite",
- "rand 0.8.5",
- "reqwest",
+ "miniscript",
+ "secp256k1-sys 0.8.1",
+ "secp256k1-zkp",
  "serde",
- "serde_json",
- "serde_with",
- "sled",
- "thiserror",
- "tokio",
- "tracing",
- "uuid",
 ]
 
 [[package]]
@@ -1272,9 +1284,26 @@ source = "git+https://github.com/p2pderivatives/rust-dlc?branch=master#240c2741b
 dependencies = [
  "async-trait",
  "bitcoin 0.30.2",
- "dlc",
- "dlc-messages",
- "dlc-trie",
+ "dlc 0.4.0 (git+https://github.com/p2pderivatives/rust-dlc?branch=master)",
+ "dlc-messages 0.4.0 (git+https://github.com/p2pderivatives/rust-dlc?branch=master)",
+ "dlc-trie 0.4.0 (git+https://github.com/p2pderivatives/rust-dlc?branch=master)",
+ "hex-conservative",
+ "lightning",
+ "log",
+ "secp256k1-zkp",
+ "serde",
+]
+
+[[package]]
+name = "dlc-manager"
+version = "0.4.0"
+source = "git+https://github.com/p2pderivatives/rust-dlc?rev=bd32cd5#bd32cd5bd9e8156801e07bbdfcc9189ccbb6374c"
+dependencies = [
+ "async-trait",
+ "bitcoin 0.30.2",
+ "dlc 0.4.0 (git+https://github.com/p2pderivatives/rust-dlc?rev=bd32cd5)",
+ "dlc-messages 0.4.0 (git+https://github.com/p2pderivatives/rust-dlc?rev=bd32cd5)",
+ "dlc-trie 0.4.0 (git+https://github.com/p2pderivatives/rust-dlc?rev=bd32cd5)",
  "hex-conservative",
  "lightning",
  "log",
@@ -1288,7 +1317,19 @@ version = "0.4.0"
 source = "git+https://github.com/p2pderivatives/rust-dlc?branch=master#240c2741b904777a306ab29752ff89f95c4ad639"
 dependencies = [
  "bitcoin 0.30.2",
- "dlc",
+ "dlc 0.4.0 (git+https://github.com/p2pderivatives/rust-dlc?branch=master)",
+ "lightning",
+ "secp256k1-zkp",
+ "serde",
+]
+
+[[package]]
+name = "dlc-messages"
+version = "0.4.0"
+source = "git+https://github.com/p2pderivatives/rust-dlc?rev=bd32cd5#bd32cd5bd9e8156801e07bbdfcc9189ccbb6374c"
+dependencies = [
+ "bitcoin 0.30.2",
+ "dlc 0.4.0 (git+https://github.com/p2pderivatives/rust-dlc?rev=bd32cd5)",
  "lightning",
  "secp256k1-zkp",
  "serde",
@@ -1300,7 +1341,18 @@ version = "0.4.0"
 source = "git+https://github.com/p2pderivatives/rust-dlc?branch=master#240c2741b904777a306ab29752ff89f95c4ad639"
 dependencies = [
  "bitcoin 0.30.2",
- "dlc",
+ "dlc 0.4.0 (git+https://github.com/p2pderivatives/rust-dlc?branch=master)",
+ "secp256k1-zkp",
+ "serde",
+]
+
+[[package]]
+name = "dlc-trie"
+version = "0.4.0"
+source = "git+https://github.com/p2pderivatives/rust-dlc?rev=bd32cd5#bd32cd5bd9e8156801e07bbdfcc9189ccbb6374c"
+dependencies = [
+ "bitcoin 0.30.2",
+ "dlc 0.4.0 (git+https://github.com/p2pderivatives/rust-dlc?rev=bd32cd5)",
  "secp256k1-zkp",
  "serde",
 ]
@@ -3275,10 +3327,10 @@ checksum = "8835116a5c179084a830efb3adc117ab007512b535bc1a21c991d3b32a6b44dd"
 name = "payouts"
 version = "0.0.5"
 dependencies = [
- "dlc",
- "dlc-manager",
- "dlc-messages",
- "dlc-trie",
+ "dlc 0.4.0 (git+https://github.com/p2pderivatives/rust-dlc?branch=master)",
+ "dlc-manager 0.4.0 (git+https://github.com/p2pderivatives/rust-dlc?branch=master)",
+ "dlc-messages 0.4.0 (git+https://github.com/p2pderivatives/rust-dlc?branch=master)",
+ "dlc-trie 0.4.0 (git+https://github.com/p2pderivatives/rust-dlc?branch=master)",
 ]
 
 [[package]]
