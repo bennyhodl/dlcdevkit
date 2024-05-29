@@ -12,8 +12,8 @@ use dlc_manager::{
     ContractId, Oracle, SimpleSigner, SystemTimeProvider,
 };
 use dlc_messages::{message_handler::MessageHandler, oracle_msgs::OracleAnnouncement};
-use dlc_sled_storage_provider::SledStorageProvider;
-use p2pd_oracle_client::P2PDOracleClient;
+use crate::storage::SledStorageProvider;
+use crate::oracle::P2PDOracleClient;
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
