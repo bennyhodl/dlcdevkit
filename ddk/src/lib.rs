@@ -7,6 +7,7 @@ mod io;
 mod oracle;
 mod signer;
 mod wallet;
+mod storage;
 
 /// Build a DDK application.
 pub mod builder;
@@ -20,7 +21,6 @@ pub use bitcoin::Network;
 pub use ddk::DlcDevKit;
 pub use dlc_manager;
 pub use dlc_messages;
-pub use dlc_sled_storage_provider::SledStorageProvider;
 pub use io::get_dlc_dev_kit_dir;
 
 pub const RELAY_HOST: &str = "ws://localhost:8081";

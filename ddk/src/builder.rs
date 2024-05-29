@@ -6,8 +6,8 @@ use bitcoin::Network;
 use dlc_manager::manager::Manager;
 use dlc_manager::Oracle;
 use dlc_manager::SystemTimeProvider;
-use dlc_sled_storage_provider::SledStorageProvider;
-use p2pd_oracle_client::P2PDOracleClient;
+use crate::storage::SledStorageProvider;
+use crate::oracle::P2PDOracleClient;
 
 use crate::chain::EsploraClient;
 use crate::ddk::DlcDevKit;

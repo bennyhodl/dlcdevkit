@@ -822,9 +822,9 @@ dependencies = [
 
 [[package]]
 name = "chrono"
-version = "0.4.31"
+version = "0.4.38"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f2c685bad3eb3d45a01354cedb7d5faa66194d1d58ba6e267a8de788f79db38"
+checksum = "a21f936df1771bf62b77f047b726c4625ff2e8aa607c01ec06e5a05bd8463401"
 dependencies = [
  "android-tzdata",
  "iana-time-zone",
@@ -832,7 +832,7 @@ dependencies = [
  "num-traits",
  "serde",
  "wasm-bindgen",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.0",
 ]
 
 [[package]]
@@ -1215,7 +1215,7 @@ checksum = "bd0c93bb4b0c6d9b77f4435b0ae98c24d17f1c45b2ff844c6151a07256ca923b"
 [[package]]
 name = "dlc"
 version = "0.4.0"
-source = "git+https://github.com/p2pderivatives/rust-dlc?branch=master#a3320600a7a01130f739e8b9a9c7d86e4f68ee89"
+source = "git+https://github.com/p2pderivatives/rust-dlc?branch=master#240c2741b904777a306ab29752ff89f95c4ad639"
 dependencies = [
  "bitcoin 0.30.2",
  "miniscript",
@@ -1236,10 +1236,10 @@ dependencies = [
  "bip39",
  "bitcoin 0.30.2",
  "blake3",
+ "chrono",
  "dlc",
  "dlc-manager",
  "dlc-messages",
- "dlc-sled-storage-provider",
  "dlc-trie",
  "electrsd",
  "electrum-client",
@@ -1253,12 +1253,12 @@ dependencies = [
  "nostr-relay-pool",
  "nostr-sdk",
  "nostr-sqlite",
- "p2pd-oracle-client",
  "rand 0.8.5",
  "reqwest",
  "serde",
  "serde_json",
  "serde_with",
+ "sled",
  "thiserror",
  "tokio",
  "tracing",
@@ -1268,7 +1268,7 @@ dependencies = [
 [[package]]
 name = "dlc-manager"
 version = "0.4.0"
-source = "git+https://github.com/p2pderivatives/rust-dlc?branch=master#a3320600a7a01130f739e8b9a9c7d86e4f68ee89"
+source = "git+https://github.com/p2pderivatives/rust-dlc?branch=master#240c2741b904777a306ab29752ff89f95c4ad639"
 dependencies = [
  "async-trait",
  "bitcoin 0.30.2",
@@ -1285,7 +1285,7 @@ dependencies = [
 [[package]]
 name = "dlc-messages"
 version = "0.4.0"
-source = "git+https://github.com/p2pderivatives/rust-dlc?branch=master#a3320600a7a01130f739e8b9a9c7d86e4f68ee89"
+source = "git+https://github.com/p2pderivatives/rust-dlc?branch=master#240c2741b904777a306ab29752ff89f95c4ad639"
 dependencies = [
  "bitcoin 0.30.2",
  "dlc",
@@ -1295,18 +1295,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "dlc-sled-storage-provider"
-version = "0.1.0"
-source = "git+https://github.com/p2pderivatives/rust-dlc?branch=master#a3320600a7a01130f739e8b9a9c7d86e4f68ee89"
-dependencies = [
- "dlc-manager",
- "sled",
-]
-
-[[package]]
 name = "dlc-trie"
 version = "0.4.0"
-source = "git+https://github.com/p2pderivatives/rust-dlc?branch=master#a3320600a7a01130f739e8b9a9c7d86e4f68ee89"
+source = "git+https://github.com/p2pderivatives/rust-dlc?branch=master#240c2741b904777a306ab29752ff89f95c4ad639"
 dependencies = [
  "bitcoin 0.30.2",
  "dlc",
@@ -3189,19 +3180,6 @@ name = "overload"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b15813163c1d831bf4a13c3610c05c0d03b39feb07f7e09fa234dac9b15aaf39"
-
-[[package]]
-name = "p2pd-oracle-client"
-version = "0.1.0"
-source = "git+https://github.com/p2pderivatives/rust-dlc?branch=master#a3320600a7a01130f739e8b9a9c7d86e4f68ee89"
-dependencies = [
- "chrono",
- "dlc-manager",
- "dlc-messages",
- "reqwest",
- "secp256k1-zkp",
- "serde",
-]
 
 [[package]]
 name = "pango"
