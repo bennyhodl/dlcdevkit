@@ -4,8 +4,8 @@ use std::sync::{Arc, Mutex};
 
 use bitcoin::Network;
 use dlc_manager::manager::Manager;
-use dlc_manager::SystemTimeProvider;
 use dlc_manager::Oracle;
+use dlc_manager::SystemTimeProvider;
 use dlc_sled_storage_provider::SledStorageProvider;
 use p2pd_oracle_client::P2PDOracleClient;
 
@@ -103,7 +103,7 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
         self
     }
 
-    async fn finish(self) -> anyhow::Result<DlcDevKit<T, S, O>> {
+    pub async fn finish(&self) -> anyhow::Result<DlcDevKit<T, S, O>> {
         let transport = self
             .transport
             .as_ref()
@@ -119,13 +119,17 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
             .as_ref()
             .map_or_else(|| Err(BuilderError::NoOracle), |o| Ok(o.clone()))?;
 
-        let name = match self.name {
+        let name = match self.name.clone() {
             Some(n) => n,
-            None => uuid::Uuid::new_v4().to_string()
+            None => uuid::Uuid::new_v4().to_string(),
         };
 
         log::info!("Creating new P2P DlcDevKit wallet. name={}", name);
-        let wallet = Arc::new(DlcDevKitWallet::new(&name, &self.esplora_url, self.network)?);
+        let wallet = Arc::new(DlcDevKitWallet::new(
+            &name,
+            &self.esplora_url,
+            self.network,
+        )?);
 
         let db_path = get_dlc_dev_kit_dir().join(&name);
         let dlc_storage = Box::new(SledStorageProvider::new(db_path.to_str().unwrap())?);

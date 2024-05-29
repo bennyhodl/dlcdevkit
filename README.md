@@ -13,27 +13,42 @@ Build DLC application by plugging in your own transport, storage, and oracle cli
 ## Get Started
 
 ```rust
-use dlcdevkit::Builder;
-use dlcdevkit::storage::FileStore;
-use dlcdevkit::transport::TcpTransport;
-use dlcdevkit::oracle::P2PDerivativesOracle;
+use dlc_dev_kit::builder::DdkBuilder;
+use dlc_dev_kit::{DdkOracle, DdkStorage, DdkTransport};
+use std::sync::Arc;
+
+#[derive(Clone)]
+struct MockTransport;
+impl DdkTransport for MockTransport {}
+
+#[derive(Clone)]
+struct MockStorage;
+impl DdkStorage for MockStorage {}
+
+#[derive(Clone)]
+struct MockOracle;
+impl DdkOracle for MockOracle {}
+
+type ApplicationDdk = dlc_dev_kit::DlcDevKit<MockTransport, MockStorage, MockOracle>;
 
 #[tokio::main]
 async fn main() {
-    let mut builder = Builder::new();
+    let transport = Arc::new(MockTransport {});
+    let storage = Arc::new(MockStorage {});
+    let oracle_client = Arc::new(MockOracle {});
+    let builder: ApplicationDdk = DdkBuilder::new()
+        .set_name("ddk")
+        .set_esplora_url("https://mempool.space/api")
+        .set_transport(transport.clone())
+        .set_storage(storage.clone())
+        .set_oracle(oracle_client.clone())
+        .finish()
+        .await
+        .unwrap();
 
-    let storage = FileStore::new();
-    let transport = TcpTransport::new();
-    let oracle = P2PDerivativesOracle::new();
+    let wallet = builder.wallet.new_external_address();
 
-    builder.set_espolora_url("https://mempool.space");
-    builder.set_storage(storage);
-    builder.set_transport(transport);
-    builder.set_oracle(oracle);
-    
-    let ddk = builder.finish().unwrap();
-
-    ddk.start().unwrap();
+    assert!(wallet.is_ok());
 }
 ```
 
