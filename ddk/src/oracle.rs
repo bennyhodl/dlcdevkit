@@ -55,3 +55,5 @@ impl dlc_manager::Oracle for DlcDevKitOracle {
         })
     }
 }
+
+impl crate::DdkOracle for DlcDevKitOracle {}
