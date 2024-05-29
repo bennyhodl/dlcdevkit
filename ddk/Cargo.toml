@@ -2,6 +2,7 @@
 name = "dlc-dev-kit"
 version = "0.0.5"
 edition = "2021"
+license = "MIT"
 description = "DLC Development Kit"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -13,12 +14,12 @@ bdk = "1.0.0-alpha.8"
 bdk_file_store = "0.8.0"
 bdk_esplora = { version = "0.10", features = ["blocking", "async"] }
 bitcoin = { version = "0.30.2", features = ["rand", "serde"] }
-dlc = { git = "https://github.com/p2pderivatives/rust-dlc", branch = "master", features = ["use-serde"] }
-dlc-manager = { git = "https://github.com/p2pderivatives/rust-dlc", branch = "master", features = ["use-serde"] }
-dlc-messages = { git = "https://github.com/p2pderivatives/rust-dlc", branch = "master", features = [ "use-serde"] }
-dlc-trie = { git = "https://github.com/p2pderivatives/rust-dlc", branch = "master", features = ["use-serde"] }
-p2pd-oracle-client = { git = "https://github.com/p2pderivatives/rust-dlc", branch = "master" }
-dlc-sled-storage-provider = { git = "https://github.com/p2pderivatives/rust-dlc", branch = "master" }
+dlc = { version = "*", git = "https://github.com/p2pderivatives/rust-dlc", branch = "master", features = ["use-serde"] }
+dlc-manager = { version = "*", git = "https://github.com/p2pderivatives/rust-dlc", branch = "master", features = ["use-serde"] }
+dlc-messages = { version = "*", git = "https://github.com/p2pderivatives/rust-dlc", branch = "master", features = [ "use-serde"] }
+dlc-trie = { version = "*", git = "https://github.com/p2pderivatives/rust-dlc", branch = "master", features = ["use-serde"] }
+p2pd-oracle-client = { version = "*", git = "https://github.com/p2pderivatives/rust-dlc", branch = "master" }
+dlc-sled-storage-provider = { version = "*", git = "https://github.com/p2pderivatives/rust-dlc", branch = "master" }
 getrandom = { version = "0.2.11", features = ["js"] }
 homedir = "0.2.1"
 lightning = { version = "0.0.121", default-features = false, features = ["grind_signatures", "std"] }
