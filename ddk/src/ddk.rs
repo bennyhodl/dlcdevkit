@@ -4,6 +4,7 @@ pub use lightning_net_tokio;
 
 use crate::chain::EsploraClient;
 use crate::{get_dlc_dev_kit_dir, oracle::DlcDevKitOracle, wallet::DlcDevKitWallet, ORACLE_HOST};
+use crate::{DdkOracle, DdkStorage, DdkTransport};
 use bdk::bitcoin::Network;
 use bitcoin::secp256k1::{Parity, PublicKey, XOnlyPublicKey};
 use dlc_manager::{
@@ -29,28 +30,36 @@ pub type DlcDevKitDlcManager = dlc_manager::manager::Manager<
     SimpleSigner,
 >;
 
-pub struct DlcDevKit {
+pub struct DlcDevKit<T: DdkTransport, S: DdkStorage, O: DdkOracle> {
     pub wallet: Arc<DlcDevKitWallet>,
     pub manager: Arc<Mutex<DlcDevKitDlcManager>>,
-    // transport
-    // storage
-    // entropy (get seed from any source)
+    pub transport: Arc<T>,
+    pub storage: Arc<S>,
+    pub oracle: Arc<O>, // transport
+                        // entropy (get seed from any source)
 }
 
-impl DlcDevKit {
-    pub async fn new(name: &str, esplora_url: &str, network: Network) -> anyhow::Result<DlcDevKit> {
+impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DlcDevKit<T, S, O> {
+    pub async fn new(
+        name: &str,
+        esplora_url: &str,
+        network: Network,
+        transport: Arc<T>,
+        storage: Arc<S>,
+        oracle: Arc<O>,
+    ) -> anyhow::Result<DlcDevKit<T, S, O>> {
         log::info!("Creating new P2P DlcDevKit wallet. name={}", name);
         let wallet = Arc::new(DlcDevKitWallet::new(name, esplora_url, network)?);
 
         let db_path = get_dlc_dev_kit_dir().join(name);
         let dlc_storage = Box::new(SledStorageProvider::new(db_path.to_str().unwrap())?);
 
-        let oracle =
+        let oracle_internal =
             tokio::task::spawn_blocking(move || P2PDOracleClient::new(ORACLE_HOST).unwrap())
                 .await
                 .unwrap();
         let mut oracles = HashMap::new();
-        oracles.insert(oracle.get_public_key(), Box::new(oracle));
+        oracles.insert(oracle_internal.get_public_key(), Box::new(oracle_internal));
 
         let esplora_client = Arc::new(EsploraClient::new(esplora_url, network)?);
 
@@ -64,7 +73,13 @@ impl DlcDevKit {
             wallet.clone(),
         )?));
 
-        Ok(DlcDevKit { wallet, manager })
+        Ok(DlcDevKit {
+            wallet,
+            manager,
+            transport,
+            storage,
+            oracle,
+        })
     }
 
     pub async fn send_dlc_offer(
