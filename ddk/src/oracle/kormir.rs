@@ -2,29 +2,29 @@ use bitcoin::key::XOnlyPublicKey;
 use dlc_messages::oracle_msgs::OracleAnnouncement;
 use std::str::FromStr;
 
-const ORACLE_URL: &str = "http://localhost:8082";
+const KORMIR_URL: &str = "http://localhost:8082";
 
 fn get<T>(path: &str) -> anyhow::Result<T>
 where
     T: serde::de::DeserializeOwned,
 {
-    let url = format!("{}{}", ORACLE_URL, path);
+    let url = format!("{}{}", KORMIR_URL, path);
     let request = reqwest::blocking::get(url)?.json::<T>()?;
 
     Ok(request)
 }
 
 #[derive(Debug)]
-pub struct DlcDevKitOracle {
+pub struct KormirOracleClient {
     pubkey: XOnlyPublicKey,
 }
 
-impl DlcDevKitOracle {
-    pub fn new() -> anyhow::Result<DlcDevKitOracle> {
+impl KormirOracleClient {
+    pub fn new() -> anyhow::Result<KormirOracleClient> {
         let request: String = get("/pubkey")?;
         let pubkey = XOnlyPublicKey::from_str(&request)?;
 
-        Ok(DlcDevKitOracle { pubkey })
+        Ok(KormirOracleClient { pubkey })
     }
 
     pub fn get_pubkey(&self) -> anyhow::Result<XOnlyPublicKey> {
@@ -33,7 +33,7 @@ impl DlcDevKitOracle {
     }
 }
 
-impl dlc_manager::Oracle for DlcDevKitOracle {
+impl dlc_manager::Oracle for KormirOracleClient {
     fn get_public_key(&self) -> bitcoin::key::XOnlyPublicKey {
         self.pubkey
     }
@@ -56,4 +56,4 @@ impl dlc_manager::Oracle for DlcDevKitOracle {
     }
 }
 
-impl crate::DdkOracle for DlcDevKitOracle {}
+impl crate::DdkOracle for KormirOracleClient {}

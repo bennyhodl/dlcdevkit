@@ -11,10 +11,13 @@ Application tooling to get started with [DLCs](https://github.com/discreetlogcon
 Build DLC application by plugging in your own transport, storage, and oracle clients.
 
 ## Get Started
+```
+$ cargo add ddk
+```
 
 ```rust
-use dlc_dev_kit::builder::DdkBuilder;
-use dlc_dev_kit::{DdkOracle, DdkStorage, DdkTransport};
+use ddk::builder::DdkBuilder;
+use ddk::{DdkOracle, DdkStorage, DdkTransport};
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -29,13 +32,14 @@ impl DdkStorage for MockStorage {}
 struct MockOracle;
 impl DdkOracle for MockOracle {}
 
-type ApplicationDdk = dlc_dev_kit::DlcDevKit<MockTransport, MockStorage, MockOracle>;
+type ApplicationDdk = ddk::DlcDevKit<MockTransport, MockStorage, MockOracle>;
 
 #[tokio::main]
 async fn main() {
     let transport = Arc::new(MockTransport {});
     let storage = Arc::new(MockStorage {});
     let oracle_client = Arc::new(MockOracle {});
+
     let builder: ApplicationDdk = DdkBuilder::new()
         .set_name("ddk")
         .set_esplora_url("https://mempool.space/api")

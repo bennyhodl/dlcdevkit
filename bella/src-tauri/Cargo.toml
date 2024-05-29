@@ -12,7 +12,7 @@ tauri-build = { version = "1.5", features = [] }
 
 [dependencies]
 fix-path-env = { git = "https://github.com/tauri-apps/fix-path-env-rs" }
-dlc-dev-kit = { path = "../../ddk" }
+ddk = { path = "../../ddk" }
 tauri = { version = "1.5", features = ["shell-open"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
