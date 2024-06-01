@@ -1,6 +1,7 @@
 use core::fmt;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 use bitcoin::Network;
 use dlc_manager::manager::Manager;
@@ -63,7 +64,7 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> Default for DdkBuilder<T, S, 
             storage: None,
             oracle: None,
             esplora_url: "https://mutinynet.com/api".into(),
-            network: Network::Signet,
+            network: Network::Regtest,
         }
     }
 }

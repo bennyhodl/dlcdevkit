@@ -1,28 +1,28 @@
 /target
-/terminal/src-tauri/target
+/bella/src-tauri/target
 # Logs
-/terminal/logs
-/terminal*.log
-/terminal/npm-debug.log*
+/bella/logs
+/bella*.log
+/bella/npm-debug.log*
 /termainal/yarn-debug.log*
-/terminal/yarn-error.log*
-/terminal/pnpm-debug.log*
-/terminal/lerna-debug.log*
+/bella/yarn-error.log*
+/bella/pnpm-debug.log*
+/bella/lerna-debug.log*
 
-/terminal/node_modules
-/terminal/dist
-/terminal/dist-ssr
-/terminal/*.local
+/bella/node_modules
+/bella/dist
+/bella/dist-ssr
+/bella/*.local
 
 # Editor directories and files
-/terminal/.vscode/*
-/terminal/!.vscode/extensions.json
-/terminal/.idea
-/terminal/.DS_Store
-/terminal/*.suo
-/terminal/*.ntvs*
-/terminal/*.njsproj
-/terminal/*.sln
-/terminal/*.sw?
+/bella/.vscode/*
+/bella/!.vscode/extensions.json
+/bella/.idea
+/bella/.DS_Store
+/bella/*.suo
+/bella/*.ntvs*
+/bella/*.njsproj
+/bella/*.sln
+/bella/*.sw?
 
 /regtest/bitcoin/*
