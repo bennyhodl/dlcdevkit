@@ -1,10 +1,21 @@
-use ddk::builder::DdkBuilder;
-use ddk::{DdkOracle, DdkStorage, DdkTransport};
+use async_trait::async_trait;
+use ddk::{builder::DdkBuilder, DlcDevKitDlcManager};
+use ddk::{DdkTransport, DdkOracle, DdkStorage};
+use tokio::sync::Mutex;
 use std::sync::Arc;
 
 #[derive(Clone)]
-struct MockTransport;
-impl DdkTransport for MockTransport {}
+pub struct MockTransport;
+
+#[async_trait]
+impl DdkTransport for MockTransport {
+    async fn listen(&self) {
+        println!("Listening with MockTransport")
+    }
+    async fn handle_dlc_message(&self, _manager: &Arc<Mutex<DlcDevKitDlcManager>>) {
+        println!("Handling DLC messages with MockTransport")
+    }
+}
 
 #[derive(Clone)]
 struct MockStorage;
@@ -21,9 +32,10 @@ async fn main() {
     let transport = Arc::new(MockTransport {});
     let storage = Arc::new(MockStorage {});
     let oracle_client = Arc::new(MockOracle {});
-    let builder: ApplicationDdk = DdkBuilder::new()
-        .set_name("ddk")
-        .set_esplora_url("https://mempool.space/api")
+    let ddk: ApplicationDdk = DdkBuilder::new()
+        .set_name("dlcdevkit")
+        .set_esplora_url(ddk::ESPLORA_HOST)
+        .set_network(bitcoin::Network::Regtest)
         .set_transport(transport.clone())
         .set_storage(storage.clone())
         .set_oracle(oracle_client.clone())
@@ -31,7 +43,12 @@ async fn main() {
         .await
         .unwrap();
 
-    let wallet = builder.wallet.new_external_address();
+
+    let wallet = ddk.wallet.new_external_address();
 
     assert!(wallet.is_ok());
+
+    ddk.start().await.expect("nope");
+
+    loop {}
 }
