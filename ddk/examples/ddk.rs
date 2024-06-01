@@ -9,6 +9,9 @@ pub struct MockTransport;
 
 #[async_trait]
 impl DdkTransport for MockTransport {
+    fn name(&self) -> String {
+        "mock-transport".into()
+    }
     async fn listen(&self) {
         println!("Listening with MockTransport")
     }

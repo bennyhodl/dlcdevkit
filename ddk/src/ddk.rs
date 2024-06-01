@@ -110,6 +110,10 @@ impl<T: DdkTransport + std::marker::Send + std::marker::Sync + 'static, S: DdkSt
         Ok(())
     }
 
+    pub fn transport_type(&self) -> String {
+        self.transport.name()
+    }
+
     pub async fn send_dlc_offer(
         &self,
         contract_input: &ContractInput,

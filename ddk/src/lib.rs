@@ -35,6 +35,7 @@ use tokio::sync::Mutex;
 
 #[async_trait::async_trait]
 pub trait DdkTransport {
+    fn name(&self) -> String;
     async fn listen(&self); 
     async fn handle_dlc_message(&self, ddk: &Arc<Mutex<DlcDevKitDlcManager>>);
 }

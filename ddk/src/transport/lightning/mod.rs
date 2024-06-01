@@ -10,6 +10,10 @@ use tokio::sync::Mutex;
 
 #[async_trait::async_trait]
 impl DdkTransport for DlcDevKitPeerManager {
+    fn name(&self) -> String {
+        "lightning".into()
+    }
+
     async fn listen(&self) {
         let peer_manager_connection_handler = self.peer_manager();
 
