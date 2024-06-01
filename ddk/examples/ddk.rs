@@ -15,7 +15,7 @@ impl DdkTransport for MockTransport {
     async fn listen(&self) {
         println!("Listening with MockTransport")
     }
-    async fn handle_dlc_message(&self, _manager: &Arc<Mutex<DlcDevKitDlcManager>>) {
+    async fn receive_dlc_message(&self, _manager: &Arc<Mutex<DlcDevKitDlcManager>>) {
         println!("Handling DLC messages with MockTransport")
     }
 }

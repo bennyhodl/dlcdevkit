@@ -37,7 +37,7 @@ use tokio::sync::Mutex;
 pub trait DdkTransport {
     fn name(&self) -> String;
     async fn listen(&self); 
-    async fn handle_dlc_message(&self, ddk: &Arc<Mutex<DlcDevKitDlcManager>>);
+    async fn receive_dlc_message(&self, ddk: &Arc<Mutex<DlcDevKitDlcManager>>);
 }
 
 pub trait DdkStorage /*: dlc_manager::Storage + PersistBackend<ChangeSet> */ {}

@@ -30,7 +30,7 @@ impl DdkTransport for DlcDevKitPeerManager {
         }
     }
 
-    async fn handle_dlc_message(&self, dlc_manager: &Arc<Mutex<DlcDevKitDlcManager>>) {
+    async fn receive_dlc_message(&self, dlc_manager: &Arc<Mutex<DlcDevKitDlcManager>>) {
         let mut ticker = tokio::time::interval(Duration::from_secs(5));
         loop {
             ticker.tick().await;
@@ -53,7 +53,5 @@ impl DdkTransport for DlcDevKitPeerManager {
                 }
             }
         }
-
-
     }
 }

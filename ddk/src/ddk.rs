@@ -104,7 +104,7 @@ impl<T: DdkTransport + std::marker::Send + std::marker::Sync + 'static, S: DdkSt
 
         let transport_clone = self.transport.clone();
         tokio::spawn(async move {
-            transport_clone.handle_dlc_message(&dlc_manager).await; 
+            transport_clone.receive_dlc_message(&dlc_manager).await; 
         });
 
         Ok(())
