@@ -39,7 +39,25 @@ impl DdkStorage for MockStorage {}
 
 #[derive(Clone)]
 struct MockOracle;
-impl DdkOracle for MockOracle {}
+impl DdkOracle for MockOracle {
+    fn name(&self) -> String {
+        "mock-oracle".into()
+    }
+}
+
+impl dlc_manager::Oracle for MockOracle {
+    fn get_public_key(&self) -> bitcoin::key::XOnlyPublicKey {
+        todo!("Trait inherited from rust-dlc")
+    }
+
+    fn get_attestation(&self, _event_id: &str) -> Result<dlc_messages::oracle_msgs::OracleAttestation, dlc_manager::error::Error> {
+        todo!("Trait inherited from rust-dlc")
+    }
+
+    fn get_announcement(&self, _event_id: &str) -> Result<dlc_messages::oracle_msgs::OracleAnnouncement, dlc_manager::error::Error> {
+        todo!("Trait inherited from rust-dlc") 
+    }
+}
 
 type ApplicationDdk = ddk::DlcDevKit<MockTransport, MockStorage, MockOracle>;
 

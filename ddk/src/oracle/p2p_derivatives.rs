@@ -9,6 +9,8 @@ use dlc_manager::Oracle;
 use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
 use dlc::secp256k1_zkp::{schnorr::Signature, XOnlyPublicKey};
 
+use crate::DdkOracle;
+
 /// Enables interacting with a DLC oracle.
 pub struct P2PDOracleClient {
     host: String,
@@ -127,7 +129,7 @@ fn parse_event_id(event_id: &str) -> Result<(String, DateTime<Utc>), DlcManagerE
     Ok((asset_id.to_string(), date_time))
 }
 
-impl Oracle for P2PDOracleClient {
+impl dlc_manager::Oracle for P2PDOracleClient {
     fn get_public_key(&self) -> XOnlyPublicKey {
         self.public_key
     }
@@ -156,5 +158,11 @@ impl Oracle for P2PDOracleClient {
             signatures,
             outcomes: values,
         })
+    }
+}
+
+impl DdkOracle for P2PDOracleClient {
+    fn name(&self) -> String {
+        "p2pderivatives".into()
     }
 }
