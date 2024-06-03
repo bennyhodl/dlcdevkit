@@ -6,8 +6,8 @@ mod error;
 mod io;
 mod oracle;
 mod signer;
-mod wallet;
 mod storage;
+mod wallet;
 
 /// Build a DDK application.
 pub mod builder;
@@ -16,6 +16,7 @@ pub mod builder;
 mod transport;
 
 use std::sync::Arc;
+use async_trait::async_trait;
 
 /// Re-exports
 pub use bdk;
@@ -33,14 +34,14 @@ pub const ESPLORA_HOST: &str = "http://localhost:30000";
 use bdk::{chain::PersistBackend, wallet::ChangeSet};
 use tokio::sync::Mutex;
 
-#[async_trait::async_trait]
+#[async_trait]
 pub trait DdkTransport {
     fn name(&self) -> String;
-    async fn listen(&self); 
+    async fn listen(&self);
     async fn receive_dlc_message(&self, ddk: &Arc<Mutex<DlcDevKitDlcManager>>);
 }
 
-pub trait DdkStorage /*: dlc_manager::Storage + PersistBackend<ChangeSet> */ {}
+pub trait DdkStorage: dlc_manager::Storage /*+ PersistBackend<ChangeSet> */ {}
 
 pub trait DdkOracle: dlc_manager::Oracle {
     fn name(&self) -> String;
