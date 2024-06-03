@@ -3,12 +3,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+use crate::oracle::P2PDOracleClient;
+use crate::storage::SledStorageProvider;
 use bitcoin::Network;
 use dlc_manager::manager::Manager;
 use dlc_manager::Oracle;
 use dlc_manager::SystemTimeProvider;
-use crate::storage::SledStorageProvider;
-use crate::oracle::P2PDOracleClient;
 
 use crate::chain::EsploraClient;
 use crate::ddk::DlcDevKit;

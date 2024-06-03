@@ -1,7 +1,7 @@
 use std::io::Cursor;
 
-use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
 use crate::storage::SledStorageProvider;
+use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
 use lightning::util::ser::Readable;
 use nostr_sdk::{Event, Kind};
 

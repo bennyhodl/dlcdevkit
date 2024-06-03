@@ -3,7 +3,11 @@ pub use dlc_messages::message_handler::MessageHandler as DlcMessageHandler;
 pub use lightning_net_tokio;
 
 use crate::chain::EsploraClient;
-use crate::{get_dlc_dev_kit_dir, oracle::KormirOracleClient, wallet::DlcDevKitWallet, ORACLE_HOST};
+use crate::oracle::P2PDOracleClient;
+use crate::storage::SledStorageProvider;
+use crate::{
+    get_dlc_dev_kit_dir, oracle::KormirOracleClient, wallet::DlcDevKitWallet, ORACLE_HOST,
+};
 use crate::{transport, DdkOracle, DdkStorage, DdkTransport};
 use bdk::bitcoin::Network;
 use bitcoin::secp256k1::{Parity, PublicKey, XOnlyPublicKey};
@@ -12,13 +16,8 @@ use dlc_manager::{
     ContractId, Oracle, SimpleSigner, SystemTimeProvider,
 };
 use dlc_messages::{message_handler::MessageHandler, oracle_msgs::OracleAnnouncement};
-use crate::storage::SledStorageProvider;
-use crate::oracle::P2PDOracleClient;
 use std::time::Duration;
-use std::{
-    collections::HashMap,
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex;
 
 pub type DlcDevKitDlcManager = dlc_manager::manager::Manager<
@@ -41,7 +40,12 @@ pub struct DlcDevKit<T: DdkTransport, S: DdkStorage, O: DdkOracle> {
     // entropy (get seed from any source)
 }
 
-impl<T: DdkTransport + std::marker::Send + std::marker::Sync + 'static, S: DdkStorage, O: DdkOracle> DlcDevKit<T, S, O> {
+impl<
+        T: DdkTransport + std::marker::Send + std::marker::Sync + 'static,
+        S: DdkStorage,
+        O: DdkOracle,
+    > DlcDevKit<T, S, O>
+{
     pub async fn new(
         name: &str,
         esplora_url: &str,
@@ -104,7 +108,7 @@ impl<T: DdkTransport + std::marker::Send + std::marker::Sync + 'static, S: DdkSt
 
         let transport_clone = self.transport.clone();
         tokio::spawn(async move {
-            transport_clone.receive_dlc_message(&dlc_manager).await; 
+            transport_clone.receive_dlc_message(&dlc_manager).await;
         });
 
         Ok(())
