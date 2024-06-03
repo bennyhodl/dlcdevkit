@@ -1,6 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use crate::{ddk::DlcDevKitDlcManager, DdkTransport, DlcDevKit};
+use async_trait::async_trait;
 use lightning_net_tokio::setup_inbound;
 
 pub(crate) mod peer_manager;
@@ -8,7 +9,7 @@ use peer_manager::DlcDevKitPeerManager;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
-#[async_trait::async_trait]
+#[async_trait]
 impl DdkTransport for DlcDevKitPeerManager {
     fn name(&self) -> String {
         "lightning".into()
@@ -41,7 +42,8 @@ impl DdkTransport for DlcDevKitPeerManager {
             for (node_id, message) in messages {
                 let mut man = dlc_manager.lock().await;
                 println!("Checking msg lock");
-                let resp = man.on_dlc_message(&message, node_id)
+                let resp = man
+                    .on_dlc_message(&message, node_id)
                     .expect("Error processing message");
 
                 if let Some(msg) = resp {
