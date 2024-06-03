@@ -42,4 +42,6 @@ pub trait DdkTransport {
 
 pub trait DdkStorage /*: dlc_manager::Storage + PersistBackend<ChangeSet> */ {}
 
-pub trait DdkOracle /*: dlc_manager::Oracle */ {}
+pub trait DdkOracle: dlc_manager::Oracle {
+    fn name(&self) -> String;
+}

@@ -56,4 +56,8 @@ impl dlc_manager::Oracle for KormirOracleClient {
     }
 }
 
-impl crate::DdkOracle for KormirOracleClient {}
+impl crate::DdkOracle for KormirOracleClient {
+    fn name(&self) -> String {
+        "kormir".into()
+    }
+}
