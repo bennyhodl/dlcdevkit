@@ -1,8 +1,8 @@
 # DLC Dev Kit
 
-[![Crate](https://img.shields.io/crates/v/dlcdevkit.svg?logo=rust)](https://crates.io/crates/ldk-node)
-[![Documentation](https://img.shields.io/static/v1?logo=read-the-docs&label=docs.rs&message=dlcdevkit&color=informational)](https://docs.rs/dlcdevkit)
-![Crates.io Total Downloads](https://img.shields.io/crates/d/dlcdevkit)
+[![Crate](https://img.shields.io/crates/v/dlcdevkit.svg?logo=rust)](https://crates.io/crates/ddk)
+[![Documentation](https://img.shields.io/static/v1?logo=read-the-docs&label=docs.rs&message=ddk&color=informational)](https://docs.rs/ddk)
+![Crates.io Total Downloads](https://img.shields.io/crates/d/ddk)
 
 > :warning: `dlcdevkit` is alpha software and should not be used with real money. API is subject to change.
 

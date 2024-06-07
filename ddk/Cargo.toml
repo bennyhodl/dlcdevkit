@@ -1,6 +1,6 @@
 [package]
 name = "ddk"
-version = "0.0.5"
+version = "0.0.7"
 edition = "2021"
 license = "MIT"
 description = "DLC Development Kit"
