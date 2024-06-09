@@ -30,7 +30,7 @@ pub type PeerManager = LdkPeerManager<
     Arc<KeysManager>,
 >;
 
-pub(crate) struct DlcDevKitPeerManager {
+pub struct DlcDevKitPeerManager {
     peer_manager: Arc<PeerManager>,
     message_handler: Arc<DlcMessageHandler>,
     pub node_id: PublicKey,
