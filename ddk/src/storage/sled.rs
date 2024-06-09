@@ -20,6 +20,8 @@ use sled::{Db, Transactional, Tree};
 use std::convert::TryInto;
 use std::io::{Cursor, Read};
 
+use crate::DdkStorage;
+
 const CONTRACT_TREE: u8 = 1;
 const CHANNEL_TREE: u8 = 2;
 const CHAIN_MONITOR_TREE: u8 = 3;
@@ -820,3 +822,5 @@ mod tests {
         }
     );
 }
+
+impl DdkStorage for SledStorageProvider {}

@@ -4,16 +4,18 @@ mod chain;
 mod ddk;
 mod error;
 mod io;
-mod oracle;
 mod signer;
-mod storage;
 mod wallet;
 
 /// Build a DDK application.
 pub mod builder;
 
 /// Transport available structs.
-mod transport;
+pub mod transport;
+/// Storage available structs.
+pub mod storage;
+/// Oracle available structs.
+pub mod oracle;
 
 use std::sync::Arc;
 use async_trait::async_trait;

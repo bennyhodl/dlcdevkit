@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use lightning_net_tokio::setup_inbound;
 
 pub(crate) mod peer_manager;
-use peer_manager::DlcDevKitPeerManager;
+pub use peer_manager::DlcDevKitPeerManager;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
