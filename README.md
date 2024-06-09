@@ -17,72 +17,35 @@ $ cargo add ddk
 
 ```rust
 use ddk::builder::DdkBuilder;
-use ddk::{DdkOracle, DdkStorage, DdkTransport};
+use ddk::storage::SledStorageProvider;
+use ddk::transport::lightning::LightningTransport;
+use ddk::oracle::P2PDOracleClient;
+use ddk::Network;
 use std::sync::Arc;
 
-#[derive(Clone)]
-pub struct MockTransport;
-
-#[async_trait]
-impl DdkTransport for MockTransport {
-    async fn listen(&self) {
-        println!("Listening with MockTransport")
-    }
-    async fn handle_dlc_message(&self, _manager: &Arc<Mutex<DlcDevKitDlcManager>>) {
-        println!("Handling DLC messages with MockTransport")
-    }
-}
-
-#[derive(Clone)]
-struct MockStorage;
-impl DdkStorage for MockStorage {}
-
-#[derive(Clone)]
-struct MockOracle;
-impl DdkOracle for MockOracle {
-    fn name(&self) -> String {
-        "mock-oracle".into()
-    }
-}
-
-impl dlc_manager::Oracle for MockOracle {
-    fn get_public_key(&self) -> bitcoin::key::XOnlyPublicKey {
-        todo!("Trait inherited from rust-dlc")
-    }
-
-    fn get_attestation(&self, _event_id: &str) -> Result<dlc_messages::oracle_msgs::OracleAttestation, dlc_manager::error::Error> {
-        todo!("Trait inherited from rust-dlc")
-    }
-
-    fn get_announcement(&self, _event_id: &str) -> Result<dlc_messages::oracle_msgs::OracleAnnouncement, dlc_manager::error::Error> {
-        todo!("Trait inherited from rust-dlc") 
-    }
-}
-
-type ApplicationDdk = ddk::DlcDevKit<MockTransport, MockStorage, MockOracle>;
+type ApplicationDdk = ddk::DlcDevKit<LightningTransport, SledStorageProvider, P2PDOracleClient>;
 
 #[tokio::main]
-async fn main() {
-    let transport = Arc::new(MockTransport {});
-    let storage = Arc::new(MockStorage {});
-    let oracle_client = Arc::new(MockOracle {});
+async fn main() -> Result<(), Error> {
+    let transport = Arc::new(LightningTransport::new("lightning-transport", Network::Regtest));
+    let storage = Arc::new(SledStorageProvider::new("<storage path>")?);
+    let oracle_client = tokio::task::spawn_blocking(move || Arc::new(P2PDOracleClient::new("<oracle host>")?)).await?;
 
     let ddk: ApplicationDdk = DdkBuilder::new()
-        .set_name("ddk")
-        .set_esplora_url("https://mempool.space/api")
+        .set_name("dlcdevkit")
+        .set_esplora_url(ddk::ESPLORA_HOST)
         .set_network(bitcoin::Network::Regtest)
         .set_transport(transport.clone())
         .set_storage(storage.clone())
         .set_oracle(oracle_client.clone())
         .finish()
-        .await
-        .unwrap();
+        .await?;
 
     let wallet = ddk.wallet.new_external_address();
 
     assert!(wallet.is_ok());
 
-    ddk.start().await
+    ddk.start().await?;
 }
 ```
 
