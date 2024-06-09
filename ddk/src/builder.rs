@@ -135,10 +135,9 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
         let db_path = get_dlc_dev_kit_dir().join(&name);
         let dlc_storage = Box::new(SledStorageProvider::new(db_path.to_str().unwrap())?);
 
-        let oracle_internal =
-            tokio::task::spawn_blocking(move || P2PDOracleClient::new(ORACLE_HOST).unwrap())
-                .await
-                .unwrap();
+        let oracle_internal = 
+            tokio::task::spawn_blocking(move || P2PDOracleClient::new(ORACLE_HOST).unwrap()).await.unwrap();
+
         let mut oracles = HashMap::new();
         oracles.insert(oracle_internal.get_public_key(), Box::new(oracle_internal));
 
