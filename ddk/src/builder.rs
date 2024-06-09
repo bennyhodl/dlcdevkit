@@ -12,7 +12,7 @@ use dlc_manager::SystemTimeProvider;
 
 use crate::chain::EsploraClient;
 use crate::ddk::DlcDevKit;
-use crate::transport::lightning::peer_manager::DlcDevKitPeerManager;
+use crate::transport::lightning::LightningTransport;
 use crate::wallet::DlcDevKitWallet;
 use crate::{get_dlc_dev_kit_dir, DdkOracle, DdkStorage, DdkTransport, ORACLE_HOST};
 

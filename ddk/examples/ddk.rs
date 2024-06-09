@@ -1,15 +1,15 @@
 use ddk::builder::DdkBuilder;
 use ddk::storage::SledStorageProvider;
-use ddk::transport::lightning::DlcDevKitPeerManager;
+use ddk::transport::lightning::LightningTransport;
 use ddk::oracle::P2PDOracleClient;
 use ddk::Network;
 use std::sync::Arc;
 
-type ApplicationDdk = ddk::DlcDevKit<DlcDevKitPeerManager, SledStorageProvider, P2PDOracleClient>;
+type ApplicationDdk = ddk::DlcDevKit<LightningTransport, SledStorageProvider, P2PDOracleClient>;
 
 #[tokio::main]
 async fn main() {
-    let transport = Arc::new(DlcDevKitPeerManager::new("peer_manager", Network::Regtest));
+    let transport = Arc::new(LightningTransport::new("peer_manager", Network::Regtest));
     let storage = Arc::new(SledStorageProvider::new("/Users/ben/ernest/dlcdevkit").unwrap());
     let oracle_client = tokio::task::spawn_blocking(move || Arc::new(P2PDOracleClient::new("http://127.0.0.1:8080").unwrap())).await.unwrap();
 

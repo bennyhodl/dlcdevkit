@@ -5,12 +5,12 @@ use async_trait::async_trait;
 use lightning_net_tokio::setup_inbound;
 
 pub(crate) mod peer_manager;
-pub use peer_manager::DlcDevKitPeerManager;
+pub use peer_manager::LightningTransport;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
 #[async_trait]
-impl DdkTransport for DlcDevKitPeerManager {
+impl DdkTransport for LightningTransport {
     fn name(&self) -> String {
         "lightning".into()
     }

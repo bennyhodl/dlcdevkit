@@ -30,14 +30,14 @@ pub type PeerManager = LdkPeerManager<
     Arc<KeysManager>,
 >;
 
-pub struct DlcDevKitPeerManager {
+pub struct LightningTransport {
     peer_manager: Arc<PeerManager>,
     message_handler: Arc<DlcMessageHandler>,
     pub node_id: PublicKey,
 }
 
-impl DlcDevKitPeerManager {
-    pub fn new(name: &str, network: Network) -> DlcDevKitPeerManager {
+impl LightningTransport {
+    pub fn new(name: &str, network: Network) -> LightningTransport {
         let seed = crate::io::read_or_generate_xprv(&name, network)
             .unwrap()
             .private_key
@@ -58,7 +58,7 @@ impl DlcDevKitPeerManager {
             custom_message_handler: dlc_message_handler.clone(),
         };
 
-        DlcDevKitPeerManager {
+        LightningTransport {
             peer_manager: Arc::new(PeerManager::new(
                 message_handler,
                 time.as_secs() as u32,
