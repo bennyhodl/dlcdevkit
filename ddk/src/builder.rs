@@ -1,6 +1,7 @@
 use core::fmt;
 use std::collections::HashMap;
 use std::sync::Arc;
+use bitcoin::bip32::ExtendedPrivKey;
 use tokio::sync::Mutex;
 
 use crate::oracle::P2PDOracleClient;
@@ -17,9 +18,9 @@ use crate::wallet::DlcDevKitWallet;
 use crate::{get_dlc_dev_kit_dir, DdkOracle, DdkStorage, DdkTransport, ORACLE_HOST};
 
 #[derive(Debug, Clone)]
-pub enum DdkTransportOption {
-    Lightning { host: String, port: u16 },
-    Nostr { relay_host: String },
+pub enum SeedConfig {
+    Bytes([u8;64]),
+    File(String),
 }
 
 #[derive(Clone, Debug)]
@@ -30,6 +31,7 @@ pub struct DdkBuilder<T, S, O> {
     oracle: Option<Arc<O>>,
     esplora_url: String,
     network: Network,
+    seed: Option<SeedConfig>
     // entropy config
 }
 
@@ -42,6 +44,8 @@ pub enum BuilderError {
     NoStorage,
     /// An oracle client was not provided.
     NoOracle,
+    /// No seed provided
+    NoSeed,
 }
 
 impl fmt::Display for BuilderError {
@@ -50,6 +54,7 @@ impl fmt::Display for BuilderError {
             BuilderError::NoTransport => write!(f, "A DLC transport was not provided."),
             BuilderError::NoStorage => write!(f, "A DLC storage implementation was not provided."),
             BuilderError::NoOracle => write!(f, "A DLC oracle client was not provided."),
+            BuilderError::NoSeed => write!(f, "No seed configuration was provided.")
         }
     }
 }
@@ -65,6 +70,7 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> Default for DdkBuilder<T, S, 
             oracle: None,
             esplora_url: "https://mutinynet.com/api".into(),
             network: Network::Regtest,
+            seed: None
         }
     }
 }
@@ -104,6 +110,11 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
         self
     }
 
+    pub fn set_seed_config(&mut self, seed_config: SeedConfig) -> &mut Self {
+        self.seed = Some(seed_config);
+        self
+    }
+
     pub async fn finish(&self) -> anyhow::Result<DlcDevKit<T, S, O>> {
         let transport = self
             .transport
@@ -125,9 +136,14 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
             None => uuid::Uuid::new_v4().to_string(),
         };
 
+        let seed_config = self.seed.as_ref().map_or_else(|| Err(BuilderError::NoSeed), |s| Ok(s.clone()))?;
+
+        let xprv = xprv_from_config(seed_config, self.network)?;
+
         log::info!("Creating new P2P DlcDevKit wallet. name={}", name);
         let wallet = Arc::new(DlcDevKitWallet::new(
             &name,
+            xprv,
             &self.esplora_url,
             self.network,
         )?);
@@ -161,4 +177,20 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
             oracle,
         })
     }
+}
+
+/// TODO: Builder error
+fn xprv_from_config(seed_config: SeedConfig, network: Network) -> anyhow::Result<ExtendedPrivKey> {
+    let seed = match seed_config {
+        SeedConfig::Bytes(bytes) => ExtendedPrivKey::new_master(network, &bytes)?,
+        SeedConfig::File(file) => {
+            let seed = std::fs::read(file)?;
+            let mut key = [0; 64];
+            key.copy_from_slice(&seed);
+
+            ExtendedPrivKey::new_master(network, &key)?
+        }
+    };
+
+    Ok(seed)
 }

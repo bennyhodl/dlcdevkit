@@ -47,10 +47,9 @@ const MIN_FEERATE: u32 = 253;
 const DB_MAGIC: &str = "dlc_dev_kit-wallet";
 
 impl DlcDevKitWallet {
-    pub fn new(name: &str, esplora_url: &str, network: Network) -> anyhow::Result<DlcDevKitWallet> {
+    pub fn new(name: &str, xprv: ExtendedPrivKey, esplora_url: &str, network: Network) -> anyhow::Result<DlcDevKitWallet> {
         tracing::info!("heyhowareya new wallet");
         let secp = Secp256k1::new();
-        let xprv = io::read_or_generate_xprv(name, network)?;
 
         let db_path = io::get_dlc_dev_kit_dir().join(&name).join("wallet_db");
 

@@ -1,3 +1,4 @@
+use bitcoin::bip32::ExtendedPrivKey;
 pub use dlc_manager::Storage;
 pub use dlc_messages::message_handler::MessageHandler as DlcMessageHandler;
 pub use lightning_net_tokio;
@@ -55,7 +56,7 @@ impl<
         oracle: Arc<O>,
     ) -> anyhow::Result<DlcDevKit<T, S, O>> {
         log::info!("Creating new P2P DlcDevKit wallet. name={}", name);
-        let wallet = Arc::new(DlcDevKitWallet::new(name, esplora_url, network)?);
+        let wallet = Arc::new(DlcDevKitWallet::new(name, ExtendedPrivKey::new_master(network, &[0u8; 64]).unwrap(), esplora_url, network)?);
 
         let db_path = get_dlc_dev_kit_dir().join(name);
         let dlc_storage = Box::new(SledStorageProvider::new(db_path.to_str().unwrap())?);
