@@ -6,7 +6,7 @@ use lightning::util::ser::Readable;
 use nostr_sdk::{Event, Kind};
 
 pub struct NostrDlcHandler {
-    storage: SledStorageProvider,
+    pub storage: SledStorageProvider,
 }
 
 impl NostrDlcHandler {

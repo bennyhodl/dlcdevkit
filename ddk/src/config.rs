@@ -1,5 +1,3 @@
-use serde::{Serialize, Deserialize};
-
 #[derive(Debug, Clone, Default)]
 pub struct DdkConfig {
     /// Probably an enum? Or is this even used? Maybe wallet_storage_path?
@@ -9,7 +7,7 @@ pub struct DdkConfig {
 
 #[derive(Debug, Clone)]
 pub enum SeedConfig {
-    Bytes([u8;64]),
+    Bytes([u8; 64]),
     File(String),
 }
 

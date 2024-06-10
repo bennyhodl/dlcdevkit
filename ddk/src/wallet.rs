@@ -6,8 +6,7 @@ use crate::{
 use anyhow::anyhow;
 use bdk::{
     bitcoin::{
-        bip32::{DerivationPath, ExtendedPrivKey, ExtendedPubKey},
-        key::{KeyPair, XOnlyPublicKey},
+        bip32::{DerivationPath, ExtendedPrivKey},
         secp256k1::{All, PublicKey, Secp256k1},
         Address, Network, Txid,
     },
@@ -17,20 +16,13 @@ use bdk::{
 };
 use bdk_esplora::EsploraExt;
 use bdk_file_store::Store;
-use bitcoin::{secp256k1::SecretKey, FeeRate, ScriptBuf};
+use bitcoin::{FeeRate, ScriptBuf};
 use blake3::Hasher;
 use dlc_manager::{error::Error as ManagerError, SimpleSigner};
 use lightning::chain::chaininterface::{ConfirmationTarget, FeeEstimator};
-use serde::Deserialize;
 use std::sync::{atomic::Ordering, Arc};
 use std::{collections::HashMap, sync::Mutex};
-use std::{
-    fmt::format,
-    str::FromStr,
-    sync::{atomic::AtomicU32, RwLock},
-};
-
-const SLED_TREE: &str = "bdk_store";
+use std::{str::FromStr, sync::atomic::AtomicU32};
 
 pub struct DlcDevKitWallet {
     pub blockchain: Arc<EsploraClient>,
@@ -47,7 +39,12 @@ const MIN_FEERATE: u32 = 253;
 const DB_MAGIC: &str = "dlc_dev_kit-wallet";
 
 impl DlcDevKitWallet {
-    pub fn new(name: &str, xprv: ExtendedPrivKey, esplora_url: &str, network: Network) -> anyhow::Result<DlcDevKitWallet> {
+    pub fn new(
+        name: &str,
+        xprv: ExtendedPrivKey,
+        esplora_url: &str,
+        network: Network,
+    ) -> anyhow::Result<DlcDevKitWallet> {
         tracing::info!("heyhowareya new wallet");
         let secp = Secp256k1::new();
 

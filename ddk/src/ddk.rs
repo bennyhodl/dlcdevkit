@@ -1,24 +1,14 @@
-use bitcoin::bip32::ExtendedPrivKey;
-pub use dlc_manager::Storage;
-pub use dlc_messages::message_handler::MessageHandler as DlcMessageHandler;
-pub use lightning_net_tokio;
-
 use crate::chain::EsploraClient;
-use crate::oracle::P2PDOracleClient;
-use crate::storage::SledStorageProvider;
-use crate::{
-    get_dlc_dev_kit_dir, oracle::KormirOracleClient, wallet::DlcDevKitWallet, ORACLE_HOST,
-};
-use crate::{transport, DdkOracle, DdkStorage, DdkTransport};
-use bdk::bitcoin::Network;
-use bitcoin::secp256k1::{Parity, PublicKey, XOnlyPublicKey};
+use crate::wallet::DlcDevKitWallet;
+use crate::{DdkOracle, DdkStorage, DdkTransport};
+use bitcoin::secp256k1::PublicKey;
 use dlc_manager::{
-    contract::contract_input::ContractInput, manager::Manager, CachedContractSignerProvider,
-    ContractId, Oracle, SimpleSigner, SystemTimeProvider,
+    contract::contract_input::ContractInput, CachedContractSignerProvider, ContractId,
+    SimpleSigner, SystemTimeProvider,
 };
-use dlc_messages::{message_handler::MessageHandler, oracle_msgs::OracleAnnouncement};
+use dlc_messages::oracle_msgs::OracleAnnouncement;
+use std::sync::Arc;
 use std::time::Duration;
-use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex;
 
 pub type DlcDevKitDlcManager<S, O> = dlc_manager::manager::Manager<

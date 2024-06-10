@@ -1,7 +1,6 @@
 use crate::error::esplora_err_to_manager_err;
 use bdk_esplora::esplora_client::Error as EsploraError;
 use bdk_esplora::esplora_client::{AsyncClient, BlockingClient, Builder};
-use bdk_esplora::EsploraExt;
 use bitcoin::Network;
 use bitcoin::{Transaction, Txid};
 use dlc_manager::error::Error as ManagerError;

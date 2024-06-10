@@ -26,9 +26,9 @@ const CONTRACT_TREE: u8 = 1;
 const CHANNEL_TREE: u8 = 2;
 const CHAIN_MONITOR_TREE: u8 = 3;
 const CHAIN_MONITOR_KEY: u8 = 4;
-const UTXO_TREE: u8 = 6;
-const KEY_PAIR_TREE: u8 = 7;
-const ADDRESS_TREE: u8 = 8;
+// const UTXO_TREE: u8 = 6;
+// const KEY_PAIR_TREE: u8 = 7;
+// const ADDRESS_TREE: u8 = 8;
 
 /// Implementation of Storage interface using the sled DB backend.
 pub struct SledStorageProvider {
@@ -180,19 +180,19 @@ impl SledStorageProvider {
     }
 }
 
-impl SledStorageProvider {
-    fn utxo_tree(&self) -> Result<Tree, Error> {
-        self.open_tree(&[UTXO_TREE])
-    }
-
-    fn address_tree(&self) -> Result<Tree, Error> {
-        self.open_tree(&[ADDRESS_TREE])
-    }
-
-    fn key_pair_tree(&self) -> Result<Tree, Error> {
-        self.open_tree(&[KEY_PAIR_TREE])
-    }
-}
+// impl SledStorageProvider {
+//     fn utxo_tree(&self) -> Result<Tree, Error> {
+//         self.open_tree(&[UTXO_TREE])
+//     }
+//
+//     fn address_tree(&self) -> Result<Tree, Error> {
+//         self.open_tree(&[ADDRESS_TREE])
+//     }
+//
+//     fn key_pair_tree(&self) -> Result<Tree, Error> {
+//         self.open_tree(&[KEY_PAIR_TREE])
+//     }
+// }
 
 impl Storage for SledStorageProvider {
     fn get_contract(&self, contract_id: &ContractId) -> Result<Option<Contract>, Error> {

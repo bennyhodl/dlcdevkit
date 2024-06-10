@@ -1,42 +1,38 @@
-#![allow(dead_code)]
-#![allow(unused_imports)]
+// #![allow(dead_code)]
+// #![allow(unused_imports)]
 mod chain;
+mod config;
 mod ddk;
 mod error;
 mod io;
 mod signer;
 mod wallet;
-mod config;
 
 /// Build a DDK application.
 pub mod builder;
 
-/// Transport available structs.
-pub mod transport;
-/// Storage available structs.
-pub mod storage;
 /// Oracle available structs.
 pub mod oracle;
-
-use std::sync::Arc;
-use async_trait::async_trait;
+/// Storage available structs.
+pub mod storage;
+/// Transport available structs.
+pub mod transport;
 
 /// Re-exports
 pub use bdk;
 pub use bitcoin::Network;
+pub use config::{DdkConfig, SeedConfig};
 pub use ddk::DlcDevKit;
 pub use ddk::DlcDevKitDlcManager;
 pub use dlc_manager;
 pub use dlc_messages;
 pub use io::get_dlc_dev_kit_dir;
-pub use config::{DdkConfig, SeedConfig};
 
 pub const RELAY_HOST: &str = "ws://localhost:8081";
 pub const ORACLE_HOST: &str = "http://localhost:8080";
 pub const ESPLORA_HOST: &str = "http://localhost:30000";
 
-use bdk::{chain::PersistBackend, wallet::ChangeSet};
-use tokio::sync::Mutex;
+use async_trait::async_trait;
 
 #[async_trait]
 pub trait DdkTransport {

@@ -1,13 +1,10 @@
-use std::{sync::Arc, time::Duration};
-
-use crate::{ddk::DlcDevKitDlcManager, DdkTransport, DlcDevKit};
+use crate::DdkTransport;
 use async_trait::async_trait;
 use lightning_net_tokio::setup_inbound;
 
 pub(crate) mod peer_manager;
 pub use peer_manager::LightningTransport;
 use tokio::net::TcpListener;
-use tokio::sync::Mutex;
 
 #[async_trait]
 impl DdkTransport for LightningTransport {

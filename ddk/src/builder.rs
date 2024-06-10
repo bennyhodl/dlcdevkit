@@ -1,23 +1,19 @@
+use bitcoin::bip32::ExtendedPrivKey;
+use bitcoin::Network;
 use core::fmt;
+use dlc_manager::manager::Manager;
+use dlc_manager::SystemTimeProvider;
+use getrandom::getrandom;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
-use bitcoin::bip32::ExtendedPrivKey;
 use tokio::sync::Mutex;
-use getrandom::getrandom;
-use crate::oracle::P2PDOracleClient;
-use crate::storage::SledStorageProvider;
-use bitcoin::Network;
-use dlc_manager::manager::Manager;
-use dlc_manager::Oracle;
-use dlc_manager::SystemTimeProvider;
 
 use crate::chain::EsploraClient;
 use crate::config::{DdkConfig, SeedConfig};
 use crate::ddk::DlcDevKit;
-use crate::transport::lightning::LightningTransport;
 use crate::wallet::DlcDevKitWallet;
-use crate::{get_dlc_dev_kit_dir, DdkOracle, DdkStorage, DdkTransport, ORACLE_HOST};
+use crate::{DdkOracle, DdkStorage, DdkTransport};
 
 #[derive(Clone, Debug)]
 pub struct DdkBuilder<T, S, O> {
@@ -49,7 +45,7 @@ impl fmt::Display for BuilderError {
             BuilderError::NoTransport => write!(f, "A DLC transport was not provided."),
             BuilderError::NoStorage => write!(f, "A DLC storage implementation was not provided."),
             BuilderError::NoOracle => write!(f, "A DLC oracle client was not provided."),
-            BuilderError::NoSeed => write!(f, "No seed configuration was provided.")
+            BuilderError::NoSeed => write!(f, "No seed configuration was provided."),
         }
     }
 }
@@ -65,7 +61,7 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> Default for DdkBuilder<T, S, 
             oracle: None,
             esplora_url: "https://mutinynet.com/api".into(),
             network: Network::Regtest,
-            config: DdkConfig::default()
+            config: DdkConfig::default(),
         }
     }
 }
