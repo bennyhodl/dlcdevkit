@@ -1,9 +1,10 @@
 use core::fmt;
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 use bitcoin::bip32::ExtendedPrivKey;
 use tokio::sync::Mutex;
-
+use getrandom::getrandom;
 use crate::oracle::P2PDOracleClient;
 use crate::storage::SledStorageProvider;
 use bitcoin::Network;
@@ -12,27 +13,21 @@ use dlc_manager::Oracle;
 use dlc_manager::SystemTimeProvider;
 
 use crate::chain::EsploraClient;
+use crate::config::{DdkConfig, SeedConfig};
 use crate::ddk::DlcDevKit;
 use crate::transport::lightning::LightningTransport;
 use crate::wallet::DlcDevKitWallet;
 use crate::{get_dlc_dev_kit_dir, DdkOracle, DdkStorage, DdkTransport, ORACLE_HOST};
 
-#[derive(Debug, Clone)]
-pub enum SeedConfig {
-    Bytes([u8;64]),
-    File(String),
-}
-
 #[derive(Clone, Debug)]
 pub struct DdkBuilder<T, S, O> {
     name: Option<String>,
+    config: DdkConfig,
     transport: Option<Arc<T>>,
     storage: Option<Arc<S>>,
     oracle: Option<Arc<O>>,
     esplora_url: String,
     network: Network,
-    seed: Option<SeedConfig>
-    // entropy config
 }
 
 /// An error that could be thrown while building [`DlcDevKit`]
@@ -70,7 +65,7 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> Default for DdkBuilder<T, S, 
             oracle: None,
             esplora_url: "https://mutinynet.com/api".into(),
             network: Network::Regtest,
-            seed: None
+            config: DdkConfig::default()
         }
     }
 }
@@ -110,8 +105,8 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
         self
     }
 
-    pub fn set_seed_config(&mut self, seed_config: SeedConfig) -> &mut Self {
-        self.seed = Some(seed_config);
+    pub fn set_config(&mut self, config: DdkConfig) -> &mut Self {
+        self.config = config;
         self
     }
 
@@ -136,7 +131,7 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
             None => uuid::Uuid::new_v4().to_string(),
         };
 
-        let seed_config = self.seed.as_ref().map_or_else(|| Err(BuilderError::NoSeed), |s| Ok(s.clone()))?;
+        let seed_config = self.config.seed();
 
         let xprv = xprv_from_config(seed_config, self.network)?;
 
@@ -147,9 +142,6 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
             &self.esplora_url,
             self.network,
         )?);
-
-        let db_path = get_dlc_dev_kit_dir().join(&name);
-        let dlc_storage = Box::new(SledStorageProvider::new(db_path.to_str().unwrap())?);
 
         let oracle_internal = 
             tokio::task::spawn_blocking(move || P2PDOracleClient::new(ORACLE_HOST).unwrap()).await.unwrap();
@@ -163,7 +155,7 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
             wallet.clone(),
             wallet.clone(),
             esplora_client.clone(),
-            dlc_storage,
+            Box::new(storage),
             oracles,
             Arc::new(SystemTimeProvider {}),
             wallet.clone(),
@@ -179,16 +171,25 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
     }
 }
 
-/// TODO: Builder error
 fn xprv_from_config(seed_config: SeedConfig, network: Network) -> anyhow::Result<ExtendedPrivKey> {
     let seed = match seed_config {
         SeedConfig::Bytes(bytes) => ExtendedPrivKey::new_master(network, &bytes)?,
         SeedConfig::File(file) => {
-            let seed = std::fs::read(file)?;
-            let mut key = [0; 64];
-            key.copy_from_slice(&seed);
-
-            ExtendedPrivKey::new_master(network, &key)?
+            if Path::new(&format!("{file}/seed")).exists() {
+                let seed = std::fs::read(format!("{file}/seed"))?;
+                let mut key = [0; 64];
+                key.copy_from_slice(&seed);
+                let xprv = ExtendedPrivKey::new_master(network, &seed)?;
+                xprv
+            } else {
+                std::fs::File::create(format!("{file}/seed"))?;
+                let mut entropy = [0u8; 78];
+                getrandom(&mut entropy)?;
+                // let _mnemonic = Mnemonic::from_entropy(&entropy)?;
+                let xprv = ExtendedPrivKey::new_master(network, &entropy)?;
+                std::fs::write(format!("{file}/seed"), &xprv.encode())?;
+                xprv
+            }
         }
     };
 
