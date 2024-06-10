@@ -1,8 +1,7 @@
 use async_trait::async_trait;
-use ddk::{builder::DdkBuilder, DlcDevKitDlcManager};
+use ddk::builder::DdkBuilder;
 use ddk::{DdkOracle, DdkStorage, DdkTransport};
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
 type ApplicationDdk = ddk::DlcDevKit<MockTransport, MockStorage, MockOracle>;
 
@@ -43,9 +42,9 @@ impl DdkTransport for MockTransport {
     async fn listen(&self) {
         println!("Listening with MockTransport")
     }
-    async fn receive_dlc_message(&self, _manager: &Arc<Mutex<DlcDevKitDlcManager>>) {
-        println!("Handling DLC messages with MockTransport")
-    }
+    // async fn receive_dlc_message(&self, _manager: &Arc<Mutex<DlcDevKitDlcManager>>) {
+    //     println!("Handling DLC messages with MockTransport")
+    // }
 }
 
 #[derive(Clone)]

@@ -143,11 +143,8 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
             self.network,
         )?);
 
-        let oracle_internal = 
-            tokio::task::spawn_blocking(move || P2PDOracleClient::new(ORACLE_HOST).unwrap()).await.unwrap();
-
         let mut oracles = HashMap::new();
-        oracles.insert(oracle_internal.get_public_key(), Box::new(oracle_internal));
+        oracles.insert(oracle.get_public_key(), oracle.clone());
 
         let esplora_client = Arc::new(EsploraClient::new(&self.esplora_url, self.network)?);
 
@@ -155,7 +152,7 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
             wallet.clone(),
             wallet.clone(),
             esplora_client.clone(),
-            Box::new(storage),
+            storage.clone(),
             oracles,
             Arc::new(SystemTimeProvider {}),
             wallet.clone(),

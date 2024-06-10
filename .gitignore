@@ -26,3 +26,5 @@
 /bella/*.sw?
 
 /regtest/bitcoin/*
+
+/dlcdevkit-example

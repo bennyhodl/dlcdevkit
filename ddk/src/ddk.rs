@@ -21,12 +21,12 @@ use std::time::Duration;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex;
 
-pub type DlcDevKitDlcManager = dlc_manager::manager::Manager<
+pub type DlcDevKitDlcManager<S, O> = dlc_manager::manager::Manager<
     Arc<DlcDevKitWallet>,
     Arc<CachedContractSignerProvider<Arc<DlcDevKitWallet>, SimpleSigner>>,
     Arc<EsploraClient>,
-    Box<SledStorageProvider>,
-    Box<P2PDOracleClient>,
+    Arc<S>,
+    Arc<O>,
     Arc<SystemTimeProvider>,
     Arc<DlcDevKitWallet>,
     SimpleSigner,
@@ -34,11 +34,10 @@ pub type DlcDevKitDlcManager = dlc_manager::manager::Manager<
 
 pub struct DlcDevKit<T: DdkTransport, S: DdkStorage, O: DdkOracle> {
     pub wallet: Arc<DlcDevKitWallet>,
-    pub manager: Arc<Mutex<DlcDevKitDlcManager>>,
+    pub manager: Arc<Mutex<DlcDevKitDlcManager<S, O>>>,
     pub transport: Arc<T>,
     pub storage: Arc<S>,
     pub oracle: Arc<O>,
-    // entropy (get seed from any source)
 }
 
 impl<
@@ -47,53 +46,11 @@ impl<
         O: DdkOracle,
     > DlcDevKit<T, S, O>
 {
-    pub async fn new(
-        name: &str,
-        esplora_url: &str,
-        network: Network,
-        transport: Arc<T>,
-        storage: Arc<S>,
-        oracle: Arc<O>,
-    ) -> anyhow::Result<DlcDevKit<T, S, O>> {
-        log::info!("Creating new P2P DlcDevKit wallet. name={}", name);
-        let wallet = Arc::new(DlcDevKitWallet::new(name, ExtendedPrivKey::new_master(network, &[0u8; 64]).unwrap(), esplora_url, network)?);
-
-        let db_path = get_dlc_dev_kit_dir().join(name);
-        let dlc_storage = Box::new(SledStorageProvider::new(db_path.to_str().unwrap())?);
-
-        let oracle_internal =
-            tokio::task::spawn_blocking(move || P2PDOracleClient::new(ORACLE_HOST).unwrap())
-                .await
-                .unwrap();
-        let mut oracles = HashMap::new();
-        oracles.insert(oracle_internal.get_public_key(), Box::new(oracle_internal));
-
-        let esplora_client = Arc::new(EsploraClient::new(esplora_url, network)?);
-
-        let manager = Arc::new(Mutex::new(Manager::new(
-            wallet.clone(),
-            wallet.clone(),
-            esplora_client.clone(),
-            dlc_storage,
-            oracles,
-            Arc::new(SystemTimeProvider {}),
-            wallet.clone(),
-        )?));
-
-        Ok(DlcDevKit {
-            wallet,
-            manager,
-            transport,
-            storage,
-            oracle,
-        })
-    }
-
     pub async fn start(&self) -> anyhow::Result<()> {
-        println!("Starting...");
+        tracing::info!("Starting ddk...");
         let transport_listener = self.transport.clone();
         let wallet = self.wallet.clone();
-        let dlc_manager = self.manager.clone();
+        let _dlc_manager = self.manager.clone();
 
         tokio::spawn(async move {
             transport_listener.listen().await;
@@ -107,9 +64,9 @@ impl<
             }
         });
 
-        let transport_clone = self.transport.clone();
+        let _transport_clone = self.transport.clone();
         tokio::spawn(async move {
-            transport_clone.receive_dlc_message(&dlc_manager).await;
+            // transport_clone.receive_dlc_message(&dlc_manager).await;
         });
 
         Ok(())

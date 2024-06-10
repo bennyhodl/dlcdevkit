@@ -6,6 +6,7 @@ mod error;
 mod io;
 mod signer;
 mod wallet;
+mod config;
 
 /// Build a DDK application.
 pub mod builder;
@@ -28,6 +29,7 @@ pub use ddk::DlcDevKitDlcManager;
 pub use dlc_manager;
 pub use dlc_messages;
 pub use io::get_dlc_dev_kit_dir;
+pub use config::{DdkConfig, SeedConfig};
 
 pub const RELAY_HOST: &str = "ws://localhost:8081";
 pub const ORACLE_HOST: &str = "http://localhost:8080";
@@ -40,7 +42,7 @@ use tokio::sync::Mutex;
 pub trait DdkTransport {
     fn name(&self) -> String;
     async fn listen(&self);
-    async fn receive_dlc_message(&self, ddk: &Arc<Mutex<DlcDevKitDlcManager>>);
+    // async fn receive_dlc_message(&self, ddk: &Arc<Mutex<DlcDevKitDlcManager>>);
 }
 
 pub trait DdkStorage: dlc_manager::Storage /*+ PersistBackend<ChangeSet> */ {}
