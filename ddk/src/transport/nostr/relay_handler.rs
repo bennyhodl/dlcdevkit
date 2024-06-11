@@ -1,4 +1,5 @@
-use crate::{io, RELAY_HOST};
+use crate::{io, SeedConfig, RELAY_HOST};
+use bdk::bitcoin::Network;
 use dlc_messages::{message_handler::read_dlc_message, Message, WireMessage};
 use lightning::{
     ln::wire::Type,
@@ -10,7 +11,6 @@ use nostr::{
     Event, EventBuilder, EventId, Filter, Keys, Kind, PublicKey, SecretKey, Tag, Timestamp, Url,
 };
 use nostr_sdk::Client;
-use std::path::Path;
 
 pub const DLC_MESSAGE_KIND: Kind = Kind::Custom(8_888);
 pub const ORACLE_ANNOUNCMENT_KIND: Kind = Kind::Custom(88);
@@ -23,21 +23,16 @@ pub struct NostrDlcRelayHandler {
 }
 
 impl NostrDlcRelayHandler {
-    pub fn new(wallet_name: &str, relay_host: &str) -> anyhow::Result<NostrDlcRelayHandler> {
-        let keys_file = io::get_dlc_dev_kit_dir()
-            .join(wallet_name)
-            .join("nostr_keys");
-        let keys = if Path::new(&keys_file).exists() {
-            let secp = Secp256k1::new();
-            let contents = std::fs::read(&keys_file)?;
-            let secret_key = SecretKey::from_slice(&contents)?;
-            Keys::new_with_ctx(&secp, secret_key.into())
-        } else {
-            let keys = Keys::generate();
-            let secret_key = keys.secret_key()?;
-            std::fs::write(keys_file, secret_key.secret_bytes())?;
-            keys
-        };
+    pub fn new(
+        seed_config: &SeedConfig,
+        relay_host: &str,
+        network: Network,
+    ) -> anyhow::Result<NostrDlcRelayHandler> {
+        let secp = Secp256k1::new();
+        let seed = io::xprv_from_config(seed_config, network)?;
+        // TODO: Seed to bytes is 78 not 64?
+        let secret_key = SecretKey::from_slice(&seed.encode())?;
+        let keys = Keys::new_with_ctx(&secp, secret_key.into());
 
         let relay_url = relay_host.parse()?;
         let client = Client::new(&keys);

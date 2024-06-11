@@ -21,7 +21,6 @@ dlc-manager = { version = "0.4.0", git = "https://github.com/bennyhodl/rust-dlc"
 dlc-messages = { version = "0.4.0", git = "https://github.com/bennyhodl/rust-dlc", branch = "use-serde", features = [ "use-serde"] }
 dlc-trie = { version = "0.4.0", git = "https://github.com/bennyhodl/rust-dlc", branch = "use-serde", features = ["use-serde"] }
 getrandom = { version = "0.2.11", features = ["js"] }
-homedir = "0.2.1"
 lightning = { version = "0.0.121", default-features = false, features = ["grind_signatures", "std"] }
 nostr = { version = "0.29.0", features = ["std"] }
 nostr-sdk = "0.29.0"

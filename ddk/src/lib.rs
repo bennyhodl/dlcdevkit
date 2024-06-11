@@ -26,7 +26,6 @@ pub use ddk::DlcDevKit;
 pub use ddk::DlcDevKitDlcManager;
 pub use dlc_manager;
 pub use dlc_messages;
-pub use io::get_dlc_dev_kit_dir;
 
 pub const RELAY_HOST: &str = "ws://localhost:8081";
 pub const ORACLE_HOST: &str = "http://localhost:8080";

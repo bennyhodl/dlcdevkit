@@ -1,6 +1,5 @@
 use crate::{
     chain::EsploraClient,
-    io,
     signer::{DeriveSigner, SimpleDeriveSigner},
 };
 use anyhow::anyhow;
@@ -20,8 +19,11 @@ use bitcoin::{FeeRate, ScriptBuf};
 use blake3::Hasher;
 use dlc_manager::{error::Error as ManagerError, SimpleSigner};
 use lightning::chain::chaininterface::{ConfirmationTarget, FeeEstimator};
-use std::sync::{atomic::Ordering, Arc};
 use std::{collections::HashMap, sync::Mutex};
+use std::{
+    path::PathBuf,
+    sync::{atomic::Ordering, Arc},
+};
 use std::{str::FromStr, sync::atomic::AtomicU32};
 
 pub struct DlcDevKitWallet {
@@ -44,14 +46,12 @@ impl DlcDevKitWallet {
         xprv: ExtendedPrivKey,
         esplora_url: &str,
         network: Network,
+        path: PathBuf,
     ) -> anyhow::Result<DlcDevKitWallet> {
-        tracing::info!("heyhowareya new wallet");
         let secp = Secp256k1::new();
 
-        let db_path = io::get_dlc_dev_kit_dir().join(&name).join("wallet_db");
-
         let database =
-            bdk_file_store::Store::<ChangeSet>::open_or_create_new(DB_MAGIC.as_bytes(), db_path)?;
+            bdk_file_store::Store::<ChangeSet>::open_or_create_new(DB_MAGIC.as_bytes(), path)?;
 
         let inner = Arc::new(Mutex::new(Wallet::new_or_load(
             Bip86(xprv, KeychainKind::External),

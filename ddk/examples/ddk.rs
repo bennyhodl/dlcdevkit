@@ -2,7 +2,6 @@ use ddk::builder::DdkBuilder;
 use ddk::oracle::P2PDOracleClient;
 use ddk::storage::SledStorageProvider;
 use ddk::transport::lightning::LightningTransport;
-use ddk::Network;
 use ddk::{DdkConfig, SeedConfig};
 use std::sync::Arc;
 
@@ -12,29 +11,19 @@ type ApplicationDdk = ddk::DlcDevKit<LightningTransport, SledStorageProvider, P2
 async fn main() {
     let name = "dlcdevkit-example";
     let dir = std::env::current_dir().unwrap().join(name);
-    let seed = SeedConfig::File(dir.to_str().unwrap().to_string());
+    std::fs::create_dir_all(&dir).unwrap();
+    let storage_path = dir.to_str().unwrap().to_string();
+    let seed = SeedConfig::File(storage_path.clone());
     let config = DdkConfig {
-        storage_path: std::env::current_dir()
-            .unwrap()
-            .join(name)
-            .to_str()
-            .unwrap()
-            .to_string(),
-        seed,
+        storage_path,
+        network: bitcoin::Network::Regtest,
+        esplora_host: ddk::ESPLORA_HOST.to_string(),
     };
-    let transport = Arc::new(LightningTransport::new("peer_manager", Network::Regtest));
-    let storage = Arc::new(
-        SledStorageProvider::new(
-            std::env::current_dir()
-                .unwrap()
-                .join(name)
-                .to_str()
-                .unwrap(),
-        )
-        .unwrap(),
-    );
+    let transport = Arc::new(LightningTransport::new(&seed, config.network).unwrap());
+    let storage =
+        Arc::new(SledStorageProvider::new(dir.join("sled_db").to_str().unwrap()).unwrap());
     let oracle_client = tokio::task::spawn_blocking(move || {
-        Arc::new(P2PDOracleClient::new("http://127.0.0.1:8080").unwrap())
+        Arc::new(P2PDOracleClient::new(ddk::ORACLE_HOST).unwrap())
     })
     .await
     .unwrap();
@@ -42,8 +31,7 @@ async fn main() {
     let ddk: ApplicationDdk = DdkBuilder::new()
         .set_name(name)
         .set_config(config)
-        .set_esplora_url(ddk::ESPLORA_HOST)
-        .set_network(bitcoin::Network::Regtest)
+        .set_seed_config(seed)
         .set_transport(transport.clone())
         .set_storage(storage.clone())
         .set_oracle(oracle_client.clone())
@@ -56,4 +44,8 @@ async fn main() {
     assert!(wallet.is_ok());
 
     ddk.start().await.expect("nope");
+
+    let address = ddk.wallet.new_external_address().unwrap();
+
+    println!("Address: {}", address);
 }

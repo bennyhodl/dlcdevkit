@@ -1,3 +1,4 @@
+use anyhow::anyhow;
 use bitcoin::{secp256k1::PublicKey, Network};
 use dlc_messages::message_handler::MessageHandler as DlcMessageHandler;
 use lightning::{
@@ -11,6 +12,8 @@ use lightning::{
 use lightning_net_tokio::SocketDescriptor;
 use log::info;
 use std::{sync::Arc, time::SystemTime};
+
+use crate::SeedConfig;
 
 pub struct DlcDevKitLogger;
 
@@ -37,18 +40,15 @@ pub struct LightningTransport {
 }
 
 impl LightningTransport {
-    pub fn new(name: &str, network: Network) -> LightningTransport {
-        let seed = crate::io::read_or_generate_xprv(&name, network)
-            .unwrap()
+    pub fn new(seed_config: &SeedConfig, network: Network) -> anyhow::Result<LightningTransport> {
+        let seed = crate::io::xprv_from_config(seed_config, network)?
             .private_key
             .secret_bytes();
-        let time = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap();
+        let time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?;
         let key_signer = KeysManager::new(&seed, time.as_secs(), time.as_nanos() as u32);
         let node_id = key_signer
             .get_node_id(lightning::sign::Recipient::Node)
-            .unwrap();
+            .map_err(|_| anyhow!("Could not get node id."))?;
         let dlc_message_handler = Arc::new(DlcMessageHandler::new());
 
         let message_handler = MessageHandler {
@@ -58,7 +58,7 @@ impl LightningTransport {
             custom_message_handler: dlc_message_handler.clone(),
         };
 
-        LightningTransport {
+        Ok(LightningTransport {
             peer_manager: Arc::new(PeerManager::new(
                 message_handler,
                 time.as_secs() as u32,
@@ -68,7 +68,7 @@ impl LightningTransport {
             )),
             message_handler: dlc_message_handler,
             node_id,
-        }
+        })
     }
 
     pub fn peer_manager(&self) -> Arc<PeerManager> {

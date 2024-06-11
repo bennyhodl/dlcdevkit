@@ -1,16 +1,15 @@
-use bitcoin::bip32::ExtendedPrivKey;
-use bitcoin::Network;
+use crate::{io, SeedConfig};
 use core::fmt;
 use dlc_manager::manager::Manager;
 use dlc_manager::SystemTimeProvider;
-use getrandom::getrandom;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::chain::EsploraClient;
-use crate::config::{DdkConfig, SeedConfig};
+use crate::config::DdkConfig;
 use crate::ddk::DlcDevKit;
 use crate::wallet::DlcDevKitWallet;
 use crate::{DdkOracle, DdkStorage, DdkTransport};
@@ -18,12 +17,11 @@ use crate::{DdkOracle, DdkStorage, DdkTransport};
 #[derive(Clone, Debug)]
 pub struct DdkBuilder<T, S, O> {
     name: Option<String>,
-    config: DdkConfig,
+    config: Option<DdkConfig>,
+    seed: Option<SeedConfig>,
     transport: Option<Arc<T>>,
     storage: Option<Arc<S>>,
     oracle: Option<Arc<O>>,
-    esplora_url: String,
-    network: Network,
 }
 
 /// An error that could be thrown while building [`DlcDevKit`]
@@ -37,6 +35,8 @@ pub enum BuilderError {
     NoOracle,
     /// No seed provided
     NoSeed,
+    /// No config provided.
+    NoConfig,
 }
 
 impl fmt::Display for BuilderError {
@@ -46,6 +46,7 @@ impl fmt::Display for BuilderError {
             BuilderError::NoStorage => write!(f, "A DLC storage implementation was not provided."),
             BuilderError::NoOracle => write!(f, "A DLC oracle client was not provided."),
             BuilderError::NoSeed => write!(f, "No seed configuration was provided."),
+            BuilderError::NoConfig => write!(f, "No config was provided"),
         }
     }
 }
@@ -56,12 +57,11 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> Default for DdkBuilder<T, S, 
     fn default() -> Self {
         Self {
             name: None,
+            config: None,
+            seed: None,
             transport: None,
             storage: None,
             oracle: None,
-            esplora_url: "https://mutinynet.com/api".into(),
-            network: Network::Regtest,
-            config: DdkConfig::default(),
         }
     }
 }
@@ -73,16 +73,6 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
 
     pub fn set_name(&mut self, name: &str) -> &mut Self {
         self.name = Some(name.into());
-        self
-    }
-
-    pub fn set_esplora_url(&mut self, esplora_url: &str) -> &mut Self {
-        self.esplora_url = esplora_url.into();
-        self
-    }
-
-    pub fn set_network(&mut self, network: Network) -> &mut Self {
-        self.network = network;
         self
     }
 
@@ -102,11 +92,28 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
     }
 
     pub fn set_config(&mut self, config: DdkConfig) -> &mut Self {
-        self.config = config;
+        self.config = Some(config);
+        self
+    }
+
+    pub fn set_seed_config(&mut self, seed_config: SeedConfig) -> &mut Self {
+        self.seed = Some(seed_config);
         self
     }
 
     pub async fn finish(&self) -> anyhow::Result<DlcDevKit<T, S, O>> {
+        let config = self
+            .config
+            .as_ref()
+            .map_or_else(|| Err(BuilderError::NoConfig), |c| Ok(c))?;
+        let seed = self
+            .seed
+            .as_ref()
+            .map_or_else(|| Err(BuilderError::NoSeed), |s| Ok(s))?;
+        println!("Creating {:?}", config.storage_path);
+        std::fs::create_dir_all(&config.storage_path)?;
+        let xprv = io::xprv_from_config(&seed, config.network)?;
+
         let transport = self
             .transport
             .as_ref()
@@ -127,22 +134,21 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
             None => uuid::Uuid::new_v4().to_string(),
         };
 
-        let seed_config = self.config.seed();
-
-        let xprv = xprv_from_config(seed_config, self.network)?;
+        let wallet_db_path = PathBuf::from_str(&config.storage_path)?.join("wallet_db");
 
         log::info!("Creating new P2P DlcDevKit wallet. name={}", name);
         let wallet = Arc::new(DlcDevKitWallet::new(
             &name,
             xprv,
-            &self.esplora_url,
-            self.network,
+            &config.esplora_host,
+            config.network,
+            wallet_db_path,
         )?);
 
         let mut oracles = HashMap::new();
         oracles.insert(oracle.get_public_key(), oracle.clone());
 
-        let esplora_client = Arc::new(EsploraClient::new(&self.esplora_url, self.network)?);
+        let esplora_client = Arc::new(EsploraClient::new(&config.esplora_host, config.network)?);
 
         let manager = Arc::new(Mutex::new(Manager::new(
             wallet.clone(),
@@ -162,29 +168,4 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
             oracle,
         })
     }
-}
-
-fn xprv_from_config(seed_config: SeedConfig, network: Network) -> anyhow::Result<ExtendedPrivKey> {
-    let seed = match seed_config {
-        SeedConfig::Bytes(bytes) => ExtendedPrivKey::new_master(network, &bytes)?,
-        SeedConfig::File(file) => {
-            if Path::new(&format!("{file}/seed")).exists() {
-                let seed = std::fs::read(format!("{file}/seed"))?;
-                let mut key = [0; 64];
-                key.copy_from_slice(&seed);
-                let xprv = ExtendedPrivKey::new_master(network, &seed)?;
-                xprv
-            } else {
-                std::fs::File::create(format!("{file}/seed"))?;
-                let mut entropy = [0u8; 78];
-                getrandom(&mut entropy)?;
-                // let _mnemonic = Mnemonic::from_entropy(&entropy)?;
-                let xprv = ExtendedPrivKey::new_master(network, &entropy)?;
-                std::fs::write(format!("{file}/seed"), &xprv.encode())?;
-                xprv
-            }
-        }
-    };
-
-    Ok(seed)
 }

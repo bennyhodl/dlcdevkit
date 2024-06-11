@@ -1,43 +1,33 @@
 use bdk::bitcoin::{bip32::ExtendedPrivKey, Network};
 use getrandom::getrandom;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-pub fn read_or_generate_xprv(
-    wallet_name: &str,
+use crate::SeedConfig;
+
+pub fn xprv_from_config(
+    seed_config: &SeedConfig,
     network: Network,
 ) -> anyhow::Result<ExtendedPrivKey> {
-    let wallet_dir = get_dlc_dev_kit_dir().join(&wallet_name);
+    let seed = match seed_config {
+        SeedConfig::Bytes(bytes) => ExtendedPrivKey::new_master(network, bytes)?,
+        SeedConfig::File(file) => {
+            if Path::new(&format!("{file}/seed")).exists() {
+                let seed = std::fs::read(format!("{file}/seed"))?;
+                let mut key = [0; 64];
+                key.copy_from_slice(&seed);
+                let xprv = ExtendedPrivKey::new_master(network, &seed)?;
+                xprv
+            } else {
+                std::fs::File::create(format!("{file}/seed"))?;
+                let mut entropy = [0u8; 64];
+                getrandom(&mut entropy)?;
+                // let _mnemonic = Mnemonic::from_entropy(&entropy)?;
+                let xprv = ExtendedPrivKey::new_master(network, &entropy)?;
+                std::fs::write(format!("{file}/seed"), &entropy)?;
+                xprv
+            }
+        }
+    };
 
-    let seed_file = &wallet_dir.join("seed");
-
-    if Path::new(&seed_file).exists() {
-        let seed = std::fs::read(seed_file)?;
-        let mut key = [0; 78];
-        key.copy_from_slice(&seed);
-
-        let xprv = ExtendedPrivKey::decode(&key)?;
-
-        Ok(xprv)
-    } else {
-        std::fs::create_dir_all(&wallet_dir)?;
-
-        let mut entropy = [0u8; 78];
-
-        getrandom(&mut entropy)?;
-
-        // let _mnemonic = Mnemonic::from_entropy(&entropy)?;
-
-        let xprv = ExtendedPrivKey::new_master(network, &entropy)?;
-
-        std::fs::write(seed_file, &xprv.encode())?;
-
-        Ok(xprv)
-    }
-}
-
-pub fn get_dlc_dev_kit_dir() -> PathBuf {
-    homedir::get_my_home()
-        .unwrap()
-        .unwrap()
-        .join(format!(".dlc_dev_kit"))
+    Ok(seed)
 }
