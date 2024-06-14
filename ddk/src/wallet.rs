@@ -8,27 +8,20 @@ use bdk::{
         bip32::{DerivationPath, ExtendedPrivKey},
         secp256k1::{All, PublicKey, Secp256k1},
         Address, Network, Txid,
-    },
-    template::Bip86,
-    wallet::{AddressIndex, AddressInfo, Balance, ChangeSet, Update},
-    KeychainKind, SignOptions, Wallet,
+    }, chain::PersistBackend, template::Bip86, wallet::{AddressIndex, AddressInfo, Balance, ChangeSet, Update}, KeychainKind, SignOptions, Wallet
 };
 use bdk_esplora::EsploraExt;
-use bdk_file_store::Store;
 use bitcoin::{FeeRate, ScriptBuf};
 use blake3::Hasher;
 use dlc_manager::{error::Error as ManagerError, SimpleSigner};
 use lightning::chain::chaininterface::{ConfirmationTarget, FeeEstimator};
 use std::{collections::HashMap, sync::Mutex};
-use std::{
-    path::PathBuf,
-    sync::{atomic::Ordering, Arc},
-};
+use std::sync::{atomic::Ordering, Arc};
 use std::{str::FromStr, sync::atomic::AtomicU32};
 
-pub struct DlcDevKitWallet {
+pub struct DlcDevKitWallet<WS> {
     pub blockchain: Arc<EsploraClient>,
-    pub inner: Arc<Mutex<Wallet<Store<ChangeSet>>>>,
+    pub inner: Arc<Mutex<Wallet<WS>>>,
     pub network: Network,
     pub xprv: ExtendedPrivKey,
     pub name: String,
@@ -38,27 +31,23 @@ pub struct DlcDevKitWallet {
 }
 
 const MIN_FEERATE: u32 = 253;
-const DB_MAGIC: &str = "dlc_dev_kit-wallet";
 
-impl DlcDevKitWallet {
+impl<WS: PersistBackend<ChangeSet>> DlcDevKitWallet<WS> {
     pub fn new(
         name: &str,
         xprv: ExtendedPrivKey,
         esplora_url: &str,
         network: Network,
-        path: PathBuf,
-    ) -> anyhow::Result<DlcDevKitWallet> {
+        database: WS,
+    ) -> anyhow::Result<DlcDevKitWallet<WS>> {
         let secp = Secp256k1::new();
-
-        let database =
-            bdk_file_store::Store::<ChangeSet>::open_or_create_new(DB_MAGIC.as_bytes(), path)?;
 
         let inner = Arc::new(Mutex::new(Wallet::new_or_load(
             Bip86(xprv, KeychainKind::External),
             Some(Bip86(xprv, KeychainKind::Internal)),
             database,
             network,
-        )?));
+        ).unwrap()));
 
         let blockchain = Arc::new(EsploraClient::new(esplora_url, network)?);
 
@@ -122,7 +111,7 @@ impl DlcDevKitWallet {
         };
 
         wallet.apply_update(update)?;
-        wallet.commit()?;
+        wallet.commit().unwrap();
         Ok(())
     }
 
@@ -140,14 +129,14 @@ impl DlcDevKitWallet {
 
     pub fn new_external_address(&self) -> anyhow::Result<AddressInfo> {
         let mut guard = self.inner.lock().unwrap();
-        let address = guard.try_get_address(AddressIndex::New)?;
+        let address = guard.try_get_address(AddressIndex::New).unwrap();
 
         Ok(address)
     }
 
     pub fn new_change_address(&self) -> anyhow::Result<AddressInfo> {
         let mut guard = self.inner.lock().unwrap();
-        let address = guard.try_get_internal_address(AddressIndex::New)?;
+        let address = guard.try_get_internal_address(AddressIndex::New).unwrap();
 
         Ok(address)
     }
@@ -166,7 +155,7 @@ impl DlcDevKitWallet {
             .add_recipient(address.script_pubkey(), amount)
             .fee_rate(FeeRate::from_sat_per_vb(sat_vbyte).unwrap());
 
-        let mut psbt = txn_builder.finish()?;
+        let mut psbt = txn_builder.finish().unwrap();
 
         guard.sign(&mut psbt, SignOptions::default())?;
 
@@ -181,7 +170,7 @@ impl DlcDevKitWallet {
     }
 }
 
-impl FeeEstimator for DlcDevKitWallet {
+impl<WS: PersistBackend<ChangeSet>> FeeEstimator for DlcDevKitWallet<WS> {
     fn get_est_sat_per_1000_weight(&self, confirmation_target: ConfirmationTarget) -> u32 {
         self.fees
             .get(&confirmation_target)
@@ -190,7 +179,7 @@ impl FeeEstimator for DlcDevKitWallet {
     }
 }
 
-impl dlc_manager::ContractSignerProvider for DlcDevKitWallet {
+impl<WS: PersistBackend<ChangeSet>> dlc_manager::ContractSignerProvider for DlcDevKitWallet<WS> {
     type Signer = SimpleSigner;
 
     // Using the data deterministically generate a key id. From a child key.
@@ -262,7 +251,7 @@ impl dlc_manager::ContractSignerProvider for DlcDevKitWallet {
     }
 }
 
-impl dlc_manager::Wallet for DlcDevKitWallet {
+impl<WS: PersistBackend<ChangeSet>> dlc_manager::Wallet for DlcDevKitWallet<WS> {
     fn get_new_address(&self) -> Result<bitcoin::Address, ManagerError> {
         Ok(self
             .new_external_address()

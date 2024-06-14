@@ -1,3 +1,5 @@
+use bdk::wallet::ChangeSet;
+use bdk_file_store::Store;
 use ddk::builder::DdkBuilder;
 use ddk::oracle::P2PDOracleClient;
 use ddk::storage::SledStorageProvider;
@@ -5,7 +7,7 @@ use ddk::transport::lightning::LightningTransport;
 use ddk::{DdkConfig, SeedConfig};
 use std::sync::Arc;
 
-type ApplicationDdk = ddk::DlcDevKit<LightningTransport, SledStorageProvider, P2PDOracleClient>;
+type ApplicationDdk = ddk::DlcDevKit<LightningTransport, SledStorageProvider, P2PDOracleClient, Store<ChangeSet>>;
 
 #[tokio::main]
 async fn main() {
@@ -28,12 +30,15 @@ async fn main() {
     .await
     .unwrap();
 
+    let wallet_storage = Store::<ChangeSet>::open_or_create_new("dlcdevkit".as_bytes(), dir.join("wallet_db")).unwrap();
+
     let ddk: ApplicationDdk = DdkBuilder::new()
         .set_name(name)
         .set_config(config)
         .set_seed_config(seed)
         .set_transport(transport.clone())
         .set_storage(storage.clone())
+        .set_wallet_storage(wallet_storage)
         .set_oracle(oracle_client.clone())
         .finish()
         .await

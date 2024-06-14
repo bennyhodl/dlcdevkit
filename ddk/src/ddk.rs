@@ -1,6 +1,8 @@
 use crate::chain::EsploraClient;
 use crate::wallet::DlcDevKitWallet;
 use crate::{DdkOracle, DdkStorage, DdkTransport};
+use bdk::chain::PersistBackend;
+use bdk::wallet::ChangeSet;
 use bitcoin::secp256k1::PublicKey;
 use dlc_manager::{
     contract::contract_input::ContractInput, CachedContractSignerProvider, ContractId,
@@ -11,20 +13,20 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 
-pub type DlcDevKitDlcManager<S, O> = dlc_manager::manager::Manager<
-    Arc<DlcDevKitWallet>,
-    Arc<CachedContractSignerProvider<Arc<DlcDevKitWallet>, SimpleSigner>>,
+pub type DlcDevKitDlcManager<S, O, WS> = dlc_manager::manager::Manager<
+    Arc<DlcDevKitWallet<WS>>,
+    Arc<CachedContractSignerProvider<Arc<DlcDevKitWallet<WS>>, SimpleSigner>>,
     Arc<EsploraClient>,
     Arc<S>,
     Arc<O>,
     Arc<SystemTimeProvider>,
-    Arc<DlcDevKitWallet>,
+    Arc<DlcDevKitWallet<WS>>,
     SimpleSigner,
 >;
 
-pub struct DlcDevKit<T: DdkTransport, S: DdkStorage, O: DdkOracle> {
-    pub wallet: Arc<DlcDevKitWallet>,
-    pub manager: Arc<Mutex<DlcDevKitDlcManager<S, O>>>,
+pub struct DlcDevKit<T: DdkTransport, S: DdkStorage, O: DdkOracle, WS: PersistBackend<ChangeSet>> {
+    pub wallet: Arc<DlcDevKitWallet<WS>>,
+    pub manager: Arc<Mutex<DlcDevKitDlcManager<S, O, WS>>>,
     pub transport: Arc<T>,
     pub storage: Arc<S>,
     pub oracle: Arc<O>,
@@ -34,7 +36,8 @@ impl<
         T: DdkTransport + std::marker::Send + std::marker::Sync + 'static,
         S: DdkStorage,
         O: DdkOracle,
-    > DlcDevKit<T, S, O>
+        WS: PersistBackend<ChangeSet> + std::marker::Send + Clone + 'static
+    > DlcDevKit<T, S, O, WS>
 {
     pub async fn start(&self) -> anyhow::Result<()> {
         tracing::info!("Starting ddk...");

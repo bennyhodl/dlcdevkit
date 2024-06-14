@@ -31,6 +31,7 @@ const CHAIN_MONITOR_KEY: u8 = 4;
 // const ADDRESS_TREE: u8 = 8;
 
 /// Implementation of Storage interface using the sled DB backend.
+#[derive(Debug, Clone)]
 pub struct SledStorageProvider {
     db: Db,
 }

@@ -1,10 +1,10 @@
 use crate::{io, SeedConfig};
 use core::fmt;
+use bdk::chain::PersistBackend;
+use bdk::wallet::ChangeSet;
 use dlc_manager::manager::Manager;
 use dlc_manager::SystemTimeProvider;
 use std::collections::HashMap;
-use std::path::PathBuf;
-use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -15,12 +15,13 @@ use crate::wallet::DlcDevKitWallet;
 use crate::{DdkOracle, DdkStorage, DdkTransport};
 
 #[derive(Clone, Debug)]
-pub struct DdkBuilder<T, S, O> {
+pub struct DdkBuilder<T, S, O, WS> {
     name: Option<String>,
     config: Option<DdkConfig>,
     seed: Option<SeedConfig>,
     transport: Option<Arc<T>>,
     storage: Option<Arc<S>>,
+    wallet_storage: Option<WS>,
     oracle: Option<Arc<O>>,
 }
 
@@ -53,7 +54,7 @@ impl fmt::Display for BuilderError {
 
 impl std::error::Error for BuilderError {}
 
-impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> Default for DdkBuilder<T, S, O> {
+impl<T: DdkTransport, S: DdkStorage, O: DdkOracle, WS: PersistBackend<ChangeSet>> Default for DdkBuilder<T, S, O, WS> {
     fn default() -> Self {
         Self {
             name: None,
@@ -61,12 +62,13 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> Default for DdkBuilder<T, S, 
             seed: None,
             transport: None,
             storage: None,
+            wallet_storage: None,
             oracle: None,
         }
     }
 }
 
-impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
+impl<T: DdkTransport, S: DdkStorage, O: DdkOracle, WS: PersistBackend<ChangeSet> + Clone + Copy> DdkBuilder<T, S, O, WS> {
     pub fn new() -> Self {
         DdkBuilder::default()
     }
@@ -101,7 +103,12 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
         self
     }
 
-    pub async fn finish(&self) -> anyhow::Result<DlcDevKit<T, S, O>> {
+    pub fn set_wallet_storage(&mut self, wallet_storage: WS) -> &mut Self {
+        self.wallet_storage = Some(wallet_storage);
+        self
+    }
+
+    pub async fn finish(&self) -> anyhow::Result<DlcDevKit<T, S, O, WS>> {
         let config = self
             .config
             .as_ref()
@@ -124,6 +131,10 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
             .as_ref()
             .map_or_else(|| Err(BuilderError::NoStorage), |s| Ok(s.clone()))?;
 
+        let wallet_storage = self
+            .wallet_storage
+            .unwrap();
+
         let oracle = self
             .oracle
             .as_ref()
@@ -134,15 +145,13 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
             None => uuid::Uuid::new_v4().to_string(),
         };
 
-        let wallet_db_path = PathBuf::from_str(&config.storage_path)?.join("wallet_db");
-
         log::info!("Creating new P2P DlcDevKit wallet. name={}", name);
         let wallet = Arc::new(DlcDevKitWallet::new(
             &name,
             xprv,
             &config.esplora_host,
             config.network,
-            wallet_db_path,
+            wallet_storage,
         )?);
 
         let mut oracles = HashMap::new();
