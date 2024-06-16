@@ -1052,10 +1052,10 @@ dependencies = [
  "bitcoin 0.30.2",
  "blake3",
  "chrono",
- "dlc 0.4.0 (git+https://github.com/bennyhodl/rust-dlc?branch=use-serde)",
- "dlc-manager 0.4.0 (git+https://github.com/bennyhodl/rust-dlc?branch=use-serde)",
- "dlc-messages 0.4.0 (git+https://github.com/bennyhodl/rust-dlc?branch=use-serde)",
- "dlc-trie 0.4.0 (git+https://github.com/bennyhodl/rust-dlc?branch=use-serde)",
+ "dlc 0.4.0",
+ "dlc-manager 0.4.0",
+ "dlc-messages 0.4.0",
+ "dlc-trie 0.4.0",
  "electrum-client",
  "futures",
  "getrandom 0.2.11",
@@ -1183,7 +1183,6 @@ checksum = "bd0c93bb4b0c6d9b77f4435b0ae98c24d17f1c45b2ff844c6151a07256ca923b"
 [[package]]
 name = "dlc"
 version = "0.4.0"
-source = "git+https://github.com/p2pderivatives/rust-dlc?branch=master#240c2741b904777a306ab29752ff89f95c4ad639"
 dependencies = [
  "bitcoin 0.30.2",
  "miniscript",
@@ -1195,11 +1194,27 @@ dependencies = [
 [[package]]
 name = "dlc"
 version = "0.4.0"
-source = "git+https://github.com/bennyhodl/rust-dlc?branch=use-serde#7a37c9720b3ff77eae897a3863008fcad6f03c12"
+source = "git+https://github.com/p2pderivatives/rust-dlc?branch=master#240c2741b904777a306ab29752ff89f95c4ad639"
 dependencies = [
  "bitcoin 0.30.2",
  "miniscript",
  "secp256k1-sys 0.8.1",
+ "secp256k1-zkp",
+ "serde",
+]
+
+[[package]]
+name = "dlc-manager"
+version = "0.4.0"
+dependencies = [
+ "async-trait",
+ "bitcoin 0.30.2",
+ "dlc 0.4.0",
+ "dlc-messages 0.4.0",
+ "dlc-trie 0.4.0",
+ "hex-conservative",
+ "lightning",
+ "log",
  "secp256k1-zkp",
  "serde",
 ]
@@ -1222,18 +1237,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "dlc-manager"
+name = "dlc-messages"
 version = "0.4.0"
-source = "git+https://github.com/bennyhodl/rust-dlc?branch=use-serde#7a37c9720b3ff77eae897a3863008fcad6f03c12"
 dependencies = [
- "async-trait",
  "bitcoin 0.30.2",
- "dlc 0.4.0 (git+https://github.com/bennyhodl/rust-dlc?branch=use-serde)",
- "dlc-messages 0.4.0 (git+https://github.com/bennyhodl/rust-dlc?branch=use-serde)",
- "dlc-trie 0.4.0 (git+https://github.com/bennyhodl/rust-dlc?branch=use-serde)",
- "hex-conservative",
+ "dlc 0.4.0",
  "lightning",
- "log",
  "secp256k1-zkp",
  "serde",
 ]
@@ -1251,13 +1260,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "dlc-messages"
+name = "dlc-trie"
 version = "0.4.0"
-source = "git+https://github.com/bennyhodl/rust-dlc?branch=use-serde#7a37c9720b3ff77eae897a3863008fcad6f03c12"
 dependencies = [
  "bitcoin 0.30.2",
- "dlc 0.4.0 (git+https://github.com/bennyhodl/rust-dlc?branch=use-serde)",
- "lightning",
+ "dlc 0.4.0",
  "secp256k1-zkp",
  "serde",
 ]
@@ -1269,17 +1276,6 @@ source = "git+https://github.com/p2pderivatives/rust-dlc?branch=master#240c2741b
 dependencies = [
  "bitcoin 0.30.2",
  "dlc 0.4.0 (git+https://github.com/p2pderivatives/rust-dlc?branch=master)",
- "secp256k1-zkp",
- "serde",
-]
-
-[[package]]
-name = "dlc-trie"
-version = "0.4.0"
-source = "git+https://github.com/bennyhodl/rust-dlc?branch=use-serde#7a37c9720b3ff77eae897a3863008fcad6f03c12"
-dependencies = [
- "bitcoin 0.30.2",
- "dlc 0.4.0 (git+https://github.com/bennyhodl/rust-dlc?branch=use-serde)",
  "secp256k1-zkp",
  "serde",
 ]

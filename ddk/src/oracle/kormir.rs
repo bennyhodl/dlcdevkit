@@ -1,5 +1,5 @@
 use bitcoin::key::XOnlyPublicKey;
-use dlc_messages::oracle_msgs::OracleAnnouncement;
+use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
 use std::str::FromStr;
 
 const KORMIR_URL: &str = "http://localhost:8082";
@@ -42,8 +42,7 @@ impl dlc_manager::Oracle for KormirOracleClient {
         &self,
         _event_id: &str,
     ) -> Result<dlc_messages::oracle_msgs::OracleAttestation, dlc_manager::error::Error> {
-        // get::<String>("attestation").map_err(|_| dlc_manager::error::Error::OracleError("Could not get attestation".into()))
-        unimplemented!()
+        get::<OracleAttestation>("attestation").map_err(|_| dlc_manager::error::Error::OracleError("Could not get attestation".into()))
     }
 
     fn get_announcement(
