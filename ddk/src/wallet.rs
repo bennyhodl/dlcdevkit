@@ -1,6 +1,8 @@
 use crate::{
     chain::EsploraClient,
     signer::{DeriveSigner, SimpleDeriveSigner},
+    storage::SledStorageProvider,
+    DdkConfig,
 };
 use anyhow::anyhow;
 use bdk::{
@@ -8,20 +10,29 @@ use bdk::{
         bip32::{DerivationPath, ExtendedPrivKey},
         secp256k1::{All, PublicKey, Secp256k1},
         Address, Network, Txid,
-    }, chain::PersistBackend, template::Bip86, wallet::{AddressIndex, AddressInfo, Balance, ChangeSet, Update}, KeychainKind, SignOptions, Wallet
+    },
+    chain::PersistBackend,
+    template::Bip86,
+    wallet::{AddressIndex, AddressInfo, Balance, ChangeSet, Update},
+    KeychainKind, SignOptions, Wallet,
 };
 use bdk_esplora::EsploraExt;
+use bdk_file_store::Store;
 use bitcoin::{FeeRate, ScriptBuf};
 use blake3::Hasher;
 use dlc_manager::{error::Error as ManagerError, SimpleSigner};
 use lightning::chain::chaininterface::{ConfirmationTarget, FeeEstimator};
-use std::{collections::HashMap, sync::Mutex};
 use std::sync::{atomic::Ordering, Arc};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::Mutex,
+};
 use std::{str::FromStr, sync::atomic::AtomicU32};
 
-pub struct DlcDevKitWallet<WS> {
+pub struct DlcDevKitWallet {
     pub blockchain: Arc<EsploraClient>,
-    pub inner: Arc<Mutex<Wallet<WS>>>,
+    pub inner: Arc<Mutex<Wallet<Store<ChangeSet>>>>,
     pub network: Network,
     pub xprv: ExtendedPrivKey,
     pub name: String,
@@ -32,22 +43,27 @@ pub struct DlcDevKitWallet<WS> {
 
 const MIN_FEERATE: u32 = 253;
 
-impl<WS: PersistBackend<ChangeSet>> DlcDevKitWallet<WS> {
-    pub fn new(
+impl DlcDevKitWallet {
+    pub fn new<P>(
         name: &str,
         xprv: ExtendedPrivKey,
         esplora_url: &str,
         network: Network,
-        database: WS,
-    ) -> anyhow::Result<DlcDevKitWallet<WS>> {
+        wallet_storage_path: P,
+    ) -> anyhow::Result<DlcDevKitWallet>
+    where
+        P: AsRef<Path>,
+    {
         let secp = Secp256k1::new();
+        let wallet_storage_path = wallet_storage_path.as_ref().join("ddk-wallet");
+        let storage = Store::<ChangeSet>::open_or_create_new(&[0u8; 32], wallet_storage_path)?;
 
         let inner = Arc::new(Mutex::new(Wallet::new_or_load(
             Bip86(xprv, KeychainKind::External),
             Some(Bip86(xprv, KeychainKind::Internal)),
-            database,
+            storage,
             network,
-        ).unwrap()));
+        )?));
 
         let blockchain = Arc::new(EsploraClient::new(esplora_url, network)?);
 
@@ -170,7 +186,7 @@ impl<WS: PersistBackend<ChangeSet>> DlcDevKitWallet<WS> {
     }
 }
 
-impl<WS: PersistBackend<ChangeSet>> FeeEstimator for DlcDevKitWallet<WS> {
+impl FeeEstimator for DlcDevKitWallet {
     fn get_est_sat_per_1000_weight(&self, confirmation_target: ConfirmationTarget) -> u32 {
         self.fees
             .get(&confirmation_target)
@@ -179,7 +195,7 @@ impl<WS: PersistBackend<ChangeSet>> FeeEstimator for DlcDevKitWallet<WS> {
     }
 }
 
-impl<WS: PersistBackend<ChangeSet>> dlc_manager::ContractSignerProvider for DlcDevKitWallet<WS> {
+impl dlc_manager::ContractSignerProvider for DlcDevKitWallet {
     type Signer = SimpleSigner;
 
     // Using the data deterministically generate a key id. From a child key.
@@ -251,7 +267,7 @@ impl<WS: PersistBackend<ChangeSet>> dlc_manager::ContractSignerProvider for DlcD
     }
 }
 
-impl<WS: PersistBackend<ChangeSet>> dlc_manager::Wallet for DlcDevKitWallet<WS> {
+impl dlc_manager::Wallet for DlcDevKitWallet {
     fn get_new_address(&self) -> Result<bitcoin::Address, ManagerError> {
         Ok(self
             .new_external_address()

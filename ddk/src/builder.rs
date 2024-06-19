@@ -1,11 +1,11 @@
 use crate::{io, SeedConfig};
-use core::fmt;
 use bdk::chain::PersistBackend;
 use bdk::wallet::ChangeSet;
+use core::fmt;
 use dlc_manager::manager::Manager;
 use dlc_manager::SystemTimeProvider;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use tokio::sync::Mutex;
 
 use crate::chain::EsploraClient;
@@ -15,13 +15,11 @@ use crate::wallet::DlcDevKitWallet;
 use crate::{DdkOracle, DdkStorage, DdkTransport};
 
 #[derive(Clone, Debug)]
-pub struct DdkBuilder<T, S, O, WS> {
+pub struct DdkBuilder<T, S, O> {
     name: Option<String>,
     config: Option<DdkConfig>,
-    seed: Option<SeedConfig>,
     transport: Option<Arc<T>>,
     storage: Option<Arc<S>>,
-    wallet_storage: Option<WS>,
     oracle: Option<Arc<O>>,
 }
 
@@ -54,21 +52,20 @@ impl fmt::Display for BuilderError {
 
 impl std::error::Error for BuilderError {}
 
-impl<T: DdkTransport, S: DdkStorage, O: DdkOracle, WS: PersistBackend<ChangeSet>> Default for DdkBuilder<T, S, O, WS> {
+impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> Default for DdkBuilder<T, S, O> {
     fn default() -> Self {
+        let config = Some(DdkConfig::default());
         Self {
             name: None,
-            config: None,
-            seed: None,
+            config,
             transport: None,
             storage: None,
-            wallet_storage: None,
             oracle: None,
         }
     }
 }
 
-impl<T: DdkTransport, S: DdkStorage, O: DdkOracle, WS: PersistBackend<ChangeSet> + Clone + Copy> DdkBuilder<T, S, O, WS> {
+impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
     pub fn new() -> Self {
         DdkBuilder::default()
     }
@@ -98,28 +95,15 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle, WS: PersistBackend<ChangeSet>
         self
     }
 
-    pub fn set_seed_config(&mut self, seed_config: SeedConfig) -> &mut Self {
-        self.seed = Some(seed_config);
-        self
-    }
-
-    pub fn set_wallet_storage(&mut self, wallet_storage: WS) -> &mut Self {
-        self.wallet_storage = Some(wallet_storage);
-        self
-    }
-
-    pub async fn finish(&self) -> anyhow::Result<DlcDevKit<T, S, O, WS>> {
+    pub fn finish(&self) -> anyhow::Result<DlcDevKit<T, S, O>> {
         let config = self
             .config
             .as_ref()
             .map_or_else(|| Err(BuilderError::NoConfig), |c| Ok(c))?;
-        let seed = self
-            .seed
-            .as_ref()
-            .map_or_else(|| Err(BuilderError::NoSeed), |s| Ok(s))?;
-        println!("Creating {:?}", config.storage_path);
+
         std::fs::create_dir_all(&config.storage_path)?;
-        let xprv = io::xprv_from_config(&seed, config.network)?;
+
+        let xprv = io::xprv_from_config(&config.seed_config, config.network)?;
 
         let transport = self
             .transport
@@ -131,10 +115,6 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle, WS: PersistBackend<ChangeSet>
             .as_ref()
             .map_or_else(|| Err(BuilderError::NoStorage), |s| Ok(s.clone()))?;
 
-        let wallet_storage = self
-            .wallet_storage
-            .unwrap();
-
         let oracle = self
             .oracle
             .as_ref()
@@ -145,13 +125,16 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle, WS: PersistBackend<ChangeSet>
             None => uuid::Uuid::new_v4().to_string(),
         };
 
-        log::info!("Creating new P2P DlcDevKit wallet. name={}", name);
+        println!(
+            "Creating new P2P DlcDevKit wallet. name={}",
+            name
+        );
         let wallet = Arc::new(DlcDevKitWallet::new(
             &name,
             xprv,
             &config.esplora_host,
             config.network,
-            wallet_storage,
+            &config.storage_path,
         )?);
 
         let mut oracles = HashMap::new();
@@ -170,6 +153,7 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle, WS: PersistBackend<ChangeSet>
         )?));
 
         Ok(DlcDevKit {
+            runtime: Arc::new(RwLock::new(None)),
             wallet,
             manager,
             transport,

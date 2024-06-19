@@ -1,56 +1,38 @@
-use bdk::wallet::ChangeSet;
-use bdk_file_store::Store;
+use anyhow::Result;
 use ddk::builder::DdkBuilder;
 use ddk::oracle::P2PDOracleClient;
 use ddk::storage::SledStorageProvider;
 use ddk::transport::lightning::LightningTransport;
-use ddk::{DdkConfig, SeedConfig};
+use ddk::DdkConfig;
+use std::env::current_dir;
 use std::sync::Arc;
 
-type ApplicationDdk = ddk::DlcDevKit<LightningTransport, SledStorageProvider, P2PDOracleClient, Store<ChangeSet>>;
+type ApplicationDdk = ddk::DlcDevKit<LightningTransport, SledStorageProvider, P2PDOracleClient>;
 
-#[tokio::main]
-async fn main() {
-    let name = "dlcdevkit-example";
-    let dir = std::env::current_dir().unwrap().join(name);
-    std::fs::create_dir_all(&dir).unwrap();
-    let storage_path = dir.to_str().unwrap().to_string();
-    let seed = SeedConfig::File(storage_path.clone());
-    let config = DdkConfig {
-        storage_path,
-        network: bitcoin::Network::Regtest,
-        esplora_host: ddk::ESPLORA_HOST.to_string(),
-    };
-    let transport = Arc::new(LightningTransport::new(&seed, config.network).unwrap());
-    let storage =
-        Arc::new(SledStorageProvider::new(dir.join("sled_db").to_str().unwrap()).unwrap());
-    let oracle_client = tokio::task::spawn_blocking(move || {
-        Arc::new(P2PDOracleClient::new(ddk::ORACLE_HOST).unwrap())
-    })
-    .await
-    .unwrap();
+fn main() -> Result<()> {
+    let mut config = DdkConfig::default();
+    config.storage_path = current_dir()?;
 
-    let wallet_storage = Store::<ChangeSet>::open_or_create_new("dlcdevkit".as_bytes(), dir.join("wallet_db")).unwrap();
+    let transport = Arc::new(LightningTransport::new(&config.seed_config, config.network)?);
+    let storage = Arc::new(SledStorageProvider::new(
+        config.storage_path.join("sled_db").to_str().expect("No storage."),
+    )?);
 
-    let ddk: ApplicationDdk = DdkBuilder::new()
-        .set_name(name)
-        .set_config(config)
-        .set_seed_config(seed)
-        .set_transport(transport.clone())
-        .set_storage(storage.clone())
-        .set_wallet_storage(wallet_storage)
-        .set_oracle(oracle_client.clone())
-        .finish()
-        .await
-        .unwrap();
+    let oracle_client = Arc::new(P2PDOracleClient::new(ddk::ORACLE_HOST).expect("no oracle"));
+
+    let mut builder = DdkBuilder::new();
+    builder.set_config(config);
+    builder.set_transport(transport.clone());
+    builder.set_storage(storage.clone());
+    builder.set_oracle(oracle_client.clone());
+
+    let ddk: ApplicationDdk = builder.finish()?;
 
     let wallet = ddk.wallet.new_external_address();
 
     assert!(wallet.is_ok());
 
-    ddk.start().await.expect("nope");
+    ddk.start().expect("couldn't start ddk");
 
-    let address = ddk.wallet.new_external_address().unwrap();
-
-    println!("Address: {}", address);
+    loop {}
 }
