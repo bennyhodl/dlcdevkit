@@ -20,10 +20,10 @@ bitcoin = { version = "0.30.2", features = ["rand", "serde"] }
 # dlc-manager = { version = "0.4.0", git = "https://github.com/bennyhodl/rust-dlc", branch = "use-serde", features = ["use-serde"] }
 # dlc-messages = { version = "0.4.0", git = "https://github.com/bennyhodl/rust-dlc", branch = "use-serde", features = [ "use-serde"] }
 # dlc-trie = { version = "0.4.0", git = "https://github.com/bennyhodl/rust-dlc", branch = "use-serde", features = ["use-serde"] }
-dlc-trie = { version = "0.4.0", path = "../../dev/libs/rust-dlc/master/dlc-trie", features = [ "use-serde"] }
-dlc = { version = "0.4.0", path = "../../dev/libs/rust-dlc/master/dlc", features = [ "use-serde"] }
-dlc-manager = { version = "0.4.0", path = "../../dev/libs/rust-dlc/master/dlc-manager", features = [ "use-serde"] }
-dlc-messages = { version = "0.4.0", path = "../../dev/libs/rust-dlc/master/dlc-messages", features = [ "use-serde"] }
+dlc-trie = { version = "0.4.0", path = "../../../libs/rust-dlc/master/dlc-trie", features = [ "use-serde"] }
+dlc = { version = "0.4.0", path = "../../../libs/rust-dlc/master/dlc", features = [ "use-serde"] }
+dlc-manager = { version = "0.4.0", path = "../../../libs/rust-dlc/master/dlc-manager", features = [ "use-serde"] }
+dlc-messages = { version = "0.4.0", path = "../../../libs/rust-dlc/master/dlc-messages", features = [ "use-serde"] }
 getrandom = { version = "0.2.11", features = ["js"] }
 lightning = { version = "0.0.121", default-features = false, features = ["grind_signatures", "std"] }
 nostr = { version = "0.29.0", features = ["std"] }

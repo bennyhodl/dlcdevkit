@@ -1,6 +1,7 @@
 use crate::chain::EsploraClient;
 use crate::wallet::DlcDevKitWallet;
-use crate::{DdkOracle, DdkStorage, DdkTransport};
+use crate::{transport, DdkOracle, DdkStorage, DdkTransport};
+use anyhow::anyhow;
 use bdk::chain::PersistBackend;
 use bdk::wallet::ChangeSet;
 use bitcoin::secp256k1::PublicKey;
@@ -9,24 +10,26 @@ use dlc_manager::{
     SimpleSigner, SystemTimeProvider,
 };
 use dlc_messages::oracle_msgs::OracleAnnouncement;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
+use tokio::runtime::Runtime;
 use tokio::sync::Mutex;
 
-pub type DlcDevKitDlcManager<S, O, WS> = dlc_manager::manager::Manager<
-    Arc<DlcDevKitWallet<WS>>,
-    Arc<CachedContractSignerProvider<Arc<DlcDevKitWallet<WS>>, SimpleSigner>>,
+pub type DlcDevKitDlcManager<S, O> = dlc_manager::manager::Manager<
+    Arc<DlcDevKitWallet>,
+    Arc<CachedContractSignerProvider<Arc<DlcDevKitWallet>, SimpleSigner>>,
     Arc<EsploraClient>,
     Arc<S>,
     Arc<O>,
     Arc<SystemTimeProvider>,
-    Arc<DlcDevKitWallet<WS>>,
+    Arc<DlcDevKitWallet>,
     SimpleSigner,
 >;
 
-pub struct DlcDevKit<T: DdkTransport, S: DdkStorage, O: DdkOracle, WS: PersistBackend<ChangeSet>> {
-    pub wallet: Arc<DlcDevKitWallet<WS>>,
-    pub manager: Arc<Mutex<DlcDevKitDlcManager<S, O, WS>>>,
+pub struct DlcDevKit<T: DdkTransport, S: DdkStorage, O: DdkOracle> {
+    pub runtime: Arc<RwLock<Option<Runtime>>>,
+    pub wallet: Arc<DlcDevKitWallet>,
+    pub manager: Arc<Mutex<DlcDevKitDlcManager<S, O>>>,
     pub transport: Arc<T>,
     pub storage: Arc<S>,
     pub oracle: Arc<O>,
@@ -34,33 +37,43 @@ pub struct DlcDevKit<T: DdkTransport, S: DdkStorage, O: DdkOracle, WS: PersistBa
 
 impl<
         T: DdkTransport + std::marker::Send + std::marker::Sync + 'static,
-        S: DdkStorage,
-        O: DdkOracle,
-        WS: PersistBackend<ChangeSet> + std::marker::Send + Clone + 'static
-    > DlcDevKit<T, S, O, WS>
+        S: DdkStorage + std::marker::Send + std::marker::Sync + 'static,
+        O: DdkOracle + std::marker::Send + std::marker::Sync + 'static,
+    > DlcDevKit<T, S, O>
 {
-    pub async fn start(&self) -> anyhow::Result<()> {
-        tracing::info!("Starting ddk...");
-        let transport_listener = self.transport.clone();
-        let wallet = self.wallet.clone();
-        let _dlc_manager = self.manager.clone();
+    pub fn start(&self) -> anyhow::Result<()> {
+        println!("Starting ddk...");
 
-        tokio::spawn(async move {
-            transport_listener.listen().await;
+        let mut runtime_lock = self.runtime.write().unwrap();
+
+        if runtime_lock.is_some() {
+            return Err(anyhow!("DDK is still running."));
+        }
+
+        let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
+        // get fees
+
+        let transport_clone = self.transport.clone();
+        runtime.spawn(async move {
+            tokio::runtime::Builder::new_current_thread()
+                .build()
+                .unwrap()
+                .spawn(async move { transport_clone.listen().await })
         });
-        tokio::spawn(async move {
+
+        let wallet_clone = self.wallet.clone();
+        runtime.spawn(async move {
+            println!("started the wallet");
             let mut timer = tokio::time::interval(Duration::from_secs(10));
             loop {
                 timer.tick().await;
-                log::info!("Syncing wallet...");
-                wallet.sync().unwrap();
+                println!("Syncing wallet...");
+                wallet_clone.sync().unwrap();
             }
         });
 
-        let _transport_clone = self.transport.clone();
-        tokio::spawn(async move {
-            // transport_clone.receive_dlc_message(&dlc_manager).await;
-        });
+        println!("Done starting ddk");
+        *runtime_lock = Some(runtime);
 
         Ok(())
     }
