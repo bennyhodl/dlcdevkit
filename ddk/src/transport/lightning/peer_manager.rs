@@ -23,7 +23,7 @@ impl Logger for DlcDevKitLogger {
     }
 }
 
-pub type PeerManager = LdkPeerManager<
+pub type LnPeerManager = LdkPeerManager<
     SocketDescriptor,
     Arc<ErroringMessageHandler>,
     Arc<IgnoringMessageHandler>,
@@ -34,7 +34,7 @@ pub type PeerManager = LdkPeerManager<
 >;
 
 pub struct LightningTransport {
-    peer_manager: Arc<PeerManager>,
+    peer_manager: Arc<LnPeerManager>,
     message_handler: Arc<DlcMessageHandler>,
     pub node_id: PublicKey,
 }
@@ -59,7 +59,7 @@ impl LightningTransport {
         };
 
         Ok(LightningTransport {
-            peer_manager: Arc::new(PeerManager::new(
+            peer_manager: Arc::new(LnPeerManager::new(
                 message_handler,
                 time.as_secs() as u32,
                 &seed,
@@ -71,7 +71,7 @@ impl LightningTransport {
         })
     }
 
-    pub fn peer_manager(&self) -> Arc<PeerManager> {
+    pub fn ln_peer_manager(&self) -> Arc<LnPeerManager> {
         self.peer_manager.clone()
     }
 

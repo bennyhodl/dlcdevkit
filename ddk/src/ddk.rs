@@ -10,10 +10,9 @@ use dlc_manager::{
     SimpleSigner, SystemTimeProvider,
 };
 use dlc_messages::oracle_msgs::OracleAnnouncement;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, RwLock, Mutex};
 use std::time::Duration;
 use tokio::runtime::Runtime;
-use tokio::sync::Mutex;
 
 pub type DlcDevKitDlcManager<S, O> = dlc_manager::manager::Manager<
     Arc<DlcDevKitWallet>,
@@ -72,14 +71,22 @@ impl<
             }
         });
 
+        let message_processor = self.transport.clone();
+        let manager_clone = self.manager.clone();
+        runtime.spawn(async move {
+            println!("Message processor");
+            let mut timer = tokio::time::interval(Duration::from_secs(5));
+            loop {
+                timer.tick().await;
+                println!("Processing message...");
+                process_incoming_messages(message_processor.clone(), manager_clone.clone());
+            }
+        });
+
         println!("Done starting ddk");
         *runtime_lock = Some(runtime);
 
         Ok(())
-    }
-
-    pub fn transport_type(&self) -> String {
-        self.transport.name()
     }
 
     pub async fn send_dlc_offer(
@@ -88,7 +95,7 @@ impl<
         oracle_announcement: &OracleAnnouncement,
         counter_party: PublicKey,
     ) -> anyhow::Result<()> {
-        let mut manager = self.manager.lock().await;
+        let mut manager = self.manager.lock().unwrap();
 
         let _offer_msg = manager.send_offer_with_announcements(
             contract_input,
@@ -99,8 +106,8 @@ impl<
         Ok(())
     }
 
-    pub async fn accept_dlc_offer(&self, contract: [u8; 32]) -> anyhow::Result<()> {
-        let mut dlc = self.manager.lock().await;
+    pub fn accept_dlc_offer(&self, contract: [u8; 32]) -> anyhow::Result<()> {
+        let mut dlc = self.manager.lock().unwrap();
 
         let contract_id = ContractId::from(contract);
 
@@ -112,3 +119,27 @@ impl<
         Ok(())
     }
 }
+
+pub fn process_incoming_messages<T: DdkTransport, S: DdkStorage, O: DdkOracle>(transport: Arc<T>, manager: Arc<Mutex<DlcDevKitDlcManager<S, O>>>) {
+    // let message_handler = self.transport.message_handler();
+    // let peer_manager = self.transport.peer_manager();
+    let messages = transport.get_and_clear_received_messages();
+
+    for (counterparty, message) in messages {
+        let resp = manager
+            .lock()
+            .unwrap()
+            .on_dlc_message(&message, counterparty)
+            .expect("Error processing message");
+
+        if let Some(msg) = resp {
+            transport.send_message(counterparty, msg);
+        }
+    }
+
+    if transport.has_pending_messages() {
+        println!("Still have pending messages!");
+        // peer_manager.process_events();
+    }
+}
+

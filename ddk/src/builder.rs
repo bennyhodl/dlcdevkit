@@ -5,8 +5,7 @@ use core::fmt;
 use dlc_manager::manager::Manager;
 use dlc_manager::SystemTimeProvider;
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
-use tokio::sync::Mutex;
+use std::sync::{Arc, RwLock, Mutex};
 
 use crate::chain::EsploraClient;
 use crate::config::DdkConfig;

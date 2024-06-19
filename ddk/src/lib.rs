@@ -21,6 +21,7 @@ pub mod transport;
 /// Re-exports
 pub use bdk;
 pub use bitcoin::Network;
+use bitcoin::secp256k1::PublicKey;
 pub use config::{DdkConfig, SeedConfig};
 pub use ddk::DlcDevKit;
 pub use ddk::DlcDevKitDlcManager;
@@ -32,12 +33,20 @@ pub const ORACLE_HOST: &str = "http://localhost:8080";
 pub const ESPLORA_HOST: &str = "http://localhost:30000";
 
 use async_trait::async_trait;
+use dlc_messages::Message;
 
 #[async_trait]
 pub trait DdkTransport {
+    type PeerManager;
+    type MessageHandler;
+
     fn name(&self) -> String;
     async fn listen(&self);
-    // async fn receive_dlc_message(&self, ddk: &Arc<Mutex<DlcDevKitDlcManager>>);
+    fn message_handler(&self) -> Self::MessageHandler;
+    fn peer_manager(&self) -> Self::PeerManager;
+    fn send_message(&self, counterparty: PublicKey, message: Message);
+    fn get_and_clear_received_messages(&self) -> Vec<(PublicKey, Message)>;
+    fn has_pending_messages(&self) -> bool;
 }
 
 pub trait DdkStorage: dlc_manager::Storage /*+ PersistBackend<ChangeSet> */ {}

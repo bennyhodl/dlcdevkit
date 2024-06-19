@@ -1,5 +1,9 @@
+use std::sync::Arc;
+
 use crate::DdkTransport;
 use async_trait::async_trait;
+use bitcoin::secp256k1::PublicKey;
+use dlc_messages::Message;
 use lightning_net_tokio::setup_inbound;
 
 pub(crate) mod peer_manager;
@@ -8,6 +12,9 @@ use tokio::net::TcpListener;
 
 #[async_trait]
 impl DdkTransport for LightningTransport {
+    type PeerManager = Arc<super::lightning::peer_manager::LnPeerManager>;
+    type MessageHandler = Arc<dlc_messages::message_handler::MessageHandler>;
+
     fn name(&self) -> String {
         "lightning".into()
     }
@@ -28,29 +35,23 @@ impl DdkTransport for LightningTransport {
         }
     }
 
-    // async fn receive_dlc_message(&self, dlc_manager: &Arc<Mutex<DlcDevKitDlcManager>>) {
-    //     let mut ticker = tokio::time::interval(Duration::from_secs(5));
-    //     loop {
-    //         ticker.tick().await;
-    //         println!("timer tick");
-    //         let message_handler = self.message_handler();
-    //         let peer_manager = self.peer_manager();
-    //         let messages = message_handler.get_and_clear_received_messages();
-    //         for (node_id, message) in messages {
-    //             let mut man = dlc_manager.lock().await;
-    //             println!("Checking msg lock");
-    //             let resp = man
-    //                 .on_dlc_message(&message, node_id)
-    //                 .expect("Error processing message");
-    //
-    //             if let Some(msg) = resp {
-    //                 message_handler.send_message(node_id, msg);
-    //             }
-    //
-    //             if message_handler.has_pending_messages() {
-    //                 peer_manager.process_events();
-    //             }
-    //         }
-    //     }
-    // }
+    fn message_handler(&self) -> Self::MessageHandler {
+        self.message_handler()
+    }
+
+    fn peer_manager(&self) -> Self::PeerManager {
+        self.ln_peer_manager()
+    }
+
+    fn send_message(&self, counterparty: PublicKey, message: dlc_messages::Message) {
+      self.message_handler().send_message(counterparty, message) 
+    }
+
+    fn get_and_clear_received_messages(&self) -> Vec<(PublicKey, Message)> {
+        self.message_handler().get_and_clear_received_messages()
+    }
+
+    fn has_pending_messages(&self) -> bool {
+        self.message_handler().has_pending_messages()
+    }
 }
