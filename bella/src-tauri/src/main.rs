@@ -4,15 +4,12 @@ mod functions;
 mod models;
 mod nostr;
 
+use std::sync::Arc;
+use crate::functions::*;
+
 // use crate::functions::{
 //     dlc::{accept_dlc, list_contracts, list_offers},
 //     wallet::{get_balance, new_address},
-// };
-// use ddk::{
-//     p2p::{
-//         lightning_net_tokio::setup_inbound, DlcDevKit, DlcDevKitDlcManager, DlcDevKitPeerManager,
-//     },
-//     Network,
 // };
 use log::LevelFilter;
 // use models::Pubkeys;
@@ -26,26 +23,16 @@ use tauri_plugin_log::LogTarget;
 // use tracing::Level;
 // use tracing_subscriber::FmtSubscriber;
 
-// #[tauri::command]
-// fn get_pubkeys(bella: State<Arc<DlcDevKit>>, p2p: State<Arc<DlcDevKitPeerManager>>) -> Pubkeys {
-//     let bitcoin = bella.wallet.get_pubkey().unwrap().to_string();
-//     let node_id = p2p.node_id.to_string();
-//
-//     Pubkeys { bitcoin, node_id }
-// }
-//
-// #[tauri::command]
-// fn list_peers(p2p: State<Arc<DlcDevKitPeerManager>>) -> Vec<String> {
-//     let mut node_ids = Vec::new();
-//     for (node_id, _) in p2p.peer_manager().get_peer_node_ids() {
-//         node_ids.push(node_id.to_string())
-//     }
-//     info!("{:?}", node_ids);
-//     node_ids
-// }
+use ddk::{DdkConfig, DlcDevKit, SeedConfig};
+use ddk::builder::DdkBuilder;
+use ddk::storage::SledStorageProvider;
+use ddk::transport::lightning::LightningTransport;
+use ddk::oracle::P2PDOracleClient;
+
+pub type BellaDdk = DlcDevKit<LightningTransport, SledStorageProvider, P2PDOracleClient>;
 
 #[tokio::main]
-async fn main() {
+async fn main() -> anyhow::Result<()> {
     // let _ = fix_path_env::fix();
     // // let _ = env_logger::init();
     // env_logger::builder()
@@ -60,40 +47,6 @@ async fn main() {
     //     .finish();
     //
     // tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
-    //
-    // log::info!("heyhowareya");
-    // let name = "terminal".to_string();
-    // let bella = Arc::new(
-    //     DlcDevKit::new(&name, "http://localhost:30000", Network::Regtest)
-    //         .await
-    //         .unwrap(),
-    // );
-    //
-    // let p2p = Arc::new(DlcDevKitPeerManager::new(&name, Network::Regtest));
-    //
-    // let peer_manager_connection_handler = p2p.peer_manager();
-    // tokio::spawn(async move {
-    //     let listener = TcpListener::bind("0.0.0.0:9002")
-    //         .await
-    //         .expect("Coldn't get port.");
-    //     loop {
-    //         let peer_mgr = peer_manager_connection_handler.clone();
-    //         let (tcp_stream, _) = listener.accept().await.unwrap();
-    //         tokio::spawn(async move {
-    //             setup_inbound(peer_mgr.clone(), tcp_stream.into_std().unwrap()).await;
-    //         });
-    //     }
-    // });
-    //
-    // let wallet_clone = bella.wallet.clone();
-    // tokio::spawn(async move {
-    //     let mut timer = tokio::time::interval(Duration::from_secs(10));
-    //     loop {
-    //         timer.tick().await;
-    //         log::info!("Syncing wallet...");
-    //         wallet_clone.sync().unwrap();
-    //     }
-    // });
 
     // let dlc_manager_clone = bella.manager.clone();
     // let p2p_clone = p2p.clone();
@@ -126,6 +79,27 @@ async fn main() {
     //     }
     // });
 
+    let mut config = DdkConfig::default();
+    let home_dir = "/Users/ben/.ddk/terminal";
+    config.seed_config = SeedConfig::File(home_dir.to_string());
+    config.storage_path = home_dir.into();
+    let transport = Arc::new(LightningTransport::new(&config.seed_config, config.network)?);
+    let storage = Arc::new(SledStorageProvider::new(
+        config.storage_path.join("sled_db").to_str().expect("No storage."),
+    )?);
+    let oracle = tokio::task::spawn_blocking(|| {
+        Arc::new(P2PDOracleClient::new(ddk::ORACLE_HOST).expect("no oracle"))
+    }).await?;
+
+    let mut builder = DdkBuilder::new();
+    builder.set_name("bella");
+    builder.set_config(config);
+    builder.set_storage(storage);
+    builder.set_transport(transport);
+    builder.set_oracle(oracle);
+
+    let ddk = Arc::new(builder.finish()?);
+    let ddk_runtime = ddk.clone();
     tauri::Builder::default()
         .plugin(
             tauri_plugin_log::Builder::default()
@@ -133,13 +107,13 @@ async fn main() {
                 .targets([LogTarget::Stdout, LogTarget::Webview, LogTarget::LogDir])
                 .build(),
         )
-        // .manage(bella.clone())
-        // .manage(p2p.clone())
+        .manage(ddk.clone())
         .invoke_handler(tauri::generate_handler![
-            // // wallet
-            // new_address,
-            // get_pubkeys,
-            // get_balance,
+            // wallet
+            wallet::new_address,
+            get_pubkeys,
+            wallet::get_balance,
+            wallet::send,
             // // dlc
             // list_peers,
             // list_contracts,
@@ -147,25 +121,12 @@ async fn main() {
             // accept_dlc,
         ])
         .setup(move |_app| {
-            // let p2p = Arc::new(BellaPeerManager::new("terminal", Network::Regtest));
-            // let app_handle = app.app_handle();
-            //
-            // let p2p_clone = p2p.clone();
-            // let p2p_state = app_handle.state::<Arc<BellaPeerManager>>().clone();
-            // tauri::async_runtime::spawn(async move {
-            //     peer_manager_server(p2p_state).await;
-            // });
-            //
-            // let wallet_state = app_handle.state::<Arc<Bella>>().clone();
-            // let wallet_clone = bella.wallet.clone();
-            // tauri::async_runtime::spawn(async move {
-            //     wallet_watcher(wallet_state).await;
-            // });
-
+            let _ = ddk_runtime.start();
             Ok(())
         })
         .run(tauri::generate_context!())
         .expect("error while running bella");
+    Ok(())
 }
 
 // pub fn process_incoming_messages(
