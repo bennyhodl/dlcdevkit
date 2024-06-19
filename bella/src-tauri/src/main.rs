@@ -115,10 +115,11 @@ async fn main() -> anyhow::Result<()> {
             wallet::get_balance,
             wallet::send,
             // // dlc
-            // list_peers,
-            // list_contracts,
-            // list_offers,
-            // accept_dlc,
+            list_peers,
+            dlc::list_contracts,
+            dlc::list_offers,
+            dlc::list_offers_async,
+            dlc::accept_dlc,
         ])
         .setup(move |_app| {
             let _ = ddk_runtime.start();
@@ -129,29 +130,6 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-// pub fn process_incoming_messages(
-//     p2p: &Arc<DlcDevKitPeerManager>,
-//     dlc_manager: &Arc<Mutex<DlcDevKitDlcManager>>,
-// ) {
-//     let message_handler = p2p.message_handler();
-//     let peer_manager = p2p.peer_manager();
-//     let messages = message_handler.get_and_clear_received_messages();
-//
-//     for (node_id, message) in messages {
-//         let resp = dlc_manager
-//             .lock()
-//             .unwrap()
-//             .on_dlc_message(&message, node_id)
-//             .expect("Error processing message");
-//         if let Some(msg) = resp {
-//             message_handler.send_message(node_id, msg);
-//         }
-//     }
-//
-//     if message_handler.has_pending_messages() {
-//         peer_manager.process_events();
-//     }
-// }
 //
 // async fn peer_manager_server(state: State<'_, Arc<DlcDevKitPeerManager>>) {
 //     let peer_manager_connection_handler = state.peer_manager();
