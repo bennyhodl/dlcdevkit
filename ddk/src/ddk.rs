@@ -56,10 +56,8 @@ impl<
 
         let transport_clone = self.transport.clone();
         runtime.spawn(async move {
-            tokio::runtime::Builder::new_current_thread()
-                .build()
-                .unwrap()
-                .spawn(async move { transport_clone.listen().await })
+            println!("Starting listener");
+            transport_clone.listen().await;
         });
 
         let wallet_clone = self.wallet.clone();
@@ -85,6 +83,8 @@ impl<
             }
         });
 
+        // TODO: connect stored peers.
+        
         println!("Done starting ddk");
         *runtime_lock = Some(runtime);
 

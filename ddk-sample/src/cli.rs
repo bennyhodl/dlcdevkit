@@ -1,15 +1,16 @@
+use std::net::SocketAddr;
 use std::str::FromStr;
 
 use clap::{Parser, Subcommand};
 // use ddk::dlc_manager::contract::contract_input::ContractInput;
-use ddk::bdk::bitcoin::{Address, PublicKey};
+use ddk::bdk::bitcoin::Address;
 use ddk::DdkTransport;
 use ddk::dlc_manager::Storage;
 use ddk::dlc_messages::{Message, OfferDlc};
 // use ddk::dlc_messages::contract_msgs::ContractInfo;
 // use ddk::dlc_messages::oracle_msgs::OracleAnnouncement;
 
-use crate::ApplicationDdk;
+use crate::{ApplicationDdk, DdkRuntime};
 /// CLI defines the overall command-line interface.
 #[derive(Parser, Debug)]
 #[command(name = "DLC Dev Kit Sample")]
@@ -27,9 +28,9 @@ pub enum Commands {
     Info,
     Listpeers,
     Addpeer {
-        #[arg(short, long)]
+        #[arg(long)]
         pubkey: String,
-        #[arg(short, long)]
+        #[arg(long)]
         host: String,
     },
     Wallet {
@@ -69,17 +70,32 @@ pub enum WalletCommand {
     }
 }
 
-pub fn match_ddk_command(command: Commands, ddk: &ApplicationDdk) -> anyhow::Result<()> {
-    println!("process message");
+pub fn match_ddk_command(command: Commands, ddk: &ApplicationDdk, _runtime: DdkRuntime) -> anyhow::Result<()> {
     match command {
         Commands::Info => {
             println!("Node id: {}", ddk.transport.node_id.to_string());
             println!("Network: {}", ddk.network())
         }
         Commands::Listpeers => {
-            println!("List peers!");
+            let peers = ddk.transport.peer_manager().get_peer_node_ids();
+            if peers.is_empty() {
+                return Ok(println!("No peers"));
+            }
+            peers.iter().for_each(|peer| {
+                println!("Peer: {}\t\tHost: {:?}", peer.0, peer.1);
+            })
         }
         Commands::Addpeer { pubkey, host } => {
+            let peer_manager = ddk.transport.peer_manager().clone();
+            let pubkey = ddk::bdk::bitcoin::secp256k1::PublicKey::from_str(&pubkey)?;
+            let host = SocketAddr::from_str(&host)?;
+            tokio::runtime::Builder::new_current_thread().build().unwrap().spawn(async move {
+                let connect = lightning_net_tokio::connect_outbound(peer_manager, pubkey, host).await;
+                if connect.is_some() {
+                    println!("Connected?");
+                }
+            });
+             
             println!("Add: {:?} {:?}", pubkey, host);
         }
         Commands::Listcontracts => {

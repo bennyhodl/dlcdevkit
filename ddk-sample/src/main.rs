@@ -1,6 +1,6 @@
 mod cli;
 
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use ddk::builder::DdkBuilder;
 use ddk::oracle::P2PDOracleClient;
 use ddk::storage::SledStorageProvider;
@@ -11,10 +11,12 @@ use rustyline::DefaultEditor;
 use clap::{CommandFactory, Parser};
 
 use cli::Ddk;
+use tokio::runtime::Runtime;
 
 use crate::cli::match_ddk_command;
 
 type ApplicationDdk = ddk::DlcDevKit<LightningTransport, SledStorageProvider, P2PDOracleClient>;
+type DdkRuntime = Arc<RwLock<Option<Runtime>>>;
 
 fn main() -> anyhow::Result<()> {
     let mut config = DdkConfig::default();
@@ -42,7 +44,8 @@ fn main() -> anyhow::Result<()> {
 
     println!("Network: {}", config.network.clone());
     println!("Pubkey: {}", ddk.transport.node_id);
-
+    let rt = ddk.runtime.clone();
+    ddk.start().unwrap();
     loop {
         let readline = rl.readline(">> ");
         match readline {
@@ -57,7 +60,7 @@ fn main() -> anyhow::Result<()> {
                 match command {
                     Ok(cli) => {
                         if let Some(command) = cli.command {
-                            match_ddk_command(command, &ddk)?;
+                            match_ddk_command(command, &ddk, rt.clone())?;
                         } else {
                             Ddk::command().print_help()?
                         }
