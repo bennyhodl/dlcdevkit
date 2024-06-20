@@ -248,6 +248,14 @@ impl Storage for SledStorageProvider {
         Ok(())
     }
 
+    fn get_contract_offers(&self) -> Result<Vec<OfferedContract>, Error> {
+        self.get_data_with_prefix(
+            &self.contract_tree()?,
+            &[ContractPrefix::Offered.into()],
+            None,
+        )
+    }
+
     fn get_signed_contracts(&self) -> Result<Vec<SignedContract>, Error> {
         self.get_data_with_prefix(
             &self.contract_tree()?,
@@ -260,14 +268,6 @@ impl Storage for SledStorageProvider {
         self.get_data_with_prefix(
             &self.contract_tree()?,
             &[ContractPrefix::Confirmed.into()],
-            None,
-        )
-    }
-
-    fn get_contract_offers(&self) -> Result<Vec<OfferedContract>, Error> {
-        self.get_data_with_prefix(
-            &self.contract_tree()?,
-            &[ContractPrefix::Offered.into()],
             None,
         )
     }

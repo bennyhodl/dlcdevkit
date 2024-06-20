@@ -5,6 +5,7 @@ use anyhow::anyhow;
 use bdk::chain::PersistBackend;
 use bdk::wallet::ChangeSet;
 use bitcoin::secp256k1::PublicKey;
+use bitcoin::Network;
 use dlc_manager::{
     contract::contract_input::ContractInput, CachedContractSignerProvider, ContractId,
     SimpleSigner, SystemTimeProvider,
@@ -32,6 +33,7 @@ pub struct DlcDevKit<T: DdkTransport, S: DdkStorage, O: DdkOracle> {
     pub transport: Arc<T>,
     pub storage: Arc<S>,
     pub oracle: Arc<O>,
+    pub network: Network,
 }
 
 impl<
@@ -104,6 +106,10 @@ impl<
         )?;
 
         Ok(())
+    }
+
+    pub fn network(&self) -> Network {
+        self.network
     }
 
     pub fn accept_dlc_offer(&self, contract: [u8; 32]) -> anyhow::Result<()> {

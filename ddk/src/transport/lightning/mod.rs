@@ -20,6 +20,7 @@ impl DdkTransport for LightningTransport {
     }
 
     async fn listen(&self) {
+        println!("startig listener!");
         let peer_manager_connection_handler = self.peer_manager();
 
         let listener = TcpListener::bind("0.0.0.0:9002")

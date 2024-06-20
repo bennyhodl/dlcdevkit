@@ -158,6 +158,7 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
             transport,
             storage,
             oracle,
+            network: config.network,
         })
     }
 }

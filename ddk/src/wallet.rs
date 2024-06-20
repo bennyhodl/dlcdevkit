@@ -55,7 +55,7 @@ impl DlcDevKitWallet {
         P: AsRef<Path>,
     {
         let secp = Secp256k1::new();
-        let wallet_storage_path = wallet_storage_path.as_ref().join("ddk-wallet");
+        let wallet_storage_path = wallet_storage_path.as_ref().join("wallet-db");
         let storage = Store::<ChangeSet>::open_or_create_new(&[0u8; 32], wallet_storage_path)?;
 
         let inner = Arc::new(Mutex::new(Wallet::new_or_load(

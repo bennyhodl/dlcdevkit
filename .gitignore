@@ -28,3 +28,4 @@
 /regtest/bitcoin/*
 
 /dlcdevkit-example
+/ddk-sample/history.txt
