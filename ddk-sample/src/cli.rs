@@ -10,12 +10,12 @@ use ddk::dlc_messages::{Message, OfferDlc};
 // use ddk::dlc_messages::contract_msgs::ContractInfo;
 // use ddk::dlc_messages::oracle_msgs::OracleAnnouncement;
 
-use crate::{ApplicationDdk, DdkRuntime};
+use crate::ApplicationDdk;
 /// CLI defines the overall command-line interface.
 #[derive(Parser, Debug)]
 #[command(name = "DLC Dev Kit Sample")]
 #[command(about = "Test out DDK", long_about = None)]
-pub struct Ddk {
+pub struct DdkCli {
     #[command(subcommand)]
     pub command: Option<Commands>,
     #[arg(short, long)]
@@ -70,7 +70,7 @@ pub enum WalletCommand {
     }
 }
 
-pub fn match_ddk_command(command: Commands, ddk: &ApplicationDdk, _runtime: DdkRuntime) -> anyhow::Result<()> {
+pub fn match_ddk_command(command: Commands, ddk: &ApplicationDdk) -> anyhow::Result<()> {
     match command {
         Commands::Info => {
             println!("Node id: {}", ddk.transport.node_id.to_string());
