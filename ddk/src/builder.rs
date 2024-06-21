@@ -5,7 +5,7 @@ use core::fmt;
 use dlc_manager::manager::Manager;
 use dlc_manager::SystemTimeProvider;
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 use crate::chain::EsploraClient;
 use crate::config::DdkConfig;
@@ -119,15 +119,12 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
             .as_ref()
             .map_or_else(|| Err(BuilderError::NoOracle), |o| Ok(o.clone()))?;
 
-        let name = match self.name.clone() {
-            Some(n) => n,
-            None => uuid::Uuid::new_v4().to_string(),
-        };
+        let name = self
+            .name
+            .clone()
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-        println!(
-            "Creating new P2P DlcDevKit wallet. name={}",
-            name
-        );
+        tracing::info!("Creating new P2P DlcDevKit wallet. name={}", name);
         let wallet = Arc::new(DlcDevKitWallet::new(
             &name,
             xprv,

@@ -1157,7 +1157,6 @@ dependencies = [
  "getrandom 0.2.11",
  "lightning",
  "lightning-net-tokio",
- "log",
  "nostr 0.29.0",
  "nostr-relay-pool",
  "nostr-sdk",
@@ -1190,6 +1189,8 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tracing",
+ "tracing-subscriber",
  "tui",
 ]
 

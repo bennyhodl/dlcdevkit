@@ -10,7 +10,6 @@ use lightning::{
     util::logger::{Logger, Record},
 };
 use lightning_net_tokio::SocketDescriptor;
-use log::info;
 use std::{sync::Arc, time::SystemTime};
 
 use crate::SeedConfig;
@@ -19,7 +18,7 @@ pub struct DlcDevKitLogger;
 
 impl Logger for DlcDevKitLogger {
     fn log(&self, record: Record) {
-        info!("LOG: {:?}", record);
+        tracing::info!("LOG: {:?}", record);
     }
 }
 

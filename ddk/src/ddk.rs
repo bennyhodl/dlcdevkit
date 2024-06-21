@@ -11,7 +11,7 @@ use dlc_manager::{
     SimpleSigner, SystemTimeProvider,
 };
 use dlc_messages::oracle_msgs::OracleAnnouncement;
-use std::sync::{Arc, RwLock, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 use tokio::runtime::Runtime;
 
@@ -43,7 +43,7 @@ impl<
     > DlcDevKit<T, S, O>
 {
     pub fn start(&self) -> anyhow::Result<()> {
-        println!("Starting ddk...");
+        tracing::info!("Starting ddk...");
 
         let mut runtime_lock = self.runtime.write().unwrap();
 
@@ -51,22 +51,24 @@ impl<
             return Err(anyhow!("DDK is still running."));
         }
 
-        let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()?;
         // get fees
 
         let transport_clone = self.transport.clone();
         runtime.spawn(async move {
-            println!("Starting listener");
+            tracing::info!("Starting listener");
             transport_clone.listen().await;
         });
 
         let wallet_clone = self.wallet.clone();
         runtime.spawn(async move {
-            println!("started the wallet");
+            tracing::info!("started the wallet");
             let mut timer = tokio::time::interval(Duration::from_secs(10));
             loop {
                 timer.tick().await;
-                println!("Syncing wallet...");
+                tracing::info!("Syncing wallet...");
                 wallet_clone.sync().unwrap();
             }
         });
@@ -74,18 +76,18 @@ impl<
         let message_processor = self.transport.clone();
         let manager_clone = self.manager.clone();
         runtime.spawn(async move {
-            println!("Message processor");
+            tracing::info!("Message processor");
             let mut timer = tokio::time::interval(Duration::from_secs(5));
             loop {
                 timer.tick().await;
-                println!("Processing message...");
+                tracing::info!("Processing message...");
                 process_incoming_messages(message_processor.clone(), manager_clone.clone());
             }
         });
 
         // TODO: connect stored peers.
-        
-        println!("Done starting ddk");
+
+        tracing::info!("DDK set up");
         *runtime_lock = Some(runtime);
 
         Ok(())
@@ -126,7 +128,10 @@ impl<
     }
 }
 
-pub fn process_incoming_messages<T: DdkTransport, S: DdkStorage, O: DdkOracle>(transport: Arc<T>, manager: Arc<Mutex<DlcDevKitDlcManager<S, O>>>) {
+pub fn process_incoming_messages<T: DdkTransport, S: DdkStorage, O: DdkOracle>(
+    transport: Arc<T>,
+    manager: Arc<Mutex<DlcDevKitDlcManager<S, O>>>,
+) {
     // let message_handler = self.transport.message_handler();
     // let peer_manager = self.transport.peer_manager();
     let messages = transport.get_and_clear_received_messages();
@@ -144,8 +149,7 @@ pub fn process_incoming_messages<T: DdkTransport, S: DdkStorage, O: DdkOracle>(t
     }
 
     if transport.has_pending_messages() {
-        println!("Still have pending messages!");
+        tracing::info!("Still have pending messages!");
         // peer_manager.process_events();
     }
 }
-
