@@ -18,7 +18,7 @@ services:
       -rpcport=18443 -rest -listen=1 -listenonion=0 -fallbackfee=0.0002
       -blockfilterindex=1 -peerblockfilters=1
     volumes:
-      - ./regtest/bitcoin/:/home/bitcoin/.bitcoin
+      - ddk-bitcoin:/home/bitcoin/.bitcoin
     expose:
       - '18443'
       - '18444'
@@ -60,7 +60,7 @@ services:
       - "30000"
       - "50000"
     volumes:
-      - ./regtest/bitcoin/:/config
+      - ddk-bitcoin:/config
     restart: unless-stopped
   kormir-oracle-db:
     image: postgres:latest
@@ -115,6 +115,7 @@ services:
       - oracle-db-data:/var/lib/postgresql/data/ # persist data even if container shuts down
 volumes:
   oracle-db-data:
+  ddk-bitcoin:
 
 networks:
   ernest:

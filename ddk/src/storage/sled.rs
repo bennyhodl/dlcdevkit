@@ -512,7 +512,7 @@ mod tests {
         ($name: ident, $body: expr) => {
             #[test]
             fn $name() {
-                let path = format!("{}{}", "test_files/sleddb/", std::stringify!($name));
+                let path = format!("{}{}", "tests/data/dlc_storage/sleddb/", std::stringify!($name));
                 {
                     let storage = SledStorageProvider::new(&path).expect("Error opening sled DB");
                     #[allow(clippy::redundant_closure_call)]
@@ -534,7 +534,7 @@ mod tests {
     sled_test!(
         create_contract_can_be_retrieved,
         |storage: SledStorageProvider| {
-            let serialized = include_bytes!("../../../regtest/storage/sled/Offered");
+            let serialized = include_bytes!("../../tests/data/dlc_storage/sled/Offered");
             let contract = deserialize_object(serialized);
 
             storage
@@ -556,9 +556,9 @@ mod tests {
     sled_test!(
         update_contract_is_updated,
         |storage: SledStorageProvider| {
-            let serialized = include_bytes!("../../../regtest/storage/sled/Offered");
+            let serialized = include_bytes!("../../tests/data/dlc_storage/sled/Offered");
             let offered_contract = deserialize_object(serialized);
-            let serialized = include_bytes!("../../../regtest/storage/sled/Accepted");
+            let serialized = include_bytes!("../../tests/data/dlc_storage/sled/Accepted");
             let accepted_contract = deserialize_object(serialized);
             let accepted_contract = Contract::Accepted(accepted_contract);
 
@@ -583,7 +583,7 @@ mod tests {
     sled_test!(
         delete_contract_is_deleted,
         |storage: SledStorageProvider| {
-            let serialized = include_bytes!("../../../regtest/storage/sled/Offered");
+            let serialized = include_bytes!("../../tests/data/dlc_storage/sled/Offered");
             let contract = deserialize_object(serialized);
             storage
                 .create_contract(&contract)
@@ -601,35 +601,35 @@ mod tests {
     );
 
     fn insert_offered_signed_and_confirmed(storage: &mut SledStorageProvider) {
-        let serialized = include_bytes!("../../../regtest/storage/sled/Offered");
+        let serialized = include_bytes!("../../tests/data/dlc_storage/sled/Offered");
         let offered_contract = deserialize_object(serialized);
         storage
             .create_contract(&offered_contract)
             .expect("Error creating contract");
 
-        let serialized = include_bytes!("../../../regtest/storage/sled/Signed");
+        let serialized = include_bytes!("../../tests/data/dlc_storage/sled/Signed");
         let signed_contract = Contract::Signed(deserialize_object(serialized));
         storage
             .update_contract(&signed_contract)
             .expect("Error creating contract");
-        let serialized = include_bytes!("../../../regtest/storage/sled/Signed1");
+        let serialized = include_bytes!("../../tests/data/dlc_storage/sled/Signed1");
         let signed_contract = Contract::Signed(deserialize_object(serialized));
         storage
             .update_contract(&signed_contract)
             .expect("Error creating contract");
 
-        let serialized = include_bytes!("../../../regtest/storage/sled/Confirmed");
+        let serialized = include_bytes!("../../tests/data/dlc_storage/sled/Confirmed");
         let confirmed_contract = Contract::Confirmed(deserialize_object(serialized));
         storage
             .update_contract(&confirmed_contract)
             .expect("Error creating contract");
-        let serialized = include_bytes!("../../../regtest/storage/sled/Confirmed1");
+        let serialized = include_bytes!("../../tests/data/dlc_storage/sled/Confirmed1");
         let confirmed_contract = Contract::Confirmed(deserialize_object(serialized));
         storage
             .update_contract(&confirmed_contract)
             .expect("Error creating contract");
 
-        let serialized = include_bytes!("../../../regtest/storage/sled/PreClosed");
+        let serialized = include_bytes!("../../tests/data/dlc_storage/sled/PreClosed");
         let preclosed_contract = Contract::PreClosed(deserialize_object(serialized));
         storage
             .update_contract(&preclosed_contract)
@@ -637,9 +637,9 @@ mod tests {
     }
 
     fn insert_offered_and_signed_channels(storage: &mut SledStorageProvider) {
-        let serialized = include_bytes!("../../../regtest/storage/sled/Offered");
+        let serialized = include_bytes!("../../tests/data/dlc_storage/sled/Offered");
         let offered_contract = deserialize_object(serialized);
-        let serialized = include_bytes!("../../../regtest/storage/sled/OfferedChannel");
+        let serialized = include_bytes!("../../tests/data/dlc_storage/sled/OfferedChannel");
         let offered_channel = deserialize_object(serialized);
         storage
             .upsert_channel(
@@ -648,13 +648,13 @@ mod tests {
             )
             .expect("Error creating contract");
 
-        let serialized = include_bytes!("../../../regtest/storage/sled/SignedChannelEstablished");
+        let serialized = include_bytes!("../../tests/data/dlc_storage/sled/SignedChannelEstablished");
         let signed_channel = Channel::Signed(deserialize_object(serialized));
         storage
             .upsert_channel(signed_channel, None)
             .expect("Error creating contract");
 
-        let serialized = include_bytes!("../../../regtest/storage/sled/SignedChannelSettled");
+        let serialized = include_bytes!("../../tests/data/dlc_storage/sled/SignedChannelSettled");
         let signed_channel = Channel::Signed(deserialize_object(serialized));
         storage
             .upsert_channel(signed_channel, None)
@@ -764,7 +764,7 @@ mod tests {
         |mut storage: SledStorageProvider| {
             insert_offered_and_signed_channels(&mut storage);
 
-            let serialized = include_bytes!("../../../regtest/storage/sled/AcceptedChannel");
+            let serialized = include_bytes!("../../tests/data/dlc_storage/sled/AcceptedChannel");
             let accepted_channel: AcceptedChannel = deserialize_object(serialized);
             let channel_id = accepted_channel.channel_id;
             storage
@@ -783,7 +783,7 @@ mod tests {
         |mut storage: SledStorageProvider| {
             insert_offered_and_signed_channels(&mut storage);
 
-            let serialized = include_bytes!("../../../regtest/storage/sled/AcceptedChannel");
+            let serialized = include_bytes!("../../tests/data/dlc_storage/sled/AcceptedChannel");
             let accepted_channel: AcceptedChannel = deserialize_object(serialized);
             let channel_id = accepted_channel.channel_id;
             storage
