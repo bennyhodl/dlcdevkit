@@ -1,9 +1,9 @@
 use anyhow::Result;
+use ddk::config::DdkConfig;
 use ddk::builder::DdkBuilder;
 use ddk::oracle::P2PDOracleClient;
 use ddk::storage::SledStorageProvider;
 use ddk::transport::lightning::LightningTransport;
-use ddk::DdkConfig;
 use std::env::current_dir;
 use std::sync::Arc;
 

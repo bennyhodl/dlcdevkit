@@ -16,73 +16,40 @@ $ cargo add ddk
 ```
 
 ```rust
+use ddk::config::DdkConfig;
 use ddk::builder::DdkBuilder;
-use ddk::{DdkOracle, DdkStorage, DdkTransport};
+use ddk::oracle::P2PDOracleClient;
+use ddk::storage::SledStorageProvider;
+use ddk::transport::lightning::LightningTransport;
+use std::env::current_dir;
 use std::sync::Arc;
 
-#[derive(Clone)]
-pub struct MockTransport;
+type ApplicationDdk = ddk::DlcDevKit<LightningTransport, SledStorageProvider, P2PDOracleClient>;
 
-#[async_trait]
-impl DdkTransport for MockTransport {
-    async fn listen(&self) {
-        println!("Listening with MockTransport")
-    }
-    async fn handle_dlc_message(&self, _manager: &Arc<Mutex<DlcDevKitDlcManager>>) {
-        println!("Handling DLC messages with MockTransport")
-    }
-}
+fn main() -> Result<()> {
+    let mut config = DdkConfig::default();
+    config.storage_path = current_dir()?;
 
-#[derive(Clone)]
-struct MockStorage;
-impl DdkStorage for MockStorage {}
+    let transport = Arc::new(LightningTransport::new(&config.seed_config, config.network)?);
+    let storage = Arc::new(SledStorageProvider::new(
+        config.storage_path.join("sled_db").to_str().expect("No storage."),
+    )?);
 
-#[derive(Clone)]
-struct MockOracle;
-impl DdkOracle for MockOracle {
-    fn name(&self) -> String {
-        "mock-oracle".into()
-    }
-}
+    let oracle_client = Arc::new(P2PDOracleClient::new(ddk::ORACLE_HOST).expect("no oracle"));
 
-impl dlc_manager::Oracle for MockOracle {
-    fn get_public_key(&self) -> bitcoin::key::XOnlyPublicKey {
-        todo!("Trait inherited from rust-dlc")
-    }
+    let mut builder = DdkBuilder::new();
+    builder.set_config(config);
+    builder.set_transport(transport.clone());
+    builder.set_storage(storage.clone());
+    builder.set_oracle(oracle_client.clone());
 
-    fn get_attestation(&self, _event_id: &str) -> Result<dlc_messages::oracle_msgs::OracleAttestation, dlc_manager::error::Error> {
-        todo!("Trait inherited from rust-dlc")
-    }
-
-    fn get_announcement(&self, _event_id: &str) -> Result<dlc_messages::oracle_msgs::OracleAnnouncement, dlc_manager::error::Error> {
-        todo!("Trait inherited from rust-dlc") 
-    }
-}
-
-type ApplicationDdk = ddk::DlcDevKit<MockTransport, MockStorage, MockOracle>;
-
-#[tokio::main]
-async fn main() {
-    let transport = Arc::new(MockTransport {});
-    let storage = Arc::new(MockStorage {});
-    let oracle_client = Arc::new(MockOracle {});
-
-    let ddk: ApplicationDdk = DdkBuilder::new()
-        .set_name("ddk")
-        .set_esplora_url("https://mempool.space/api")
-        .set_network(bitcoin::Network::Regtest)
-        .set_transport(transport.clone())
-        .set_storage(storage.clone())
-        .set_oracle(oracle_client.clone())
-        .finish()
-        .await
-        .unwrap();
+    let ddk: ApplicationDdk = builder.finish()?;
 
     let wallet = ddk.wallet.new_external_address();
 
     assert!(wallet.is_ok());
 
-    ddk.start().await
+    ddk.start().expect("couldn't start ddk");
 }
 ```
 
@@ -91,13 +58,13 @@ Ready-to-go clients for developing applications:
 * `ddk` - Contains DLC management w/ [rust-dlc](https://github.com/p2pderivatives/rust-dlc) and the internal wallet w/ [bdk](https://github.com/bitcoindevkit/bdk).
 
 ### Storage
-* `filestore` - **crate soon™️**
-* `sqlite` - **crate soon™️**
+* `filestore` - flat file store for DLC contracts
+* `sqlite` - sqlite store for DLC contracts
 
 ### Transport
-* `tcp (lightning p2p)` - Tcp listener with the [ldk peer manager](https://lightningdevkit.org/introduction/peer-management/)
-* `nostr` - NIP04 encrypted transport
+* [`tcp (lightning p2p)`](https://github.com/bennyhodl/dlcdevkit/tree/master/ddk/src/transport/lightning) - Tcp listener with the [ldk peer manager](https://lightningdevkit.org/introduction/peer-management/)
+* [`nostr`](https://github.com/bennyhodl/dlcdevkit/tree/master/ddk/src/transport/nostr) - NIP04 encrypted transport
 
-### Oracle
-* `P2PDerivatives` - **crate soon™️**
-* `kormir` - **crate soon™️**
+### Oracle Clients
+* [`P2PDerivatives`](https://github.com/bennyhodl/dlcdevkit/blob/master/ddk/src/oracle/p2p_derivatives.rs) 
+* [`kormir`](https://github.com/bennyhodl/dlcdevkit/blob/master/ddk/src/oracle/kormir.rs)

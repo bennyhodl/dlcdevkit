@@ -25,7 +25,6 @@ use std::sync::Arc;
 
 type ApplicationDdk = ddk::DlcDevKit<LightningTransport, SledStorageProvider, P2PDOracleClient>;
 
-#[tokio::main]
 async fn main() -> Result<(), Error> {
     let transport = Arc::new(LightningTransport::new("lightning-transport", Network::Regtest));
     let storage = Arc::new(SledStorageProvider::new("<storage path>")?);
@@ -39,39 +38,39 @@ async fn main() -> Result<(), Error> {
         .set_storage(storage.clone())
         .set_oracle(oracle_client.clone())
         .finish()
-        .await?;
+        .expect("could not build ddk");
 
     let wallet = ddk.wallet.new_external_address();
 
     assert!(wallet.is_ok());
 
-    ddk.start().await?;
+    ddk.start().expect("ddk did not start");
 }
 ```
 
 ## Crates
 Ready-to-go clients for developing applications:
-* `ddk` - Contains DLC management w/ [rust-dlc](https://github.com/p2pderivatives/rust-dlc) and the internal wallet w/ [bdk](https://github.com/bitcoindevkit/bdk).
+* [`ddk`](./ddk/) - Contains DLC management w/ [rust-dlc](https://github.com/p2pderivatives/rust-dlc) and the internal wallet w/ [bdk](https://github.com/bitcoindevkit/bdk).
 
 ### Storage
-* `filestore` - **crate soon™️**
-* `sqlite` - **crate soon™️**
+* [`filestore`](./ddk/src/storage/sled.rs) - file storage for DLC contracts
+* `sqlite` - coming soon...
 
 ### Transport
-* `tcp (lightning p2p)` - Tcp listener with the [ldk peer manager](https://lightningdevkit.org/introduction/peer-management/)
-* `nostr` - NIP04 encrypted transport
+* [`tcp (lightning p2p)`](./ddk/src/transport/lightning/) - Tcp listener with the [ldk peer manager](https://lightningdevkit.org/introduction/peer-management/)
+* [`nostr`](./ddk/src/transport/nostr/) - NIP04 encrypted transport
 
-### Oracle
-* `P2PDerivatives` - **crate soon™️**
-* `kormir` - **crate soon™️**
+### Oracle Clients
+* [`P2PDerivatives`](./ddk/src/oracle/p2p_derivatives.rs)
+* [`kormir`](./ddk/src/oracle/kormir.rs)
 
 ### Examples
-* [`bella`](https://github.com/bennyhodl/dlcdevkit/bella) - Example client built with [`tauri`](https://tauri.app) to test `dlcdevkit`
-* [`payouts`](https://github.com/bennyhodl/dlcdevkit/payouts) - example payout curves for DLC applications
+* [`bella`](./bella) - Example client built with [`tauri`](https://tauri.app) to test `dlcdevkit`
+* [`payouts`](./payouts) - example payout curves for DLC applications
 
 ## Development
 
-Running the example client [`bella`](https://github.com/bennyhodl/dlcdevkit/bella) requires running a bitcoin node, esplora server, & oracle. Dependencies can be started with the `docker-compose.yaml` file.
+Running the example client [`bella`](./bella/) requires running a bitcoin node, esplora server, & oracle. Dependencies can be started with the `docker-compose.yaml` file.
 
 ```
 git clone git@github.com:bennyhodl/dlcdevkit.git
