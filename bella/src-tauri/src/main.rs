@@ -6,24 +6,11 @@ mod nostr;
 
 use std::sync::Arc;
 use crate::functions::*;
-
-// use crate::functions::{
-//     dlc::{accept_dlc, list_contracts, list_offers},
-//     wallet::{get_balance, new_address},
-// };
 use log::LevelFilter;
-// use models::Pubkeys;
-// use std::{
-//     sync::{Arc, Mutex},
-//     time::Duration,
-// };
-// use tauri::{Manager, State};
 use tauri_plugin_log::LogTarget;
-// use tokio::net::TcpListener;
-// use tracing::Level;
-// use tracing_subscriber::FmtSubscriber;
 
-use ddk::{DdkConfig, DlcDevKit, SeedConfig};
+use ddk::DlcDevKit;
+use ddk::config::{DdkConfig, SeedConfig};
 use ddk::builder::DdkBuilder;
 use ddk::storage::SledStorageProvider;
 use ddk::transport::lightning::LightningTransport;
@@ -31,58 +18,20 @@ use ddk::oracle::P2PDOracleClient;
 
 pub type BellaDdk = DlcDevKit<LightningTransport, SledStorageProvider, P2PDOracleClient>;
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    // let _ = fix_path_env::fix();
-    // // let _ = env_logger::init();
-    // env_logger::builder()
-    //     .filter_level(LevelFilter::Info)
-    //     .build();
-    // // a builder for `FmtSubscriber`.
-    // let subscriber = FmtSubscriber::builder()
-    //     // all spans/events with a level higher than TRACE (e.g, debug, info, warn, etc.)
-    //     // will be written to stdout.
-    //     .with_max_level(Level::INFO)
-    //     // completes the builder.
-    //     .finish();
-    //
-    // tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
-
-    // let dlc_manager_clone = bella.manager.clone();
-    // let p2p_clone = p2p.clone();
-    // tokio::spawn(async move {
-    //     let mut ticker = tokio::time::interval(Duration::from_secs(5));
-    //     loop {
-    //         ticker.tick().await;
-    //         println!("timer tick");
-    //         let message_handler = p2p_clone.message_handler();
-    //         let peer_manager = p2p_clone.peer_manager();
-    //         let messages = message_handler.get_and_clear_received_messages();
-    //         for (node_id, message) in messages {
-    //             if let Ok(mut man) = dlc_manager_clone.lock() {
-    //                 println!("Checking msg lock");
-    //                 let resp = man.on_dlc_message(&message, node_id)
-    //                     .expect("Error processing message");
-    //
-    //                 if let Some(msg) = resp {
-    //                     message_handler.send_message(node_id, msg);
-    //                 }
-    //
-    //                 if message_handler.has_pending_messages() {
-    //                     peer_manager.process_events();
-    //                 }
-    //             } else {
-    //                 println!("Could acquire lock");
-    //                 continue;
-    //             }
-    //         }
-    //     }
-    // });
-
+fn bella_config() -> DdkConfig {
     let mut config = DdkConfig::default();
     let home_dir = "/Users/ben/.ddk/terminal";
     config.seed_config = SeedConfig::File(home_dir.to_string());
     config.storage_path = home_dir.into();
+    config.network = ddk::Network::Regtest;
+    config.esplora_host = ddk::ESPLORA_HOST.to_string();
+    config
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let config = bella_config();
+
     let transport = Arc::new(LightningTransport::new(&config.seed_config, config.network)?);
     let storage = Arc::new(SledStorageProvider::new(
         config.storage_path.join("sled_db").to_str().expect("No storage."),
@@ -129,29 +78,3 @@ async fn main() -> anyhow::Result<()> {
         .expect("error while running bella");
     Ok(())
 }
-
-//
-// async fn peer_manager_server(state: State<'_, Arc<DlcDevKitPeerManager>>) {
-//     let peer_manager_connection_handler = state.peer_manager();
-//
-//     let listener = TcpListener::bind("0.0.0.0:9002")
-//         .await
-//         .expect("Coldn't get port.");
-//
-//     loop {
-//         let peer_mgr = peer_manager_connection_handler.clone();
-//         let (tcp_stream, _) = listener.accept().await.unwrap();
-//         tauri::async_runtime::spawn(async move {
-//             setup_inbound(peer_mgr.clone(), tcp_stream.into_std().unwrap()).await;
-//         });
-//     }
-// }
-//
-// async fn wallet_watcher(state: State<'_, Arc<DlcDevKit>>) {
-//     let mut timer = tokio::time::interval(Duration::from_secs(10));
-//     loop {
-//         timer.tick().await;
-//         log::info!("Syncing wallet...");
-//         state.wallet.sync().unwrap();
-//     }
-// }
