@@ -25,10 +25,10 @@ use std::sync::Arc;
 
 type ApplicationDdk = ddk::DlcDevKit<LightningTransport, SledStorageProvider, P2PDOracleClient>;
 
-async fn main() -> Result<(), Error> {
+fn main() -> Result<(), Error> {
     let transport = Arc::new(LightningTransport::new("lightning-transport", Network::Regtest));
     let storage = Arc::new(SledStorageProvider::new("<storage path>")?);
-    let oracle_client = tokio::task::spawn_blocking(move || Arc::new(P2PDOracleClient::new("<oracle host>")?)).await?;
+    let oracle_client = Arc::new(P2PDOracleClient::new("<oracle host>")?);
 
     let ddk: ApplicationDdk = DdkBuilder::new()
         .set_name("dlcdevkit")

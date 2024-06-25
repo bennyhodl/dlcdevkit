@@ -6,7 +6,7 @@ use ddk::{builder::DdkBuilder, DlcDevKit};
 use ddk::oracle::P2PDOracleClient;
 use ddk::storage::SledStorageProvider;
 use ddk::transport::lightning::LightningTransport;
-use ddk::DdkConfig;
+use ddk::config::DdkConfig;
 use logging::DdkSubscriber;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
@@ -18,11 +18,11 @@ use crate::cli::{DdkCli, match_ddk_command};
 type ApplicationDdk = ddk::DlcDevKit<LightningTransport, SledStorageProvider, P2PDOracleClient>;
 
 fn main() -> anyhow::Result<()> {
-    let ddk_subscriber = DdkSubscriber;
-    let env_filter = EnvFilter::new("ddk=info,ddk_sample=info");
-    let subscriber = tracing_subscriber::registry().with(env_filter).with(ddk_subscriber);
-    let _ = tracing::subscriber::set_global_default(subscriber);
-    env_logger::init();
+    // let ddk_subscriber = DdkSubscriber;
+    // let env_filter = EnvFilter::new("ddk=info,ddk_sample=info");
+    // let subscriber = tracing_subscriber::registry().with(env_filter).with(ddk_subscriber);
+    // let _ = tracing::subscriber::set_global_default(subscriber);
+    // env_logger::init();
 
     let ddk = ddk_instance()?;
     ddk.start().unwrap();
