@@ -12,7 +12,7 @@ use lightning::{
 use lightning_net_tokio::SocketDescriptor;
 use std::{sync::Arc, time::SystemTime};
 
-use crate::SeedConfig;
+use crate::config::SeedConfig;
 
 pub struct DlcDevKitLogger;
 

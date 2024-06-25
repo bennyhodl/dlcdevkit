@@ -1,4 +1,5 @@
-use crate::{io, SeedConfig, RELAY_HOST};
+use crate::{io, RELAY_HOST};
+use crate::config::SeedConfig;
 use bdk::bitcoin::Network;
 use dlc_messages::{message_handler::read_dlc_message, Message, WireMessage};
 use lightning::{

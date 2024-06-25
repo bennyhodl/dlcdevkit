@@ -2,7 +2,7 @@ use crate::{
     chain::EsploraClient,
     signer::{DeriveSigner, SimpleDeriveSigner},
     storage::SledStorageProvider,
-    DdkConfig,
+    config::DdkConfig,
 };
 use anyhow::anyhow;
 use bdk::{
@@ -30,6 +30,11 @@ use std::{
 };
 use std::{str::FromStr, sync::atomic::AtomicU32};
 
+/// Internal [bdk::Wallet] for ddk.
+/// Uses eplora blocking for the [ddk::DlcDevKit] being sync only
+/// Currently supports the file-based [bdk_file_store::Store]
+///
+/// TODO:: Add a config option for sqlite or store.
 pub struct DlcDevKitWallet {
     pub blockchain: Arc<EsploraClient>,
     pub inner: Arc<Mutex<Wallet<Store<ChangeSet>>>>,
@@ -56,6 +61,7 @@ impl DlcDevKitWallet {
     {
         let secp = Secp256k1::new();
         let wallet_storage_path = wallet_storage_path.as_ref().join("wallet-db");
+    
         let storage = Store::<ChangeSet>::open_or_create_new(&[0u8; 32], wallet_storage_path)?;
 
         let inner = Arc::new(Mutex::new(Wallet::new_or_load(
@@ -67,6 +73,7 @@ impl DlcDevKitWallet {
 
         let blockchain = Arc::new(EsploraClient::new(esplora_url, network)?);
 
+        // TODO: Actually get fees. I don't think it's used for regular DLCs though
         let mut fees: HashMap<ConfirmationTarget, AtomicU32> = HashMap::new();
         fees.insert(ConfirmationTarget::OnChainSweep, AtomicU32::new(5000));
         fees.insert(
@@ -127,7 +134,7 @@ impl DlcDevKitWallet {
         };
 
         wallet.apply_update(update)?;
-        wallet.commit().unwrap();
+        wallet.commit()?;
         Ok(())
     }
 

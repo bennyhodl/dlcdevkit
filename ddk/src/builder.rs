@@ -1,4 +1,5 @@
-use crate::{io, SeedConfig};
+use crate::config::SeedConfig;
+use crate::io;
 use bdk::chain::PersistBackend;
 use bdk::wallet::ChangeSet;
 use core::fmt;
@@ -13,6 +14,7 @@ use crate::ddk::DlcDevKit;
 use crate::wallet::DlcDevKitWallet;
 use crate::{DdkOracle, DdkStorage, DdkTransport};
 
+/// Builder pattern for creating a [crate::ddk::DlcDevKit] process.
 #[derive(Clone, Debug)]
 pub struct DdkBuilder<T, S, O> {
     name: Option<String>,
@@ -22,7 +24,7 @@ pub struct DdkBuilder<T, S, O> {
     oracle: Option<Arc<O>>,
 }
 
-/// An error that could be thrown while building [`DlcDevKit`]
+/// An error that could be thrown while building [crate::ddk::DlcDevKit]
 #[derive(Debug, Clone, Copy)]
 pub enum BuilderError {
     /// A transport was not provided.
@@ -51,6 +53,9 @@ impl fmt::Display for BuilderError {
 
 impl std::error::Error for BuilderError {}
 
+/// Defaults when creating a DDK application
+/// Transport, storage, and oracle is set to none.
+/// Default [crate::config::DdkConfig] to mutiny net.
 impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> Default for DdkBuilder<T, S, O> {
     fn default() -> Self {
         let config = Some(DdkConfig::default());
@@ -65,41 +70,61 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> Default for DdkBuilder<T, S, 
 }
 
 impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
+    /// Create a new, default DDK builder.
     pub fn new() -> Self {
         DdkBuilder::default()
     }
 
+    /// Set the name of the DDK process. Used as an identifier for the process created.
+    /// Creates a directory for the process with the name specifed. All file-based components
+    /// will be stored in a directory under the storage path set in the `DdkConfig` and the `name`.
+    /// If no name is set, defaults to a generated `uuid`.
     pub fn set_name(&mut self, name: &str) -> &mut Self {
         self.name = Some(name.into());
         self
     }
 
+    /// The communication layer of DDK. Type MUST implement [crate::DdkTransport].
+    /// Transport sets up listeners, communicates with counterparties, and passes
+    /// DLC messages to the `Manager`.
     pub fn set_transport(&mut self, transport: Arc<T>) -> &mut Self {
         self.transport = Some(transport);
         self
     }
 
+    /// DLC contract storage. Storage is used by the [dlc_manager::manager::Manager] to create, update, retrieve, and
+    /// delete contracts. MUST implement [crate::DdkStorage]
+    ///
+    /// TODO: Storage for the [crate::wallet::DlcDevKitWallet].
     pub fn set_storage(&mut self, storage: Arc<S>) -> &mut Self {
         self.storage = Some(storage);
         self
     }
 
+    /// Oracle implementation for the [dlc_manager::manager::Manager] to retrieve oracle attestations and announcements.
+    /// MUST implement [crate::DdkOracle].
     pub fn set_oracle(&mut self, oracle: Arc<O>) -> &mut Self {
         self.oracle = Some(oracle);
         self
     }
 
+    /// Configuration for `DlcDevKit`. Storage dir, seed config, network, and esplora host.
     pub fn set_config(&mut self, config: DdkConfig) -> &mut Self {
         self.config = Some(config);
         self
     }
 
+    /// Builds the `DlcDevKit` instance. Fails if any components are missing.
     pub fn finish(&self) -> anyhow::Result<DlcDevKit<T, S, O>> {
         let config = self
             .config
             .as_ref()
             .map_or_else(|| Err(BuilderError::NoConfig), |c| Ok(c))?;
 
+        // Creates the DDK directory.
+        //
+        // TODO: Should have a storage config for no-std builds.
+        // TODO: should be nested with the DDK name.
         std::fs::create_dir_all(&config.storage_path)?;
 
         let xprv = io::xprv_from_config(&config.seed_config, config.network)?;

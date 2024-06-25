@@ -2,7 +2,7 @@ use bdk::bitcoin::{bip32::ExtendedPrivKey, Network};
 use getrandom::getrandom;
 use std::path::Path;
 
-use crate::SeedConfig;
+use crate::config::SeedConfig;
 
 pub fn xprv_from_config(
     seed_config: &SeedConfig,

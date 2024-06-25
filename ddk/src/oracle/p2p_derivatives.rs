@@ -1,4 +1,4 @@
-//! rust-dlc https://github.com/p2pderivatives/rust-dlc/blob/master/p2pd-oracle-client/src/lib.rs (2024)
+//! rust-dlc <https://github.com/p2pderivatives/rust-dlc/blob/master/p2pd-oracle-client/src/lib.rs> (2024)
 
 //! # cg-oracle-client
 //! Http client wrapper for the Crypto Garage DLC oracle

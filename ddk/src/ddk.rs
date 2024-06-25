@@ -15,6 +15,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 use tokio::runtime::Runtime;
 
+/// DlcDevKit type alias for the [dlc_manager::manager::Manager]
 pub type DlcDevKitDlcManager<S, O> = dlc_manager::manager::Manager<
     Arc<DlcDevKitWallet>,
     Arc<CachedContractSignerProvider<Arc<DlcDevKitWallet>, SimpleSigner>>,
