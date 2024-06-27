@@ -1,9 +1,13 @@
+use std::env::current_dir;
 use std::net::SocketAddr;
 use std::str::FromStr;
 
 use clap::{Parser, Subcommand};
+use ddk::transport::PeerInformation;
 // use ddk::dlc_manager::contract::contract_input::ContractInput;
+use ddk::DdkStorage;
 use ddk::bdk::bitcoin::Address;
+use ddk::dlc_manager::contract::contract_input::ContractInput;
 use ddk::DdkTransport;
 use ddk::dlc_manager::Storage;
 use ddk::dlc_messages::{Message, OfferDlc};
@@ -50,8 +54,8 @@ pub enum Commands {
         offer: String
     },
     SendOffer {
-        #[arg(short, long)]
-        contract_input: String,
+        // #[arg(short, long)]
+        // contract_input: String,
         #[arg(short, long)]
         counterparty: String,
         #[arg(short, long)]
@@ -82,6 +86,12 @@ pub fn match_ddk_command(command: Commands, ddk: &ApplicationDdk) -> anyhow::Res
                 return Ok(println!("No peers"));
             }
             peers.iter().for_each(|peer| {
+                println!("Checking if peer is saved");
+                let connect_to = PeerInformation {
+                    pubkey: peer.0.to_string(),
+                    host: peer.clone().1.unwrap().to_string()
+                };
+                ddk.storage.save_peer(connect_to).unwrap();
                 println!("Peer: {}\t\tHost: {:?}", peer.0, peer.1);
             })
         }
@@ -122,14 +132,19 @@ pub fn match_ddk_command(command: Commands, ddk: &ApplicationDdk) -> anyhow::Res
             ddk.transport.send_message(counterparty, Message::Accept(accept_offer));
             println!("Accepted offer: {:?}", contract_id);
         }
-        Commands::SendOffer { .. } => {
-            // let counterparty = ddk::bdk::bitcoin::secp256k1::PublicKey::from_str(&counterparty)?;
+        Commands::SendOffer { counterparty, .. } => {
+            println!("{:?}", current_dir().unwrap());
+            let file = current_dir().unwrap().join("numerical_contract_input.json");
+            let offer_string = std::fs::read_to_string(file).unwrap();
+            let counterparty = ddk::bdk::bitcoin::secp256k1::PublicKey::from_str(&counterparty)?;
             // let announcement = serde_json::from_str::<OracleAnnouncement>(&announcement)?;
-            // let contract_input = serde_json::from_str::<ContractInput>(&contract_input)?;
-            // let (contract_id, counterparty, offer) = ddk.manager.lock().unwrap().send_offer_with_announcements(&contract_input, counterparty, vec![vec![announcement]])?;
-            // ddk.transport.send_message(counterparty, Message::Offer(offer));
-            // println!("Offered Contract: {:?}", contract_id);
-            // println!("{:?}", offer);
+            let contract_input = serde_json::from_str::<ContractInput>(&offer_string)?;
+            let offer = ddk.manager.lock().unwrap().send_offer(&contract_input, counterparty)?;
+            let offer_clone = offer.clone();
+            println!("Offered Contract: {:?}", &offer_clone.clone().temporary_contract_id[0..12]);
+            println!("{:?}", offer_clone);
+
+            ddk.transport.send_message(counterparty, Message::Offer(offer));
         }
         Commands::Contract { contract_id } => {
             let mut buf = [0u8; 32];
