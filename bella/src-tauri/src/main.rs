@@ -32,7 +32,7 @@ fn bella_config() -> DdkConfig {
 async fn main() -> anyhow::Result<()> {
     let config = bella_config();
 
-    let transport = Arc::new(LightningTransport::new(&config.seed_config, config.network)?);
+    let transport = Arc::new(LightningTransport::new(&config.seed_config, 1776, config.network)?);
     let storage = Arc::new(SledStorageProvider::new(
         config.storage_path.join("sled_db").to_str().expect("No storage."),
     )?);

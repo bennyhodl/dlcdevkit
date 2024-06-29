@@ -10,6 +10,8 @@ pub(crate) mod peer_manager;
 pub use peer_manager::LightningTransport;
 use tokio::net::TcpListener;
 
+use super::PeerInformation;
+
 #[async_trait]
 impl DdkTransport for LightningTransport {
     type PeerManager = Arc<super::lightning::peer_manager::LnPeerManager>;
@@ -23,7 +25,7 @@ impl DdkTransport for LightningTransport {
         tracing::info!("starting lightning listener!");
         let peer_manager_connection_handler = self.peer_manager();
 
-        let listener = TcpListener::bind("0.0.0.0:9002")
+        let listener = TcpListener::bind(format!("0.0.0.0:{}", self.listening_port))
             .await
             .expect("Coldn't get port.");
 
@@ -56,4 +58,6 @@ impl DdkTransport for LightningTransport {
     fn has_pending_messages(&self) -> bool {
         self.message_handler().has_pending_messages()
     }
+
+    async fn connect_outbound(&self, _peer: PeerInformation) {}
 }

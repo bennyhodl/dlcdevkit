@@ -13,7 +13,7 @@ fn main() -> Result<()> {
     let mut config = DdkConfig::default();
     config.storage_path = current_dir()?;
 
-    let transport = Arc::new(LightningTransport::new(&config.seed_config, config.network)?);
+    let transport = Arc::new(LightningTransport::new(&config.seed_config, 1776, config.network)?);
     let storage = Arc::new(SledStorageProvider::new(
         config.storage_path.join("sled_db").to_str().expect("No storage."),
     )?);
