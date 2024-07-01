@@ -2,33 +2,48 @@ version: "3.3"
 name: "ernest"
 services:
   ernest-bitcoin:
-    environment:
-      USERID: ${USERID:-1000}
-      GROUPID: ${GROUPID:-1000}
-    stop_grace_period: 5m
-    image: polarlightning/bitcoind:26.0
+    image: ruimarinho/bitcoin-core:0.20.0
     container_name: ernest-bitcoin
-    hostname: bitcoin
-    command: >-
-      bitcoind -server=1 -regtest=1
-      -rpcauth=ernest:940d5191606fbdb08b4f749fb6496247$4a8abbde943b578c1f5828773038a52e43621346e6444619399e11ece8ca7a5d
-      -debug=1 -zmqpubrawblock=tcp://0.0.0.0:28333
-      -zmqpubrawtx=tcp://0.0.0.0:28332 -zmqpubhashblock=tcp://0.0.0.0:28334
-      -txindex=1 -dnsseed=0 -upnp=0 -rpcbind=0.0.0.0 -rpcallowip=0.0.0.0/0
-      -rpcport=18443 -rest -listen=1 -listenonion=0 -fallbackfee=0.0002
-      -blockfilterindex=1 -peerblockfilters=1
+    command: |
+      -conf=/config/bitcoin.conf
+      -printtoconsole
+      -regtest
+    ports:
+      # regtest ports
+      - 18443:18443
+      - 18444:18444
     volumes:
       - ddk-bitcoin:/home/bitcoin/.bitcoin
-    expose:
-      - '18443'
-      - '18444'
-      - '28332'
-      - '28333'
-    ports:
-      - '18443:18443'
-      - '19444:18444'
-      - '28332:28332'
-      - '28333:28333'
+      - ./regtest/bitcoin:/config
+      - ./scripts:/scripts
+  # ernest-bitcoin:
+  #   environment:
+  #     USERID: ${USERID:-1000}
+  #     GROUPID: ${GROUPID:-1000}
+  #   stop_grace_period: 5m
+  #   image: polarlightning/bitcoind:26.0
+  #   container_name: ernest-bitcoin
+  #   hostname: bitcoin
+  #   command: >-
+  #     bitcoind -server=1 -regtest=1
+  #     -rpcauth=ernest:940d5191606fbdb08b4f749fb6496247$4a8abbde943b578c1f5828773038a52e43621346e6444619399e11ece8ca7a5d
+  #     -debug=1 -zmqpubrawblock=tcp://0.0.0.0:28333
+  #     -zmqpubrawtx=tcp://0.0.0.0:28332 -zmqpubhashblock=tcp://0.0.0.0:28334
+  #     -txindex=1 -dnsseed=0 -upnp=0 -rpcbind=0.0.0.0 -rpcallowip=0.0.0.0/0
+  #     -rpcport=18443 -rest -listen=1 -listenonion=0 -fallbackfee=0.0002
+  #     -blockfilterindex=1 -peerblockfilters=1
+  #   volumes:
+  #     - ddk-bitcoin:/home/bitcoin/.bitcoin
+    # expose:
+    #   - '18443'
+    #   - '18444'
+    #   - '28332'
+    #   - '28333'
+    # ports:
+    #   - '18443:18443'
+    #   - '19444:18444'
+    #   - '28332:28332'
+    #   - '28333:28333'
   ernest-electrs:
     image: ghcr.io/vulpemventures/electrs:latest
     container_name: ernest-electrs
