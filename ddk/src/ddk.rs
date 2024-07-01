@@ -94,6 +94,14 @@ impl<
         Ok(())
     }
 
+    pub fn connect_if_necessary(&self) -> anyhow::Result<()> {
+        let _known_peers = self.storage.list_peers()?;
+        
+        // check from already connected
+        
+        Ok(()) 
+    }
+
     pub async fn send_dlc_offer(
         &self,
         contract_input: &ContractInput,
@@ -138,6 +146,7 @@ pub fn process_incoming_messages<T: DdkTransport, S: DdkStorage, O: DdkOracle>(
     let messages = transport.get_and_clear_received_messages();
 
     for (counterparty, message) in messages {
+        tracing::info!("Processing DLC message from {}", counterparty.to_string());
         let resp = manager
             .lock()
             .unwrap()

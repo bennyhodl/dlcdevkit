@@ -42,6 +42,7 @@ pub const ESPLORA_HOST: &str = "http://localhost:30000";
 use async_trait::async_trait;
 use dlc_messages::Message;
 use bitcoin::secp256k1::PublicKey;
+use transport::PeerInformation;
 
 /// Allows ddk to open a listening connection and send/receive dlc messages functionality.
 ///
@@ -67,12 +68,17 @@ pub trait DdkTransport {
     fn get_and_clear_received_messages(&self) -> Vec<(PublicKey, Message)>;
     /// If their are messages that still need to be processed.
     fn has_pending_messages(&self) -> bool;
+    /// Connect to another peer
+    async fn connect_outbound(&self, peer: PeerInformation);
 }
 
 /// Storage for DLC contracts.
 ///
 /// TODO: Add `bdk` storage.
-pub trait DdkStorage: dlc_manager::Storage /*+ PersistBackend<ChangeSet> */ {}
+pub trait DdkStorage: dlc_manager::Storage /*+ PersistBackend<ChangeSet> */ {
+    fn list_peers(&self) -> anyhow::Result<Vec<PeerInformation>>;
+    fn save_peer(&self, peer: PeerInformation) -> anyhow::Result<()>;
+}
 
 /// Oracle client
 pub trait DdkOracle: dlc_manager::Oracle {

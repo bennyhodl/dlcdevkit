@@ -20,12 +20,14 @@ use sled::{Db, Transactional, Tree};
 use std::convert::TryInto;
 use std::io::{Cursor, Read};
 
+use crate::transport::PeerInformation;
 use crate::DdkStorage;
 
 const CONTRACT_TREE: u8 = 1;
 const CHANNEL_TREE: u8 = 2;
 const CHAIN_MONITOR_TREE: u8 = 3;
 const CHAIN_MONITOR_KEY: u8 = 4;
+const PEER_KEY: u8 = 5;
 // const UTXO_TREE: u8 = 6;
 // const KEY_PAIR_TREE: u8 = 7;
 // const ADDRESS_TREE: u8 = 8;
@@ -179,21 +181,33 @@ impl SledStorageProvider {
     fn channel_tree(&self) -> Result<Tree, Error> {
         self.open_tree(&[CHANNEL_TREE])
     }
-}
 
-// impl SledStorageProvider {
-//     fn utxo_tree(&self) -> Result<Tree, Error> {
-//         self.open_tree(&[UTXO_TREE])
-//     }
-//
-//     fn address_tree(&self) -> Result<Tree, Error> {
-//         self.open_tree(&[ADDRESS_TREE])
-//     }
-//
-//     fn key_pair_tree(&self) -> Result<Tree, Error> {
-//         self.open_tree(&[KEY_PAIR_TREE])
-//     }
-// }
+}
+impl DdkStorage for SledStorageProvider {
+    fn list_peers(&self) -> anyhow::Result<Vec<PeerInformation>> {
+        if let Some(bytes) = self.db.get("peers")? {
+            let peers: Vec<PeerInformation> = serde_json::from_slice(&bytes)?;
+            Ok(peers)
+        } else {
+            Ok(vec![])
+        }
+    }
+
+    fn save_peer(&self, peer: PeerInformation) -> anyhow::Result<()> {
+        let mut known_peers = self.list_peers()?;
+
+        if known_peers.contains(&peer) {
+            return Ok(());
+        }
+
+        known_peers.push(peer);
+        let peer_vec = serde_json::to_vec(&known_peers)?;
+
+        self.db.insert("peers", peer_vec)?;
+
+        Ok(())
+    }
+}
 
 impl Storage for SledStorageProvider {
     fn get_contract(&self, contract_id: &ContractId) -> Result<Option<Contract>, Error> {
@@ -823,5 +837,3 @@ mod tests {
         }
     );
 }
-
-impl DdkStorage for SledStorageProvider {}

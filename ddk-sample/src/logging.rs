@@ -12,7 +12,7 @@ impl<S> Layer<S> for SampleLogger where S: Subscriber {
         let mut visitor = MessageVisitor::default();
         event.record(&mut visitor);
         if let Some(log_msg) = visitor.message {
-            let log = format!("{}", log_msg);
+            let log = format!("[ddk]\t{}", log_msg);
             let _ = self.tx.send(log);
         }
     }

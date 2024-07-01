@@ -74,25 +74,25 @@ pub enum WalletCommand {
     }
 }
 
-pub fn match_ddk_command(command: Commands, ddk: &ApplicationDdk) -> anyhow::Result<()> {
+pub fn match_ddk_command(command: Commands, ddk: &ApplicationDdk, output: &mut Vec<String>) -> anyhow::Result<()> {
     match command {
         Commands::Info => {
-            println!("Node id: {}", ddk.transport.node_id.to_string());
-            println!("Network: {}", ddk.network())
+            output.push(format!("Node id: {}", ddk.transport.node_id.to_string()));
+            output.push(format!("Network: {}", ddk.network()))
         }
         Commands::Listpeers => {
             let peers = ddk.transport.peer_manager().get_peer_node_ids();
             if peers.is_empty() {
-                return Ok(println!("No peers"));
+                return Ok(output.push(format!("No peers")));
             }
             peers.iter().for_each(|peer| {
-                println!("Checking if peer is saved");
+                output.push(format!("Checking if peer is saved"));
                 let connect_to = PeerInformation {
                     pubkey: peer.0.to_string(),
                     host: peer.clone().1.unwrap().to_string()
                 };
                 ddk.storage.save_peer(connect_to).unwrap();
-                println!("Peer: {}\t\tHost: {:?}", peer.0, peer.1);
+                output.push(format!("Peer: {}\t\tHost: {:?}", peer.0, peer.1));
             })
         }
         Commands::Addpeer { pubkey, host } => {
@@ -100,40 +100,37 @@ pub fn match_ddk_command(command: Commands, ddk: &ApplicationDdk) -> anyhow::Res
             let pubkey = ddk::bdk::bitcoin::secp256k1::PublicKey::from_str(&pubkey)?;
             let host = SocketAddr::from_str(&host)?;
             tokio::runtime::Builder::new_current_thread().build().unwrap().spawn(async move {
-                let connect = lightning_net_tokio::connect_outbound(peer_manager, pubkey, host).await;
-                if connect.is_some() {
-                    println!("Connected?");
-                }
+                let _ = lightning_net_tokio::connect_outbound(peer_manager, pubkey, host).await;
             });
              
-            println!("Add: {:?} {:?}", pubkey, host);
+            output.push(format!("Add: {:?} {:?}", pubkey, host));
         }
         Commands::Listcontracts => {
             let contracts = ddk.storage.get_contracts()?;
             contracts.iter().for_each(|contract| {
-                println!("{:?}\n", contract)
+                output.push(format!("{:?}\n", contract))
             })
         }
         Commands::Listoffers => {
             let offers = ddk.storage.get_offered_channels()?;
             offers.iter().for_each(|offer| {
-                println!("{:?}", offer)
+                output.push(format!("{:?}", offer))
             })
         }
         Commands::Closedcontracts => {
             let contracts = ddk.storage.get_preclosed_contracts()?;
             contracts.iter().for_each(|_contract| {
-                println!("Closed contracts")
+                output.push(format!("Closed contracts"))
             })
         }
         Commands::Accept { offer } => {
             let offer = serde_json::from_str::<OfferDlc>(&offer)?;
             let (contract_id, counterparty, accept_offer) = ddk.manager.lock().unwrap().accept_contract_offer(&offer.temporary_contract_id)?;
             ddk.transport.send_message(counterparty, Message::Accept(accept_offer));
-            println!("Accepted offer: {:?}", contract_id);
+            output.push(format!("Accepted offer: {:?}", contract_id));
         }
         Commands::SendOffer { counterparty, .. } => {
-            println!("{:?}", current_dir().unwrap());
+            output.push(format!("{:?}", current_dir().unwrap()));
             let file = current_dir().unwrap().join("numerical_contract_input.json");
             let offer_string = std::fs::read_to_string(file).unwrap();
             let counterparty = ddk::bdk::bitcoin::secp256k1::PublicKey::from_str(&counterparty)?;
@@ -141,8 +138,8 @@ pub fn match_ddk_command(command: Commands, ddk: &ApplicationDdk) -> anyhow::Res
             let contract_input = serde_json::from_str::<ContractInput>(&offer_string)?;
             let offer = ddk.manager.lock().unwrap().send_offer(&contract_input, counterparty)?;
             let offer_clone = offer.clone();
-            println!("Offered Contract: {:?}", &offer_clone.clone().temporary_contract_id[0..12]);
-            println!("{:?}", offer_clone);
+            output.push(format!("Offered Contract: {:?}", &offer_clone.clone().temporary_contract_id[0..12]));
+            output.push(format!("{:?}", offer_clone));
 
             ddk.transport.send_message(counterparty, Message::Offer(offer));
         }
@@ -150,22 +147,22 @@ pub fn match_ddk_command(command: Commands, ddk: &ApplicationDdk) -> anyhow::Res
             let mut buf = [0u8; 32];
             buf.copy_from_slice(contract_id.as_bytes());
             let contract = ddk.storage.get_contract(&buf)?;
-            println!("{:?}", contract);
+            output.push(format!("{:?}", contract))
         }
         Commands::Wallet { wallet_subcommand } => {
             match wallet_subcommand {
                 WalletCommand::Balance => {
                     let balance = ddk.wallet.get_balance()?;
-                    println!("{:?}", balance)
+                    output.push(format!("{:?}", balance))
                 },
                 WalletCommand::NewAddress => {
                     let address = ddk.wallet.new_external_address()?;
-                    println!("{}", address)
+                    output.push(format!("{}", address))
                 }
                 WalletCommand::Send { address, amount, sat_vbyte } => {
                     let address = Address::from_str(&address)?.assume_checked();
                     let send = ddk.wallet.send_to_address(address, amount, sat_vbyte)?;
-                    println!("Sent transaction: {:?}", send)
+                    output.push(format!("Sent transaction: {:?}", send))
                 }
             }
         }
