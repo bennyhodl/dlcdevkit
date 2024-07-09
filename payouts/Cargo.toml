@@ -4,7 +4,8 @@ version = "0.0.5"
 edition = "2021"
 
 [dependencies]
-dlc = { git = "https://github.com/p2pderivatives/rust-dlc", branch = "master", features = ["use-serde"] }
-dlc-manager = { git = "https://github.com/p2pderivatives/rust-dlc", branch = "master", features = ["use-serde"] }
-dlc-messages = { git = "https://github.com/p2pderivatives/rust-dlc", branch = "master", features = [ "use-serde"] }
-dlc-trie = { git = "https://github.com/p2pderivatives/rust-dlc", branch = "master", features = ["use-serde"] }
+dlc-trie = { version = "0.4.0", path = "../../../libs/rust-dlc/master/dlc-trie", features = [ "use-serde"] }
+dlc = { version = "0.4.0", path = "../../../libs/rust-dlc/master/dlc", features = [ "use-serde"] }
+dlc-manager = { version = "0.4.0", path = "../../../libs/rust-dlc/master/dlc-manager", features = [ "use-serde"] }
+dlc-messages = { version = "0.4.0", path = "../../../libs/rust-dlc/master/dlc-messages", features = [ "use-serde"] }
+bitcoin = "0.30.2"
