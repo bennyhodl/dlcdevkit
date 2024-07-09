@@ -3,9 +3,9 @@ procs:
   #   shell: "docker run --name ernest-bitcoin --hostname bitcoin --env USERID=1000 --env GROUPID=1000 polarlightning/bitcoind:26.0 bitcoind -server=1 -regtest=1 -rpcuser=ernest -rpcpassword=ernest -debug=1 -zmqpubrawblock=tcp://0.0.0.0:28333 -zmqpubrawtx=tcp://0.0.0.0:28332 -zmqpubhashblock=tcp://0.0.0.0:28334 -txindex=1 -dnsseed=0 -upnp=0 -rpcbind=0.0.0.0 -rpcallowip=0.0.0.0/0 -rpcport=18443 -rest -listen=1 -listenonion=0 -fallbackfee=0.0002 -blockfilterindex=1 -peerblockfilters=1"
   #   stop: "hard-kill"
   relay:
-    shell: "RUST_LOG=info /Users/ben/ernest/relays/nostr-rs-relay/target/release/nostr-rs-relay -d /Users/ben/ernest/relays/nostr-relay-db -c /Users/ben/ernest/relays/config.toml"
+    shell: "RUST_LOG=info /Users/ben/ernest/dev/relays/nostr-rs-relay/target/release/nostr-rs-relay -d /Users/ben/ernest/dev/relays/nostr-relay-db -c /Users/ben/ernest/dev/relays/config.toml"
   kormir:
-    shell: "RUST_LOG=info KORMIR_PORT=8082 KORMIR_RELAYS=ws://localhost:8081 DATABASE_URL=postgres://kormir:kormir@localhost:5433 KORMIR_KEY=34d95a073eee38ecb968a0da8273926cda601802541a715c011fb340dd6d1706 /Users/ben/ernest/oracles/kormir/target/release/kormir-server"
+    shell: "RUST_LOG=info KORMIR_PORT=8082 KORMIR_RELAYS=ws://localhost:8081 DATABASE_URL=postgres://kormir:kormir@localhost:5433 KORMIR_KEY=34d95a073eee38ecb968a0da8273926cda601802541a715c011fb340dd6d1706 /Users/ben/ernest/dev/oracles/kormir/target/release/kormir-server"
   tauri_check:
     cmd: ["bacon -p terminal/src-tauri"]
     autostart: false
