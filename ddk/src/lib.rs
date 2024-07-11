@@ -31,6 +31,7 @@ pub use bdk;
 pub use bitcoin::Network;
 pub use dlc_manager;
 pub use dlc_messages;
+pub use dlc;
 
 /// Nostr relay host. TODO: nostr feature
 pub const RELAY_HOST: &str = "ws://localhost:8081";
