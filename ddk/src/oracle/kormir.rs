@@ -33,10 +33,12 @@ pub struct KormirOracleClient {
 
 impl KormirOracleClient {
     pub fn new() -> anyhow::Result<KormirOracleClient> {
+        tracing::info!(host=KORMIR_URL, "Connecting to Kormir oracle client.");
         let request: String = get("/pubkey")?;
         let pubkey = XOnlyPublicKey::from_str(&request)?;
 
         let client = reqwest::Client::new();
+        tracing::info!(pubkey=pubkey.to_string(), "Connected to Kormir client.");
 
         Ok(KormirOracleClient { pubkey, client })
     }

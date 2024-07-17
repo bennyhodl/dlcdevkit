@@ -108,7 +108,7 @@ impl<
         oracle_announcement: &OracleAnnouncement,
         counter_party: PublicKey,
     ) -> anyhow::Result<()> {
-        let mut manager = self.manager.lock().unwrap();
+        let manager = self.manager.lock().unwrap();
 
         let _offer_msg = manager.send_offer_with_announcements(
             contract_input,
@@ -124,7 +124,7 @@ impl<
     }
 
     pub fn accept_dlc_offer(&self, contract: [u8; 32]) -> anyhow::Result<()> {
-        let mut dlc = self.manager.lock().unwrap();
+        let dlc = self.manager.lock().unwrap();
 
         let contract_id = ContractId::from(contract);
 
