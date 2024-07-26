@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+anyhow = "1.0.86"
 clap = { version = "4.5.9", features = ["derive"] }
 ddk = { path = "../ddk/" }
 prost = "0.12.1"
@@ -22,5 +23,5 @@ path = "./src/bin/server.rs"
 
 [[bin]]
 name = "ddk-cli"
-path = "./bin/cli.rs"
+path = "./src/bin/cli.rs"
 
