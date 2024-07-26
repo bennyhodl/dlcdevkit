@@ -2,7 +2,7 @@ version: "3.3"
 name: "ernest"
 services:
   ernest-bitcoin:
-    image: ruimarinho/bitcoin-core:0.20.0
+    image: kylemanna/bitcoind:latest
     container_name: ernest-bitcoin
     command: |
       -conf=/config/bitcoin.conf

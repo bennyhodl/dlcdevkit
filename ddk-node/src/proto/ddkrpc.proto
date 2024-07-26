@@ -1,0 +1,29 @@
+syntax = "proto3";
+package ddkrpc;
+
+service DdkRpc {
+  rpc Info (InfoRequest) returns (InfoResponse);
+  rpc SendOffer (SendOfferRequest) returns (SendOfferResponse);
+  rpc AcceptOffer (AcceptOfferRequest) returns (AcceptOfferResponse);
+  rpc NewAddress (NewAddressRequest) returns (NewAddressResponse);
+}
+
+message InfoRequest {}
+
+message InfoResponse {
+  string pubkey = 1;
+}
+
+message SendOfferRequest {}
+
+message SendOfferResponse {}
+
+message AcceptOfferRequest {}
+
+message AcceptOfferResponse {}
+
+message NewAddressRequest {}
+
+message NewAddressResponse {
+  string address = 1;
+}
