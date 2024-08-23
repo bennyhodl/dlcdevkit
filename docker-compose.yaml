@@ -15,7 +15,6 @@ services:
     volumes:
       - ddk-bitcoin:/home/bitcoin/.bitcoin
       - ./regtest/bitcoin:/config
-      - ./scripts:/scripts
   # ernest-bitcoin:
   #   environment:
   #     USERID: ${USERID:-1000}

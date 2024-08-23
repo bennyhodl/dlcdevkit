@@ -7,10 +7,17 @@ pub struct InfoRequest {}
 pub struct InfoResponse {
     #[prost(string, tag = "1")]
     pub pubkey: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub transport: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub oracle: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct SendOfferRequest {}
+pub struct SendOfferRequest {
+    #[prost(string, tag = "1")]
+    pub contract_input: ::prost::alloc::string::String,
+}
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SendOfferResponse {}

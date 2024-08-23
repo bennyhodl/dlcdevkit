@@ -3,13 +3,13 @@ use std::sync::Arc;
 use ddk::config::DdkConfig;
 use ddk::builder::DdkBuilder;
 use ddk::storage::SledStorageProvider;
-use ddk::oracle::KormirOracleClient;
+use ddk::oracle::P2PDOracleClient;
 use ddk::transport::lightning::LightningTransport;
 use ddk_node::ddkrpc::ddk_rpc_server::DdkRpcServer;
 use ddk_node::DdkNode;
 use tonic::transport::Server;
 
-type DdkServer = ddk::DlcDevKit<LightningTransport, SledStorageProvider, KormirOracleClient>;
+type DdkServer = ddk::DlcDevKit<LightningTransport, SledStorageProvider, P2PDOracleClient>;
 
 // toml options w/ clap
 //  - storage dir
@@ -31,7 +31,7 @@ async fn main() {
     ).expect("sled failed"));
 
     let oracle_client = tokio::task::spawn_blocking(|| {
-        Arc::new(KormirOracleClient::new().expect("no oracle"))
+        Arc::new(P2PDOracleClient::new("http://127.0.0.1:8080").expect("no oracle"))
     }).await.unwrap();
 
     let mut builder = DdkBuilder::new();

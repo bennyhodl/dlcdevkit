@@ -12,9 +12,13 @@ message InfoRequest {}
 
 message InfoResponse {
   string pubkey = 1;
+  string transport = 2;
+  string oracle = 3;
 }
 
-message SendOfferRequest {}
+message SendOfferRequest {
+  string contract_input = 1;
+}
 
 message SendOfferResponse {}
 
