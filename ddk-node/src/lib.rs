@@ -1,7 +1,10 @@
 pub mod ddkrpc;
 
+use std::str::FromStr;
 use std::sync::Arc;
 
+use ddk::bdk::bitcoin::secp256k1::PublicKey;
+use ddk::dlc_manager::contract::contract_input::ContractInput;
 use ddkrpc::ddk_rpc_server::DdkRpc;
 use ddk::oracle::P2PDOracleClient;
 use ddk::storage::SledStorageProvider;
@@ -37,8 +40,14 @@ impl DdkRpc for DdkNode {
         Ok(Response::new(response))
     }
 
-    async fn send_offer(&self, _request: Request<SendOfferRequest>) -> Result<Response<SendOfferResponse>, Status> {
-        todo!()
+    async fn send_offer(&self, request: Request<SendOfferRequest>) -> Result<Response<SendOfferResponse>, Status> {
+        let SendOfferRequest { contract_input, counter_party } = request.into_inner();
+        let contract_input: ContractInput = serde_json::from_slice(&contract_input).expect("couldn't get bytes correct");  
+        let counter_party = PublicKey::from_str(&counter_party).expect("no public key");
+        println!("Worked in server: {}", contract_input.offer_collateral); 
+        let offer_msg = self.inner.manager.lock().unwrap().send_offer(&contract_input, counter_party).expect("couldn't send offer");
+        let offer_dlc = serde_json::to_vec(&offer_msg).expect("OfferDlc could not be converted to vec.");
+        Ok(Response::new(SendOfferResponse { offer_dlc }))
     }
 
     async fn accept_offer(&self, _request: Request<AcceptOfferRequest>) -> Result<Response<AcceptOfferResponse>, Status> {

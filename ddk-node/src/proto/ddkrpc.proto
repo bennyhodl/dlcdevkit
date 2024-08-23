@@ -17,10 +17,13 @@ message InfoResponse {
 }
 
 message SendOfferRequest {
-  string contract_input = 1;
+  bytes contract_input = 1;
+  string counter_party = 2;
 }
 
-message SendOfferResponse {}
+message SendOfferResponse {
+  bytes offer_dlc = 1;
+}
 
 message AcceptOfferRequest {}
 

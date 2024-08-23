@@ -15,12 +15,17 @@ pub struct InfoResponse {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SendOfferRequest {
-    #[prost(string, tag = "1")]
-    pub contract_input: ::prost::alloc::string::String,
+    #[prost(bytes = "vec", tag = "1")]
+    pub contract_input: ::prost::alloc::vec::Vec<u8>,
+    #[prost(string, tag = "2")]
+    pub counter_party: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct SendOfferResponse {}
+pub struct SendOfferResponse {
+    #[prost(bytes = "vec", tag = "1")]
+    pub offer_dlc: ::prost::alloc::vec::Vec<u8>,
+}
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AcceptOfferRequest {}

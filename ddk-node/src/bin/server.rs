@@ -1,5 +1,7 @@
 use std::env::current_dir;
+use std::path::PathBuf;
 use std::sync::Arc;
+use clap::Parser;
 use ddk::config::DdkConfig;
 use ddk::builder::DdkBuilder;
 use ddk::storage::SledStorageProvider;
@@ -10,6 +12,14 @@ use ddk_node::DdkNode;
 use tonic::transport::Server;
 
 type DdkServer = ddk::DlcDevKit<LightningTransport, SledStorageProvider, P2PDOracleClient>;
+
+#[derive(Parser, Clone, Debug)]
+struct Config {
+    #[arg(short, long)]
+    storage_dir: Option<PathBuf>,
+    #[arg(short, long)]
+    listening_port: Option<u16>,
+}
 
 // toml options w/ clap
 //  - storage dir
@@ -22,10 +32,14 @@ async fn main() {
     let subscriber = tracing_subscriber::fmt().finish();
     tracing::subscriber::set_global_default(subscriber).unwrap();
     tracing::info!("Starting DDK server");
-    let mut config = DdkConfig::default();
-    config.storage_path = current_dir().unwrap();
 
-    let transport = Arc::new(LightningTransport::new(&config.seed_config, 1776, config.network).expect("transport fail"));
+    let args = Config::parse();
+    let mut config = DdkConfig::default();
+    config.storage_path = args.storage_dir.unwrap_or(current_dir().expect("couldn't get storage").join("ddk-sample")); 
+
+    let listening_port = args.listening_port.unwrap_or(1776);
+
+    let transport = Arc::new(LightningTransport::new(&config.seed_config, listening_port, config.network).expect("transport fail"));
     let storage = Arc::new(SledStorageProvider::new(
         config.storage_path.join("sled_db").to_str().expect("No storage."),
     ).expect("sled failed"));
