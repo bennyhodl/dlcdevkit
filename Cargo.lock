@@ -1221,15 +1221,15 @@ dependencies = [
  "bitcoin 0.30.2",
  "blake3",
  "chrono",
- "dlc 0.5.0",
- "dlc-manager 0.5.0",
- "dlc-messages 0.5.0",
- "dlc-trie 0.5.0",
+ "dlc 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "dlc-manager 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "dlc-messages 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "dlc-trie 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "electrum-client",
  "futures",
  "getrandom 0.2.11",
  "kormir",
- "lightning 0.0.121",
+ "lightning",
  "lightning-net-tokio",
  "nostr 0.29.0",
  "nostr-relay-pool",
@@ -1256,7 +1256,9 @@ dependencies = [
  "ddk",
  "prost",
  "serde",
+ "serde_json",
  "tokio",
+ "toml 0.8.19",
  "tonic",
  "tonic-build",
  "tracing",
@@ -1273,7 +1275,7 @@ dependencies = [
  "crossterm 0.27.0",
  "ddk",
  "env_logger",
- "lightning 0.0.121",
+ "lightning",
  "lightning-net-tokio",
  "log",
  "rustyline",
@@ -1389,7 +1391,7 @@ checksum = "bd0c93bb4b0c6d9b77f4435b0ae98c24d17f1c45b2ff844c6151a07256ca923b"
 
 [[package]]
 name = "dlc"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bitcoin 0.30.2",
  "miniscript",
@@ -1413,15 +1415,15 @@ dependencies = [
 
 [[package]]
 name = "dlc-manager"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "bitcoin 0.30.2",
- "dlc 0.4.0",
- "dlc-messages 0.4.0",
- "dlc-trie 0.4.0",
+ "dlc 0.5.0",
+ "dlc-messages 0.5.0",
+ "dlc-trie 0.5.0",
  "hex-conservative",
- "lightning 0.0.123",
+ "lightning",
  "log",
  "secp256k1-zkp",
  "serde",
@@ -1435,11 +1437,11 @@ checksum = "bf59f3a76e571e2bf85021bb34c91c03d004241426dbcd438c47d5a76c476834"
 dependencies = [
  "async-trait",
  "bitcoin 0.30.2",
- "dlc 0.5.0",
- "dlc-messages 0.5.0",
- "dlc-trie 0.5.0",
+ "dlc 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "dlc-messages 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "dlc-trie 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "hex-conservative",
- "lightning 0.0.121",
+ "lightning",
  "log",
  "secp256k1-zkp",
  "serde",
@@ -1447,11 +1449,11 @@ dependencies = [
 
 [[package]]
 name = "dlc-messages"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bitcoin 0.30.2",
- "dlc 0.4.0",
- "lightning 0.0.123",
+ "dlc 0.5.0",
+ "lightning",
  "secp256k1-zkp",
  "serde",
 ]
@@ -1463,18 +1465,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "758cb623d4889882e7da547e98ff9f6249b59d081048402dfab2e8f5f54c6441"
 dependencies = [
  "bitcoin 0.30.2",
- "dlc 0.5.0",
- "lightning 0.0.121",
+ "dlc 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "lightning",
  "secp256k1-zkp",
  "serde",
 ]
 
 [[package]]
 name = "dlc-trie"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bitcoin 0.30.2",
- "dlc 0.4.0",
+ "dlc 0.5.0",
  "secp256k1-zkp",
  "serde",
 ]
@@ -1486,7 +1488,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c36982420191ed253bf8d813be6259cb1116d17401ba2eed6a1fa50665674e21"
 dependencies = [
  "bitcoin 0.30.2",
- "dlc 0.5.0",
+ "dlc 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "secp256k1-zkp",
  "serde",
 ]
@@ -1544,7 +1546,7 @@ checksum = "f54cc3e827ee1c3812239a9a41dede7b4d7d5d5464faa32d71bd7cba28ce2cb2"
 dependencies = [
  "cc",
  "rustc_version",
- "toml 0.8.8",
+ "toml 0.8.19",
  "vswhom",
  "winreg 0.51.0",
 ]
@@ -2681,10 +2683,10 @@ name = "kormir"
 version = "0.2.0"
 dependencies = [
  "bitcoin 0.30.2",
- "dlc 0.5.0",
- "dlc-messages 0.5.0",
+ "dlc 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "dlc-messages 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "hex",
- "lightning 0.0.121",
+ "lightning",
  "log",
  "secp256k1-zkp",
  "serde",
@@ -2748,23 +2750,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "lightning"
-version = "0.0.123"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5fd92d4aa159374be430c7590e169b4a6c0fb79018f5bc4ea1bffde536384db3"
-dependencies = [
- "bitcoin 0.30.2",
- "hex-conservative",
-]
-
-[[package]]
 name = "lightning-net-tokio"
 version = "0.0.121"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4813cca14ed984924a6975895e80cde8673a0a105a1c7ddf3b0fb3d1ce59e6bf"
 dependencies = [
  "bitcoin 0.30.2",
- "lightning 0.0.121",
+ "lightning",
  "tokio",
 ]
 
@@ -3490,10 +3482,10 @@ name = "payouts"
 version = "0.0.5"
 dependencies = [
  "bitcoin 0.30.2",
- "dlc 0.4.0",
- "dlc-manager 0.4.0",
- "dlc-messages 0.4.0",
- "dlc-trie 0.4.0",
+ "dlc 0.5.0",
+ "dlc-manager 0.5.0",
+ "dlc-messages 0.5.0",
+ "dlc-trie 0.5.0",
 ]
 
 [[package]]
@@ -4589,12 +4581,13 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.117"
+version = "1.0.127"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "455182ea6142b14f93f4bc5320a2b31c1f266b66a4a5c858b013302a5d8cbfc3"
+checksum = "8043c06d9f82bd7271361ed64f415fe5e12a77fdb52e573e7f06a516dea329ad"
 dependencies = [
  "indexmap 2.2.6",
  "itoa 1.0.10",
+ "memchr",
  "ryu",
  "serde",
 ]
@@ -4612,9 +4605,9 @@ dependencies = [
 
 [[package]]
 name = "serde_spanned"
-version = "0.6.5"
+version = "0.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb3622f419d1296904700073ea6cc23ad690adbd66f13ea683df73298736f0c1"
+checksum = "eb5b1b31579f3811bf615c144393417496f152e12ac8b7663bf664f4a815306d"
 dependencies = [
  "serde",
 ]
@@ -5014,7 +5007,7 @@ dependencies = [
  "cfg-expr 0.15.5",
  "heck 0.4.1",
  "pkg-config",
- "toml 0.8.8",
+ "toml 0.8.19",
  "version-compare 0.1.1",
 ]
 
@@ -5554,21 +5547,21 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "0.8.8"
+version = "0.8.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1a195ec8c9da26928f773888e0742ca3ca1040c6cd859c919c9f59c1954ab35"
+checksum = "a1ed1f98e3fdc28d6d910e6737ae6ab1a93bf1985935a1193e68f93eeb68d24e"
 dependencies = [
  "serde",
  "serde_spanned",
  "toml_datetime",
- "toml_edit 0.21.0",
+ "toml_edit 0.22.20",
 ]
 
 [[package]]
 name = "toml_datetime"
-version = "0.6.5"
+version = "0.6.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3550f4e9685620ac18a50ed434eb3aec30db8ba93b0287467bca5826ea25baf1"
+checksum = "0dd7358ecb8fc2f8d014bf86f6f638ce72ba252a2c3a2572f2a795f1d23efb41"
 dependencies = [
  "serde",
 ]
@@ -5583,7 +5576,7 @@ dependencies = [
  "serde",
  "serde_spanned",
  "toml_datetime",
- "winnow",
+ "winnow 0.5.30",
 ]
 
 [[package]]
@@ -5593,10 +5586,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d34d383cd00a163b4a5b85053df514d45bc330f6de7737edfe0a93311d1eaa03"
 dependencies = [
  "indexmap 2.2.6",
+ "toml_datetime",
+ "winnow 0.5.30",
+]
+
+[[package]]
+name = "toml_edit"
+version = "0.22.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "583c44c02ad26b0c3f3066fe629275e50627026c51ac2e595cca4c230ce1ce1d"
+dependencies = [
+ "indexmap 2.2.6",
  "serde",
  "serde_spanned",
  "toml_datetime",
- "winnow",
+ "winnow 0.6.18",
 ]
 
 [[package]]
@@ -6547,6 +6551,15 @@ name = "winnow"
 version = "0.5.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b5c3db89721d50d0e2a673f5043fc4722f76dcc352d7b1ab8b8288bed4ed2c5"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
+name = "winnow"
+version = "0.6.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "68a9bda4691f099d435ad181000724da8e5899daa10713c2d432552b9ccd3a6f"
 dependencies = [
  "memchr",
 ]
