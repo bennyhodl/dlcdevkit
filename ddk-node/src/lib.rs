@@ -5,13 +5,15 @@ use std::sync::Arc;
 
 use ddk::bdk::bitcoin::secp256k1::PublicKey;
 use ddk::dlc_manager::contract::contract_input::ContractInput;
+use ddk::dlc_manager::Storage;
+use ddk::dlc_messages::Message;
 use ddkrpc::ddk_rpc_server::DdkRpc;
 use ddk::oracle::P2PDOracleClient;
 use ddk::storage::SledStorageProvider;
 use ddk::transport::lightning::LightningTransport;
 use ddk::DlcDevKit;
 use ddk::{DdkTransport, DdkOracle};
-use ddkrpc::{AcceptOfferRequest, AcceptOfferResponse, NewAddressRequest, NewAddressResponse, SendOfferRequest, SendOfferResponse};
+use ddkrpc::{AcceptOfferRequest, AcceptOfferResponse, ListOffersRequest, ListOffersResponse, NewAddressRequest, NewAddressResponse, SendOfferRequest, SendOfferResponse};
 use ddkrpc::{InfoRequest, InfoResponse};
 use tonic::async_trait;
 use tonic::Request;
@@ -50,13 +52,26 @@ impl DdkRpc for DdkNode {
         Ok(Response::new(SendOfferResponse { offer_dlc }))
     }
 
-    async fn accept_offer(&self, _request: Request<AcceptOfferRequest>) -> Result<Response<AcceptOfferResponse>, Status> {
-        todo!()
+    async fn accept_offer(&self, request: Request<AcceptOfferRequest>) -> Result<Response<AcceptOfferResponse>, Status> {
+        let mut contract_id = [0u8; 32];
+        let contract_id_bytes = hex::decode(&request.into_inner().contract_id).unwrap();
+        contract_id.copy_from_slice(&contract_id_bytes);
+        println!("{:?}", contract_id);
+        let (_, node_id, accept_dlc) = self.inner.manager.lock().unwrap().accept_contract_offer(&contract_id).unwrap();
+        self.inner.transport.send_message(node_id, Message::Accept(accept_dlc.clone()));
+        Ok(Response::new(AcceptOfferResponse { node_id: node_id.to_string(), accept_msg: serde_json::to_vec(&accept_dlc).unwrap()}))
     }
 
     async fn new_address(&self, _request: Request<NewAddressRequest>) -> Result<Response<NewAddressResponse>, Status> {
         let address = self.inner.wallet.new_external_address().unwrap().to_string();
         let response = NewAddressResponse { address };
         Ok(Response::new(response))
+    }
+
+    async fn list_offers(&self, _request: Request<ListOffersRequest>) -> Result<Response<ListOffersResponse>, Status> {
+        let offers = self.inner.storage.get_contract_offers().unwrap();
+        let offers: Vec<Vec<u8>> = offers.iter().map(|offer| serde_json::to_vec(offer).unwrap()).collect();
+
+        Ok(Response::new(ListOffersResponse { offers }))
     }
 }

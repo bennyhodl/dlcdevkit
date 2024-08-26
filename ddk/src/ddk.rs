@@ -69,7 +69,6 @@ impl<
             let mut timer = tokio::time::interval(Duration::from_secs(10));
             loop {
                 timer.tick().await;
-                tracing::info!("Syncing wallet...");
                 wallet_clone.sync().unwrap();
             }
         });
@@ -77,11 +76,9 @@ impl<
         let message_processor = self.transport.clone();
         let manager_clone = self.manager.clone();
         runtime.spawn(async move {
-            tracing::info!("Message processor");
             let mut timer = tokio::time::interval(Duration::from_secs(5));
             loop {
                 timer.tick().await;
-                tracing::info!("Processing message...");
                 process_incoming_messages(message_processor.clone(), manager_clone.clone());
             }
         });

@@ -7,6 +7,7 @@ use ddk::builder::DdkBuilder;
 use ddk::storage::SledStorageProvider;
 use ddk::oracle::P2PDOracleClient;
 use ddk::transport::lightning::LightningTransport;
+use ddk::Network;
 use ddk_node::ddkrpc::ddk_rpc_server::DdkRpcServer;
 use ddk_node::DdkNode;
 use tonic::transport::Server;
@@ -36,6 +37,8 @@ async fn main() {
     let args = Config::parse();
     let mut config = DdkConfig::default();
     config.storage_path = args.storage_dir.unwrap_or(current_dir().expect("couldn't get storage").join("ddk-sample")); 
+    config.network = Network::Regtest;
+    config.esplora_host = "http://localhost:30000".into();
 
     let listening_port = args.listening_port.unwrap_or(1776);
 

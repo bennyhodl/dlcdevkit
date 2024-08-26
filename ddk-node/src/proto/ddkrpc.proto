@@ -5,6 +5,7 @@ service DdkRpc {
   rpc Info (InfoRequest) returns (InfoResponse);
   rpc SendOffer (SendOfferRequest) returns (SendOfferResponse);
   rpc AcceptOffer (AcceptOfferRequest) returns (AcceptOfferResponse);
+  rpc ListOffers (ListOffersRequest) returns (ListOffersResponse);
   rpc NewAddress (NewAddressRequest) returns (NewAddressResponse);
 }
 
@@ -25,9 +26,20 @@ message SendOfferResponse {
   bytes offer_dlc = 1;
 }
 
-message AcceptOfferRequest {}
+message ListOffersRequest {}
 
-message AcceptOfferResponse {}
+message ListOffersResponse {
+  repeated bytes offers = 1;
+}
+
+message AcceptOfferRequest {
+  string contract_id = 1;
+}
+
+message AcceptOfferResponse {
+  string node_id = 1;
+  bytes accept_msg = 2;
+}
 
 message NewAddressRequest {}
 

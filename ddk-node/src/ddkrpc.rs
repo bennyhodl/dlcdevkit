@@ -28,10 +28,27 @@ pub struct SendOfferResponse {
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct AcceptOfferRequest {}
+pub struct ListOffersRequest {}
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct AcceptOfferResponse {}
+pub struct ListOffersResponse {
+    #[prost(bytes = "vec", repeated, tag = "1")]
+    pub offers: ::prost::alloc::vec::Vec<::prost::alloc::vec::Vec<u8>>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct AcceptOfferRequest {
+    #[prost(string, tag = "1")]
+    pub contract_id: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct AcceptOfferResponse {
+    #[prost(string, tag = "1")]
+    pub node_id: ::prost::alloc::string::String,
+    #[prost(bytes = "vec", tag = "2")]
+    pub accept_msg: ::prost::alloc::vec::Vec<u8>,
+}
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct NewAddressRequest {}
@@ -191,6 +208,28 @@ pub mod ddk_rpc_client {
             req.extensions_mut().insert(GrpcMethod::new("ddkrpc.DdkRpc", "AcceptOffer"));
             self.inner.unary(req, path, codec).await
         }
+        pub async fn list_offers(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ListOffersRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListOffersResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/ddkrpc.DdkRpc/ListOffers");
+            let mut req = request.into_request();
+            req.extensions_mut().insert(GrpcMethod::new("ddkrpc.DdkRpc", "ListOffers"));
+            self.inner.unary(req, path, codec).await
+        }
         pub async fn new_address(
             &mut self,
             request: impl tonic::IntoRequest<super::NewAddressRequest>,
@@ -238,6 +277,13 @@ pub mod ddk_rpc_server {
             request: tonic::Request<super::AcceptOfferRequest>,
         ) -> std::result::Result<
             tonic::Response<super::AcceptOfferResponse>,
+            tonic::Status,
+        >;
+        async fn list_offers(
+            &self,
+            request: tonic::Request<super::ListOffersRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListOffersResponse>,
             tonic::Status,
         >;
         async fn new_address(
@@ -446,6 +492,50 @@ pub mod ddk_rpc_server {
                     let fut = async move {
                         let inner = inner.0;
                         let method = AcceptOfferSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/ddkrpc.DdkRpc/ListOffers" => {
+                    #[allow(non_camel_case_types)]
+                    struct ListOffersSvc<T: DdkRpc>(pub Arc<T>);
+                    impl<T: DdkRpc> tonic::server::UnaryService<super::ListOffersRequest>
+                    for ListOffersSvc<T> {
+                        type Response = super::ListOffersResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::ListOffersRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as DdkRpc>::list_offers(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = ListOffersSvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

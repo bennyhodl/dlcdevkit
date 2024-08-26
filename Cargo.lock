@@ -1254,6 +1254,7 @@ dependencies = [
  "anyhow",
  "clap",
  "ddk",
+ "hex",
  "prost",
  "serde",
  "serde_json",
