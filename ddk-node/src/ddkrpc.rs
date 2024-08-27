@@ -58,6 +58,49 @@ pub struct NewAddressResponse {
     #[prost(string, tag = "1")]
     pub address: ::prost::alloc::string::String,
 }
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct Balance {
+    #[prost(uint64, tag = "1")]
+    pub confirmed: u64,
+    #[prost(uint64, tag = "2")]
+    pub unconfirmed: u64,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct WalletBalanceRequest {}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct WalletBalanceResponse {
+    #[prost(uint64, tag = "1")]
+    pub confirmed: u64,
+    #[prost(uint64, tag = "2")]
+    pub unconfirmed: u64,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetWalletTransactionsRequest {}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetWalletTransactionsResponse {
+    #[prost(message, repeated, tag = "1")]
+    pub transactions: ::prost::alloc::vec::Vec<Transaction>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct Transaction {
+    #[prost(bytes = "vec", tag = "1")]
+    pub transaction: ::prost::alloc::vec::Vec<u8>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListUtxosRequest {}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListUtxosResponse {
+    #[prost(bytes = "vec", repeated, tag = "1")]
+    pub utxos: ::prost::alloc::vec::Vec<::prost::alloc::vec::Vec<u8>>,
+}
 /// Generated client implementations.
 pub mod ddk_rpc_client {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
@@ -252,6 +295,78 @@ pub mod ddk_rpc_client {
             req.extensions_mut().insert(GrpcMethod::new("ddkrpc.DdkRpc", "NewAddress"));
             self.inner.unary(req, path, codec).await
         }
+        pub async fn wallet_balance(
+            &mut self,
+            request: impl tonic::IntoRequest<super::WalletBalanceRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::WalletBalanceResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/ddkrpc.DdkRpc/WalletBalance",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("ddkrpc.DdkRpc", "WalletBalance"));
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn get_wallet_transactions(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetWalletTransactionsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetWalletTransactionsResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/ddkrpc.DdkRpc/GetWalletTransactions",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("ddkrpc.DdkRpc", "GetWalletTransactions"));
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn list_utxos(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ListUtxosRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListUtxosResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/ddkrpc.DdkRpc/ListUtxos");
+            let mut req = request.into_request();
+            req.extensions_mut().insert(GrpcMethod::new("ddkrpc.DdkRpc", "ListUtxos"));
+            self.inner.unary(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -291,6 +406,27 @@ pub mod ddk_rpc_server {
             request: tonic::Request<super::NewAddressRequest>,
         ) -> std::result::Result<
             tonic::Response<super::NewAddressResponse>,
+            tonic::Status,
+        >;
+        async fn wallet_balance(
+            &self,
+            request: tonic::Request<super::WalletBalanceRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::WalletBalanceResponse>,
+            tonic::Status,
+        >;
+        async fn get_wallet_transactions(
+            &self,
+            request: tonic::Request<super::GetWalletTransactionsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetWalletTransactionsResponse>,
+            tonic::Status,
+        >;
+        async fn list_utxos(
+            &self,
+            request: tonic::Request<super::ListUtxosRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListUtxosResponse>,
             tonic::Status,
         >;
     }
@@ -580,6 +716,143 @@ pub mod ddk_rpc_server {
                     let fut = async move {
                         let inner = inner.0;
                         let method = NewAddressSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/ddkrpc.DdkRpc/WalletBalance" => {
+                    #[allow(non_camel_case_types)]
+                    struct WalletBalanceSvc<T: DdkRpc>(pub Arc<T>);
+                    impl<
+                        T: DdkRpc,
+                    > tonic::server::UnaryService<super::WalletBalanceRequest>
+                    for WalletBalanceSvc<T> {
+                        type Response = super::WalletBalanceResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::WalletBalanceRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as DdkRpc>::wallet_balance(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = WalletBalanceSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/ddkrpc.DdkRpc/GetWalletTransactions" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetWalletTransactionsSvc<T: DdkRpc>(pub Arc<T>);
+                    impl<
+                        T: DdkRpc,
+                    > tonic::server::UnaryService<super::GetWalletTransactionsRequest>
+                    for GetWalletTransactionsSvc<T> {
+                        type Response = super::GetWalletTransactionsResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetWalletTransactionsRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as DdkRpc>::get_wallet_transactions(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = GetWalletTransactionsSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/ddkrpc.DdkRpc/ListUtxos" => {
+                    #[allow(non_camel_case_types)]
+                    struct ListUtxosSvc<T: DdkRpc>(pub Arc<T>);
+                    impl<T: DdkRpc> tonic::server::UnaryService<super::ListUtxosRequest>
+                    for ListUtxosSvc<T> {
+                        type Response = super::ListUtxosResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::ListUtxosRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as DdkRpc>::list_utxos(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = ListUtxosSvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

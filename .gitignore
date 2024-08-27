@@ -34,3 +34,5 @@
 .idea
 /ddk-sample/logs.txt
 /history.txt
+
+/ddk-node/ddk-sample

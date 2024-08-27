@@ -10,8 +10,8 @@ use lightning::{
     util::logger::{Logger, Record},
 };
 use lightning_net_tokio::{setup_inbound, SocketDescriptor};
-use tokio::net::TcpListener;
 use std::{sync::Arc, time::SystemTime};
+use tokio::net::TcpListener;
 
 use crate::config::SeedConfig;
 
@@ -19,7 +19,7 @@ pub struct DlcDevKitLogger;
 
 impl Logger for DlcDevKitLogger {
     fn log(&self, record: Record) {
-        tracing::info!("ln transport: {:?}", record);
+        tracing::info!("{}", record.args);
     }
 }
 
@@ -41,7 +41,11 @@ pub struct LightningTransport {
 }
 
 impl LightningTransport {
-    pub fn new(seed_config: &SeedConfig, listening_port: u16, network: Network) -> anyhow::Result<LightningTransport> {
+    pub fn new(
+        seed_config: &SeedConfig,
+        listening_port: u16,
+        network: Network,
+    ) -> anyhow::Result<LightningTransport> {
         let seed = crate::io::xprv_from_config(seed_config, network)?
             .private_key
             .secret_bytes();
@@ -72,7 +76,7 @@ impl LightningTransport {
             listening_port,
         })
     }
-    
+
     pub fn ln_peer_manager(&self) -> Arc<LnPeerManager> {
         self.peer_manager.clone()
     }

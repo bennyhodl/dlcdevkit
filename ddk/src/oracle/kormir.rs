@@ -48,12 +48,12 @@ impl KormirOracleClient {
         Ok(XOnlyPublicKey::from_str(&request)?)
     }
 
-    pub async fn list_events(&self) -> anyhow::Result<Vec<OracleAnnouncement>> {
-        let oracle_events: Vec<OracleEventData> = reqwest::get(format!("{}/list-events", KORMIR_URL)).await?.json().await?;
-        println!("oracle_events: {:?}", oracle_events);
-
-        Ok(oracle_events.iter().map(|event| event.announcement.clone()).collect::<Vec<OracleAnnouncement>>())
-    }
+    // pub async fn list_events(&self) -> anyhow::Result<Vec<OracleAnnouncement>> {
+    //     let oracle_events: Vec<OracleEventData> = reqwest::get(format!("{}/list-events", KORMIR_URL)).await?.json().await?;
+    //     println!("oracle_events: {:?}", oracle_events);
+    //
+    //     Ok(oracle_events.iter().map(|event| event.announcement.clone()).collect::<Vec<OracleAnnouncement>>())
+    // }
 
     pub async fn create_event(&self, outcomes: Vec<String>, maturity: u32) -> anyhow::Result<()> {
         let event_id = Uuid::new_v4().to_string();

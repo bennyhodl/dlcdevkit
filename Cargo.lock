@@ -1221,10 +1221,10 @@ dependencies = [
  "bitcoin 0.30.2",
  "blake3",
  "chrono",
- "dlc 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "dlc-manager 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "dlc-messages 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "dlc-trie 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "dlc 0.5.0",
+ "dlc-manager",
+ "dlc-messages 0.5.0",
+ "dlc-trie",
  "electrum-client",
  "futures",
  "getrandom 0.2.11",
@@ -1422,25 +1422,7 @@ dependencies = [
  "bitcoin 0.30.2",
  "dlc 0.5.0",
  "dlc-messages 0.5.0",
- "dlc-trie 0.5.0",
- "hex-conservative",
- "lightning",
- "log",
- "secp256k1-zkp",
- "serde",
-]
-
-[[package]]
-name = "dlc-manager"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf59f3a76e571e2bf85021bb34c91c03d004241426dbcd438c47d5a76c476834"
-dependencies = [
- "async-trait",
- "bitcoin 0.30.2",
- "dlc 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "dlc-messages 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "dlc-trie 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "dlc-trie",
  "hex-conservative",
  "lightning",
  "log",
@@ -1478,18 +1460,6 @@ version = "0.5.0"
 dependencies = [
  "bitcoin 0.30.2",
  "dlc 0.5.0",
- "secp256k1-zkp",
- "serde",
-]
-
-[[package]]
-name = "dlc-trie"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c36982420191ed253bf8d813be6259cb1116d17401ba2eed6a1fa50665674e21"
-dependencies = [
- "bitcoin 0.30.2",
- "dlc 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "secp256k1-zkp",
  "serde",
 ]
@@ -2682,6 +2652,8 @@ dependencies = [
 [[package]]
 name = "kormir"
 version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7becdeb25367b38194b52ca52aecf56393ff2dfe5a6f1f751b098280ce1f639d"
 dependencies = [
  "bitcoin 0.30.2",
  "dlc 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -3484,9 +3456,9 @@ version = "0.0.5"
 dependencies = [
  "bitcoin 0.30.2",
  "dlc 0.5.0",
- "dlc-manager 0.5.0",
+ "dlc-manager",
  "dlc-messages 0.5.0",
- "dlc-trie 0.5.0",
+ "dlc-trie",
 ]
 
 [[package]]

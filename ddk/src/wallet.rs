@@ -1,8 +1,8 @@
 use crate::{
     chain::EsploraClient,
+    config::DdkConfig,
     signer::{DeriveSigner, SimpleDeriveSigner},
     storage::SledStorageProvider,
-    config::DdkConfig,
 };
 use anyhow::anyhow;
 use bdk::{
@@ -14,11 +14,11 @@ use bdk::{
     chain::PersistBackend,
     template::Bip86,
     wallet::{AddressIndex, AddressInfo, Balance, ChangeSet, Update},
-    KeychainKind, SignOptions, Wallet,
+    KeychainKind, LocalOutput, SignOptions, Utxo, Wallet,
 };
 use bdk_esplora::EsploraExt;
 use bdk_file_store::Store;
-use bitcoin::{FeeRate, ScriptBuf};
+use bitcoin::{FeeRate, ScriptBuf, Transaction};
 use blake3::Hasher;
 use dlc_manager::{error::Error as ManagerError, SimpleSigner};
 use lightning::chain::chaininterface::{ConfirmationTarget, FeeEstimator};
@@ -61,7 +61,7 @@ impl DlcDevKitWallet {
     {
         let secp = Secp256k1::new();
         let wallet_storage_path = wallet_storage_path.as_ref().join("wallet-db");
-    
+
         let storage = Store::<ChangeSet>::open_or_create_new(&[0u8; 32], wallet_storage_path)?;
 
         let inner = Arc::new(Mutex::new(Wallet::new_or_load(
@@ -190,6 +190,28 @@ impl DlcDevKitWallet {
         };
 
         Ok(tx.txid())
+    }
+
+    pub fn get_transactions(&self) -> anyhow::Result<Vec<Transaction>> {
+        let guard = self.inner.lock().unwrap();
+        let transactions: Vec<Transaction> = guard
+            .transactions()
+            .into_iter()
+            .map(|t| t.tx_node.tx.to_owned())
+            .collect();
+
+        Ok(transactions)
+    }
+
+    pub fn list_utxos(&self) -> anyhow::Result<Vec<LocalOutput>> {
+        let guard = self.inner.lock().unwrap();
+        let utxos = guard
+            .list_unspent()
+            .into_iter()
+            .map(|utxo| utxo.to_owned())
+            .collect();
+
+        Ok(utxos)
     }
 }
 

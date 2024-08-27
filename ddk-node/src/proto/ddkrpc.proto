@@ -7,6 +7,9 @@ service DdkRpc {
   rpc AcceptOffer (AcceptOfferRequest) returns (AcceptOfferResponse);
   rpc ListOffers (ListOffersRequest) returns (ListOffersResponse);
   rpc NewAddress (NewAddressRequest) returns (NewAddressResponse);
+  rpc WalletBalance (WalletBalanceRequest) returns (WalletBalanceResponse);
+  rpc GetWalletTransactions (GetWalletTransactionsRequest) returns (GetWalletTransactionsResponse);
+  rpc ListUtxos (ListUtxosRequest) returns (ListUtxosResponse);
 }
 
 message InfoRequest {}
@@ -46,3 +49,32 @@ message NewAddressRequest {}
 message NewAddressResponse {
   string address = 1;
 }
+
+message Balance {
+  uint64 confirmed = 1;
+  uint64 unconfirmed = 2;
+}
+
+message WalletBalanceRequest {}
+
+message WalletBalanceResponse {
+  uint64 confirmed = 1;
+  uint64 unconfirmed = 2;
+}
+
+message GetWalletTransactionsRequest {}
+
+message GetWalletTransactionsResponse {
+  repeated Transaction transactions = 1;
+}
+
+message Transaction {
+  bytes transaction = 1;
+}
+
+message ListUtxosRequest {}
+
+message ListUtxosResponse {
+  repeated bytes utxos = 1;
+}
+
