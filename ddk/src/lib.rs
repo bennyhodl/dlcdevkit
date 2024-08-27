@@ -63,6 +63,8 @@ pub trait DdkTransport {
     /// Retrieve the peer handler.
     /// TODO: could remove?
     fn peer_manager(&self) -> Self::PeerManager;
+    /// Process messages 
+    fn process_messages(&self);
     /// Send a message to a specific counterparty.
     fn send_message(&self, counterparty: PublicKey, message: Message);
     /// Get messages that have not been processed yet.

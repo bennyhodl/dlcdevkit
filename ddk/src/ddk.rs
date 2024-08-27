@@ -79,7 +79,7 @@ impl<
             let mut timer = tokio::time::interval(Duration::from_secs(5));
             loop {
                 timer.tick().await;
-                process_incoming_messages(message_processor.clone(), manager_clone.clone());
+                process_incoming_messages(message_processor.clone(), manager_clone.clone(), || message_processor.process_messages());
             }
         });
 
@@ -134,9 +134,10 @@ impl<
     }
 }
 
-pub fn process_incoming_messages<T: DdkTransport, S: DdkStorage, O: DdkOracle>(
+pub fn process_incoming_messages<T: DdkTransport, S: DdkStorage, O: DdkOracle, F: Fn() -> ()>(
     transport: Arc<T>,
     manager: Arc<Mutex<DlcDevKitDlcManager<S, O>>>,
+    process_messages: F,
 ) {
     // let message_handler = self.transport.message_handler();
     // let peer_manager = self.transport.peer_manager();
@@ -157,6 +158,6 @@ pub fn process_incoming_messages<T: DdkTransport, S: DdkStorage, O: DdkOracle>(
 
     if transport.has_pending_messages() {
         tracing::info!("Still have pending messages!");
-        // peer_manager.process_events();
+        process_messages()
     }
 }

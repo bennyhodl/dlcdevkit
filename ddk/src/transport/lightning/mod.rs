@@ -47,6 +47,11 @@ impl DdkTransport for LightningTransport {
         self.ln_peer_manager()
     }
 
+    fn process_messages(&self) {
+        tracing::info!("Processing lightning messages.");
+        self.ln_peer_manager().process_events()
+    }
+
     fn send_message(&self, counterparty: PublicKey, message: dlc_messages::Message) {
         self.message_handler().send_message(counterparty, message)
     }
