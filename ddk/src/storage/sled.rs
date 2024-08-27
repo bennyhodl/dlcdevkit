@@ -483,7 +483,6 @@ fn serialize_channel(channel: &Channel) -> Result<Vec<u8>, ::std::io::Error> {
         Channel::Closed(c) => c.serialize(),
         Channel::CollaborativelyClosed(c) => c.serialize(),
         Channel::CounterClosed(c) => c.serialize(),
-        Channel::CounterClosed(c) => c.serialize(),
         Channel::ClosedPunished(c) => c.serialize(),
     };
     let mut serialized = serialized?;
