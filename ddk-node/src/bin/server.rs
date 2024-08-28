@@ -1,5 +1,5 @@
-use std::env::current_dir;
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::Arc;
 use clap::Parser;
 use ddk::config::DdkConfig;
@@ -15,40 +15,57 @@ use tonic::transport::Server;
 type DdkServer = ddk::DlcDevKit<LightningTransport, SledStorageProvider, P2PDOracleClient>;
 
 #[derive(Parser, Clone, Debug)]
-struct Config {
+struct NodeArgs {
     #[arg(short, long)]
+    #[arg(help = "Set the Bitcoin network for DDK")]
+    #[arg(default_value = "regtest")]
+    network: String,
+    #[arg(short, long)]
+    #[arg(help = "The path where DlcDevKit will store data.")]
     storage_dir: Option<PathBuf>,
-    #[arg(short, long)]
-    listening_port: Option<u16>,
+    #[arg(short = 'p')]
+    #[arg(long = "port")]
+    #[arg(default_value = "1776")]
+    #[arg(help = "Listening port for network transport.")]
+    listening_port: u16,
+    #[arg(long = "grpc")]
+    #[arg(default_value = "0.0.0.0:3030")]
+    #[arg(help = "Host and port the gRPC server will run on.")]
+    grpc_host: String,
+    #[arg(long = "esplora")]
+    #[arg(default_value = "http://127.0.0.1:30000")]
+    #[arg(help = "Host to connect to an esplora server.")]
+    esplora_host: String,
+    #[arg(long = "oracle")]
+    #[arg(default_value = "http://127.0.0.1:8080")]
+    #[arg(help = "Host to connect to an oracle server.")]
+    oracle_host: String
 }
 
-// toml options w/ clap
-//  - storage dir
-//  - seed file
-//  - listener port
-//  - name
-
 #[tokio::main]
-async fn main() {
+async fn main() -> anyhow::Result<()> {
     let subscriber = tracing_subscriber::fmt().finish();
     tracing::subscriber::set_global_default(subscriber).unwrap();
+
+    let args = NodeArgs::parse();
+    let mut config = DdkConfig::default();
+    let storage_path = match args.storage_dir {
+        Some(storage) => storage,
+        None => homedir::my_home().expect("Provide a directory for ddk.").unwrap().join("defualt-ddk")
+    };
+    config.storage_path = storage_path;
+    config.esplora_host = args.esplora_host;
+    config.network = Network::from_str(&args.network)?;
     tracing::info!("Starting DDK server");
 
-    let args = Config::parse();
-    let mut config = DdkConfig::default();
-    config.storage_path = args.storage_dir.unwrap_or(current_dir().expect("couldn't get storage").join("ddk-sample")); 
-    config.network = Network::Regtest;
-    config.esplora_host = "http://localhost:30000".into();
-
-    let listening_port = args.listening_port.unwrap_or(1776);
-
-    let transport = Arc::new(LightningTransport::new(&config.seed_config, listening_port, config.network).expect("transport fail"));
+    let transport = Arc::new(LightningTransport::new(&config.seed_config, args.listening_port, config.network)?);
     let storage = Arc::new(SledStorageProvider::new(
-        config.storage_path.join("sled_db").to_str().expect("No storage."),
-    ).expect("sled failed"));
+        config.storage_path.join("sled_db").to_str().unwrap(),
+    )?);
 
-    let oracle_client = tokio::task::spawn_blocking(|| {
-        Arc::new(P2PDOracleClient::new("http://127.0.0.1:8080").expect("no oracle"))
+    let oracle_host = args.oracle_host.clone();
+    let oracle_client = tokio::task::spawn_blocking(move || {
+        Arc::new(P2PDOracleClient::new(&oracle_host).expect("Could not connect to oracle."))
     }).await.unwrap();
 
     let mut builder = DdkBuilder::new();
@@ -57,21 +74,16 @@ async fn main() {
     builder.set_storage(storage.clone());
     builder.set_oracle(oracle_client.clone());
 
-    let ddk: DdkServer = builder.finish().expect("finish build");
+    let ddk: DdkServer = builder.finish()?;
 
-    let wallet = ddk.wallet.new_external_address();
+    ddk.start()?;
 
-    assert!(wallet.is_ok());
-    tracing::info!("Wallet is good");
-
-    ddk.start().expect("couldn't start ddk");
-
-    let guy = DdkNode::new(ddk);
-
-    tracing::info!("Done with server.");
+    let node = DdkNode::new(ddk);
 
     Server::builder()
-        .add_service(DdkRpcServer::new(guy))
-        .serve("0.0.0.0:3030".parse().unwrap())
-        .await.expect("Didn't start grpc");
+        .add_service(DdkRpcServer::new(node))
+        .serve(args.grpc_host.parse()?)
+        .await?;
+
+    Ok(())
 }
