@@ -146,7 +146,6 @@ pub fn process_incoming_messages<T: DdkTransport, S: DdkStorage, O: DdkOracle, F
 
     for (counter_party, message) in messages {
         tracing::info!(counter_party=counter_party.to_string(), "Processing DLC message");
-        tracing::debug!(message=?message);
         let resp = manager
             .lock()
             .unwrap()

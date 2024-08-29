@@ -13,7 +13,7 @@ use ddk::DlcDevKit;
 use ddk::{DdkOracle, DdkTransport};
 use ddkrpc::ddk_rpc_server::DdkRpc;
 use ddkrpc::{
-    AcceptOfferRequest, AcceptOfferResponse, GetWalletTransactionsRequest, GetWalletTransactionsResponse, ListOffersRequest, ListOffersResponse, ListUtxosRequest, ListUtxosResponse, NewAddressRequest, NewAddressResponse, SendOfferRequest, SendOfferResponse, WalletBalanceRequest, WalletBalanceResponse
+    AcceptOfferRequest, AcceptOfferResponse, ConnectRequest, ConnectResponse, GetWalletTransactionsRequest, GetWalletTransactionsResponse, ListOffersRequest, ListOffersResponse, ListPeersRequest, ListPeersResponse, ListUtxosRequest, ListUtxosResponse, NewAddressRequest, NewAddressResponse, Peer, SendOfferRequest, SendOfferResponse, WalletBalanceRequest, WalletBalanceResponse
 };
 use ddkrpc::{InfoRequest, InfoResponse};
 use tonic::{async_trait, Code};
@@ -179,5 +179,35 @@ impl DdkRpc for DdkNode {
             .map(|utxo| serde_json::to_vec(utxo).unwrap())
             .collect();
         Ok(Response::new(ListUtxosResponse { utxos }))
+    }
+
+
+    #[tracing::instrument(skip(self, _request), name = "grpc_server")]
+    async fn list_peers(&self, _request: Request<ListPeersRequest>) -> Result<Response<ListPeersResponse>, Status> {
+        tracing::info!("List peers request");
+        let peers = self.inner.transport.ln_peer_manager().get_peer_node_ids();
+        let peers = peers.iter()
+            .map(|peer| {
+                let host = match &peer.1 {
+                    Some(h) => h.to_string(),
+                    None => "".to_string(),
+                };
+                let pubkey = peer.0.to_string();
+                Peer {
+                    pubkey,
+                    host
+                }
+            })
+            .collect::<Vec<Peer>>();
+
+        Ok(Response::new(ListPeersResponse {peers}))
+    }
+
+    #[tracing::instrument(skip(self, request), name = "grpc_server")]
+    async fn connect_peer(&self, request: Request<ConnectRequest>) -> Result<Response<ConnectResponse>, Status> {
+        let ConnectRequest { pubkey, host } = request.into_inner();
+        let pubkey = PublicKey::from_str(&pubkey).unwrap();
+        self.inner.transport.connect_outbound(pubkey, &host).await;
+        Ok(Response::new(ConnectResponse {}))
     }
 }

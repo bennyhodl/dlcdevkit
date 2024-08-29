@@ -10,6 +10,8 @@ service DdkRpc {
   rpc WalletBalance (WalletBalanceRequest) returns (WalletBalanceResponse);
   rpc GetWalletTransactions (GetWalletTransactionsRequest) returns (GetWalletTransactionsResponse);
   rpc ListUtxos (ListUtxosRequest) returns (ListUtxosResponse);
+  rpc ListPeers (ListPeersRequest) returns (ListPeersResponse);
+  rpc ConnectPeer (ConnectRequest) returns (ConnectResponse);
 }
 
 message InfoRequest {}
@@ -79,3 +81,20 @@ message ListUtxosResponse {
   repeated bytes utxos = 1;
 }
 
+message ListPeersRequest {}
+
+message ListPeersResponse {
+  repeated Peer peers = 1;
+}
+
+message Peer {
+  string pubkey = 1;
+  string host = 2;
+}
+
+message ConnectRequest {
+  string pubkey = 1;
+  string host = 2;
+}
+
+message ConnectResponse {}

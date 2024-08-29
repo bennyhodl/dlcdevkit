@@ -6,8 +6,7 @@ use ddk::dlc_manager::contract::offered_contract::OfferedContract;
 use ddk::dlc_messages::{AcceptDlc, OfferDlc};
 use ddk_node::ddkrpc::ddk_rpc_client::DdkRpcClient;
 use ddk_node::ddkrpc::{
-    AcceptOfferRequest, GetWalletTransactionsRequest, InfoRequest, ListOffersRequest,
-    ListUtxosRequest, NewAddressRequest, SendOfferRequest, WalletBalanceRequest,
+    AcceptOfferRequest, ConnectRequest, GetWalletTransactionsRequest, InfoRequest, ListOffersRequest, ListPeersRequest, ListUtxosRequest, NewAddressRequest, SendOfferRequest, WalletBalanceRequest
 };
 use inquire::Text;
 
@@ -32,6 +31,13 @@ enum CliCommand {
     // Wallet commands
     #[clap(subcommand)]
     Wallet(WalletCommand),
+    /// Get the peers connected to the node.
+    Peers,
+    /// Connect to another DDK node.
+    Connect {
+        #[arg(help = "The counter party to connect to. <PUBKEY>@<HOST>")]
+        connect_string: String
+    },
 }
 
 #[derive(Parser, Clone, Debug)]
@@ -59,6 +65,12 @@ enum WalletCommand {
 struct Accept {
     // The contract id string to accept.
     pub contract_id: String,
+}
+
+#[derive(Parser, Clone, Debug)]
+struct Connect {
+    #[arg(help = "The public key to connect to.")]
+    pub pubkey: String,
 }
 
 #[tokio::main]
@@ -172,6 +184,15 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         },
+        CliCommand::Peers => {
+            let peers = client.list_peers(ListPeersRequest::default()).await?.into_inner();
+            peers.peers.iter().for_each(|peer| println!("{}\t{}", peer.pubkey, peer.host))
+        }
+        CliCommand::Connect { connect_string } => {
+            let parts = connect_string.split("@").collect::<Vec<&str>>();
+            client.connect_peer(ConnectRequest { pubkey: parts[0].to_string(), host: parts[1].to_string() }).await?;
+            println!("Connected")
+        }
     }
 
     Ok(())

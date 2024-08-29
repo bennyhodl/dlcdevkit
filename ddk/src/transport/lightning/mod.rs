@@ -1,14 +1,14 @@
-use std::sync::Arc;
+use std::{net::{SocketAddr, SocketAddrV4}, sync::Arc};
 
 use crate::DdkTransport;
 use async_trait::async_trait;
 use bitcoin::secp256k1::PublicKey;
 use dlc_messages::Message;
-use lightning_net_tokio::setup_inbound;
+use lightning_net_tokio::{connect_outbound, setup_inbound, setup_outbound};
 
 pub(crate) mod peer_manager;
 pub use peer_manager::LightningTransport;
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpSocket, TcpStream};
 
 use super::PeerInformation;
 
@@ -63,5 +63,7 @@ impl DdkTransport for LightningTransport {
         self.message_handler().has_pending_messages()
     }
 
-    async fn connect_outbound(&self, _peer: PeerInformation) {}
+    async fn connect_outbound(&self, pubkey: PublicKey, host: &str) {
+        connect_outbound(self.peer_manager(), pubkey, host.parse().unwrap()).await;
+    }
 }

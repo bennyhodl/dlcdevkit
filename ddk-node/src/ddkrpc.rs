@@ -103,6 +103,34 @@ pub struct ListUtxosResponse {
     #[prost(bytes = "vec", repeated, tag = "1")]
     pub utxos: ::prost::alloc::vec::Vec<::prost::alloc::vec::Vec<u8>>,
 }
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListPeersRequest {}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListPeersResponse {
+    #[prost(message, repeated, tag = "1")]
+    pub peers: ::prost::alloc::vec::Vec<Peer>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct Peer {
+    #[prost(string, tag = "1")]
+    pub pubkey: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub host: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ConnectRequest {
+    #[prost(string, tag = "1")]
+    pub pubkey: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub host: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ConnectResponse {}
 /// Generated client implementations.
 pub mod ddk_rpc_client {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
@@ -369,6 +397,52 @@ pub mod ddk_rpc_client {
             req.extensions_mut().insert(GrpcMethod::new("ddkrpc.DdkRpc", "ListUtxos"));
             self.inner.unary(req, path, codec).await
         }
+        pub async fn list_peers(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ListPeersRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListPeersResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/ddkrpc.DdkRpc/ListPeers");
+            let mut req = request.into_request();
+            req.extensions_mut().insert(GrpcMethod::new("ddkrpc.DdkRpc", "ListPeers"));
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn connect_peer(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ConnectRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ConnectResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/ddkrpc.DdkRpc/ConnectPeer",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut().insert(GrpcMethod::new("ddkrpc.DdkRpc", "ConnectPeer"));
+            self.inner.unary(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -431,6 +505,17 @@ pub mod ddk_rpc_server {
             tonic::Response<super::ListUtxosResponse>,
             tonic::Status,
         >;
+        async fn list_peers(
+            &self,
+            request: tonic::Request<super::ListPeersRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListPeersResponse>,
+            tonic::Status,
+        >;
+        async fn connect_peer(
+            &self,
+            request: tonic::Request<super::ConnectRequest>,
+        ) -> std::result::Result<tonic::Response<super::ConnectResponse>, tonic::Status>;
     }
     #[derive(Debug)]
     pub struct DdkRpcServer<T: DdkRpc> {
@@ -855,6 +940,94 @@ pub mod ddk_rpc_server {
                     let fut = async move {
                         let inner = inner.0;
                         let method = ListUtxosSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/ddkrpc.DdkRpc/ListPeers" => {
+                    #[allow(non_camel_case_types)]
+                    struct ListPeersSvc<T: DdkRpc>(pub Arc<T>);
+                    impl<T: DdkRpc> tonic::server::UnaryService<super::ListPeersRequest>
+                    for ListPeersSvc<T> {
+                        type Response = super::ListPeersResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::ListPeersRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as DdkRpc>::list_peers(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = ListPeersSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/ddkrpc.DdkRpc/ConnectPeer" => {
+                    #[allow(non_camel_case_types)]
+                    struct ConnectPeerSvc<T: DdkRpc>(pub Arc<T>);
+                    impl<T: DdkRpc> tonic::server::UnaryService<super::ConnectRequest>
+                    for ConnectPeerSvc<T> {
+                        type Response = super::ConnectResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::ConnectRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as DdkRpc>::connect_peer(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = ConnectPeerSvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

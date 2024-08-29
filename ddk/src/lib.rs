@@ -73,7 +73,7 @@ pub trait DdkTransport {
     /// If their are messages that still need to be processed.
     fn has_pending_messages(&self) -> bool;
     /// Connect to another peer
-    async fn connect_outbound(&self, peer: PeerInformation);
+    async fn connect_outbound(&self, pubkey: PublicKey, host: &str);
 }
 
 /// Storage for DLC contracts.
