@@ -49,12 +49,11 @@ struct NodeArgs {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-
     let args = NodeArgs::parse();
     let mut config = DdkConfig::default();
     let storage_path = match args.storage_dir {
         Some(storage) => storage,
-        None => homedir::my_home().expect("Provide a directory for ddk.").unwrap().join("defualt-ddk")
+        None => homedir::my_home().expect("Provide a directory for ddk.").unwrap().join(".ddk").join("defualt-ddk")
     };
     config.storage_path = storage_path;
     config.esplora_host = args.esplora_host;

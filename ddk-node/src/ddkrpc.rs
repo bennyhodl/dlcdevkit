@@ -45,9 +45,11 @@ pub struct AcceptOfferRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AcceptOfferResponse {
     #[prost(string, tag = "1")]
-    pub node_id: ::prost::alloc::string::String,
-    #[prost(bytes = "vec", tag = "2")]
-    pub accept_msg: ::prost::alloc::vec::Vec<u8>,
+    pub contract_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub counter_party: ::prost::alloc::string::String,
+    #[prost(bytes = "vec", tag = "3")]
+    pub accept_dlc: ::prost::alloc::vec::Vec<u8>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]

@@ -3,6 +3,7 @@ use ddk::bdk::bitcoin::{Address, Transaction};
 use ddk::bdk::LocalOutput;
 use ddk::dlc_manager::contract::contract_input::ContractInput;
 use ddk::dlc_manager::contract::offered_contract::OfferedContract;
+use ddk::dlc_messages::{AcceptDlc, OfferDlc};
 use ddk_node::ddkrpc::ddk_rpc_client::DdkRpcClient;
 use ddk_node::ddkrpc::{
     AcceptOfferRequest, GetWalletTransactionsRequest, InfoRequest, ListOffersRequest,
@@ -38,6 +39,8 @@ struct Offer {
     #[arg(help = "Path to a contract input file. Eventually to be a repl asking contract params")]
     #[arg(short = 'f', long = "file")]
     pub contract_input_file: Option<String>,
+    #[arg(help = "The contract counterparty to send to.")]
+    pub counter_party: String,
 }
 
 #[derive(Clone, Debug, Subcommand)]
@@ -74,16 +77,21 @@ async fn main() -> anyhow::Result<()> {
                 let contract_string = std::fs::read_to_string(file)?;
                 serde_json::from_str::<ContractInput>(&contract_string)?
             } else {
-                let offer_collateral: u64 = Text::new("Collateral from you? (sats)").prompt()?.parse()?;
-                let accept_collateral: u64 = Text::new("Collateral from counterparty? (sats)").prompt()?.parse()?;
-                let fee_rate: u64 = Text::new("Fee rate? (sats/vbyte)").prompt()?.parse()?;
-                let min_price: u64 = Text::new("Minimum Bitcoin price?").prompt()?.parse()?;
-                let max_price: u64 = Text::new("Maximum Bitcoin price?").prompt()?.parse()?;
-                let num_steps: u64 = Text::new("Number of rounding steps?").prompt()?.parse()?;
-                ddk_payouts::create_contract_input(min_price, max_price, num_steps, offer_collateral, accept_collateral, fee_rate)
+                let offer_collateral: u64 = Text::new("Collateral from you (sats):").prompt()?.parse()?;
+                let accept_collateral: u64 = Text::new("Collateral from counterparty (sats):").prompt()?.parse()?;
+                let fee_rate: u64 = Text::new("Fee rate (sats/vbyte):").prompt()?.parse()?;
+                let min_price: u64 = Text::new("Minimum Bitcoin price:").prompt()?.parse()?;
+                let max_price: u64 = Text::new("Maximum Bitcoin price:").prompt()?.parse()?;
+                let num_steps: u64 = Text::new("Number of rounding steps:").prompt()?.parse()?;
+                let oracle_pubkey = Text::new("Oracle public key:").prompt()?;
+                let event_id = Text::new("Oracle event id:").prompt()?;
+                ddk_payouts::create_contract_input(min_price, max_price, num_steps, offer_collateral, accept_collateral, fee_rate, oracle_pubkey, event_id)
             };
 
-            println!("{:?}", contract_input)
+            let contract_input = serde_json::to_vec(&contract_input)?;
+            let offer = client.send_offer(SendOfferRequest { contract_input, counter_party: arg.counter_party}).await?.into_inner();
+            let offer_dlc = serde_json::from_slice::<OfferDlc>(&offer.offer_dlc)?;
+            println!("{:?}", offer_dlc);
         }
         CliCommand::Offers => {
             let offers_request = client.list_offers(ListOffersRequest {}).await?.into_inner();
@@ -103,7 +111,9 @@ async fn main() -> anyhow::Result<()> {
                 })
                 .await?
                 .into_inner();
-            println!("Contract Accepted w/ node id: {:?}", accept.node_id)
+            println!("Contract {} accepted with {}", accept.contract_id, accept.counter_party);
+            let accept_dlc = serde_json::from_slice::<AcceptDlc>(&accept.accept_dlc)?;
+            println!("{:?}", accept_dlc)
         }
         CliCommand::Wallet(wallet) => match wallet {
             WalletCommand::Balance => {

@@ -22,7 +22,6 @@ impl DdkTransport for LightningTransport {
     }
 
     async fn listen(&self) {
-        tracing::info!("starting lightning listener!");
         let peer_manager_connection_handler = self.peer_manager();
 
         let listener = TcpListener::bind(format!("0.0.0.0:{}", self.listening_port))
@@ -31,9 +30,9 @@ impl DdkTransport for LightningTransport {
 
         loop {
             let peer_mgr = peer_manager_connection_handler.clone();
-            let (tcp_stream, _) = listener.accept().await.unwrap();
-            tracing::info!("got a stream?");
+            let (tcp_stream, socket) = listener.accept().await.unwrap();
             tokio::spawn(async move {
+                tracing::info!(connection=socket.to_string(), "Received connection.");
                 setup_inbound(peer_mgr.clone(), tcp_stream.into_std().unwrap()).await;
             });
         }

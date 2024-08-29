@@ -41,6 +41,7 @@ pub const ORACLE_HOST: &str = "http://localhost:8080";
 pub const ESPLORA_HOST: &str = "http://localhost:30000";
 
 use async_trait::async_trait;
+use dlc_messages::oracle_msgs::OracleAnnouncement;
 use dlc_messages::Message;
 use bitcoin::secp256k1::PublicKey;
 use transport::PeerInformation;
@@ -84,6 +85,8 @@ pub trait DdkStorage: dlc_manager::Storage /*+ PersistBackend<ChangeSet> */ {
 }
 
 /// Oracle client
+#[async_trait]
 pub trait DdkOracle: dlc_manager::Oracle {
     fn name(&self) -> String;
+    async fn get_announcement_async(&self, event_id: &str) -> Result<OracleAnnouncement, dlc_manager::error::Error>;
 }

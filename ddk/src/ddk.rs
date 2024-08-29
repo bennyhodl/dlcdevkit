@@ -11,7 +11,7 @@ use dlc_manager::{
     SimpleSigner, SystemTimeProvider,
 };
 use dlc_messages::oracle_msgs::OracleAnnouncement;
-use dlc_messages::Message;
+use dlc_messages::{AcceptDlc, Message, OfferDlc};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 use tokio::runtime::Runtime;
@@ -94,40 +94,46 @@ impl<
         Ok(()) 
     }
 
-    pub async fn send_dlc_offer(
+    pub fn send_dlc_offer(
         &self,
         contract_input: &ContractInput,
         counter_party: PublicKey,
-    ) -> anyhow::Result<()> {
-        let manager = self.manager.lock().unwrap();
-        
-        let offer = manager.send_offer(
+        oracle_announcements: Vec<OracleAnnouncement>,
+    ) -> anyhow::Result<OfferDlc> {
+        let manager = self.manager.lock().unwrap();        
+
+        let offer = manager.send_offer_with_announcements(
             contract_input,
             counter_party,
+            vec![oracle_announcements]
         )?;
 
         let contract_id = hex::encode(&offer.temporary_contract_id);
-        self.transport.send_message(counter_party, Message::Offer(offer)); 
+        self.transport.send_message(counter_party, Message::Offer(offer.clone())); 
         tracing::info!(counterparty=counter_party.to_string(), contract_id, "Sent DLC offer to counterparty.");
 
-        Ok(())
+        Ok(offer)
     }
 
     pub fn network(&self) -> Network {
         self.network
     }
 
-    pub fn accept_dlc_offer(&self, contract: [u8; 32]) -> anyhow::Result<()> {
+    pub fn accept_dlc_offer(&self, contract: [u8; 32]) -> anyhow::Result<(String, String, AcceptDlc)> {
         let dlc = self.manager.lock().unwrap();
 
         let contract_id = ContractId::from(contract);
 
-        let (contract_id, public_key, _) = dlc.accept_contract_offer(&contract_id)?;
+        let (contract_id, public_key, accept_dlc) = dlc.accept_contract_offer(&contract_id)?;
+
+        self.transport
+            .send_message(public_key, Message::Accept(accept_dlc.clone()));
+
         let contract_id = hex::encode(&contract_id);
+        let counter_party = public_key.to_string();
+        tracing::info!(counter_party, contract_id, "Accepted DLC contract.");
 
-        tracing::info!(counter_party=?public_key.to_string(), contract_id, "Accepted DLC contract.");
-
-        Ok(())
+        Ok((contract_id, counter_party, accept_dlc))
     }
 }
 

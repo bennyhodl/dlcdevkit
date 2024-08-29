@@ -6,7 +6,6 @@ use std::sync::Arc;
 use ddk::bdk::bitcoin::secp256k1::PublicKey;
 use ddk::dlc_manager::contract::contract_input::ContractInput;
 use ddk::dlc_manager::Storage;
-use ddk::dlc_messages::Message;
 use ddk::oracle::P2PDOracleClient;
 use ddk::storage::SledStorageProvider;
 use ddk::transport::lightning::LightningTransport;
@@ -14,13 +13,10 @@ use ddk::DlcDevKit;
 use ddk::{DdkOracle, DdkTransport};
 use ddkrpc::ddk_rpc_server::DdkRpc;
 use ddkrpc::{
-    AcceptOfferRequest, AcceptOfferResponse, GetWalletTransactionsRequest,
-    GetWalletTransactionsResponse, ListOffersRequest, ListOffersResponse, ListUtxosRequest,
-    ListUtxosResponse, NewAddressRequest, NewAddressResponse, SendOfferRequest, SendOfferResponse,
-    WalletBalanceRequest, WalletBalanceResponse,
+    AcceptOfferRequest, AcceptOfferResponse, GetWalletTransactionsRequest, GetWalletTransactionsResponse, ListOffersRequest, ListOffersResponse, ListUtxosRequest, ListUtxosResponse, NewAddressRequest, NewAddressResponse, SendOfferRequest, SendOfferResponse, WalletBalanceRequest, WalletBalanceResponse
 };
 use ddkrpc::{InfoRequest, InfoResponse};
-use tonic::async_trait;
+use tonic::{async_trait, Code};
 use tonic::Request;
 use tonic::Response;
 use tonic::Status;
@@ -68,15 +64,17 @@ impl DdkRpc for DdkNode {
         } = request.into_inner();
         let contract_input: ContractInput =
             serde_json::from_slice(&contract_input).expect("couldn't get bytes correct");
+        let mut oracle_announcements = Vec::new();
+        for info in &contract_input.contract_infos {
+            let announcement = self.inner.oracle.get_announcement_async(&info.oracles.event_id).await.unwrap();
+            oracle_announcements.push(announcement)
+        }
+
         let counter_party = PublicKey::from_str(&counter_party).expect("no public key");
-        println!("Worked in server: {}", contract_input.offer_collateral);
         let offer_msg = self
             .inner
-            .manager
-            .lock()
-            .unwrap()
-            .send_offer(&contract_input, counter_party)
-            .expect("couldn't send offer");
+            .send_dlc_offer(&contract_input, counter_party, oracle_announcements).map_err(|e| Status::new(Code::Cancelled, format!("Contract offer could not be sent to counterparty. error={:?}", e)))?;
+
         let offer_dlc =
             serde_json::to_vec(&offer_msg).expect("OfferDlc could not be converted to vec.");
         Ok(Response::new(SendOfferResponse { offer_dlc }))
@@ -92,19 +90,16 @@ impl DdkRpc for DdkNode {
         let contract_id_bytes = hex::decode(&request.into_inner().contract_id).unwrap();
         contract_id.copy_from_slice(&contract_id_bytes);
         println!("{:?}", contract_id);
-        let (_, node_id, accept_dlc) = self
+        let (contract_id, counter_party, accept_dlc) = self
             .inner
-            .manager
-            .lock()
-            .unwrap()
-            .accept_contract_offer(&contract_id)
-            .unwrap();
-        self.inner
-            .transport
-            .send_message(node_id, Message::Accept(accept_dlc.clone()));
+            .accept_dlc_offer(contract_id).map_err(|_| Status::new(Code::Cancelled, "Contract could not be accepted."))?;
+
+        let accept_dlc = serde_json::to_vec(&accept_dlc).map_err(|_| Status::new(Code::Cancelled, "Accept DLC is malformed to create bytes."))?;
+
         Ok(Response::new(AcceptOfferResponse {
-            node_id: node_id.to_string(),
-            accept_msg: serde_json::to_vec(&accept_dlc).unwrap(),
+            contract_id,
+            counter_party,
+            accept_dlc,
         }))
     }
 

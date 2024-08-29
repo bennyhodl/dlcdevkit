@@ -40,8 +40,9 @@ message AcceptOfferRequest {
 }
 
 message AcceptOfferResponse {
-  string node_id = 1;
-  bytes accept_msg = 2;
+  string contract_id = 1;
+  string counter_party = 2;
+  bytes accept_dlc = 3;
 }
 
 message NewAddressRequest {}
