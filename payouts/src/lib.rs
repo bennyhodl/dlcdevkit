@@ -20,12 +20,13 @@ pub fn generate_payout_curve(
     offer_collateral: u64,
     accept_collateral: u64,
     num_steps: u64,
+    max_value: u64,
 ) -> anyhow::Result<PayoutFunction> {
     let total_collateral = offer_collateral + accept_collateral;
     let price_range = max_price - min_price;
     let step_size = price_range / (num_steps - 1);
 
-    let mut points = Vec::with_capacity(num_steps.try_into().unwrap());
+    let mut points = Vec::with_capacity((num_steps).try_into().unwrap());
 
     for i in 0..num_steps {
         let price = if i == num_steps - 1 {
@@ -46,9 +47,20 @@ pub fn generate_payout_curve(
         });
     }
 
+    let final_payout_piece = points[points.len() - 1].clone();
+
+    // 20 digit oracle max value
+    let max_payout = PayoutPoint {
+        event_outcome: max_value,
+        extra_precision: 0,
+        outcome_payout: total_collateral,
+    };
+
     let payout_curve_pieces = PolynomialPayoutCurvePiece::new(points)?;
+    let upper_limit = PolynomialPayoutCurvePiece::new(vec![final_payout_piece, max_payout])?;
     Ok(PayoutFunction::new(vec![
         PayoutFunctionPiece::PolynomialPayoutCurvePiece(payout_curve_pieces),
+        PayoutFunctionPiece::PolynomialPayoutCurvePiece(upper_limit),
     ])?)
 }
 
@@ -59,13 +71,24 @@ pub fn create_contract_input(
     offer_collateral: u64,
     accept_collateral: u64,
     fee_rate: u64,
+    oracle_pubkey: String,
+    event_id: String,
 ) -> ContractInput {
+    let oracle_numeric_infos = OracleNumericInfo {
+        base: 2,
+        nb_digits: vec![20],
+    };
+
+    // Check the max value given the base and nb digits.
+    let max_value = oracle_numeric_infos.base.checked_pow(oracle_numeric_infos.nb_digits[0] as u32).unwrap() as u64 - 1;
+
     let payout_curve = generate_payout_curve(
         min_price,
         max_price,
         offer_collateral,
         accept_collateral,
         num_steps,
+        max_value,
     )
     .unwrap();
     let rounding_intervals = RoundingIntervals {
@@ -74,10 +97,7 @@ pub fn create_contract_input(
             rounding_mod: 1,
         }],
     };
-    let oracle_numeric_infos = OracleNumericInfo {
-        base: 2,
-        nb_digits: vec![20],
-    };
+    
     let contract_descriptor = ContractDescriptor::Numerical(NumericalDescriptor {
         payout_function: payout_curve,
         rounding_intervals,
@@ -86,11 +106,9 @@ pub fn create_contract_input(
     });
 
     let oracles = OracleInput {
-        public_keys: vec![XOnlyPublicKey::from_str(
-            "0d829c1cc556aa59060df5a9543c5357199ace5db9bcd5a8ddd6ee2fc7b6d174",
-        )
+        public_keys: vec![XOnlyPublicKey::from_str(&oracle_pubkey)
         .unwrap()],
-        event_id: "btcusd1724888198".into(),
+        event_id,
         threshold: 1,
     };
     let contract_infos = vec![ContractInputInfo {
@@ -111,13 +129,15 @@ mod tests {
 
     #[test]
     fn payout_curve() {
-        let curve = generate_payout_curve(13_000, 60_000, 50_000, 50_000, 10);
+        let curve = generate_payout_curve(13_000, 60_000, 50_000, 50_000, 10, 1045686);
         assert!(curve.is_ok())
     }
 
     #[test]
     fn create_contract_input_test() {
-        let contract = create_contract_input(0, 100_000, 3, 50_000, 50_000, 2);
+        let oracle_pk = "0d829c1cc556aa59060df5a9543c5357199ace5db9bcd5a8ddd6ee2fc7b6d174".to_string();
+        let event_id = "event".to_string();
+        let contract = create_contract_input(0, 100_000, 3, 50_000, 50_000, 2, oracle_pk, event_id);
 
         let json = serde_json::to_string(&contract).unwrap();
         println!("{}", json)
