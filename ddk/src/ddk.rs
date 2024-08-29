@@ -11,6 +11,7 @@ use dlc_manager::{
     SimpleSigner, SystemTimeProvider,
 };
 use dlc_messages::oracle_msgs::OracleAnnouncement;
+use dlc_messages::Message;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 use tokio::runtime::Runtime;
@@ -102,16 +103,16 @@ impl<
     pub async fn send_dlc_offer(
         &self,
         contract_input: &ContractInput,
-        oracle_announcement: &OracleAnnouncement,
         counter_party: PublicKey,
     ) -> anyhow::Result<()> {
         let manager = self.manager.lock().unwrap();
 
-        let _offer_msg = manager.send_offer_with_announcements(
+        let offer = manager.send_offer(
             contract_input,
             counter_party,
-            vec![vec![oracle_announcement.clone()]],
         )?;
+
+        self.transport.send_message(counter_party, Message::Offer(offer));
 
         Ok(())
     }

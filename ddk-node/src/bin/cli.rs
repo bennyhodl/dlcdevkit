@@ -1,12 +1,14 @@
 use clap::{Parser, Subcommand};
 use ddk::bdk::bitcoin::{Address, Transaction};
 use ddk::bdk::LocalOutput;
+use ddk::dlc_manager::contract::contract_input::ContractInput;
 use ddk::dlc_manager::contract::offered_contract::OfferedContract;
 use ddk_node::ddkrpc::ddk_rpc_client::DdkRpcClient;
 use ddk_node::ddkrpc::{
     AcceptOfferRequest, GetWalletTransactionsRequest, InfoRequest, ListOffersRequest,
     ListUtxosRequest, NewAddressRequest, SendOfferRequest, WalletBalanceRequest,
 };
+use inquire::Text;
 
 #[derive(Debug, Clone, Parser)]
 #[clap(name = "ddk")]
@@ -33,10 +35,9 @@ enum CliCommand {
 
 #[derive(Parser, Clone, Debug)]
 struct Offer {
-    // Path to a contract input file. Eventually to be a repl asking contract params
-    pub contract_input: String,
-    // The counterparty for the contract. MUST be already connected.
-    pub counter_party: String,
+    #[arg(help = "Path to a contract input file. Eventually to be a repl asking contract params")]
+    #[arg(short = 'f', long = "file")]
+    pub contract_input_file: Option<String>,
 }
 
 #[derive(Clone, Debug, Subcommand)]
@@ -68,16 +69,21 @@ async fn main() -> anyhow::Result<()> {
             let info = client.info(InfoRequest::default()).await?.into_inner();
             println!("{:?}", info);
         }
-        CliCommand::OfferContract(contract) => {
-            let input_str =
-                std::fs::read(contract.contract_input).expect("Could not read contract string.");
-            client
-                .send_offer(SendOfferRequest {
-                    contract_input: input_str,
-                    counter_party: contract.counter_party,
-                })
-                .await?
-                .into_inner();
+        CliCommand::OfferContract(arg) => {
+            let contract_input = if let Some(file) = arg.contract_input_file {
+                let contract_string = std::fs::read_to_string(file)?;
+                serde_json::from_str::<ContractInput>(&contract_string)?
+            } else {
+                let offer_collateral: u64 = Text::new("Collateral from you? (sats)").prompt()?.parse()?;
+                let accept_collateral: u64 = Text::new("Collateral from counterparty? (sats)").prompt()?.parse()?;
+                let fee_rate: u64 = Text::new("Fee rate? (sats/vbyte)").prompt()?.parse()?;
+                let min_price: u64 = Text::new("Minimum Bitcoin price?").prompt()?.parse()?;
+                let max_price: u64 = Text::new("Maximum Bitcoin price?").prompt()?.parse()?;
+                let num_steps: u64 = Text::new("Number of rounding steps?").prompt()?.parse()?;
+                ddk_payouts::create_contract_input(min_price, max_price, num_steps, offer_collateral, accept_collateral, fee_rate)
+            };
+
+            println!("{:?}", contract_input)
         }
         CliCommand::Offers => {
             let offers_request = client.list_offers(ListOffersRequest {}).await?.into_inner();
