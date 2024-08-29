@@ -45,8 +45,6 @@ impl<
     > DlcDevKit<T, S, O>
 {
     pub fn start(&self) -> anyhow::Result<()> {
-        tracing::info!("Starting ddk...");
-
         let mut runtime_lock = self.runtime.write().unwrap();
 
         if runtime_lock.is_some() {
@@ -56,17 +54,14 @@ impl<
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()?;
-        // get fees
 
         let transport_clone = self.transport.clone();
         runtime.spawn(async move {
-            tracing::info!("Starting listener");
             transport_clone.listen().await;
         });
 
         let wallet_clone = self.wallet.clone();
         runtime.spawn(async move {
-            tracing::info!("started the wallet");
             let mut timer = tokio::time::interval(Duration::from_secs(10));
             loop {
                 timer.tick().await;
@@ -86,7 +81,6 @@ impl<
 
         // TODO: connect stored peers.
 
-        tracing::info!("DDK set up");
         *runtime_lock = Some(runtime);
 
         Ok(())
@@ -106,13 +100,15 @@ impl<
         counter_party: PublicKey,
     ) -> anyhow::Result<()> {
         let manager = self.manager.lock().unwrap();
-
+        
         let offer = manager.send_offer(
             contract_input,
             counter_party,
         )?;
 
-        self.transport.send_message(counter_party, Message::Offer(offer));
+        let contract_id = hex::encode(&offer.temporary_contract_id);
+        self.transport.send_message(counter_party, Message::Offer(offer)); 
+        tracing::info!(counterparty=counter_party.to_string(), contract_id, "Sent DLC offer to counterparty.");
 
         Ok(())
     }
@@ -126,10 +122,10 @@ impl<
 
         let contract_id = ContractId::from(contract);
 
-        tracing::info!("Before accept: {:?}", contract_id);
-        let (_, _public_key, _accept_dlc) = dlc.accept_contract_offer(&contract_id)?;
+        let (contract_id, public_key, _) = dlc.accept_contract_offer(&contract_id)?;
+        let contract_id = hex::encode(&contract_id);
 
-        tracing::info!("Accepted");
+        tracing::info!(counter_party=?public_key.to_string(), contract_id, "Accepted DLC contract.");
 
         Ok(())
     }
@@ -140,25 +136,25 @@ pub fn process_incoming_messages<T: DdkTransport, S: DdkStorage, O: DdkOracle, F
     manager: Arc<Mutex<DlcDevKitDlcManager<S, O>>>,
     process_messages: F,
 ) {
-    // let message_handler = self.transport.message_handler();
-    // let peer_manager = self.transport.peer_manager();
     let messages = transport.get_and_clear_received_messages();
 
-    for (counterparty, message) in messages {
-        tracing::info!("Processing DLC message from {}", counterparty.to_string());
+    for (counter_party, message) in messages {
+        tracing::info!(counter_party=counter_party.to_string(), "Processing DLC message");
+        tracing::debug!(message=?message);
         let resp = manager
             .lock()
             .unwrap()
-            .on_dlc_message(&message, counterparty)
+            .on_dlc_message(&message, counter_party)
             .expect("Error processing message");
 
         if let Some(msg) = resp {
-            transport.send_message(counterparty, msg);
+            tracing::info!("Responding to message received.");
+            tracing::debug!(message=?msg);
+            transport.send_message(counter_party, msg);
         }
     }
 
     if transport.has_pending_messages() {
-        tracing::info!("Still have pending messages!");
         process_messages()
     }
 }

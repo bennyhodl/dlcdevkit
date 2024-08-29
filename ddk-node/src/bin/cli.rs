@@ -93,7 +93,6 @@ async fn main() -> anyhow::Result<()> {
                 .map(|offer| serde_json::from_slice(offer).unwrap())
                 .collect();
             for offer in offers {
-                println!("{:?}", offer.id);
                 println!("Contract: {}", hex::encode(&offer.id));
             }
         }

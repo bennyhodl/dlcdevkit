@@ -11,11 +11,16 @@ use ddk::Network;
 use ddk_node::ddkrpc::ddk_rpc_server::DdkRpcServer;
 use ddk_node::DdkNode;
 use tonic::transport::Server;
+use tracing::level_filters::LevelFilter;
 
 type DdkServer = ddk::DlcDevKit<LightningTransport, SledStorageProvider, P2PDOracleClient>;
 
 #[derive(Parser, Clone, Debug)]
 struct NodeArgs {
+    #[arg(long)]
+    #[arg(help = "Set the log level.")]
+    #[arg(default_value = "info")]
+    log: String,
     #[arg(short, long)]
     #[arg(help = "Set the Bitcoin network for DDK")]
     #[arg(default_value = "regtest")]
@@ -44,8 +49,6 @@ struct NodeArgs {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let subscriber = tracing_subscriber::fmt().finish();
-    tracing::subscriber::set_global_default(subscriber).unwrap();
 
     let args = NodeArgs::parse();
     let mut config = DdkConfig::default();
@@ -56,7 +59,12 @@ async fn main() -> anyhow::Result<()> {
     config.storage_path = storage_path;
     config.esplora_host = args.esplora_host;
     config.network = Network::from_str(&args.network)?;
-    tracing::info!("Starting DDK server");
+
+    let level = LevelFilter::from_str(&args.log).unwrap_or(LevelFilter::INFO);
+    let subscriber = tracing_subscriber::fmt().with_max_level(level).finish();
+    tracing::subscriber::set_global_default(subscriber).unwrap();
+
+    tracing::info!("Starting DDK node.");
 
     let transport = Arc::new(LightningTransport::new(&config.seed_config, args.listening_port, config.network)?);
     let storage = Arc::new(SledStorageProvider::new(

@@ -120,14 +120,17 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
             .config
             .as_ref()
             .map_or_else(|| Err(BuilderError::NoConfig), |c| Ok(c))?;
+        tracing::info!("Using network {}", config.network);
 
         // Creates the DDK directory.
         //
         // TODO: Should have a storage config for no-std builds.
         // TODO: should be nested with the DDK name.
         std::fs::create_dir_all(&config.storage_path)?;
+        tracing::info!(path=?config.storage_path, "Created directory for ddk node.");
 
         let xprv = io::xprv_from_config(&config.seed_config, config.network)?;
+        tracing::info!(strategy=config.seed_config.to_string(), "Loaded private key");
 
         let transport = self
             .transport
@@ -149,7 +152,6 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
             .clone()
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-        tracing::info!("Creating new P2P DlcDevKit wallet. name={}", name);
         let wallet = Arc::new(DlcDevKitWallet::new(
             &name,
             xprv,
@@ -157,11 +159,14 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
             config.network,
             &config.storage_path,
         )?);
+        tracing::info!("Opened BDK wallet. name={}", name);
 
         let mut oracles = HashMap::new();
         oracles.insert(oracle.get_public_key(), oracle.clone());
+        tracing::info!(name=oracle.name(), "Connected to oracle.");
 
         let esplora_client = Arc::new(EsploraClient::new(&config.esplora_host, config.network)?);
+        tracing::info!(host=config.esplora_host, "Connected to esplora client.");
 
         let manager = Arc::new(Mutex::new(Manager::new(
             wallet.clone(),
@@ -172,6 +177,7 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
             Arc::new(SystemTimeProvider {}),
             wallet.clone(),
         )?));
+        tracing::info!("Created ddk dlc manager.");
 
         Ok(DlcDevKit {
             runtime: Arc::new(RwLock::new(None)),

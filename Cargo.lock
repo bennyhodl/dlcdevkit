@@ -787,6 +787,7 @@ dependencies = [
  "electrum-client",
  "futures",
  "getrandom",
+ "hex",
  "kormir",
  "lightning",
  "lightning-net-tokio",

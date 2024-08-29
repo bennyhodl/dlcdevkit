@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{fmt, path::PathBuf};
 
 use bitcoin::Network;
 
@@ -41,6 +41,15 @@ pub enum SeedConfig {
     Bytes([u8; 64]),
     /// File path to a seed.
     File(String),
+}
+
+impl fmt::Display for SeedConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::File(_) => write!(f, "File"),
+            Self::Bytes(_) => write!(f, "Bytes")
+        }
+    }
 }
 
 impl Default for SeedConfig {
