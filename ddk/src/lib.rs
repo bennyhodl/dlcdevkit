@@ -21,6 +21,7 @@ pub mod oracle;
 pub mod storage;
 /// Transport services.
 pub mod transport;
+use bitcoin::key::XOnlyPublicKey;
 /// DDK object with all services
 pub use ddk::DlcDevKit;
 /// Type alias for [dlc_manager::manager::Manager]
@@ -89,4 +90,5 @@ pub trait DdkStorage: dlc_manager::Storage /*+ PersistBackend<ChangeSet> */ {
 pub trait DdkOracle: dlc_manager::Oracle {
     fn name(&self) -> String;
     async fn get_announcement_async(&self, event_id: &str) -> Result<OracleAnnouncement, dlc_manager::error::Error>;
+    async fn get_public_key_async(&self) -> Result<XOnlyPublicKey, dlc_manager::error::Error>;
 }

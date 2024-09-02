@@ -60,7 +60,10 @@ async fn main() -> anyhow::Result<()> {
     config.network = Network::from_str(&args.network)?;
 
     let level = LevelFilter::from_str(&args.log).unwrap_or(LevelFilter::INFO);
-    let subscriber = tracing_subscriber::fmt().with_max_level(level).finish();
+    let subscriber = tracing_subscriber::fmt()
+        .with_line_number(true)
+        .with_max_level(level)
+        .finish();
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
     tracing::info!("Starting DDK node.");
@@ -71,15 +74,13 @@ async fn main() -> anyhow::Result<()> {
     )?);
 
     let oracle_host = args.oracle_host.clone();
-    let oracle_client = tokio::task::spawn_blocking(move || {
-        Arc::new(P2PDOracleClient::new(&oracle_host).expect("Could not connect to oracle."))
-    }).await.unwrap();
+    let oracle = Arc::new(P2PDOracleClient::new(&oracle_host).await?);
 
     let mut builder = DdkBuilder::new();
     builder.set_config(config);
     builder.set_transport(transport.clone());
     builder.set_storage(storage.clone());
-    builder.set_oracle(oracle_client.clone());
+    builder.set_oracle(oracle.clone());
 
     let ddk: DdkServer = builder.finish()?;
 

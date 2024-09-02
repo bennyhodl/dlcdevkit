@@ -93,7 +93,7 @@ impl P2PDOracleClient {
     /// Try to create an instance of an oracle client connecting to the provided
     /// host. Returns an error if the host could not be reached. Panics if the
     /// oracle uses an incompatible format.
-    pub fn new(host: &str) -> Result<P2PDOracleClient, DlcManagerError> {
+    pub async fn new(host: &str) -> Result<P2PDOracleClient, DlcManagerError> {
         if host.is_empty() {
             return Err(DlcManagerError::InvalidParameters(
                 "Invalid host".to_string(),
@@ -104,8 +104,16 @@ impl P2PDOracleClient {
         } else {
             host.to_string()
         };
-        let path = pubkey_path(&host);
-        let public_key = get::<PublicKeyResponse>(&path)?.public_key;
+
+        let public_key = reqwest::get(pubkey_path(&host)).await
+            .map_err(|x| {
+                dlc_manager::error::Error::IOError(std::io::Error::new(std::io::ErrorKind::Other, x))
+            })?
+            .json::<PublicKeyResponse>()
+            .await
+            .map_err(|e| dlc_manager::error::Error::OracleError(e.to_string()))?
+            .public_key;
+
         Ok(P2PDOracleClient { host, public_key })
     }
 }
@@ -134,6 +142,7 @@ impl dlc_manager::Oracle for P2PDOracleClient {
     }
 
     fn get_announcement(&self, event_id: &str) -> Result<OracleAnnouncement, DlcManagerError> {
+        tracing::warn!("GETTING BLOCKING ANNOUNCEMENT");
         let (asset_id, date_time) = parse_event_id(event_id)?;
         let path = announcement_path(&self.host, &asset_id, &date_time);
         let announcement = get(&path)?;
@@ -144,6 +153,7 @@ impl dlc_manager::Oracle for P2PDOracleClient {
         &self,
         event_id: &str,
     ) -> Result<OracleAttestation, dlc_manager::error::Error> {
+        tracing::error!("GETTING BLOCKING ATTESTATION");
         let (asset_id, date_time) = parse_event_id(event_id)?;
         let path = attestation_path(&self.host, &asset_id, &date_time);
         let AttestationResponse {
@@ -152,8 +162,10 @@ impl dlc_manager::Oracle for P2PDOracleClient {
             values,
         } = get::<AttestationResponse>(&path)?;
 
+        let oracle_public_key = get::<PublicKeyResponse>(&self.host)?.public_key;
+
         Ok(OracleAttestation {
-            oracle_public_key: self.public_key,
+            oracle_public_key,
             signatures,
             outcomes: values,
         })
@@ -177,5 +189,18 @@ impl DdkOracle for P2PDOracleClient {
             .await
             .map_err(|e| dlc_manager::error::Error::OracleError(e.to_string()))?;
         Ok(announcement) 
+    }
+
+    async fn get_public_key_async(&self) -> Result<XOnlyPublicKey, dlc_manager::error::Error> {
+        let path = pubkey_path(&self.host);
+        let publickey = reqwest::get(path).await
+            .map_err(|x| {
+                dlc_manager::error::Error::IOError(std::io::Error::new(std::io::ErrorKind::Other, x))
+            })?
+            .json::<PublicKeyResponse>()
+            .await
+            .map_err(|e| dlc_manager::error::Error::OracleError(e.to_string()))?
+            .public_key;
+        Ok(publickey)
     }
 }

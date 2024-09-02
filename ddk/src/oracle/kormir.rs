@@ -99,6 +99,10 @@ impl crate::DdkOracle for KormirOracleClient {
         "kormir".into()
     }
 
+    async fn get_public_key_async(&self) -> Result<XOnlyPublicKey, dlc_manager::error::Error> {
+        todo!()
+    }
+
     async fn get_announcement_async(&self, _event_id: &str) -> Result<OracleAnnouncement, dlc_manager::error::Error> {
         todo!()
     }
