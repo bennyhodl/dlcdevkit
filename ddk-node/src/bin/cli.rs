@@ -112,8 +112,16 @@ async fn main() -> anyhow::Result<()> {
                 .iter()
                 .map(|offer| serde_json::from_slice(offer).unwrap())
                 .collect();
-            for offer in offers {
-                println!("Contract: {}", hex::encode(&offer.id));
+            let offer_ids = offers.iter().map(|o| hex::encode(&o.id)).collect::<Vec<String>>();
+    
+            let offer = inquire::Select::new("Select offer to view.", offer_ids).prompt()?;
+
+            let mut offer_bytes = [0u8;32];
+            let chosen_offer = hex::decode(&offer)?;
+            offer_bytes.copy_from_slice(&chosen_offer);
+            let offer = offers.iter().find(|o| o.id == offer_bytes);
+            if let Some(o) = offer {
+                print!("{}", serde_json::to_string_pretty(&o).unwrap())
             }
         }
         CliCommand::AcceptOffer(accept) => {
