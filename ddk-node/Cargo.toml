@@ -25,8 +25,8 @@ reqwest = "0.12.7"
 tonic-build = "0.10.2"
 
 [[bin]]
-name = "ddk-server"
-path = "./src/bin/server.rs"
+name = "ddk-node"
+path = "./src/bin/node.rs"
 
 [[bin]]
 name = "ddk-cli"
