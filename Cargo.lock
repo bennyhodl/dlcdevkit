@@ -780,7 +780,7 @@ checksum = "7e962a19be5cfc3f3bf6dd8f61eb50107f356ad6270fbb3ed41476571db78be5"
 
 [[package]]
 name = "ddk"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -792,9 +792,9 @@ dependencies = [
  "bitcoin 0.30.2",
  "blake3",
  "chrono",
- "dlc 0.5.0",
+ "dlc",
  "dlc-manager",
- "dlc-messages 0.5.0",
+ "dlc-messages",
  "dlc-trie",
  "electrum-client",
  "futures",
@@ -821,7 +821,7 @@ dependencies = [
 
 [[package]]
 name = "ddk-node"
-version = "0.1.0"
+version = "0.0.10"
 dependencies = [
  "anyhow",
  "clap",
@@ -844,13 +844,13 @@ dependencies = [
 
 [[package]]
 name = "ddk-payouts"
-version = "0.0.5"
+version = "0.0.10"
 dependencies = [
  "anyhow",
  "bitcoin 0.30.2",
- "dlc 0.5.0",
+ "dlc",
  "dlc-manager",
- "dlc-messages 0.5.0",
+ "dlc-messages",
  "dlc-trie",
  "serde",
  "serde_json",
@@ -921,17 +921,6 @@ dependencies = [
 [[package]]
 name = "dlc"
 version = "0.5.0"
-dependencies = [
- "bitcoin 0.30.2",
- "miniscript",
- "secp256k1-sys 0.8.1",
- "secp256k1-zkp",
- "serde",
-]
-
-[[package]]
-name = "dlc"
-version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "22b6f19b12f135c9fefde2b1ff95dac0d1f04f3256456ce36f72299be1a025e4"
 dependencies = [
@@ -945,11 +934,13 @@ dependencies = [
 [[package]]
 name = "dlc-manager"
 version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf59f3a76e571e2bf85021bb34c91c03d004241426dbcd438c47d5a76c476834"
 dependencies = [
  "async-trait",
  "bitcoin 0.30.2",
- "dlc 0.5.0",
- "dlc-messages 0.5.0",
+ "dlc",
+ "dlc-messages",
  "dlc-trie",
  "hex-conservative",
  "lightning",
@@ -961,22 +952,11 @@ dependencies = [
 [[package]]
 name = "dlc-messages"
 version = "0.5.0"
-dependencies = [
- "bitcoin 0.30.2",
- "dlc 0.5.0",
- "lightning",
- "secp256k1-zkp",
- "serde",
-]
-
-[[package]]
-name = "dlc-messages"
-version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "758cb623d4889882e7da547e98ff9f6249b59d081048402dfab2e8f5f54c6441"
 dependencies = [
  "bitcoin 0.30.2",
- "dlc 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "dlc",
  "lightning",
  "secp256k1-zkp",
  "serde",
@@ -985,9 +965,11 @@ dependencies = [
 [[package]]
 name = "dlc-trie"
 version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c36982420191ed253bf8d813be6259cb1116d17401ba2eed6a1fa50665674e21"
 dependencies = [
  "bitcoin 0.30.2",
- "dlc 0.5.0",
+ "dlc",
  "secp256k1-zkp",
  "serde",
 ]
@@ -1748,8 +1730,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7becdeb25367b38194b52ca52aecf56393ff2dfe5a6f1f751b098280ce1f639d"
 dependencies = [
  "bitcoin 0.30.2",
- "dlc 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "dlc-messages 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "dlc",
+ "dlc-messages",
  "hex",
  "lightning",
  "log",

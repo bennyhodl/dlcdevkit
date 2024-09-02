@@ -1,6 +1,6 @@
 [package]
 name = "ddk"
-version = "0.0.9"
+version = "0.0.10"
 edition = "2021"
 license = "MIT"
 description = "application tooling for DLCs 🌊"
@@ -17,14 +17,14 @@ bdk = "=1.0.0-alpha.8"
 bdk_file_store = "0.8.0"
 bdk_esplora = { version = "0.10", features = ["blocking", "async"] }
 bitcoin = { version = "0.30.2", features = ["rand", "serde"] }
-dlc = { version = "0.5.0", path = "/Users/ben/ernest/dev/libs/rust-dlc/master/dlc", features = ["use-serde"] }
-dlc-manager = { version = "0.5.0", path = "/Users/ben/ernest/dev/libs/rust-dlc/master/dlc-manager", features = ["use-serde"] }
-dlc-messages = { version = "0.5.0", path = "/Users/ben/ernest/dev/libs/rust-dlc/master/dlc-messages", features = [ "use-serde"] }
-dlc-trie = { version = "0.5.0", path = "/Users/ben/ernest/dev/libs/rust-dlc/master/dlc-trie", features = ["use-serde"] }
-# dlc-trie = { version = "0.5.0", features = [ "use-serde"] }
-# dlc = { version = "0.5.0", features = [ "use-serde"] }
-# dlc-manager = { version = "0.5.0", features = [ "use-serde"] }
-# dlc-messages = { version = "0.5.0", features = [ "use-serde"] }
+# dlc = { version = "0.5.0", path = "/Users/ben/ernest/dev/libs/rust-dlc/master/dlc", features = ["use-serde"] }
+# dlc-manager = { version = "0.5.0", path = "/Users/ben/ernest/dev/libs/rust-dlc/master/dlc-manager", features = ["use-serde"] }
+# dlc-messages = { version = "0.5.0", path = "/Users/ben/ernest/dev/libs/rust-dlc/master/dlc-messages", features = [ "use-serde"] }
+# dlc-trie = { version = "0.5.0", path = "/Users/ben/ernest/dev/libs/rust-dlc/master/dlc-trie", features = ["use-serde"] }
+dlc-trie = { version = "0.5.0", features = [ "use-serde"] }
+dlc = { version = "0.5.0", features = [ "use-serde"] }
+dlc-manager = { version = "0.5.0", features = [ "use-serde"] }
+dlc-messages = { version = "0.5.0", features = [ "use-serde"] }
 getrandom = { version = "0.2.11", features = ["js"] }
 lightning = { version = "0.0.121", default-features = false, features = ["grind_signatures", "std"] }
 nostr = { version = "0.29.0", features = ["std"] }
