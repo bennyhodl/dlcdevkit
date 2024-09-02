@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use clap::Parser;
-use ddk::config::DdkConfig;
+use ddk::config::{DdkConfig, SeedConfig};
 use ddk::builder::DdkBuilder;
 use ddk::storage::SledStorageProvider;
 use ddk::oracle::P2PDOracleClient;
@@ -44,7 +44,11 @@ struct NodeArgs {
     #[arg(long = "oracle")]
     #[arg(default_value = "http://127.0.0.1:8080")]
     #[arg(help = "Host to connect to an oracle server.")]
-    oracle_host: String
+    oracle_host: String,
+    #[arg(long)]
+    #[arg(help = "Seed config strategy ('bytes' OR 'file')")]
+    #[arg(default_value = "file")]
+    seed: String
 }
 
 #[tokio::main]
@@ -55,9 +59,14 @@ async fn main() -> anyhow::Result<()> {
         Some(storage) => storage,
         None => homedir::my_home().expect("Provide a directory for ddk.").unwrap().join(".ddk").join("defualt-ddk")
     };
-    config.storage_path = storage_path;
+    config.storage_path = storage_path.clone();
     config.esplora_host = args.esplora_host;
     config.network = Network::from_str(&args.network)?;
+    config.seed_config = match args.seed.as_str() {
+        "bytes" => SeedConfig::Bytes([0u8; 64]),
+        "file" => SeedConfig::File(storage_path.to_str().unwrap().to_string()),
+        _ => SeedConfig::Bytes([0u8;64])
+    };
 
     let level = LevelFilter::from_str(&args.log).unwrap_or(LevelFilter::INFO);
     let subscriber = tracing_subscriber::fmt()
