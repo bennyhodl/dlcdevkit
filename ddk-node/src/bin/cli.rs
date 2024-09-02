@@ -14,6 +14,10 @@ use inquire::Text;
 #[clap(name = "ddk")]
 #[command(about = "A CLI tool for DDK", version = "1.0")]
 struct DdkCliArgs {
+    #[arg(short, long)]
+    #[arg(help = "DDK gRPC server to connect to.")]
+    #[arg(default_value = "http://127.0.0.1:3030")]
+    pub server: String,
     #[clap(subcommand)]
     pub command: CliCommand,
 }
@@ -77,7 +81,7 @@ struct Connect {
 async fn main() -> anyhow::Result<()> {
     let args = DdkCliArgs::parse();
 
-    let mut client = DdkRpcClient::connect("http://127.0.0.1:3030").await?;
+    let mut client = DdkRpcClient::connect(args.server).await?;
 
     match args.command {
         CliCommand::Info => {
