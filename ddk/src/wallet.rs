@@ -1,8 +1,8 @@
 use crate::{
     chain::EsploraClient,
     config::DdkConfig,
-    signer::{DeriveSigner, SimpleDeriveSigner},
-    storage::SledStorageProvider,
+    signer::{DeriveSigner, SignerInformation, SimpleDeriveSigner},
+    storage::SledStorageProvider, DdkStorage,
 };
 use anyhow::anyhow;
 use bdk::{
@@ -13,12 +13,12 @@ use bdk::{
     },
     chain::PersistBackend,
     template::Bip86,
-    wallet::{AddressIndex, AddressInfo, Balance, ChangeSet, Update},
+    wallet::{self, AddressIndex, AddressInfo, Balance, ChangeSet, Update},
     KeychainKind, LocalOutput, SignOptions, Utxo, Wallet,
 };
 use bdk_esplora::EsploraExt;
 use bdk_file_store::Store;
-use bitcoin::{FeeRate, ScriptBuf, Transaction};
+use bitcoin::{secp256k1::SecretKey, FeeRate, ScriptBuf, Transaction};
 use blake3::Hasher;
 use dlc_manager::{error::Error as ManagerError, SimpleSigner};
 use lightning::chain::chaininterface::{ConfirmationTarget, FeeEstimator};
@@ -35,39 +35,40 @@ use std::{str::FromStr, sync::atomic::AtomicU32};
 /// Currently supports the file-based [bdk_file_store::Store]
 ///
 /// TODO:: Add a config option for sqlite or store.
-pub struct DlcDevKitWallet {
+pub struct DlcDevKitWallet<S> {
     pub blockchain: Arc<EsploraClient>,
-    pub inner: Arc<Mutex<Wallet<Store<ChangeSet>>>>,
+    pub inner: Arc<Mutex<Wallet<SledStorageProvider>>>,
     pub network: Network,
     pub xprv: ExtendedPrivKey,
     pub name: String,
     pub fees: Arc<HashMap<ConfirmationTarget, AtomicU32>>,
-    simple_derive_signer: SimpleDeriveSigner,
+    derive_signer: Arc<S>,
     secp: Secp256k1<All>,
 }
 
 const MIN_FEERATE: u32 = 253;
 
-impl DlcDevKitWallet {
+impl<S: DdkStorage> DlcDevKitWallet<S> {
     pub fn new<P>(
         name: &str,
         xprv: ExtendedPrivKey,
         esplora_url: &str,
         network: Network,
         wallet_storage_path: P,
-    ) -> anyhow::Result<DlcDevKitWallet>
+        derive_signer: Arc<S>,
+    ) -> anyhow::Result<DlcDevKitWallet<S>>
     where
         P: AsRef<Path>,
     {
         let secp = Secp256k1::new();
         let wallet_storage_path = wallet_storage_path.as_ref().join("wallet-db");
 
-        let storage = Store::<ChangeSet>::open_or_create_new(&[0u8; 32], wallet_storage_path)?;
+        let wallet_storage = SledStorageProvider::new(wallet_storage_path.to_str().unwrap())?;
 
         let inner = Arc::new(Mutex::new(Wallet::new_or_load(
             Bip86(xprv, KeychainKind::External),
             Some(Bip86(xprv, KeychainKind::Internal)),
-            storage,
+            wallet_storage,
             network,
         )?));
 
@@ -108,7 +109,7 @@ impl DlcDevKitWallet {
             network,
             xprv,
             fees,
-            simple_derive_signer: SimpleDeriveSigner {},
+            derive_signer,
             secp,
             name: name.to_string(),
         })
@@ -153,6 +154,7 @@ impl DlcDevKitWallet {
     pub fn new_external_address(&self) -> anyhow::Result<AddressInfo> {
         let mut guard = self.inner.lock().unwrap();
         let address = guard.try_get_address(AddressIndex::New).unwrap();
+            // .map_err(|e| Err(anyhow!("{}", e.to_string())))?;
 
         Ok(address)
     }
@@ -215,7 +217,7 @@ impl DlcDevKitWallet {
     }
 }
 
-impl FeeEstimator for DlcDevKitWallet {
+impl<S: DdkStorage> FeeEstimator for DlcDevKitWallet<S> {
     fn get_est_sat_per_1000_weight(&self, confirmation_target: ConfirmationTarget) -> u32 {
         self.fees
             .get(&confirmation_target)
@@ -224,7 +226,7 @@ impl FeeEstimator for DlcDevKitWallet {
     }
 }
 
-impl dlc_manager::ContractSignerProvider for DlcDevKitWallet {
+impl<S: DdkStorage> dlc_manager::ContractSignerProvider for DlcDevKitWallet<S> {
     type Signer = SimpleSigner;
 
     // Using the data deterministically generate a key id. From a child key.
@@ -249,18 +251,21 @@ impl dlc_manager::ContractSignerProvider for DlcDevKitWallet {
         let mut key_id = [0u8; 32];
         key_id.copy_from_slice(hash.as_bytes());
         let public_key = PublicKey::from_secret_key(&self.secp, &child_key.private_key);
-        self.simple_derive_signer.store_derived_key_id(
-            newest_index,
-            key_id,
-            child_key.private_key,
+        let signer_info = SignerInformation {
+            index: newest_index,
             public_key,
-        );
+            secret_key: child_key.private_key
+        };
+        self.derive_signer.store_derived_key_id(
+            key_id,
+            signer_info,
+        ).unwrap();
 
         key_id
     }
 
     fn derive_contract_signer(&self, key_id: [u8; 32]) -> Result<Self::Signer, ManagerError> {
-        let index = self.simple_derive_signer.get_index_for_key_id(key_id);
+        let index = self.derive_signer.get_index_for_key_id(key_id).unwrap();
         let derivation_path = format!("m/86'/0'/0'/0'/{}", index);
         let child_path = DerivationPath::from_str(&derivation_path)
             .expect("Not a valid derivation path to derive signer key.");
@@ -274,12 +279,12 @@ impl dlc_manager::ContractSignerProvider for DlcDevKitWallet {
 
     fn get_secret_key_for_pubkey(
         &self,
-        pubkey: &bitcoin::secp256k1::PublicKey,
-    ) -> Result<bitcoin::secp256k1::SecretKey, ManagerError> {
-        Ok(self.simple_derive_signer.get_secret_key(pubkey))
+        pubkey: &PublicKey,
+    ) -> Result<SecretKey, ManagerError> {
+        Ok(self.derive_signer.get_secret_key(pubkey).unwrap())
     }
 
-    fn get_new_secret_key(&self) -> Result<bitcoin::secp256k1::SecretKey, ManagerError> {
+    fn get_new_secret_key(&self) -> Result<SecretKey, ManagerError> {
         let newest_index = self
             .inner
             .lock()
@@ -296,7 +301,7 @@ impl dlc_manager::ContractSignerProvider for DlcDevKitWallet {
     }
 }
 
-impl dlc_manager::Wallet for DlcDevKitWallet {
+impl<S: DdkStorage> dlc_manager::Wallet for DlcDevKitWallet<S> {
     fn get_new_address(&self) -> Result<bitcoin::Address, ManagerError> {
         Ok(self
             .new_external_address()
@@ -335,7 +340,7 @@ impl dlc_manager::Wallet for DlcDevKitWallet {
 
     fn import_address(&self, address: &bitcoin::Address) -> Result<(), ManagerError> {
         // might be ok, might not
-        Ok(self.simple_derive_signer.import_address_to_storage(address))
+        Ok(self.derive_signer.import_address_to_storage(address).unwrap())
     }
 
     // return all utxos

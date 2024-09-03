@@ -1,4 +1,5 @@
 use crate::chain::EsploraClient;
+use crate::signer::DeriveSigner;
 use crate::wallet::DlcDevKitWallet;
 use crate::{transport, DdkOracle, DdkStorage, DdkTransport};
 use anyhow::anyhow;
@@ -18,19 +19,19 @@ use tokio::runtime::Runtime;
 
 /// DlcDevKit type alias for the [dlc_manager::manager::Manager]
 pub type DlcDevKitDlcManager<S, O> = dlc_manager::manager::Manager<
-    Arc<DlcDevKitWallet>,
-    Arc<CachedContractSignerProvider<Arc<DlcDevKitWallet>, SimpleSigner>>,
+    Arc<DlcDevKitWallet<S>>,
+    Arc<CachedContractSignerProvider<Arc<DlcDevKitWallet<S>>, SimpleSigner>>,
     Arc<EsploraClient>,
     Arc<S>,
     Arc<O>,
     Arc<SystemTimeProvider>,
-    Arc<DlcDevKitWallet>,
+    Arc<DlcDevKitWallet<S>>,
     SimpleSigner,
 >;
 
 pub struct DlcDevKit<T: DdkTransport, S: DdkStorage, O: DdkOracle> {
     pub runtime: Arc<RwLock<Option<Runtime>>>,
-    pub wallet: Arc<DlcDevKitWallet>,
+    pub wallet: Arc<DlcDevKitWallet<S>>,
     pub manager: Arc<Mutex<DlcDevKitDlcManager<S, O>>>,
     pub transport: Arc<T>,
     pub storage: Arc<S>,
