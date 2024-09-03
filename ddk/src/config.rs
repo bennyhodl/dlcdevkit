@@ -47,7 +47,7 @@ impl fmt::Display for SeedConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::File(_) => write!(f, "file"),
-            Self::Bytes(_) => write!(f, "bytes")
+            Self::Bytes(_) => write!(f, "bytes"),
         }
     }
 }

@@ -2,8 +2,8 @@
 //! # dlc-sled-storage-provider
 //! Storage provider for dlc-manager using sled as underlying storage.
 
-mod wallet;
 mod contract;
+mod wallet;
 
 use dlc_manager::contract::ser::Serializable;
 use dlc_manager::error::Error;
@@ -77,7 +77,7 @@ impl SledStorageProvider {
     fn signer_tree(&self) -> Result<Tree, Error> {
         self.open_tree(&[SIGNER_TREE])
     }
-    
+
     pub fn wallet_tree(&self) -> Result<Tree, Error> {
         self.open_tree(&[WALLET_TREE])
     }

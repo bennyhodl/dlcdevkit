@@ -105,9 +105,13 @@ impl P2PDOracleClient {
             host.to_string()
         };
 
-        let public_key = reqwest::get(pubkey_path(&host)).await
+        let public_key = reqwest::get(pubkey_path(&host))
+            .await
             .map_err(|x| {
-                dlc_manager::error::Error::IOError(std::io::Error::new(std::io::ErrorKind::Other, x))
+                dlc_manager::error::Error::IOError(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    x,
+                ))
             })?
             .json::<PublicKeyResponse>()
             .await
@@ -178,24 +182,35 @@ impl DdkOracle for P2PDOracleClient {
         "p2pderivatives".into()
     }
 
-    async fn get_announcement_async(&self, event_id: &str) -> Result<OracleAnnouncement, dlc_manager::error::Error> {
+    async fn get_announcement_async(
+        &self,
+        event_id: &str,
+    ) -> Result<OracleAnnouncement, dlc_manager::error::Error> {
         let (asset_id, date_time) = parse_event_id(event_id)?;
         let path = announcement_path(&self.host, &asset_id, &date_time);
-        let announcement = reqwest::get(&path).await
+        let announcement = reqwest::get(&path)
+            .await
             .map_err(|x| {
-                dlc_manager::error::Error::IOError(std::io::Error::new(std::io::ErrorKind::Other, x))
+                dlc_manager::error::Error::IOError(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    x,
+                ))
             })?
             .json::<OracleAnnouncement>()
             .await
             .map_err(|e| dlc_manager::error::Error::OracleError(e.to_string()))?;
-        Ok(announcement) 
+        Ok(announcement)
     }
 
     async fn get_public_key_async(&self) -> Result<XOnlyPublicKey, dlc_manager::error::Error> {
         let path = pubkey_path(&self.host);
-        let publickey = reqwest::get(path).await
+        let publickey = reqwest::get(path)
+            .await
             .map_err(|x| {
-                dlc_manager::error::Error::IOError(std::io::Error::new(std::io::ErrorKind::Other, x))
+                dlc_manager::error::Error::IOError(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    x,
+                ))
             })?
             .json::<PublicKeyResponse>()
             .await

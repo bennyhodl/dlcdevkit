@@ -1,38 +1,6 @@
 /target
-/bella/src-tauri/target
-# Logs
-/bella/logs
-/bella*.log
-/bella/npm-debug.log*
-/termainal/yarn-debug.log*
-/bella/yarn-error.log*
-/bella/pnpm-debug.log*
-/bella/lerna-debug.log*
-
-/bella/node_modules
-/bella/dist
-/bella/dist-ssr
-/bella/*.local
-
-# Editor directories and files
-/bella/.vscode/*
-/bella/!.vscode/extensions.json
-/bella/.idea
-/bella/.DS_Store
-/bella/*.suo
-/bella/*.ntvs*
-/bella/*.njsproj
-/bella/*.sln
-/bella/*.sw?
 
 /regtest/bitcoin/*
 
-/dlcdevkit-example
-/ddk-sample/history.txt
-/ddk-sample/ddk-sample
-
 .idea
-/ddk-sample/logs.txt
-/history.txt
 
-/ddk-node/ddk-sample

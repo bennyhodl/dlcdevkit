@@ -1,9 +1,7 @@
-use std::collections::HashMap;
 use bitcoin::key::XOnlyPublicKey;
 use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
-use std::str::FromStr;
-use kormir::{storage::OracleEventData, Oracle};
 use serde::Serialize;
+use std::str::FromStr;
 use uuid::Uuid;
 
 const KORMIR_URL: &str = "http://localhost:8082";
@@ -33,18 +31,21 @@ pub struct KormirOracleClient {
 
 impl KormirOracleClient {
     pub fn new() -> anyhow::Result<KormirOracleClient> {
-        tracing::info!(host=KORMIR_URL, "Connecting to Kormir oracle client.");
+        tracing::info!(host = KORMIR_URL, "Connecting to Kormir oracle client.");
         let request: String = get("/pubkey")?;
         let pubkey = XOnlyPublicKey::from_str(&request)?;
 
         let client = reqwest::Client::new();
-        tracing::info!(pubkey=pubkey.to_string(), "Connected to Kormir client.");
+        tracing::info!(pubkey = pubkey.to_string(), "Connected to Kormir client.");
 
         Ok(KormirOracleClient { pubkey, client })
     }
 
     pub async fn get_pubkey(&self) -> anyhow::Result<XOnlyPublicKey> {
-        let request = reqwest::get(format!("{}/pubkey", KORMIR_URL)).await?.json::<String>().await?;
+        let request = reqwest::get(format!("{}/pubkey", KORMIR_URL))
+            .await?
+            .json::<String>()
+            .await?;
         Ok(XOnlyPublicKey::from_str(&request)?)
     }
 
@@ -63,9 +64,11 @@ impl KormirOracleClient {
             outcomes,
             event_maturity_epoch: maturity,
         };
-        self.client.post(format!("{}/create-event", KORMIR_URL))
+        self.client
+            .post(format!("{}/create-event", KORMIR_URL))
             .json(&create_event_request)
-            .send().await?;
+            .send()
+            .await?;
 
         Ok(())
     }
@@ -80,7 +83,8 @@ impl dlc_manager::Oracle for KormirOracleClient {
         &self,
         _event_id: &str,
     ) -> Result<dlc_messages::oracle_msgs::OracleAttestation, dlc_manager::error::Error> {
-        get::<OracleAttestation>("attestation").map_err(|_| dlc_manager::error::Error::OracleError("Could not get attestation".into()))
+        get::<OracleAttestation>("attestation")
+            .map_err(|_| dlc_manager::error::Error::OracleError("Could not get attestation".into()))
     }
 
     fn get_announcement(
@@ -103,7 +107,10 @@ impl crate::DdkOracle for KormirOracleClient {
         todo!()
     }
 
-    async fn get_announcement_async(&self, _event_id: &str) -> Result<OracleAnnouncement, dlc_manager::error::Error> {
+    async fn get_announcement_async(
+        &self,
+        _event_id: &str,
+    ) -> Result<OracleAnnouncement, dlc_manager::error::Error> {
         todo!()
     }
 }

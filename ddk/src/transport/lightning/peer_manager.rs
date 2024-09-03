@@ -9,9 +9,8 @@ use lightning::{
     sign::{KeysManager, NodeSigner},
     util::logger::{Logger, Record},
 };
-use lightning_net_tokio::{setup_inbound, SocketDescriptor};
+use lightning_net_tokio::SocketDescriptor;
 use std::{sync::Arc, time::SystemTime};
-use tokio::net::TcpListener;
 
 use crate::config::SeedConfig;
 

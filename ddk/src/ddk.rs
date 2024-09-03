@@ -1,10 +1,7 @@
 use crate::chain::EsploraClient;
-use crate::signer::DeriveSigner;
 use crate::wallet::DlcDevKitWallet;
-use crate::{transport, DdkOracle, DdkStorage, DdkTransport};
+use crate::{DdkOracle, DdkStorage, DdkTransport};
 use anyhow::anyhow;
-use bdk::chain::PersistBackend;
-use bdk::wallet::ChangeSet;
 use bitcoin::secp256k1::PublicKey;
 use bitcoin::Network;
 use dlc_manager::{
@@ -76,7 +73,9 @@ impl<
             let mut timer = tokio::time::interval(Duration::from_secs(5));
             loop {
                 timer.tick().await;
-                process_incoming_messages(message_processor.clone(), manager_clone.clone(), || message_processor.process_messages());
+                process_incoming_messages(message_processor.clone(), manager_clone.clone(), || {
+                    message_processor.process_messages()
+                });
             }
         });
 
@@ -89,10 +88,10 @@ impl<
 
     pub fn connect_if_necessary(&self) -> anyhow::Result<()> {
         let _known_peers = self.storage.list_peers()?;
-        
+
         // check from already connected
-        
-        Ok(()) 
+
+        Ok(())
     }
 
     pub fn send_dlc_offer(
@@ -101,17 +100,22 @@ impl<
         counter_party: PublicKey,
         oracle_announcements: Vec<OracleAnnouncement>,
     ) -> anyhow::Result<OfferDlc> {
-        let manager = self.manager.lock().unwrap();        
+        let manager = self.manager.lock().unwrap();
 
         let offer = manager.send_offer_with_announcements(
             contract_input,
             counter_party,
-            vec![oracle_announcements]
+            vec![oracle_announcements],
         )?;
 
         let contract_id = hex::encode(&offer.temporary_contract_id);
-        self.transport.send_message(counter_party, Message::Offer(offer.clone())); 
-        tracing::info!(counterparty=counter_party.to_string(), contract_id, "Sent DLC offer to counterparty.");
+        self.transport
+            .send_message(counter_party, Message::Offer(offer.clone()));
+        tracing::info!(
+            counterparty = counter_party.to_string(),
+            contract_id,
+            "Sent DLC offer to counterparty."
+        );
 
         Ok(offer)
     }
@@ -120,7 +124,10 @@ impl<
         self.network
     }
 
-    pub fn accept_dlc_offer(&self, contract: [u8; 32]) -> anyhow::Result<(String, String, AcceptDlc)> {
+    pub fn accept_dlc_offer(
+        &self,
+        contract: [u8; 32],
+    ) -> anyhow::Result<(String, String, AcceptDlc)> {
         let dlc = self.manager.lock().unwrap();
 
         let contract_id = ContractId::from(contract);
@@ -146,7 +153,10 @@ pub fn process_incoming_messages<T: DdkTransport, S: DdkStorage, O: DdkOracle, F
     let messages = transport.get_and_clear_received_messages();
 
     for (counter_party, message) in messages {
-        tracing::info!(counter_party=counter_party.to_string(), "Processing DLC message");
+        tracing::info!(
+            counter_party = counter_party.to_string(),
+            "Processing DLC message"
+        );
         let resp = manager
             .lock()
             .unwrap()

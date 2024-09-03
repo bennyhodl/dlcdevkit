@@ -6,7 +6,7 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum SignerError {
     #[error("Error with deriving signer {0}")]
-    SignerError(String)
+    SignerError(String),
 }
 
 #[derive(Serialize, Deserialize)]
@@ -16,7 +16,7 @@ pub struct SignerInformation {
     pub public_key: PublicKey,
 }
 
-/// Trait with contract specific information 
+/// Trait with contract specific information
 /// 1. Storing and retrieving private keys for DLC CETs.
 /// 2. Tracking contract specific addresses for counterparties.
 pub trait DeriveSigner {

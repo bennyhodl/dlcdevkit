@@ -1,8 +1,11 @@
+use super::{SledStorageProvider, CHAIN_MONITOR_KEY, CHAIN_MONITOR_TREE};
 use dlc_manager::chain_monitor::ChainMonitor;
 use dlc_manager::channel::accepted_channel::AcceptedChannel;
 use dlc_manager::channel::offered_channel::OfferedChannel;
 use dlc_manager::channel::signed_channel::{SignedChannel, SignedChannelStateType};
-use dlc_manager::channel::{Channel, ClosedChannel, ClosedPunishedChannel, ClosingChannel, FailedAccept, FailedSign};
+use dlc_manager::channel::{
+    Channel, ClosedChannel, ClosedPunishedChannel, ClosingChannel, FailedAccept, FailedSign,
+};
 use dlc_manager::contract::accepted_contract::AcceptedContract;
 use dlc_manager::contract::offered_contract::OfferedContract;
 use dlc_manager::contract::ser::Serializable;
@@ -15,7 +18,6 @@ use sled::transaction::{ConflictableTransactionResult, UnabortableTransactionErr
 use sled::Transactional;
 use std::convert::TryInto;
 use std::io::Read;
-use super::{SledStorageProvider, CHAIN_MONITOR_KEY, CHAIN_MONITOR_TREE};
 
 macro_rules! convertible_enum {
     (enum $name:ident {
@@ -432,15 +434,15 @@ fn deserialize_channel(buff: &sled::IVec) -> Result<Channel, Error> {
         ChannelPrefix::Closing => {
             Channel::Closing(ClosingChannel::deserialize(&mut cursor).map_err(to_storage_error)?)
         }
-        ChannelPrefix::CounterClosed => {
-            Channel::CounterClosed(ClosedChannel::deserialize(&mut cursor).map_err(to_storage_error)?)
-        }
-        ChannelPrefix::ClosedPunished => {
-            Channel::ClosedPunished(ClosedPunishedChannel::deserialize(&mut cursor).map_err(to_storage_error)?)
-        }
-        ChannelPrefix::CollaborativelyClosed => {
-            Channel::CollaborativelyClosed(ClosedChannel::deserialize(&mut cursor).map_err(to_storage_error)?)
-        }
+        ChannelPrefix::CounterClosed => Channel::CounterClosed(
+            ClosedChannel::deserialize(&mut cursor).map_err(to_storage_error)?,
+        ),
+        ChannelPrefix::ClosedPunished => Channel::ClosedPunished(
+            ClosedPunishedChannel::deserialize(&mut cursor).map_err(to_storage_error)?,
+        ),
+        ChannelPrefix::CollaborativelyClosed => Channel::CollaborativelyClosed(
+            ClosedChannel::deserialize(&mut cursor).map_err(to_storage_error)?,
+        ),
     };
     Ok(channel)
 }
@@ -453,7 +455,11 @@ mod tests {
         ($name: ident, $body: expr) => {
             #[test]
             fn $name() {
-                let path = format!("{}{}", "tests/data/dlc_storage/sleddb/", std::stringify!($name));
+                let path = format!(
+                    "{}{}",
+                    "tests/data/dlc_storage/sleddb/",
+                    std::stringify!($name)
+                );
                 {
                     let storage = SledStorageProvider::new(&path).expect("Error opening sled DB");
                     #[allow(clippy::redundant_closure_call)]
@@ -589,13 +595,15 @@ mod tests {
             )
             .expect("Error creating contract");
 
-        let serialized = include_bytes!("../../../tests/data/dlc_storage/sled/SignedChannelEstablished");
+        let serialized =
+            include_bytes!("../../../tests/data/dlc_storage/sled/SignedChannelEstablished");
         let signed_channel = Channel::Signed(deserialize_object(serialized));
         storage
             .upsert_channel(signed_channel, None)
             .expect("Error creating contract");
 
-        let serialized = include_bytes!("../../../tests/data/dlc_storage/sled/SignedChannelSettled");
+        let serialized =
+            include_bytes!("../../../tests/data/dlc_storage/sled/SignedChannelSettled");
         let signed_channel = Channel::Signed(deserialize_object(serialized));
         storage
             .upsert_channel(signed_channel, None)

@@ -1,8 +1,5 @@
 use crate::{
-    chain::EsploraClient,
-    config::DdkConfig,
-    signer::{DeriveSigner, SignerInformation, SimpleDeriveSigner},
-    storage::SledStorageProvider, DdkStorage,
+    chain::EsploraClient, signer::SignerInformation, storage::SledStorageProvider, DdkStorage,
 };
 use anyhow::anyhow;
 use bdk::{
@@ -11,23 +8,17 @@ use bdk::{
         secp256k1::{All, PublicKey, Secp256k1},
         Address, Network, Txid,
     },
-    chain::PersistBackend,
     template::Bip86,
-    wallet::{self, AddressIndex, AddressInfo, Balance, ChangeSet, Update},
-    KeychainKind, LocalOutput, SignOptions, Utxo, Wallet,
+    wallet::{AddressIndex, AddressInfo, Balance, Update},
+    KeychainKind, LocalOutput, SignOptions, Wallet,
 };
 use bdk_esplora::EsploraExt;
-use bdk_file_store::Store;
 use bitcoin::{secp256k1::SecretKey, FeeRate, ScriptBuf, Transaction};
 use blake3::Hasher;
 use dlc_manager::{error::Error as ManagerError, SimpleSigner};
 use lightning::chain::chaininterface::{ConfirmationTarget, FeeEstimator};
 use std::sync::{atomic::Ordering, Arc};
-use std::{
-    collections::HashMap,
-    path::{Path, PathBuf},
-    sync::Mutex,
-};
+use std::{collections::HashMap, path::Path, sync::Mutex};
 use std::{str::FromStr, sync::atomic::AtomicU32};
 
 /// Internal [bdk::Wallet] for ddk.
@@ -154,7 +145,7 @@ impl<S: DdkStorage> DlcDevKitWallet<S> {
     pub fn new_external_address(&self) -> anyhow::Result<AddressInfo> {
         let mut guard = self.inner.lock().unwrap();
         let address = guard.try_get_address(AddressIndex::New).unwrap();
-            // .map_err(|e| Err(anyhow!("{}", e.to_string())))?;
+        // .map_err(|e| Err(anyhow!("{}", e.to_string())))?;
 
         Ok(address)
     }
@@ -254,12 +245,11 @@ impl<S: DdkStorage> dlc_manager::ContractSignerProvider for DlcDevKitWallet<S> {
         let signer_info = SignerInformation {
             index: newest_index,
             public_key,
-            secret_key: child_key.private_key
+            secret_key: child_key.private_key,
         };
-        self.derive_signer.store_derived_key_id(
-            key_id,
-            signer_info,
-        ).unwrap();
+        self.derive_signer
+            .store_derived_key_id(key_id, signer_info)
+            .unwrap();
 
         key_id
     }
@@ -277,10 +267,7 @@ impl<S: DdkStorage> dlc_manager::ContractSignerProvider for DlcDevKitWallet<S> {
         Ok(SimpleSigner::new(child_key.private_key))
     }
 
-    fn get_secret_key_for_pubkey(
-        &self,
-        pubkey: &PublicKey,
-    ) -> Result<SecretKey, ManagerError> {
+    fn get_secret_key_for_pubkey(&self, pubkey: &PublicKey) -> Result<SecretKey, ManagerError> {
         Ok(self.derive_signer.get_secret_key(pubkey).unwrap())
     }
 
@@ -340,7 +327,10 @@ impl<S: DdkStorage> dlc_manager::Wallet for DlcDevKitWallet<S> {
 
     fn import_address(&self, address: &bitcoin::Address) -> Result<(), ManagerError> {
         // might be ok, might not
-        Ok(self.derive_signer.import_address_to_storage(address).unwrap())
+        Ok(self
+            .derive_signer
+            .import_address_to_storage(address)
+            .unwrap())
     }
 
     // return all utxos

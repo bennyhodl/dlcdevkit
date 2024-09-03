@@ -1,6 +1,6 @@
 use anyhow::Result;
-use ddk::config::DdkConfig;
 use ddk::builder::DdkBuilder;
+use ddk::config::DdkConfig;
 use ddk::oracle::P2PDOracleClient;
 use ddk::storage::SledStorageProvider;
 use ddk::transport::lightning::LightningTransport;
@@ -13,9 +13,17 @@ fn main() -> Result<()> {
     let mut config = DdkConfig::default();
     config.storage_path = current_dir()?;
 
-    let transport = Arc::new(LightningTransport::new(&config.seed_config, 1776, config.network)?);
+    let transport = Arc::new(LightningTransport::new(
+        &config.seed_config,
+        1776,
+        config.network,
+    )?);
     let storage = Arc::new(SledStorageProvider::new(
-        config.storage_path.join("sled_db").to_str().expect("No storage."),
+        config
+            .storage_path
+            .join("sled_db")
+            .to_str()
+            .expect("No storage."),
     )?);
 
     let oracle_client = Arc::new(P2PDOracleClient::new(ddk::ORACLE_HOST).expect("no oracle"));

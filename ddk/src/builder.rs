@@ -1,7 +1,4 @@
-use crate::config::SeedConfig;
 use crate::io;
-use bdk::chain::PersistBackend;
-use bdk::wallet::ChangeSet;
 use core::fmt;
 use dlc_manager::manager::Manager;
 use dlc_manager::SystemTimeProvider;
@@ -50,7 +47,7 @@ impl fmt::Display for BuilderError {
             BuilderError::NoOracle => write!(f, "A DLC oracle client was not provided."),
             BuilderError::NoSeed => write!(f, "No seed configuration was provided."),
             BuilderError::NoConfig => write!(f, "No config was provided"),
-            BuilderError::NoWalletStorage => write!(f, "No wallet storage was provided.")
+            BuilderError::NoWalletStorage => write!(f, "No wallet storage was provided."),
         }
     }
 }
@@ -142,7 +139,10 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
         tracing::info!(path=?config.storage_path, "Created directory for ddk node.");
 
         let xprv = io::xprv_from_config(&config.seed_config, config.network)?;
-        tracing::info!(strategy=config.seed_config.to_string(), "Loaded private key");
+        tracing::info!(
+            strategy = config.seed_config.to_string(),
+            "Loaded private key"
+        );
 
         let transport = self
             .transport
@@ -163,7 +163,7 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
             .name
             .clone()
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
- 
+
         let wallet = Arc::new(DlcDevKitWallet::new(
             &name,
             xprv,
@@ -176,10 +176,10 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
 
         let mut oracles = HashMap::new();
         oracles.insert(oracle.get_public_key(), oracle.clone());
-        tracing::info!(name=oracle.name(), "Connected to oracle.");
+        tracing::info!(name = oracle.name(), "Connected to oracle.");
 
         let esplora_client = Arc::new(EsploraClient::new(&config.esplora_host, config.network)?);
-        tracing::info!(host=config.esplora_host, "Connected to esplora client.");
+        tracing::info!(host = config.esplora_host, "Connected to esplora client.");
 
         let manager = Arc::new(Mutex::new(Manager::new(
             wallet.clone(),

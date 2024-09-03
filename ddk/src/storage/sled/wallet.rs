@@ -1,9 +1,9 @@
+use super::SledStorageProvider;
+use crate::signer::{DeriveSigner, SignerError, SignerInformation};
 use bdk::wallet::ChangeSet;
 use bdk_chain::{Append, PersistBackend};
 use bitcoin::secp256k1::{PublicKey, SecretKey};
 use rand::{thread_rng, Rng};
-use crate::signer::{DeriveSigner, SignerError, SignerInformation};
-use super::SledStorageProvider;
 
 impl PersistBackend<ChangeSet> for SledStorageProvider {
     type WriteError = sled::Error;
@@ -26,11 +26,17 @@ impl SledStorageProvider {
             return Ok(());
         }
 
-        let serialized = bincode::serialize(changeset)
-            .map_err(|_| sled::Error::Io(std::io::Error::new(std::io::ErrorKind::Other, "Serialization error")))?;
+        let serialized = bincode::serialize(changeset).map_err(|_| {
+            sled::Error::Io(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Serialization error",
+            ))
+        })?;
 
         let rand_key: [u8; 32] = thread_rng().gen();
-        self.wallet_tree().unwrap().insert(rand_key, serialized.clone())?;
+        self.wallet_tree()
+            .unwrap()
+            .insert(rand_key, serialized.clone())?;
 
         Ok(())
     }
@@ -41,9 +47,7 @@ impl SledStorageProvider {
         for next_changeset in self.wallet_tree().unwrap().iter() {
             let next_changeset = match next_changeset {
                 Ok(next_changeset) => next_changeset,
-                Err(e) => {
-                    return Err(e)
-                }
+                Err(e) => return Err(e),
             };
             let next_changeset = bincode::deserialize(&next_changeset.1).unwrap();
             match &mut changeset {
@@ -70,7 +74,10 @@ impl DeriveSigner for SledStorageProvider {
         signer_information: SignerInformation,
     ) -> Result<(), SignerError> {
         let serialized_signer_info = bincode::serialize(&signer_information).unwrap();
-        self.signer_tree().unwrap().insert(key_id, serialized_signer_info).unwrap();
+        self.signer_tree()
+            .unwrap()
+            .insert(key_id, serialized_signer_info)
+            .unwrap();
         Ok(())
     }
 
@@ -81,7 +88,7 @@ impl DeriveSigner for SledStorageProvider {
             if let Ok(value) = result {
                 let info: SignerInformation = bincode::deserialize(&value.1).unwrap();
                 if info.public_key == *public_key {
-                    return Ok(info.secret_key)
+                    return Ok(info.secret_key);
                 }
             }
         }
@@ -105,19 +112,22 @@ mod tests {
         let path = "tests/data/dlc_storage/sleddb/index_from_key_id";
         let storage = SledStorageProvider::new(path).unwrap();
         let secp = Secp256k1::new();
-        let secret_key = bitcoin::secp256k1::SecretKey::new(&mut bitcoin::secp256k1::rand::thread_rng());
+        let secret_key =
+            bitcoin::secp256k1::SecretKey::new(&mut bitcoin::secp256k1::rand::thread_rng());
         let signer_info = SignerInformation {
             index: 1,
             secret_key,
             public_key: secret_key.public_key(&secp),
         };
-        
-        let _ = storage.store_derived_key_id([0u8;32], signer_info);
 
-        let index = storage.get_index_for_key_id([0u8;32]).unwrap();
+        let _ = storage.store_derived_key_id([0u8; 32], signer_info);
+
+        let index = storage.get_index_for_key_id([0u8; 32]).unwrap();
         assert_eq!(index, 1);
 
-        let priv_key = storage.get_secret_key(&secret_key.public_key(&secp)).unwrap();
+        let priv_key = storage
+            .get_secret_key(&secret_key.public_key(&secp))
+            .unwrap();
         assert_eq!(priv_key, secret_key);
         std::fs::remove_dir_all(path).unwrap();
     }
