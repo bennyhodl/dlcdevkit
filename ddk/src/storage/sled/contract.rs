@@ -1,7 +1,3 @@
-//! p2pderivatives/rust-dlc https://github.com/p2pderivatives/rust-dlc/blob/master/dlc-sled-storage-provider/src/lib.rs (2024)
-//! # dlc-sled-storage-provider
-//! Storage provider for dlc-manager using sled as underlying storage.
-
 use dlc_manager::chain_monitor::ChainMonitor;
 use dlc_manager::channel::accepted_channel::AcceptedChannel;
 use dlc_manager::channel::offered_channel::OfferedChannel;
@@ -16,27 +12,10 @@ use dlc_manager::contract::{
 };
 use dlc_manager::{error::Error, ContractId, Storage};
 use sled::transaction::{ConflictableTransactionResult, UnabortableTransactionError};
-use sled::{Db, Transactional, Tree};
+use sled::Transactional;
 use std::convert::TryInto;
-use std::io::{Cursor, Read};
-
-use crate::transport::PeerInformation;
-use crate::DdkStorage;
-
-const CONTRACT_TREE: u8 = 1;
-const CHANNEL_TREE: u8 = 2;
-const CHAIN_MONITOR_TREE: u8 = 3;
-const CHAIN_MONITOR_KEY: u8 = 4;
-const PEER_KEY: u8 = 5;
-// const UTXO_TREE: u8 = 6;
-// const KEY_PAIR_TREE: u8 = 7;
-// const ADDRESS_TREE: u8 = 8;
-
-/// Implementation of Storage interface using the sled DB backend.
-#[derive(Debug, Clone)]
-pub struct SledStorageProvider {
-    db: Db,
-}
+use std::io::Read;
+use super::{SledStorageProvider, CHAIN_MONITOR_KEY, CHAIN_MONITOR_TREE};
 
 macro_rules! convertible_enum {
     (enum $name:ident {
@@ -135,80 +114,6 @@ where
     T: std::fmt::Display,
 {
     Error::StorageError(e.to_string())
-}
-
-impl SledStorageProvider {
-    /// Creates a new instance of a SledStorageProvider.
-    pub fn new(path: &str) -> Result<Self, sled::Error> {
-        Ok(SledStorageProvider {
-            db: sled::open(path)?,
-        })
-    }
-
-    fn get_data_with_prefix<T: Serializable>(
-        &self,
-        tree: &Tree,
-        prefix: &[u8],
-        consume: Option<u64>,
-    ) -> Result<Vec<T>, Error> {
-        let iter = tree.iter();
-        iter.values()
-            .filter_map(|res| {
-                let value = res.unwrap();
-                let mut cursor = Cursor::new(&value);
-                let mut pref = vec![0u8; prefix.len()];
-                cursor.read_exact(&mut pref).expect("Error reading prefix");
-                if pref == prefix {
-                    if let Some(c) = consume {
-                        cursor.set_position(cursor.position() + c);
-                    }
-                    Some(Ok(T::deserialize(&mut cursor).ok()?))
-                } else {
-                    None
-                }
-            })
-            .collect()
-    }
-
-    fn open_tree(&self, tree_id: &[u8; 1]) -> Result<Tree, Error> {
-        self.db
-            .open_tree(tree_id)
-            .map_err(|e| Error::StorageError(format!("Error opening contract tree: {}", e)))
-    }
-
-    fn contract_tree(&self) -> Result<Tree, Error> {
-        self.open_tree(&[CONTRACT_TREE])
-    }
-
-    fn channel_tree(&self) -> Result<Tree, Error> {
-        self.open_tree(&[CHANNEL_TREE])
-    }
-
-}
-impl DdkStorage for SledStorageProvider {
-    fn list_peers(&self) -> anyhow::Result<Vec<PeerInformation>> {
-        if let Some(bytes) = self.db.get("peers")? {
-            let peers: Vec<PeerInformation> = serde_json::from_slice(&bytes)?;
-            Ok(peers)
-        } else {
-            Ok(vec![])
-        }
-    }
-
-    fn save_peer(&self, peer: PeerInformation) -> anyhow::Result<()> {
-        let mut known_peers = self.list_peers()?;
-
-        if known_peers.contains(&peer) {
-            return Ok(());
-        }
-
-        known_peers.push(peer);
-        let peer_vec = serde_json::to_vec(&known_peers)?;
-
-        self.db.insert("peers", peer_vec)?;
-
-        Ok(())
-    }
 }
 
 impl Storage for SledStorageProvider {
@@ -570,7 +475,7 @@ mod tests {
     sled_test!(
         create_contract_can_be_retrieved,
         |storage: SledStorageProvider| {
-            let serialized = include_bytes!("../../tests/data/dlc_storage/sled/Offered");
+            let serialized = include_bytes!("../../../tests/data/dlc_storage/sled/Offered");
             let contract = deserialize_object(serialized);
 
             storage
@@ -592,9 +497,9 @@ mod tests {
     sled_test!(
         update_contract_is_updated,
         |storage: SledStorageProvider| {
-            let serialized = include_bytes!("../../tests/data/dlc_storage/sled/Offered");
+            let serialized = include_bytes!("../../../tests/data/dlc_storage/sled/Offered");
             let offered_contract = deserialize_object(serialized);
-            let serialized = include_bytes!("../../tests/data/dlc_storage/sled/Accepted");
+            let serialized = include_bytes!("../../../tests/data/dlc_storage/sled/Accepted");
             let accepted_contract = deserialize_object(serialized);
             let accepted_contract = Contract::Accepted(accepted_contract);
 
@@ -619,7 +524,7 @@ mod tests {
     sled_test!(
         delete_contract_is_deleted,
         |storage: SledStorageProvider| {
-            let serialized = include_bytes!("../../tests/data/dlc_storage/sled/Offered");
+            let serialized = include_bytes!("../../../tests/data/dlc_storage/sled/Offered");
             let contract = deserialize_object(serialized);
             storage
                 .create_contract(&contract)
@@ -637,35 +542,35 @@ mod tests {
     );
 
     fn insert_offered_signed_and_confirmed(storage: &mut SledStorageProvider) {
-        let serialized = include_bytes!("../../tests/data/dlc_storage/sled/Offered");
+        let serialized = include_bytes!("../../../tests/data/dlc_storage/sled/Offered");
         let offered_contract = deserialize_object(serialized);
         storage
             .create_contract(&offered_contract)
             .expect("Error creating contract");
 
-        let serialized = include_bytes!("../../tests/data/dlc_storage/sled/Signed");
+        let serialized = include_bytes!("../../../tests/data/dlc_storage/sled/Signed");
         let signed_contract = Contract::Signed(deserialize_object(serialized));
         storage
             .update_contract(&signed_contract)
             .expect("Error creating contract");
-        let serialized = include_bytes!("../../tests/data/dlc_storage/sled/Signed1");
+        let serialized = include_bytes!("../../../tests/data/dlc_storage/sled/Signed1");
         let signed_contract = Contract::Signed(deserialize_object(serialized));
         storage
             .update_contract(&signed_contract)
             .expect("Error creating contract");
 
-        let serialized = include_bytes!("../../tests/data/dlc_storage/sled/Confirmed");
+        let serialized = include_bytes!("../../../tests/data/dlc_storage/sled/Confirmed");
         let confirmed_contract = Contract::Confirmed(deserialize_object(serialized));
         storage
             .update_contract(&confirmed_contract)
             .expect("Error creating contract");
-        let serialized = include_bytes!("../../tests/data/dlc_storage/sled/Confirmed1");
+        let serialized = include_bytes!("../../../tests/data/dlc_storage/sled/Confirmed1");
         let confirmed_contract = Contract::Confirmed(deserialize_object(serialized));
         storage
             .update_contract(&confirmed_contract)
             .expect("Error creating contract");
 
-        let serialized = include_bytes!("../../tests/data/dlc_storage/sled/PreClosed");
+        let serialized = include_bytes!("../../../tests/data/dlc_storage/sled/PreClosed");
         let preclosed_contract = Contract::PreClosed(deserialize_object(serialized));
         storage
             .update_contract(&preclosed_contract)
@@ -673,9 +578,9 @@ mod tests {
     }
 
     fn insert_offered_and_signed_channels(storage: &mut SledStorageProvider) {
-        let serialized = include_bytes!("../../tests/data/dlc_storage/sled/Offered");
+        let serialized = include_bytes!("../../../tests/data/dlc_storage/sled/Offered");
         let offered_contract = deserialize_object(serialized);
-        let serialized = include_bytes!("../../tests/data/dlc_storage/sled/OfferedChannel");
+        let serialized = include_bytes!("../../../tests/data/dlc_storage/sled/OfferedChannel");
         let offered_channel = deserialize_object(serialized);
         storage
             .upsert_channel(
@@ -684,13 +589,13 @@ mod tests {
             )
             .expect("Error creating contract");
 
-        let serialized = include_bytes!("../../tests/data/dlc_storage/sled/SignedChannelEstablished");
+        let serialized = include_bytes!("../../../tests/data/dlc_storage/sled/SignedChannelEstablished");
         let signed_channel = Channel::Signed(deserialize_object(serialized));
         storage
             .upsert_channel(signed_channel, None)
             .expect("Error creating contract");
 
-        let serialized = include_bytes!("../../tests/data/dlc_storage/sled/SignedChannelSettled");
+        let serialized = include_bytes!("../../../tests/data/dlc_storage/sled/SignedChannelSettled");
         let signed_channel = Channel::Signed(deserialize_object(serialized));
         storage
             .upsert_channel(signed_channel, None)
@@ -756,88 +661,6 @@ mod tests {
             let contracts = storage.get_contracts().expect("Error retrieving contracts");
 
             assert_eq!(6, contracts.len());
-        }
-    );
-
-    sled_test!(
-        get_offered_channels_only_offered,
-        |mut storage: SledStorageProvider| {
-            insert_offered_and_signed_channels(&mut storage);
-
-            let offered_channels = storage
-                .get_offered_channels()
-                .expect("Error retrieving offered channels");
-            assert_eq!(1, offered_channels.len());
-        }
-    );
-
-    sled_test!(
-        get_signed_established_channel_only_established,
-        |mut storage: SledStorageProvider| {
-            insert_offered_and_signed_channels(&mut storage);
-
-            let signed_channels = storage
-                .get_signed_channels(Some(
-                    dlc_manager::channel::signed_channel::SignedChannelStateType::Established,
-                ))
-                .expect("Error retrieving offered channels");
-            assert_eq!(1, signed_channels.len());
-            if let dlc_manager::channel::signed_channel::SignedChannelState::Established {
-                ..
-            } = &signed_channels[0].state
-            {
-            } else {
-                panic!(
-                    "Expected established state got {:?}",
-                    &signed_channels[0].state
-                );
-            }
-        }
-    );
-
-    sled_test!(
-        get_channel_by_id_returns_correct_channel,
-        |mut storage: SledStorageProvider| {
-            insert_offered_and_signed_channels(&mut storage);
-
-            let serialized = include_bytes!("../../tests/data/dlc_storage/sled/AcceptedChannel");
-            let accepted_channel: AcceptedChannel = deserialize_object(serialized);
-            let channel_id = accepted_channel.channel_id;
-            storage
-                .upsert_channel(Channel::Accepted(accepted_channel), None)
-                .expect("Error creating contract");
-
-            storage
-                .get_channel(&channel_id)
-                .expect("error retrieving previously inserted channel.")
-                .expect("to have found the previously inserted channel.");
-        }
-    );
-
-    sled_test!(
-        delete_channel_is_not_returned,
-        |mut storage: SledStorageProvider| {
-            insert_offered_and_signed_channels(&mut storage);
-
-            let serialized = include_bytes!("../../tests/data/dlc_storage/sled/AcceptedChannel");
-            let accepted_channel: AcceptedChannel = deserialize_object(serialized);
-            let channel_id = accepted_channel.channel_id;
-            storage
-                .upsert_channel(Channel::Accepted(accepted_channel), None)
-                .expect("Error creating contract");
-
-            storage
-                .get_channel(&channel_id)
-                .expect("could not retrieve previously inserted channel.");
-
-            storage
-                .delete_channel(&channel_id)
-                .expect("to be able to delete the channel");
-
-            assert!(storage
-                .get_channel(&channel_id)
-                .expect("error getting channel.")
-                .is_none());
         }
     );
 

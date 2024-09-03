@@ -48,6 +48,8 @@ sled = "0.34.7"
 async-trait = "0.1.80"
 kormir = "0.2.0"
 hex = "0.4.3"
+bincode = "1.3.3"
+bdk_chain = "0.11.0"
 
 [dev-dependencies]
 # electrsd = { version = "0.22.0", features = ["legacy", "esplora_a33e97e1", "bitcoind_23_0"] }

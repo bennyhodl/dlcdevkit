@@ -1,7 +1,7 @@
 //! application tooling for DLCs 🌊
 
 #![allow(dead_code)]
-#![allow(unused_imports)]
+// #![allow(unused_imports)]
 mod chain;
 // pub mod ddk;
 mod ddk;
@@ -9,18 +9,20 @@ mod error;
 mod io;
 mod signer;
 
-/// Configuration for a DDK application.
-pub mod config;
-/// The internal [bdk::Wallet].
-pub mod wallet;
 /// Build a DDK application.
 pub mod builder;
+/// Configuration for a DDK application.
+pub mod config;
 /// Oracle clients.
 pub mod oracle;
 /// Storage implementations.
 pub mod storage;
 /// Transport services.
 pub mod transport;
+/// The internal [bdk::Wallet].
+pub mod wallet;
+use bdk::wallet::ChangeSet;
+use bdk_chain::PersistBackend;
 use bitcoin::key::XOnlyPublicKey;
 /// DDK object with all services
 pub use ddk::DlcDevKit;
@@ -30,9 +32,9 @@ pub use ddk::DlcDevKitDlcManager;
 /// Re-exports
 pub use bdk;
 pub use bitcoin::Network;
+pub use dlc;
 pub use dlc_manager;
 pub use dlc_messages;
-pub use dlc;
 
 /// Nostr relay host. TODO: nostr feature
 pub const RELAY_HOST: &str = "ws://localhost:8081";
@@ -42,9 +44,10 @@ pub const ORACLE_HOST: &str = "http://localhost:8080";
 pub const ESPLORA_HOST: &str = "http://localhost:30000";
 
 use async_trait::async_trait;
+use bitcoin::secp256k1::PublicKey;
 use dlc_messages::oracle_msgs::OracleAnnouncement;
 use dlc_messages::Message;
-use bitcoin::secp256k1::PublicKey;
+use signer::DeriveSigner;
 use transport::PeerInformation;
 
 /// Allows ddk to open a listening connection and send/receive dlc messages functionality.
@@ -65,7 +68,7 @@ pub trait DdkTransport {
     /// Retrieve the peer handler.
     /// TODO: could remove?
     fn peer_manager(&self) -> Self::PeerManager;
-    /// Process messages 
+    /// Process messages
     fn process_messages(&self);
     /// Send a message to a specific counterparty.
     fn send_message(&self, counterparty: PublicKey, message: Message);
@@ -78,9 +81,7 @@ pub trait DdkTransport {
 }
 
 /// Storage for DLC contracts.
-///
-/// TODO: Add `bdk` storage.
-pub trait DdkStorage: dlc_manager::Storage /*+ PersistBackend<ChangeSet> */ {
+pub trait DdkStorage: dlc_manager::Storage + DeriveSigner + PersistBackend<ChangeSet> {
     fn list_peers(&self) -> anyhow::Result<Vec<PeerInformation>>;
     fn save_peer(&self, peer: PeerInformation) -> anyhow::Result<()>;
 }
@@ -89,6 +90,9 @@ pub trait DdkStorage: dlc_manager::Storage /*+ PersistBackend<ChangeSet> */ {
 #[async_trait]
 pub trait DdkOracle: dlc_manager::Oracle {
     fn name(&self) -> String;
-    async fn get_announcement_async(&self, event_id: &str) -> Result<OracleAnnouncement, dlc_manager::error::Error>;
+    async fn get_announcement_async(
+        &self,
+        event_id: &str,
+    ) -> Result<OracleAnnouncement, dlc_manager::error::Error>;
     async fn get_public_key_async(&self) -> Result<XOnlyPublicKey, dlc_manager::error::Error>;
 }

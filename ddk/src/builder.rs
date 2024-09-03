@@ -22,6 +22,7 @@ pub struct DdkBuilder<T, S, O> {
     transport: Option<Arc<T>>,
     storage: Option<Arc<S>>,
     oracle: Option<Arc<O>>,
+    wallet_storage: Option<S>,
 }
 
 /// An error that could be thrown while building [crate::ddk::DlcDevKit]
@@ -37,6 +38,8 @@ pub enum BuilderError {
     NoSeed,
     /// No config provided.
     NoConfig,
+    /// No wallet storage provided.
+    NoWalletStorage,
 }
 
 impl fmt::Display for BuilderError {
@@ -47,6 +50,7 @@ impl fmt::Display for BuilderError {
             BuilderError::NoOracle => write!(f, "A DLC oracle client was not provided."),
             BuilderError::NoSeed => write!(f, "No seed configuration was provided."),
             BuilderError::NoConfig => write!(f, "No config was provided"),
+            BuilderError::NoWalletStorage => write!(f, "No wallet storage was provided.")
         }
     }
 }
@@ -65,6 +69,7 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> Default for DdkBuilder<T, S, 
             transport: None,
             storage: None,
             oracle: None,
+            wallet_storage: None,
         }
     }
 }
@@ -94,10 +99,17 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
 
     /// DLC contract storage. Storage is used by the [dlc_manager::manager::Manager] to create, update, retrieve, and
     /// delete contracts. MUST implement [crate::DdkStorage]
-    ///
-    /// TODO: Storage for the [crate::wallet::DlcDevKitWallet].
     pub fn set_storage(&mut self, storage: Arc<S>) -> &mut Self {
         self.storage = Some(storage);
+        self
+    }
+
+    /// DLC wallet storage. Storage is used by the [bdk::wallet::Wallet] to create, update, retrieve, and
+    /// delete wallet information. MUST implement [bdk_chain::PersistBackend<bdk::wallet::ChangeSet>]
+    ///
+    /// TODO: Figure out a way to pass storage wrapped in arc to `Wallet::new_or_load()`..
+    pub fn set_wallet_storage(&mut self, wallet_storage: S) -> &mut Self {
+        self.wallet_storage = Some(wallet_storage);
         self
     }
 
@@ -151,13 +163,14 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
             .name
             .clone()
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-
+ 
         let wallet = Arc::new(DlcDevKitWallet::new(
             &name,
             xprv,
             &config.esplora_host,
             config.network,
             &config.storage_path,
+            storage.clone(),
         )?);
         tracing::info!("Opened BDK wallet. name={}", name);
 
