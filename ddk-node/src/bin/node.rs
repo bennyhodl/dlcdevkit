@@ -54,19 +54,6 @@ struct NodeArgs {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = NodeArgs::parse();
-    let mut config = DdkConfig::default();
-    let storage_path = match args.storage_dir {
-        Some(storage) => storage,
-        None => homedir::my_home().expect("Provide a directory for ddk.").unwrap().join(".ddk").join("defualt-ddk")
-    };
-    config.storage_path = storage_path.clone();
-    config.esplora_host = args.esplora_host;
-    config.network = Network::from_str(&args.network)?;
-    config.seed_config = match args.seed.as_str() {
-        "bytes" => SeedConfig::Bytes([0u8; 64]),
-        "file" => SeedConfig::File(storage_path.to_str().unwrap().to_string()),
-        _ => SeedConfig::Bytes([0u8;64])
-    };
 
     let level = LevelFilter::from_str(&args.log).unwrap_or(LevelFilter::INFO);
     let subscriber = tracing_subscriber::fmt()
@@ -74,6 +61,21 @@ async fn main() -> anyhow::Result<()> {
         .with_max_level(level)
         .finish();
     tracing::subscriber::set_global_default(subscriber).unwrap();
+
+    let mut config = DdkConfig::default();
+    let storage_path = match args.storage_dir {
+        Some(storage) => storage,
+        None => homedir::my_home().expect("Provide a directory for ddk.").unwrap().join(".ddk").join("default-ddk")
+    };
+    config.storage_path = storage_path.clone();
+    config.esplora_host = args.esplora_host;
+    config.network = Network::from_str(&args.network)?;
+    config.seed_config = match args.seed.as_str() {
+        "bytes" => SeedConfig::Bytes([0u8; 64]),
+        _ => SeedConfig::File(storage_path.to_str().unwrap().to_string()),
+    };
+
+    std::fs::create_dir_all(storage_path)?;
 
     tracing::info!("Starting DDK node.");
 
