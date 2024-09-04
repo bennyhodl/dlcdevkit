@@ -5,7 +5,7 @@ use clap::Parser;
 use ddk::config::{DdkConfig, SeedConfig};
 use ddk::builder::DdkBuilder;
 use ddk::storage::SledStorageProvider;
-use ddk::oracle::P2PDOracleClient;
+use ddk::oracle::{KormirOracleClient, P2PDOracleClient};
 use ddk::transport::lightning::LightningTransport;
 use ddk::Network;
 use ddk_node::ddkrpc::ddk_rpc_server::DdkRpcServer;
@@ -13,7 +13,7 @@ use ddk_node::DdkNode;
 use tonic::transport::Server;
 use tracing::level_filters::LevelFilter;
 
-type DdkServer = ddk::DlcDevKit<LightningTransport, SledStorageProvider, P2PDOracleClient>;
+type DdkServer = ddk::DlcDevKit<LightningTransport, SledStorageProvider, KormirOracleClient>;
 
 #[derive(Parser, Clone, Debug)]
 struct NodeArgs {
@@ -42,7 +42,7 @@ struct NodeArgs {
     #[arg(help = "Host to connect to an esplora server.")]
     esplora_host: String,
     #[arg(long = "oracle")]
-    #[arg(default_value = "http://127.0.0.1:8080")]
+    #[arg(default_value = "http://127.0.0.1:8082")]
     #[arg(help = "Host to connect to an oracle server.")]
     oracle_host: String,
     #[arg(long)]
@@ -85,7 +85,8 @@ async fn main() -> anyhow::Result<()> {
     )?);
 
     let oracle_host = args.oracle_host.clone();
-    let oracle = Arc::new(P2PDOracleClient::new(&oracle_host).await?);
+    // let oracle = Arc::new(P2PDOracleClient::new(&oracle_host).await?);
+    let oracle = Arc::new(KormirOracleClient::new().await?);
 
     let mut builder = DdkBuilder::new();
     builder.set_config(config);

@@ -1,5 +1,7 @@
 use bitcoin::key::XOnlyPublicKey;
+use dlc_manager::error::Error;
 use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
+use kormir::storage::OracleEventData;
 use serde::Serialize;
 use std::str::FromStr;
 use uuid::Uuid;
@@ -30,11 +32,10 @@ pub struct KormirOracleClient {
 }
 
 impl KormirOracleClient {
-    pub fn new() -> anyhow::Result<KormirOracleClient> {
+    pub async fn new() -> anyhow::Result<KormirOracleClient> {
         tracing::info!(host = KORMIR_URL, "Connecting to Kormir oracle client.");
-        let request: String = get("/pubkey")?;
+        let request: String = reqwest::get(format!("{KORMIR_URL}/pubkey")).await?.json().await?;
         let pubkey = XOnlyPublicKey::from_str(&request)?;
-
         let client = reqwest::Client::new();
         tracing::info!(pubkey = pubkey.to_string(), "Connected to Kormir client.");
 
@@ -104,13 +105,26 @@ impl crate::DdkOracle for KormirOracleClient {
     }
 
     async fn get_public_key_async(&self) -> Result<XOnlyPublicKey, dlc_manager::error::Error> {
-        todo!()
+        Ok(self.pubkey)
     }
 
     async fn get_announcement_async(
         &self,
-        _event_id: &str,
+        event_id: &str,
     ) -> Result<OracleAnnouncement, dlc_manager::error::Error> {
-        todo!()
+        let announcements = reqwest::get(format!("{KORMIR_URL}/list-events"))
+            .await
+            .map_err(|_| Error::OracleError("Could not get announcements async.".into()))?
+            .json::<Vec<OracleEventData>>()
+            .await
+            .map_err(|_| Error::OracleError("Could not get announcements async.".into()))?;
+        
+        let event = announcements.iter().find(|event| event.announcement.oracle_event.event_id == event_id);
+
+        match event {
+            Some(event_data) => Ok(event_data.announcement.to_owned()),
+            None => return Err(Error::OracleError("No event found".to_string()))
+        }
+
     }
 }

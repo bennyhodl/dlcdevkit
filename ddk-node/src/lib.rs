@@ -6,7 +6,7 @@ use std::sync::Arc;
 use ddk::bdk::bitcoin::secp256k1::PublicKey;
 use ddk::dlc_manager::contract::contract_input::ContractInput;
 use ddk::dlc_manager::Storage;
-use ddk::oracle::P2PDOracleClient;
+use ddk::oracle::{KormirOracleClient, P2PDOracleClient};
 use ddk::storage::SledStorageProvider;
 use ddk::transport::lightning::LightningTransport;
 use ddk::DlcDevKit;
@@ -21,7 +21,7 @@ use tonic::Request;
 use tonic::Response;
 use tonic::Status;
 
-type DdkServer = DlcDevKit<LightningTransport, SledStorageProvider, P2PDOracleClient>;
+type DdkServer = DlcDevKit<LightningTransport, SledStorageProvider, KormirOracleClient>;
 
 pub struct DdkNode {
     pub inner: Arc<DdkServer>,
