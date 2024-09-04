@@ -1,6 +1,9 @@
+use core::panic;
+
 use clap::{Parser, Subcommand};
 use ddk::bdk::bitcoin::{Address, Transaction};
 use ddk::bdk::LocalOutput;
+use ddk::dlc::{EnumerationPayout, Payout};
 use ddk::dlc_manager::contract::contract_input::ContractInput;
 use ddk::dlc_manager::contract::offered_contract::OfferedContract;
 use ddk::dlc_messages::{AcceptDlc, OfferDlc};
@@ -8,7 +11,7 @@ use ddk_node::ddkrpc::ddk_rpc_client::DdkRpcClient;
 use ddk_node::ddkrpc::{
     AcceptOfferRequest, ConnectRequest, GetWalletTransactionsRequest, InfoRequest, ListOffersRequest, ListPeersRequest, ListUtxosRequest, NewAddressRequest, SendOfferRequest, WalletBalanceRequest
 };
-use inquire::Text;
+use inquire::{Select, Text};
 
 #[derive(Debug, Clone, Parser)]
 #[clap(name = "ddk")]
@@ -93,15 +96,44 @@ async fn main() -> anyhow::Result<()> {
                 let contract_string = std::fs::read_to_string(file)?;
                 serde_json::from_str::<ContractInput>(&contract_string)?
             } else {
-                let offer_collateral: u64 = Text::new("Collateral from you (sats):").prompt()?.parse()?;
-                let accept_collateral: u64 = Text::new("Collateral from counterparty (sats):").prompt()?.parse()?;
-                let fee_rate: u64 = Text::new("Fee rate (sats/vbyte):").prompt()?.parse()?;
-                let min_price: u64 = Text::new("Minimum Bitcoin price:").prompt()?.parse()?;
-                let max_price: u64 = Text::new("Maximum Bitcoin price:").prompt()?.parse()?;
-                let num_steps: u64 = Text::new("Number of rounding steps:").prompt()?.parse()?;
-                let oracle_pubkey = Text::new("Oracle public key:").prompt()?;
-                let event_id = Text::new("Oracle event id:").prompt()?;
-                ddk_payouts::create_contract_input(min_price, max_price, num_steps, offer_collateral, accept_collateral, fee_rate, oracle_pubkey, event_id)
+                let contract_type = Select::new("Select type of contract.", vec!["enum", "numerical"]).prompt()?;
+                match contract_type {
+                    "numerical" => {
+                        let offer_collateral: u64 = Text::new("Collateral from you (sats):").prompt()?.parse()?;
+                        let accept_collateral: u64 = Text::new("Collateral from counterparty (sats):").prompt()?.parse()?;
+                        let fee_rate: u64 = Text::new("Fee rate (sats/vbyte):").prompt()?.parse()?;
+                        let min_price: u64 = Text::new("Minimum Bitcoin price:").prompt()?.parse()?;
+                        let max_price: u64 = Text::new("Maximum Bitcoin price:").prompt()?.parse()?;
+                        let num_steps: u64 = Text::new("Number of rounding steps:").prompt()?.parse()?;
+                        let oracle_pubkey = Text::new("Oracle public key:").prompt()?;
+                        let event_id = Text::new("Oracle event id:").prompt()?;
+                        ddk_payouts::create_contract_input(min_price, max_price, num_steps, offer_collateral, accept_collateral, fee_rate, oracle_pubkey, event_id)
+                    }
+                    "enum" => {
+                        let offer_collateral: u64 = Text::new("Collateral from you (sats):").prompt()?.parse()?;
+                        let accept_collateral: u64 = Text::new("Collateral from counterparty (sats):").prompt()?.parse()?;
+                        let num_outcomes: usize = Text::new("Number of outcomes:").prompt()?.parse()?;
+                        let mut outcome_payouts = Vec::with_capacity(num_outcomes);
+                        for _ in 0..num_outcomes {
+                            let outcome = Text::new("Outcome:").prompt()?;
+                            let offer: u64 = Text::new("Payout: ").prompt()?.parse()?;
+                            let accept: u64 = Text::new("Counterparty payout:").prompt()?.parse()?;
+                            let outcome_payout = EnumerationPayout {
+                                outcome,
+                                payout: Payout {
+                                    offer,
+                                    accept,
+                                }
+                            };
+                            outcome_payouts.push(outcome_payout)
+                        }
+                        let fee_rate: u64 = Text::new("Fee rate (sats/vbyte):").prompt()?.parse()?; 
+                        let oracle_pubkey = Text::new("Oracle public key:").prompt()?;
+                        let event_id = Text::new("Oracle event id:").prompt()?;
+                        ddk_payouts::enumeration::create_contract_input(outcome_payouts, offer_collateral, accept_collateral, fee_rate, oracle_pubkey, event_id)
+                    }
+                    _ => panic!("Invalid contract type.")
+                }
             };
 
             let contract_input = serde_json::to_vec(&contract_input)?;

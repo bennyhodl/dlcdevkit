@@ -1,3 +1,5 @@
+pub mod enumeration;
+
 use std::str::FromStr;
 
 use bitcoin::key::XOnlyPublicKey;
