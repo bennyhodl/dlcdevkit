@@ -5,7 +5,7 @@ use clap::Parser;
 use ddk::config::{DdkConfig, SeedConfig};
 use ddk::builder::DdkBuilder;
 use ddk::storage::SledStorageProvider;
-use ddk::oracle::{KormirOracleClient, P2PDOracleClient};
+use ddk::oracle::KormirOracleClient;
 use ddk::transport::lightning::LightningTransport;
 use ddk::Network;
 use ddk_node::ddkrpc::ddk_rpc_server::DdkRpcServer;
@@ -84,7 +84,7 @@ async fn main() -> anyhow::Result<()> {
         config.storage_path.join("sled_db").to_str().unwrap(),
     )?);
 
-    let oracle_host = args.oracle_host.clone();
+    // let oracle_host = args.oracle_host.clone();
     // let oracle = Arc::new(P2PDOracleClient::new(&oracle_host).await?);
     let oracle = Arc::new(KormirOracleClient::new().await?);
 

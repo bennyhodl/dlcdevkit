@@ -1,13 +1,14 @@
 use crate::io;
 use core::fmt;
+use crossbeam::channel::unbounded;
 use dlc_manager::manager::Manager;
 use dlc_manager::SystemTimeProvider;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 
 use crate::chain::EsploraClient;
 use crate::config::DdkConfig;
-use crate::ddk::DlcDevKit;
+use crate::ddk::{DlcDevKit, DlcManagerMessage};
 use crate::wallet::DlcDevKitWallet;
 use crate::{DdkOracle, DdkStorage, DdkTransport};
 
@@ -181,7 +182,9 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
         let esplora_client = Arc::new(EsploraClient::new(&config.esplora_host, config.network)?);
         tracing::info!(host = config.esplora_host, "Connected to esplora client.");
 
-        let manager = Arc::new(Mutex::new(Manager::new(
+        let (sender, receiver) = unbounded::<DlcManagerMessage>();
+
+        let manager = Arc::new(Manager::new(
             wallet.clone(),
             wallet.clone(),
             esplora_client.clone(),
@@ -189,13 +192,15 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
             oracles,
             Arc::new(SystemTimeProvider {}),
             wallet.clone(),
-        )?));
+        )?);
         tracing::info!("Created ddk dlc manager.");
 
         Ok(DlcDevKit {
             runtime: Arc::new(RwLock::new(None)),
             wallet,
             manager,
+            sender: Arc::new(sender),
+            receiver: Arc::new(receiver),
             transport,
             storage,
             oracle,

@@ -56,7 +56,7 @@ use transport::PeerInformation;
 ///
 /// TODO: error handling and result types
 #[async_trait]
-pub trait DdkTransport {
+pub trait DdkTransport: std::marker::Send + std::marker::Sync + 'static {
     type PeerManager;
     type MessageHandler;
 
@@ -83,14 +83,14 @@ pub trait DdkTransport {
 }
 
 /// Storage for DLC contracts.
-pub trait DdkStorage: dlc_manager::Storage + DeriveSigner + PersistBackend<ChangeSet> {
+pub trait DdkStorage: dlc_manager::Storage + DeriveSigner + PersistBackend<ChangeSet> + std::marker::Send + std::marker::Sync + 'static {
     fn list_peers(&self) -> anyhow::Result<Vec<PeerInformation>>;
     fn save_peer(&self, peer: PeerInformation) -> anyhow::Result<()>;
 }
 
 /// Oracle client
 #[async_trait]
-pub trait DdkOracle: dlc_manager::Oracle {
+pub trait DdkOracle: dlc_manager::Oracle + std::marker::Send + std::marker::Sync + 'static {
     fn name(&self) -> String;
     async fn get_announcement_async(
         &self,

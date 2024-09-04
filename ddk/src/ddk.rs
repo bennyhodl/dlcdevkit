@@ -10,9 +10,10 @@ use dlc_manager::{
 };
 use dlc_messages::oracle_msgs::OracleAnnouncement;
 use dlc_messages::{AcceptDlc, Message, OfferDlc};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio::runtime::Runtime;
+use crossbeam::channel::{unbounded, Sender, Receiver};
 
 /// DlcDevKit type alias for the [dlc_manager::manager::Manager]
 pub type DlcDevKitDlcManager<S, O> = dlc_manager::manager::Manager<
@@ -26,21 +27,36 @@ pub type DlcDevKitDlcManager<S, O> = dlc_manager::manager::Manager<
     SimpleSigner,
 >;
 
+#[derive(Debug)]
+pub enum DlcManagerMessage {
+    AcceptDlc {
+        contract: ContractId,
+        responder: Sender<(ContractId, PublicKey, AcceptDlc)>
+    },
+    OfferDlc {
+        contract_input: ContractInput,
+        counter_party: PublicKey,
+        oracle_announcements: Vec<OracleAnnouncement>,
+        responder: Sender<OfferDlc>,
+    },
+    ProcessMessages,
+}
+
 pub struct DlcDevKit<T: DdkTransport, S: DdkStorage, O: DdkOracle> {
     pub runtime: Arc<RwLock<Option<Runtime>>>,
     pub wallet: Arc<DlcDevKitWallet<S>>,
-    pub manager: Arc<Mutex<DlcDevKitDlcManager<S, O>>>,
+    pub manager: Arc<DlcDevKitDlcManager<S, O>>,
+    pub sender: Arc<Sender<DlcManagerMessage>>,
+    pub receiver: Arc<Receiver<DlcManagerMessage>>,
     pub transport: Arc<T>,
     pub storage: Arc<S>,
     pub oracle: Arc<O>,
     pub network: Network,
 }
 
-impl<
-        T: DdkTransport + std::marker::Send + std::marker::Sync + 'static,
-        S: DdkStorage + std::marker::Send + std::marker::Sync + 'static,
-        O: DdkOracle + std::marker::Send + std::marker::Sync + 'static,
-    > DlcDevKit<T, S, O>
+impl<T, S, O> DlcDevKit<T, S, O>
+where 
+    T: DdkTransport, S: DdkStorage, O: DdkOracle
 {
     pub fn start(&self) -> anyhow::Result<()> {
         let mut runtime_lock = self.runtime.write().unwrap();
@@ -52,6 +68,12 @@ impl<
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()?;
+
+        
+        let manager_transport = self.transport.clone();
+        let manager_clone = self.manager.clone();
+        let receiver_clone = self.receiver.clone();
+        std::thread::spawn(move || Self::run_manager(manager_clone, manager_transport, receiver_clone));
 
         let transport_clone = self.transport.clone();
         runtime.spawn(async move {
@@ -67,15 +89,12 @@ impl<
             }
         });
 
-        let message_processor = self.transport.clone();
-        let manager_clone = self.manager.clone();
+        let processor = self.sender.clone();
         runtime.spawn(async move {
             let mut timer = tokio::time::interval(Duration::from_secs(5));
             loop {
                 timer.tick().await;
-                process_incoming_messages(message_processor.clone(), manager_clone.clone(), || {
-                    message_processor.process_messages()
-                });
+                processor.send(DlcManagerMessage::ProcessMessages).expect("couldn't send message");
             }
         });
 
@@ -86,6 +105,44 @@ impl<
         Ok(())
     }
 
+    fn run_manager(manager: Arc<DlcDevKitDlcManager<S, O>>, transport: Arc<T>, receiver: Arc<Receiver<DlcManagerMessage>>) {
+        while let Ok(msg) = receiver.recv() {
+            tracing::info!(message=?msg, "Received dlc manager message.");
+            match msg {
+                DlcManagerMessage::OfferDlc { contract_input, counter_party, oracle_announcements, responder } => {
+                    let offer = manager.send_offer_with_announcements(&contract_input, counter_party, vec![oracle_announcements]).expect("can't create offerdlc");
+                    responder.send(offer).expect("send offer error")
+                },
+                DlcManagerMessage::AcceptDlc { contract, responder } => {
+                    let accept = manager.accept_contract_offer(&contract).expect("can't accept offer");
+                    responder.send(accept).expect("can't send")
+                }
+                DlcManagerMessage::ProcessMessages => {
+                    let messages = transport.get_and_clear_received_messages();
+
+                    for (counter_party, message) in messages {
+                        tracing::info!(
+                            counter_party = counter_party.to_string(),
+                            "Processing DLC message"
+                        );
+
+                        let message_response = manager.on_dlc_message(&message, counter_party).expect("no on dlc message");
+                        if let Some(msg) = message_response {
+                            tracing::info!("Responding to message received.");
+                            tracing::debug!(message=?msg);
+                            transport.send_message(counter_party, msg);
+                        }
+                    }
+
+                    if transport.has_pending_messages() {
+                        transport.process_messages()
+                    }
+                }
+            }
+        }
+
+    }
+
     pub fn connect_if_necessary(&self) -> anyhow::Result<()> {
         let _known_peers = self.storage.list_peers()?;
 
@@ -94,19 +151,19 @@ impl<
         Ok(())
     }
 
+    pub fn network(&self) -> Network {
+        self.network
+    }
+
     pub fn send_dlc_offer(
         &self,
         contract_input: &ContractInput,
         counter_party: PublicKey,
         oracle_announcements: Vec<OracleAnnouncement>,
     ) -> anyhow::Result<OfferDlc> {
-        let manager = self.manager.lock().unwrap();
-
-        let offer = manager.send_offer_with_announcements(
-            contract_input,
-            counter_party,
-            vec![oracle_announcements],
-        )?;
+        let (responder, receiver) = unbounded();
+        self.sender.send(DlcManagerMessage::OfferDlc { contract_input: contract_input.to_owned(), counter_party, oracle_announcements, responder }).expect("sending offer message");
+        let offer = receiver.recv().expect("no offer dlc");
 
         let contract_id = hex::encode(&offer.temporary_contract_id);
         self.transport
@@ -120,19 +177,13 @@ impl<
         Ok(offer)
     }
 
-    pub fn network(&self) -> Network {
-        self.network
-    }
-
     pub fn accept_dlc_offer(
         &self,
         contract: [u8; 32],
     ) -> anyhow::Result<(String, String, AcceptDlc)> {
-        let dlc = self.manager.lock().unwrap();
-
-        let contract_id = ContractId::from(contract);
-
-        let (contract_id, public_key, accept_dlc) = dlc.accept_contract_offer(&contract_id)?;
+        let (responder, receiver) = unbounded();
+        self.sender.send(DlcManagerMessage::AcceptDlc { contract, responder }).expect("couldnt send accept");
+        let (contract_id, public_key, accept_dlc) = receiver.recv().expect("coudlnt accept dlc");
 
         self.transport
             .send_message(public_key, Message::Accept(accept_dlc.clone()));
@@ -145,32 +196,3 @@ impl<
     }
 }
 
-pub fn process_incoming_messages<T: DdkTransport, S: DdkStorage, O: DdkOracle, F: Fn() -> ()>(
-    transport: Arc<T>,
-    manager: Arc<Mutex<DlcDevKitDlcManager<S, O>>>,
-    process_messages: F,
-) {
-    let messages = transport.get_and_clear_received_messages();
-
-    for (counter_party, message) in messages {
-        tracing::info!(
-            counter_party = counter_party.to_string(),
-            "Processing DLC message"
-        );
-        let resp = manager
-            .lock()
-            .unwrap()
-            .on_dlc_message(&message, counter_party)
-            .expect("Error processing message");
-
-        if let Some(msg) = resp {
-            tracing::info!("Responding to message received.");
-            tracing::debug!(message=?msg);
-            transport.send_message(counter_party, msg);
-        }
-    }
-
-    if transport.has_pending_messages() {
-        process_messages()
-    }
-}
