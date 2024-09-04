@@ -13,6 +13,8 @@ mod signer;
 pub mod builder;
 /// Configuration for a DDK application.
 pub mod config;
+/// DLC utilities.
+pub mod util;
 /// Oracle clients.
 pub mod oracle;
 /// Storage implementations.

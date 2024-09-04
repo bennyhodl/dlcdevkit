@@ -6,18 +6,16 @@ use dlc_manager::channel::signed_channel::{SignedChannel, SignedChannelStateType
 use dlc_manager::channel::{
     Channel, ClosedChannel, ClosedPunishedChannel, ClosingChannel, FailedAccept, FailedSign,
 };
-use dlc_manager::contract::accepted_contract::AcceptedContract;
 use dlc_manager::contract::offered_contract::OfferedContract;
 use dlc_manager::contract::ser::Serializable;
 use dlc_manager::contract::signed_contract::SignedContract;
-use dlc_manager::contract::{
-    ClosedContract, Contract, FailedAcceptContract, FailedSignContract, PreClosedContract,
-};
+use dlc_manager::contract::{Contract, PreClosedContract};
 use dlc_manager::{error::Error, ContractId, Storage};
 use sled::transaction::{ConflictableTransactionResult, UnabortableTransactionError};
 use sled::Transactional;
 use std::convert::TryInto;
 use std::io::Read;
+use crate::util::{serialize_contract, deserialize_contract};
 
 macro_rules! convertible_enum {
     (enum $name:ident {
@@ -319,63 +317,6 @@ fn insert_contract(
     };
 
     db.insert(&contract.get_id(), serialized)
-}
-
-fn serialize_contract(contract: &Contract) -> Result<Vec<u8>, ::std::io::Error> {
-    let serialized = match contract {
-        Contract::Offered(o) | Contract::Rejected(o) => o.serialize(),
-        Contract::Accepted(o) => o.serialize(),
-        Contract::Signed(o) | Contract::Confirmed(o) | Contract::Refunded(o) => o.serialize(),
-        Contract::FailedAccept(c) => c.serialize(),
-        Contract::FailedSign(c) => c.serialize(),
-        Contract::PreClosed(c) => c.serialize(),
-        Contract::Closed(c) => c.serialize(),
-    };
-    let mut serialized = serialized?;
-    let mut res = Vec::with_capacity(serialized.len() + 1);
-    res.push(ContractPrefix::get_prefix(contract));
-    res.append(&mut serialized);
-    Ok(res)
-}
-
-fn deserialize_contract(buff: &sled::IVec) -> Result<Contract, Error> {
-    let mut cursor = ::std::io::Cursor::new(buff);
-    let mut prefix = [0u8; 1];
-    cursor.read_exact(&mut prefix)?;
-    let contract_prefix: ContractPrefix = prefix[0].try_into()?;
-    let contract = match contract_prefix {
-        ContractPrefix::Offered => {
-            Contract::Offered(OfferedContract::deserialize(&mut cursor).map_err(to_storage_error)?)
-        }
-        ContractPrefix::Accepted => Contract::Accepted(
-            AcceptedContract::deserialize(&mut cursor).map_err(to_storage_error)?,
-        ),
-        ContractPrefix::Signed => {
-            Contract::Signed(SignedContract::deserialize(&mut cursor).map_err(to_storage_error)?)
-        }
-        ContractPrefix::Confirmed => {
-            Contract::Confirmed(SignedContract::deserialize(&mut cursor).map_err(to_storage_error)?)
-        }
-        ContractPrefix::PreClosed => Contract::PreClosed(
-            PreClosedContract::deserialize(&mut cursor).map_err(to_storage_error)?,
-        ),
-        ContractPrefix::Closed => {
-            Contract::Closed(ClosedContract::deserialize(&mut cursor).map_err(to_storage_error)?)
-        }
-        ContractPrefix::FailedAccept => Contract::FailedAccept(
-            FailedAcceptContract::deserialize(&mut cursor).map_err(to_storage_error)?,
-        ),
-        ContractPrefix::FailedSign => Contract::FailedSign(
-            FailedSignContract::deserialize(&mut cursor).map_err(to_storage_error)?,
-        ),
-        ContractPrefix::Refunded => {
-            Contract::Refunded(SignedContract::deserialize(&mut cursor).map_err(to_storage_error)?)
-        }
-        ContractPrefix::Rejected => {
-            Contract::Rejected(OfferedContract::deserialize(&mut cursor).map_err(to_storage_error)?)
-        }
-    };
-    Ok(contract)
 }
 
 fn serialize_channel(channel: &Channel) -> Result<Vec<u8>, ::std::io::Error> {

@@ -6,10 +6,12 @@ use ddk::bdk::LocalOutput;
 use ddk::dlc::{EnumerationPayout, Payout};
 use ddk::dlc_manager::contract::contract_input::ContractInput;
 use ddk::dlc_manager::contract::offered_contract::OfferedContract;
+use ddk::dlc_manager::contract::Contract;
 use ddk::dlc_messages::{AcceptDlc, OfferDlc};
+use ddk::util::deserialize_contract_bytes;
 use ddk_node::ddkrpc::ddk_rpc_client::DdkRpcClient;
 use ddk_node::ddkrpc::{
-    AcceptOfferRequest, ConnectRequest, GetWalletTransactionsRequest, InfoRequest, ListOffersRequest, ListPeersRequest, ListUtxosRequest, NewAddressRequest, SendOfferRequest, WalletBalanceRequest
+    AcceptOfferRequest, ConnectRequest, GetWalletTransactionsRequest, InfoRequest, ListContractsRequest, ListOffersRequest, ListOraclesRequest, ListPeersRequest, ListUtxosRequest, NewAddressRequest, SendOfferRequest, WalletBalanceRequest
 };
 use inquire::{Select, Text};
 
@@ -35,6 +37,8 @@ enum CliCommand {
     Offers,
     // Accept a DLC offer with the contract id string.
     AcceptOffer(Accept),
+    // List contracts.
+    Contracts,
     // Wallet commands
     #[clap(subcommand)]
     Wallet(WalletCommand),
@@ -92,6 +96,9 @@ async fn main() -> anyhow::Result<()> {
             println!("{:?}", info);
         }
         CliCommand::OfferContract(arg) => {
+            // TODO: support multiple oracles
+            let oracle = client.list_oracles(ListOraclesRequest::default()).await?.into_inner();
+
             let contract_input = if let Some(file) = arg.contract_input_file {
                 let contract_string = std::fs::read_to_string(file)?;
                 serde_json::from_str::<ContractInput>(&contract_string)?
@@ -128,9 +135,9 @@ async fn main() -> anyhow::Result<()> {
                             outcome_payouts.push(outcome_payout)
                         }
                         let fee_rate: u64 = Text::new("Fee rate (sats/vbyte):").prompt()?.parse()?; 
-                        let oracle_pubkey = Text::new("Oracle public key:").prompt()?;
+                        // TODO: list possible events.
                         let event_id = Text::new("Oracle event id:").prompt()?;
-                        ddk_payouts::enumeration::create_contract_input(outcome_payouts, offer_collateral, accept_collateral, fee_rate, oracle_pubkey, event_id)
+                        ddk_payouts::enumeration::create_contract_input(outcome_payouts, offer_collateral, accept_collateral, fee_rate, oracle.pubkey, event_id)
                     }
                     _ => panic!("Invalid contract type.")
                 }
@@ -170,6 +177,24 @@ async fn main() -> anyhow::Result<()> {
             println!("Contract {} accepted with {}", accept.contract_id, accept.counter_party);
             let accept_dlc = serde_json::from_slice::<AcceptDlc>(&accept.accept_dlc)?;
             println!("{:?}", accept_dlc)
+        }
+        CliCommand::Contracts => {
+            let contracts = client.list_contracts(ListContractsRequest {}).await?.into_inner().contracts;
+            for contract in contracts {
+                let contract = deserialize_contract_bytes(&contract).unwrap();
+                match contract {
+                    Contract::Offered(o) => {
+                        print!("{:?}", o)
+                    }
+                    Contract::Signed(s) => {
+                        print!("{:?}", s)
+                    }
+                    Contract::Accepted(a) => {
+                        print!("{:?}", a)
+                    }
+                    _ => ()
+                }
+            }
         }
         CliCommand::Wallet(wallet) => match wallet {
             WalletCommand::Balance => {

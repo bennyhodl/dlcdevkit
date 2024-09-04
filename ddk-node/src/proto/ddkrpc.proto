@@ -12,6 +12,8 @@ service DdkRpc {
   rpc ListUtxos (ListUtxosRequest) returns (ListUtxosResponse);
   rpc ListPeers (ListPeersRequest) returns (ListPeersResponse);
   rpc ConnectPeer (ConnectRequest) returns (ConnectResponse);
+  rpc ListOracles (ListOraclesRequest) returns (ListOraclesResponse);
+  rpc ListContracts (ListContractsRequest) returns (ListContractsResponse);
 }
 
 message InfoRequest {}
@@ -98,3 +100,16 @@ message ConnectRequest {
 }
 
 message ConnectResponse {}
+
+message ListOraclesRequest {}
+
+message ListOraclesResponse {
+  string name = 1;
+  string pubkey = 2;
+}
+
+message ListContractsRequest {}
+
+message ListContractsResponse {
+  repeated bytes contracts = 1;
+}

@@ -6,14 +6,15 @@ use std::sync::Arc;
 use ddk::bdk::bitcoin::secp256k1::PublicKey;
 use ddk::dlc_manager::contract::contract_input::ContractInput;
 use ddk::dlc_manager::Storage;
-use ddk::oracle::{KormirOracleClient, P2PDOracleClient};
+use ddk::oracle::KormirOracleClient;
 use ddk::storage::SledStorageProvider;
 use ddk::transport::lightning::LightningTransport;
+use ddk::util::serialize_contract;
 use ddk::DlcDevKit;
 use ddk::{DdkOracle, DdkTransport};
 use ddkrpc::ddk_rpc_server::DdkRpc;
 use ddkrpc::{
-    AcceptOfferRequest, AcceptOfferResponse, ConnectRequest, ConnectResponse, GetWalletTransactionsRequest, GetWalletTransactionsResponse, ListOffersRequest, ListOffersResponse, ListPeersRequest, ListPeersResponse, ListUtxosRequest, ListUtxosResponse, NewAddressRequest, NewAddressResponse, Peer, SendOfferRequest, SendOfferResponse, WalletBalanceRequest, WalletBalanceResponse
+    AcceptOfferRequest, AcceptOfferResponse, ConnectRequest, ConnectResponse, GetWalletTransactionsRequest, GetWalletTransactionsResponse, ListContractsRequest, ListContractsResponse, ListOffersRequest, ListOffersResponse, ListOraclesRequest, ListOraclesResponse, ListPeersRequest, ListPeersResponse, ListUtxosRequest, ListUtxosResponse, NewAddressRequest, NewAddressResponse, Peer, SendOfferRequest, SendOfferResponse, WalletBalanceRequest, WalletBalanceResponse
 };
 use ddkrpc::{InfoRequest, InfoResponse};
 use tonic::{async_trait, Code};
@@ -209,5 +210,19 @@ impl DdkRpc for DdkNode {
         let pubkey = PublicKey::from_str(&pubkey).unwrap();
         self.inner.transport.connect_outbound(pubkey, &host).await;
         Ok(Response::new(ConnectResponse {}))
+    }
+
+    async fn list_oracles(&self, _request: Request<ListOraclesRequest>) -> Result<Response<ListOraclesResponse>, Status> {
+        let pubkey = self.inner.oracle.get_public_key_async().await.unwrap().to_string();
+        let name = self.inner.oracle.name();
+        Ok(Response::new(ListOraclesResponse { name, pubkey }))
+    }
+
+    async fn list_contracts(&self, _request: Request<ListContractsRequest>) -> Result<Response<ListContractsResponse>, Status> {
+        let contracts = self.inner.storage.get_contracts().map_err(|e| Status::new(Code::Cancelled, e.to_string()))?;
+        let contract_bytes: Vec<Vec<u8>> = contracts.iter()
+            .map(|contract| serialize_contract(contract).unwrap())
+            .collect();
+        Ok(Response::new(ListContractsResponse {contracts: contract_bytes}))
     }
 }
