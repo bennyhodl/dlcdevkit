@@ -179,22 +179,22 @@ async fn main() -> anyhow::Result<()> {
             println!("{:?}", accept_dlc)
         }
         CliCommand::Contracts => {
-            let contracts = client.list_contracts(ListContractsRequest {}).await?.into_inner().contracts;
-            for contract in contracts {
-                let contract = deserialize_contract_bytes(&contract).unwrap();
-                match contract {
-                    Contract::Offered(o) => {
-                        print!("{:?}", o)
-                    }
-                    Contract::Signed(s) => {
-                        print!("{:?}", s)
-                    }
-                    Contract::Accepted(a) => {
-                        print!("{:?}", a)
-                    }
-                    _ => ()
-                }
-            }
+            let _contracts = client.list_contracts(ListContractsRequest {}).await?.into_inner().contracts;
+            // for contract in contracts {
+            //     let contract = deserialize_contract_bytes(&contract).unwrap();
+            //     match contract {
+            //         Contract::Offered(o) => {
+            //             print!("{:?}", o)
+            //         }
+            //         Contract::Signed(s) => {
+            //             print!("{:?}", s)
+            //         }
+            //         Contract::Accepted(a) => {
+            //             print!("{:?}", a)
+            //         }
+            //         _ => ()
+            //     }
+            // }
         }
         CliCommand::Wallet(wallet) => match wallet {
             WalletCommand::Balance => {
