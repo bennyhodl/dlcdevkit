@@ -12,14 +12,12 @@ pub fn xprv_from_config(
         SeedConfig::Bytes(bytes) => ExtendedPrivKey::new_master(network, bytes)?,
         SeedConfig::File(file) => {
             if Path::new(&format!("{file}/seed.ddk")).exists() {
-                tracing::info!("seed exists {}", network);
                 let seed = std::fs::read(format!("{file}/seed.ddk"))?;
                 let mut key = [0; 64];
                 key.copy_from_slice(&seed);
                 let xprv = ExtendedPrivKey::new_master(network, &seed)?;
                 xprv
             } else {
-                tracing::info!("seed doesnt exist");
                 let mut file = File::create(format!("{file}/seed.ddk"))?;
                 let mut entropy = [0u8; 64];
                 getrandom(&mut entropy)?;

@@ -39,3 +39,25 @@ impl From<DlcDevKitError> for ManagerError {
 pub fn esplora_err_to_manager_err(e: EsploraError) -> ManagerError {
     DlcDevKitError::Esplora(e).into()
 }
+
+#[derive(thiserror::Error, Debug)]
+pub enum WalletError {
+    #[error("Error syncing the internal BDK wallet.")]
+    SyncError,
+    #[error("Storage error.")]
+    StorageError(#[from] sled::Error),
+    #[error("Error with deriving signer: {0}")]
+    SignerError(String),
+    #[error("Wallet call to esplora: {0}")]
+    Esplora(#[from] Box<bdk_esplora::esplora_client::Error>),
+    #[error("Broadcast to esplora: {0}")]
+    Broadcast(#[from] bdk_esplora::esplora_client::Error),
+    #[error("Applying an update to the wallet.")]
+    UtxoUpdate(#[from] bdk_chain::local_chain::CannotConnectError),
+    #[error("Error signing PSBT: {0}")]
+    Signing(#[from] bdk::wallet::signer::SignerError),
+    #[error("Receive error from wallet channel: {0}")]
+    ReceiveMessage(#[from] crossbeam::channel::RecvError),
+    #[error("Sending error from wallet channel: {0}")]
+    SendMessage(String),
+}

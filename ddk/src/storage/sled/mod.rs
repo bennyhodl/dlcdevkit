@@ -74,12 +74,12 @@ impl SledStorageProvider {
         self.open_tree(&[CHANNEL_TREE])
     }
 
-    fn signer_tree(&self) -> Result<Tree, Error> {
-        self.open_tree(&[SIGNER_TREE])
+    fn signer_tree(&self) -> Result<Tree, sled::Error> {
+        self.db.open_tree(&[SIGNER_TREE])
     }
 
-    pub fn wallet_tree(&self) -> Result<Tree, Error> {
-        self.open_tree(&[WALLET_TREE])
+    pub fn wallet_tree(&self) -> Result<Tree, sled::Error> {
+        self.db.open_tree(&[WALLET_TREE])
     }
 }
 

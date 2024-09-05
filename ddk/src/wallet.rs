@@ -1,7 +1,6 @@
 use crate::{
     chain::EsploraClient, signer::SignerInformation, storage::SledStorageProvider, DdkStorage,
 };
-use anyhow::anyhow;
 use bdk::{
     bitcoin::{
         bip32::{DerivationPath, ExtendedPrivKey},
@@ -13,7 +12,7 @@ use bdk::{
     KeychainKind, LocalOutput, SignOptions, Wallet,
 };
 use bdk_esplora::EsploraExt;
-use bitcoin::{secp256k1::SecretKey, FeeRate, ScriptBuf, Transaction};
+use bitcoin::{psbt::PartiallySignedTransaction, secp256k1::SecretKey, FeeRate, ScriptBuf, Transaction};
 use blake3::Hasher;
 use crossbeam::channel::{unbounded, Receiver, Sender};
 use dlc_manager::{error::Error as ManagerError, SimpleSigner};
@@ -21,6 +20,7 @@ use lightning::chain::chaininterface::{ConfirmationTarget, FeeEstimator};
 use std::sync::{atomic::Ordering, Arc};
 use std::{collections::HashMap, path::Path};
 use std::{str::FromStr, sync::atomic::AtomicU32};
+use crate::error::WalletError;
 
 /// Internal [bdk::Wallet] for ddk.
 /// Uses eplora blocking for the [ddk::DlcDevKit] being sync only
@@ -39,21 +39,21 @@ pub struct DlcDevKitWallet<S> {
 /// Messages that can be sent to the internal wallet.
 pub enum WalletOperation {
     // Sync the wallet scrippubkeys to chain.
-    Sync(Sender<anyhow::Result<()>>),
+    Sync(Sender<Result<(), WalletError>>),
     // Retrieve wallet balance.
-    Balance(Sender<anyhow::Result<Balance>>),
+    Balance(Sender<Balance>),
     // Get a new, unused address for external use.
-    NewExternalAddress(Sender<anyhow::Result<AddressInfo>>),
+    NewExternalAddress(Sender<Result<AddressInfo, WalletError>>),
     // Get a new, unused change address.
-    NewChangeAddress(Sender<anyhow::Result<AddressInfo>>),
+    NewChangeAddress(Sender<Result<AddressInfo, WalletError>>),
     // Send an amount to an address.
-    SendToAddress(Address, u64, u64, Sender<anyhow::Result<Txid>>),
+    SendToAddress(Address, u64, u64, Sender<Result<Txid, WalletError>>),
     // Get all Transactions in the wallet.
-    GetTransactions(Sender<anyhow::Result<Vec<Transaction>>>),
+    GetTransactions(Sender<Vec<Transaction>>),
     // Get all UTXO's owned by the wallet.
-    ListUtxos(Sender<anyhow::Result<Vec<LocalOutput>>>),
+    ListUtxos(Sender<Vec<LocalOutput>>),
     // Sign an input.
-    SignPsbtInput(bitcoin::psbt::PartiallySignedTransaction, usize, Sender<()>),
+    SignPsbtInput(PartiallySignedTransaction, usize, Sender<Result<(), WalletError>>),
     // Get the next unused derivation path.
     NextDerivationIndex(Sender<u32>),
 }
@@ -140,58 +140,79 @@ impl<S: DdkStorage> DlcDevKitWallet<S> {
         while let Ok(op) = receiver.recv() {
             match op {
                 WalletOperation::Sync(responder) => {
-                    let prev_tip = wallet.latest_checkpoint();
-                    let keychain_spks = wallet.all_unbounded_spk_iters().into_iter().collect();
-                    let (update_graph, last_active_indices) = blockchain
-                        .blocking_client
-                        .full_scan(keychain_spks, 5, 1)
-                        .expect("msg");
-                    let missing_height = update_graph.missing_heights(wallet.local_chain());
-                    let chain_update = blockchain
-                        .blocking_client
-                        .update_local_chain(prev_tip, missing_height)
-                        .expect("msg");
-                    let update = Update {
-                        last_active_indices,
-                        graph: update_graph,
-                        chain: Some(chain_update),
-                    };
+                    let sync_inner = |wallet: &mut Wallet<SledStorageProvider>| -> Result<(), WalletError> {
+                        let prev_tip = wallet.latest_checkpoint();
+                        let keychain_spks = wallet.all_unbounded_spk_iters().into_iter().collect();
+                        let (update_graph, last_active_indices) = blockchain
+                            .blocking_client
+                            .full_scan(keychain_spks, 5, 1)?;
+                        let missing_height = update_graph.missing_heights(wallet.local_chain());
+                        let chain_update = blockchain
+                            .blocking_client
+                            .update_local_chain(prev_tip, missing_height)?;
+                        let update = Update {
+                            last_active_indices,
+                            graph: update_graph,
+                            chain: Some(chain_update),
+                        };
 
-                    wallet.apply_update(update).expect("msg");
-                    wallet.commit().expect("msg");
-                    responder.send(Ok(())).expect("Couldn't send sync result.");
+                        wallet.apply_update(update)?;
+                        wallet.commit()?;
+                        Ok(())
+                    };
+                    let result = sync_inner(wallet);
+                    if let Err(e) = responder.send(result) {
+                        tracing::error!(message=?e, "Could not send message in sync message")
+                    }
                 }
                 WalletOperation::Balance(responder) => {
                     let balance = wallet.get_balance();
-                    responder.send(Ok(balance)).expect("Couldn't send balance.");
+                    if let Err(e) = responder.send(balance) {
+                        tracing::error!(message=?e, "Could not send message in balance message")
+                    }
                 }
                 WalletOperation::NewExternalAddress(responder) => {
-                    let address = wallet
-                        .try_get_address(AddressIndex::New)
-                        .expect("couldn't get address");
-                    responder
-                        .send(Ok(address))
-                        .expect("Couldn't send new external address.");
+                    let get_address = |wallet: &mut Wallet<SledStorageProvider>| -> Result<AddressInfo, WalletError> {
+                        Ok(wallet
+                            .try_get_address(AddressIndex::New)?)
+                    };
+                    let address = get_address(wallet);
+                    if let Err(e) = responder.send(address) {
+                        tracing::error!(message=?e, "Could not send message in balance message")
+                    }
                 }
                 WalletOperation::NewChangeAddress(responder) => {
-                    let address = wallet
-                        .try_get_internal_address(AddressIndex::New)
-                        .expect("couldn't get internal address");
-                    responder
-                        .send(Ok(address))
-                        .expect("Couldn't send new change address.");
+                    let get_address = |wallet: &mut Wallet<SledStorageProvider>| -> Result<AddressInfo, WalletError> {
+                        Ok(wallet
+                            .try_get_internal_address(AddressIndex::New)?)
+                    };
+                    let address = get_address(wallet);
+                    if let Err(e) = responder.send(address) {
+                        tracing::error!(message=?e, "Could not send message in balance message")
+                    }
                 }
                 WalletOperation::SendToAddress(address, amount, sat_vbyte, responder) => {
-                    let result = Self::send_to_address_inner(
-                        wallet,
-                        address,
-                        amount,
-                        sat_vbyte,
-                        &blockchain,
-                    );
-                    responder
-                        .send(result)
-                        .expect("Couldn't send transaction result.");
+                    let send = |wallet: &mut Wallet<SledStorageProvider>| -> Result<Txid, WalletError> {
+                        let mut txn_builder = wallet.build_tx();
+
+                        txn_builder
+                            .add_recipient(address.script_pubkey(), amount)
+                            .fee_rate(FeeRate::from_sat_per_vb(sat_vbyte).unwrap());
+
+                        let mut psbt = txn_builder.finish().unwrap();
+
+                        wallet.sign(&mut psbt, SignOptions::default())?;
+
+                        let tx = psbt.extract_tx();
+
+                        blockchain.blocking_client.broadcast(&tx)?;
+
+                        Ok(tx.txid())
+                    };
+                    let txid = send(wallet);
+                    if let Err(e) = responder.send(txid) {
+                        tracing::error!(message=?e, "Could not send message to broadcast transaction.")
+                    }
                 }
                 WalletOperation::GetTransactions(responder) => {
                     let transactions: Vec<Transaction> = wallet
@@ -199,9 +220,9 @@ impl<S: DdkStorage> DlcDevKitWallet<S> {
                         .into_iter()
                         .map(|t| t.tx_node.tx.to_owned())
                         .collect();
-                    responder
-                        .send(Ok(transactions))
-                        .expect("Couldn't send transactions.");
+                    if let Err(e) = responder.send(transactions) {
+                        tracing::error!(message=?e, "Could not send message to get transactions.")
+                    }
                 }
                 WalletOperation::ListUtxos(responder) => {
                     let utxos: Vec<LocalOutput> = wallet
@@ -209,58 +230,65 @@ impl<S: DdkStorage> DlcDevKitWallet<S> {
                         .into_iter()
                         .map(|utxo| utxo.to_owned())
                         .collect();
-                    responder.send(Ok(utxos)).expect("Couldn't send UTXOs.");
+                    if let Err(e) = responder.send(utxos) {
+                        tracing::error!(message=?e, "Could not send message to get utxos.")
+                    }
                 }
                 WalletOperation::NextDerivationIndex(responder) => {
                     let next_index = wallet.next_derivation_index(KeychainKind::External);
-                    responder.send(next_index).expect("couldn't send")
+                    if let Err(e) = responder.send(next_index) {
+                        tracing::error!(message=?e, "Could not send message to get utxos.")
+                    }
                 }
                 WalletOperation::SignPsbtInput(psbt, _input_index, responder) => {
-                    let mut psbt = psbt.clone();
-                    wallet
-                        .sign(&mut psbt, SignOptions::default())
-                        .expect("couldn't sign");
-                    responder.send(()).expect("Couldn't send sign result.");
+                    let sign = |psbt: PartiallySignedTransaction, wallet: &mut Wallet<SledStorageProvider>, | -> Result<(), WalletError> {
+                        let mut psbt = psbt.clone();
+                        wallet.sign(&mut psbt, SignOptions::default())?;
+                        Ok(())
+                    };
+                    let sign_txn = sign(psbt, wallet);
+                    if let Err(e) = responder.send(sign_txn) {
+                        tracing::error!(message=?e, "Could not send message to get utxos.")
+                    }
                 }
             }
         }
     }
 
-    pub fn sync(&self) -> anyhow::Result<()> {
+    pub fn sync(&self) -> Result<(), WalletError> {
         let (sender, receiver) = unbounded();
         self.sender
             .send(WalletOperation::Sync(sender))
-            .expect("Failed to send sync operation");
+            .map_err(|e| WalletError::SendMessage(e.to_string()))?;
         receiver.recv()?
     }
 
-    pub fn get_pubkey(&self) -> anyhow::Result<PublicKey> {
+    pub fn get_pubkey(&self) -> PublicKey {
         tracing::info!("Getting wallet public key.");
-        let pubkey = PublicKey::from_secret_key(&self.secp, &self.xprv.private_key);
-        Ok(pubkey)
+        PublicKey::from_secret_key(&self.secp, &self.xprv.private_key)
     }
 
-    pub fn get_balance(&self) -> anyhow::Result<Balance> {
+    pub fn get_balance(&self) -> Result<Balance, WalletError> {
         let (sender, receiver) = unbounded();
         self.sender
             .send(WalletOperation::Balance(sender))
-            .expect("Failed to send balance operation");
-        receiver.recv()?
+            .map_err(|e| WalletError::SendMessage(e.to_string()))?;
+        Ok(receiver.recv()?)
     }
 
-    pub fn new_external_address(&self) -> anyhow::Result<AddressInfo> {
+    pub fn new_external_address(&self) -> Result<AddressInfo, WalletError> {
         let (sender, receiver) = unbounded();
         self.sender
             .send(WalletOperation::NewExternalAddress(sender))
-            .expect("Failed to send new external address operation");
+            .map_err(|e| WalletError::SendMessage(e.to_string()))?;
         receiver.recv()?
     }
 
-    pub fn new_change_address(&self) -> anyhow::Result<AddressInfo> {
+    pub fn new_change_address(&self) -> Result<AddressInfo, WalletError> {
         let (sender, receiver) = unbounded();
         self.sender
             .send(WalletOperation::NewChangeAddress(sender))
-            .expect("Failed to send new change address operation");
+            .map_err(|e| WalletError::SendMessage(e.to_string()))?;
         receiver.recv()?
     }
 
@@ -269,7 +297,7 @@ impl<S: DdkStorage> DlcDevKitWallet<S> {
         address: Address,
         amount: u64,
         sat_vbyte: u64,
-    ) -> anyhow::Result<Txid> {
+    ) -> Result<Txid, WalletError> {
         tracing::info!(
             address = address.to_string(),
             amount,
@@ -280,49 +308,24 @@ impl<S: DdkStorage> DlcDevKitWallet<S> {
             .send(WalletOperation::SendToAddress(
                 address, amount, sat_vbyte, sender,
             ))
-            .expect("Failed to send send_to_address operation");
+            .map_err(|e| WalletError::SendMessage(e.to_string()))?;
         receiver.recv()?
     }
 
-    fn send_to_address_inner(
-        wallet: &mut Wallet<SledStorageProvider>,
-        address: Address,
-        amount: u64,
-        sat_vbyte: u64,
-        blockchain: &EsploraClient,
-    ) -> anyhow::Result<Txid> {
-        let mut txn_builder = wallet.build_tx();
-
-        txn_builder
-            .add_recipient(address.script_pubkey(), amount)
-            .fee_rate(FeeRate::from_sat_per_vb(sat_vbyte).unwrap());
-
-        let mut psbt = txn_builder.finish().unwrap();
-
-        wallet.sign(&mut psbt, SignOptions::default())?;
-
-        let tx = psbt.extract_tx();
-
-        match blockchain.blocking_client.broadcast(&tx) {
-            Ok(_) => Ok(tx.txid()),
-            Err(e) => Err(anyhow!("Could not broadcast txn {}", e)),
-        }
-    }
-
-    pub fn get_transactions(&self) -> anyhow::Result<Vec<Transaction>> {
+    pub fn get_transactions(&self) -> Result<Vec<Transaction>, WalletError> {
         let (sender, receiver) = unbounded();
         self.sender
             .send(WalletOperation::GetTransactions(sender))
-            .expect("Failed to send get_transactions operation");
-        receiver.recv()?
+            .map_err(|e| WalletError::SendMessage(e.to_string()))?;
+        Ok(receiver.recv()?)
     }
 
-    pub fn list_utxos(&self) -> anyhow::Result<Vec<LocalOutput>> {
+    pub fn list_utxos(&self) -> Result<Vec<LocalOutput>, WalletError> {
         let (sender, receiver) = unbounded();
         self.sender
             .send(WalletOperation::ListUtxos(sender))
-            .expect("sending list utxos");
-        receiver.recv()?
+            .map_err(|e| WalletError::SendMessage(e.to_string()))?;
+        Ok(receiver.recv()?)
     }
 }
 
@@ -366,8 +369,7 @@ impl<S: DdkStorage> dlc_manager::ContractSignerProvider for DlcDevKitWallet<S> {
             secret_key: child_key.private_key,
         };
         self.derive_signer
-            .store_derived_key_id(key_id, signer_info)
-            .unwrap();
+            .store_derived_key_id(key_id, signer_info).unwrap();
 
         let key_id_string = hex::encode(&key_id);
         tracing::info!(key_id = key_id_string, "Derived new key id for signer.");
@@ -456,7 +458,7 @@ impl<S: DdkStorage> dlc_manager::Wallet for DlcDevKitWallet<S> {
                 sender,
             ))
             .expect("no send psbt input");
-        Ok(receiver.recv().expect("no sign"))
+        Ok(receiver.recv().expect("no sign").unwrap())
     }
 
     // TODO: Does BDK have reserved UTXOs?
@@ -486,8 +488,7 @@ impl<S: DdkStorage> dlc_manager::Wallet for DlcDevKitWallet<S> {
             .expect("list utxos");
         let local_utxos = receiver
             .recv()
-            .expect("no receiver")
-            .expect("no local utxos");
+            .expect("no receiver");
 
         let dlc_utxos = local_utxos
             .iter()
