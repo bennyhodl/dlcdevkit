@@ -1,4 +1,5 @@
 use super::{SledStorageProvider, CHAIN_MONITOR_KEY, CHAIN_MONITOR_TREE};
+use bitcoin::consensus::ReadExt;
 use dlc_manager::chain_monitor::ChainMonitor;
 use dlc_manager::channel::accepted_channel::AcceptedChannel;
 use dlc_manager::channel::offered_channel::OfferedChannel;
@@ -14,7 +15,6 @@ use dlc_manager::{error::Error, ContractId, Storage};
 use sled::transaction::{ConflictableTransactionResult, UnabortableTransactionError};
 use sled::Transactional;
 use std::convert::TryInto;
-use std::io::Read;
 use crate::util::{serialize_contract, deserialize_contract};
 
 macro_rules! convertible_enum {
@@ -295,7 +295,7 @@ impl Storage for SledStorageProvider {
             .map_err(|e| Error::StorageError(format!("Error reading chain monitor: {}", e)))?;
         let deserialized = match serialized {
             Some(s) => Some(
-                ChainMonitor::deserialize(&mut ::std::io::Cursor::new(s))
+                ChainMonitor::deserialize(&mut ::lightning::io::Cursor::new(s))
                     .map_err(to_storage_error)?,
             ),
             None => None,
@@ -319,7 +319,7 @@ fn insert_contract(
     db.insert(&contract.get_id(), serialized)
 }
 
-fn serialize_channel(channel: &Channel) -> Result<Vec<u8>, ::std::io::Error> {
+fn serialize_channel(channel: &Channel) -> Result<Vec<u8>, ::lightning::io::Error> {
     let serialized = match channel {
         Channel::Offered(o) => o.serialize(),
         Channel::Accepted(a) => a.serialize(),
@@ -344,9 +344,9 @@ fn serialize_channel(channel: &Channel) -> Result<Vec<u8>, ::std::io::Error> {
 }
 
 fn deserialize_channel(buff: &sled::IVec) -> Result<Channel, Error> {
-    let mut cursor = ::std::io::Cursor::new(buff);
+    let mut cursor = lightning::io::Cursor::new(buff);
     let mut prefix = [0u8; 1];
-    cursor.read_exact(&mut prefix)?;
+    cursor.read_slice(&mut prefix)?;
     let channel_prefix: ChannelPrefix = prefix[0].try_into()?;
     let channel = match channel_prefix {
         ChannelPrefix::Offered => {
@@ -415,7 +415,7 @@ mod tests {
     where
         T: Serializable,
     {
-        let mut cursor = std::io::Cursor::new(&serialized);
+        let mut cursor = ::lightning::io::Cursor::new(&serialized);
         T::deserialize(&mut cursor).unwrap()
     }
 

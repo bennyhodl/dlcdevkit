@@ -6,13 +6,11 @@ use serde::Serialize;
 use std::str::FromStr;
 use uuid::Uuid;
 
-const KORMIR_URL: &str = "http://localhost:8082";
-
-fn get<T>(path: &str) -> anyhow::Result<T>
+fn get<T>(host: &str, path: &str) -> anyhow::Result<T>
 where
     T: serde::de::DeserializeOwned,
 {
-    let url = format!("{}{}", KORMIR_URL, path);
+    let url = format!("{}{}", host, path);
     let request = reqwest::blocking::get(url)?.json::<T>()?;
 
     Ok(request)
@@ -29,33 +27,34 @@ pub struct CreateEnumEvent {
 pub struct KormirOracleClient {
     pubkey: XOnlyPublicKey,
     client: reqwest::Client,
+    host: String,
 }
 
 impl KormirOracleClient {
-    pub async fn new() -> anyhow::Result<KormirOracleClient> {
-        tracing::info!(host = KORMIR_URL, "Connecting to Kormir oracle client.");
-        let request: String = reqwest::get(format!("{KORMIR_URL}/pubkey")).await?.json().await?;
+    pub async fn new(host: &str) -> anyhow::Result<KormirOracleClient> {
+        tracing::info!(host, "Connecting to Kormir oracle client.");
+        let request: String = reqwest::get(format!("{host}/pubkey")).await?.json().await?;
         let pubkey = XOnlyPublicKey::from_str(&request)?;
         let client = reqwest::Client::new();
         tracing::info!(pubkey = pubkey.to_string(), "Connected to Kormir client.");
 
-        Ok(KormirOracleClient { pubkey, client })
+        Ok(KormirOracleClient { pubkey, client, host: host.to_string() })
     }
 
     pub async fn get_pubkey(&self) -> anyhow::Result<XOnlyPublicKey> {
-        let request = reqwest::get(format!("{}/pubkey", KORMIR_URL))
+        let request = reqwest::get(format!("{}/pubkey", self.host))
             .await?
             .json::<String>()
             .await?;
         Ok(XOnlyPublicKey::from_str(&request)?)
     }
 
-    // pub async fn list_events(&self) -> anyhow::Result<Vec<OracleAnnouncement>> {
-    //     let oracle_events: Vec<OracleEventData> = reqwest::get(format!("{}/list-events", KORMIR_URL)).await?.json().await?;
-    //     println!("oracle_events: {:?}", oracle_events);
-    //
-    //     Ok(oracle_events.iter().map(|event| event.announcement.clone()).collect::<Vec<OracleAnnouncement>>())
-    // }
+    pub async fn list_events(&self) -> anyhow::Result<Vec<OracleAnnouncement>> {
+        let oracle_events: Vec<OracleEventData> = reqwest::get(format!("{}/list-events", self.host)).await?.json().await?;
+        println!("oracle_events: {:?}", oracle_events);
+
+        Ok(oracle_events.iter().map(|event| event.announcement.clone()).collect::<Vec<OracleAnnouncement>>())
+    }
 
     pub async fn create_event(&self, outcomes: Vec<String>, maturity: u32) -> anyhow::Result<()> {
         let event_id = Uuid::new_v4().to_string();
@@ -66,7 +65,7 @@ impl KormirOracleClient {
             event_maturity_epoch: maturity,
         };
         self.client
-            .post(format!("{}/create-event", KORMIR_URL))
+            .post(format!("{}/create-event", self.host))
             .json(&create_event_request)
             .send()
             .await?;
@@ -84,7 +83,7 @@ impl dlc_manager::Oracle for KormirOracleClient {
         &self,
         _event_id: &str,
     ) -> Result<dlc_messages::oracle_msgs::OracleAttestation, dlc_manager::error::Error> {
-        get::<OracleAttestation>("attestation")
+        get::<OracleAttestation>(&self.host, "attestation")
             .map_err(|_| dlc_manager::error::Error::OracleError("Could not get attestation".into()))
     }
 
@@ -92,7 +91,7 @@ impl dlc_manager::Oracle for KormirOracleClient {
         &self,
         _event_id: &str,
     ) -> Result<dlc_messages::oracle_msgs::OracleAnnouncement, dlc_manager::error::Error> {
-        get::<OracleAnnouncement>("announcement").map_err(|_| {
+        get::<OracleAnnouncement>(&self.host, "announcement").map_err(|_| {
             dlc_manager::error::Error::OracleError("Could not get announcement".into())
         })
     }
@@ -112,7 +111,7 @@ impl crate::DdkOracle for KormirOracleClient {
         &self,
         event_id: &str,
     ) -> Result<OracleAnnouncement, dlc_manager::error::Error> {
-        let announcements = reqwest::get(format!("{KORMIR_URL}/list-events"))
+        let announcements = reqwest::get(format!("{}/list-events", &self.host))
             .await
             .map_err(|_| Error::OracleError("Could not get announcements async.".into()))?
             .json::<Vec<OracleEventData>>()

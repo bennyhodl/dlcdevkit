@@ -1,4 +1,4 @@
-use std::io::Cursor;
+use lightning::io::Cursor;
 
 use crate::storage::SledStorageProvider;
 use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};

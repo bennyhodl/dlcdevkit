@@ -23,20 +23,17 @@ pub mod storage;
 pub mod transport;
 /// The internal [bdk::Wallet].
 pub mod wallet;
-use bdk::wallet::ChangeSet;
-use bdk_chain::PersistBackend;
-use bitcoin::key::XOnlyPublicKey;
 /// DDK object with all services
 pub use ddk::DlcDevKit;
 /// Type alias for [dlc_manager::manager::Manager]
 pub use ddk::DlcDevKitDlcManager;
 
 /// Re-exports
-pub use bdk;
-pub use bitcoin::Network;
+pub use bitcoin;
 pub use dlc;
 pub use dlc_manager;
 pub use dlc_messages;
+pub use bdk_wallet::LocalOutput;
 
 /// Nostr relay host. TODO: nostr feature
 pub const RELAY_HOST: &str = "ws://localhost:8081";
@@ -51,6 +48,8 @@ use dlc_messages::oracle_msgs::OracleAnnouncement;
 use dlc_messages::Message;
 use signer::DeriveSigner;
 use transport::PeerInformation;
+use bdk_wallet::WalletPersister;
+use bitcoin::key::XOnlyPublicKey;
 
 /// Allows ddk to open a listening connection and send/receive dlc messages functionality.
 ///
@@ -83,7 +82,7 @@ pub trait DdkTransport: std::marker::Send + std::marker::Sync + 'static {
 }
 
 /// Storage for DLC contracts.
-pub trait DdkStorage: dlc_manager::Storage + DeriveSigner + PersistBackend<ChangeSet> + std::marker::Send + std::marker::Sync + 'static {
+pub trait DdkStorage: dlc_manager::Storage + DeriveSigner + std::marker::Send + std::marker::Sync + 'static + WalletPersister {
     fn list_peers(&self) -> anyhow::Result<Vec<PeerInformation>>;
     fn save_peer(&self, peer: PeerInformation) -> anyhow::Result<()>;
 }

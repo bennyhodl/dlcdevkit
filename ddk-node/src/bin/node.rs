@@ -7,7 +7,7 @@ use ddk::builder::DdkBuilder;
 use ddk::storage::SledStorageProvider;
 use ddk::oracle::KormirOracleClient;
 use ddk::transport::lightning::LightningTransport;
-use ddk::Network;
+use ddk::bitcoin::Network;
 use ddk_node::ddkrpc::ddk_rpc_server::DdkRpcServer;
 use ddk_node::DdkNode;
 use tonic::transport::Server;
@@ -84,9 +84,8 @@ async fn main() -> anyhow::Result<()> {
         config.storage_path.join("sled_db").to_str().unwrap(),
     )?);
 
-    // let oracle_host = args.oracle_host.clone();
     // let oracle = Arc::new(P2PDOracleClient::new(&oracle_host).await?);
-    let oracle = Arc::new(KormirOracleClient::new().await?);
+    let oracle = Arc::new(KormirOracleClient::new(&args.oracle_host).await?);
 
     let mut builder = DdkBuilder::new();
     builder.set_config(config);

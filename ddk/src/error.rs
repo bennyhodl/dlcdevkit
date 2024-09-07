@@ -52,10 +52,12 @@ pub enum WalletError {
     Esplora(#[from] Box<bdk_esplora::esplora_client::Error>),
     #[error("Broadcast to esplora: {0}")]
     Broadcast(#[from] bdk_esplora::esplora_client::Error),
+    #[error("Could not extract txn from psbt. {0}")]
+    ExtractTx(#[from] bitcoin::psbt::ExtractTxError),
     #[error("Applying an update to the wallet.")]
     UtxoUpdate(#[from] bdk_chain::local_chain::CannotConnectError),
     #[error("Error signing PSBT: {0}")]
-    Signing(#[from] bdk::wallet::signer::SignerError),
+    Signing(#[from] bdk_wallet::signer::SignerError),
     #[error("Receive error from wallet channel: {0}")]
     ReceiveMessage(#[from] crossbeam::channel::RecvError),
     #[error("Sending error from wallet channel: {0}")]

@@ -6,8 +6,7 @@ use dlc_manager::contract::{
     ClosedContract, Contract, FailedAcceptContract, FailedSignContract, PreClosedContract,
 };
 use dlc_manager::error::Error;
-use std::convert::TryInto;
-use std::io::Read;
+use lightning::io::Read;
 
 macro_rules! convertible_enum {
     (enum $name:ident {
@@ -73,7 +72,7 @@ where
     Error::StorageError(e.to_string())
 }
 
-pub fn serialize_contract(contract: &Contract) -> Result<Vec<u8>, ::std::io::Error> {
+pub fn serialize_contract(contract: &Contract) -> Result<Vec<u8>, ::lightning::io::Error> {
     let serialized = match contract {
         Contract::Offered(o) | Contract::Rejected(o) => o.serialize(),
         Contract::Accepted(o) => o.serialize(),
@@ -91,7 +90,7 @@ pub fn serialize_contract(contract: &Contract) -> Result<Vec<u8>, ::std::io::Err
 }
 
 pub fn deserialize_contract(buff: &sled::IVec) -> Result<Contract, Error> {
-    let mut cursor = ::std::io::Cursor::new(buff);
+    let mut cursor = ::lightning::io::Cursor::new(buff);
     let mut prefix = [0u8; 1];
     cursor.read_exact(&mut prefix)?;
     let contract_prefix: ContractPrefix = prefix[0].try_into()?;
@@ -131,7 +130,7 @@ pub fn deserialize_contract(buff: &sled::IVec) -> Result<Contract, Error> {
 }
 
 pub fn deserialize_contract_bytes(buff: &Vec<u8>) -> Result<Contract, Error> {
-    let mut cursor = ::std::io::Cursor::new(buff);
+    let mut cursor = ::lightning::io::Cursor::new(buff);
     let mut prefix = [0u8; 1];
     cursor.read_exact(&mut prefix)?;
     let contract_prefix: ContractPrefix = prefix[0].try_into()?;

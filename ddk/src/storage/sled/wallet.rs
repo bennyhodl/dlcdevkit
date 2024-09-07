@@ -1,66 +1,19 @@
 use super::SledStorageProvider;
 use crate::signer::{DeriveSigner, SignerInformation};
-use bdk::wallet::ChangeSet;
-use bdk_chain::{Append, PersistBackend};
+use bdk_wallet::ChangeSet;
 use bitcoin::secp256k1::{PublicKey, SecretKey};
 use crate::error::WalletError;
-use rand::{thread_rng, Rng};
+use bdk_wallet::WalletPersister;
 
-impl PersistBackend<ChangeSet> for SledStorageProvider {
-    type WriteError = WalletError;
-    type LoadError = WalletError;
+impl WalletPersister for SledStorageProvider {
+    type Error = WalletError;
 
-    fn write_changes(&mut self, changeset: &ChangeSet) -> Result<(), Self::WriteError> {
-        self.append_changeset(changeset)
+    fn persist(_persister: &mut Self, _changeset: &ChangeSet) -> Result<(), Self::Error> {
+       Ok(()) 
     }
 
-    fn load_from_persistence(&mut self) -> Result<Option<ChangeSet>, Self::LoadError> {
-        self.aggregate_changesets()
-    }
-}
-
-impl SledStorageProvider {
-    /// Append a new changeset to the Sled database.
-    pub fn append_changeset(&mut self, changeset: &ChangeSet) -> Result<(), WalletError> {
-        // no need to write anything if changeset is empty
-        if changeset.is_empty() {
-            return Ok(());
-        }
-
-        let serialized = bincode::serialize(changeset).map_err(|_| {
-            WalletError::StorageError(sled::Error::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Serialization error appending changset.",
-            )))
-        })?;
-
-        let rand_key: [u8; 32] = thread_rng().gen();
-        self.wallet_tree()?
-            .insert(rand_key, serialized.clone())?;
-
-        Ok(())
-    }
-
-    /// Loads all the changesets that have been stored as one giant changeset.
-    pub fn aggregate_changesets(&self) -> Result<Option<ChangeSet>, WalletError> {
-        let mut changeset = Option::<ChangeSet>::None;
-        for next_changeset in self.wallet_tree()?.iter() {
-            let next_changeset = match next_changeset {
-                Ok(next_changeset) => next_changeset,
-                Err(e) => return Err(WalletError::StorageError(e)),
-            };
-            let next_changeset = bincode::deserialize(&next_changeset.1).map_err(|_| {
-                WalletError::StorageError(sled::Error::Io(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "Deserialization error aggregating changset.",
-                )))
-            })?;
-            match &mut changeset {
-                Some(changeset) => changeset.append(next_changeset),
-                changeset => *changeset = Some(next_changeset),
-            }
-        }
-        Ok(changeset)
+    fn initialize(_persister: &mut Self) -> Result<ChangeSet, Self::Error> {
+       Ok(ChangeSet::default()) 
     }
 }
 

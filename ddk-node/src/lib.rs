@@ -3,7 +3,7 @@ pub mod ddkrpc;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use ddk::bdk::bitcoin::secp256k1::PublicKey;
+use ddk::bitcoin::secp256k1::PublicKey;
 use ddk::dlc_manager::contract::contract_input::ContractInput;
 use ddk::dlc_manager::Storage;
 use ddk::oracle::KormirOracleClient;
@@ -144,8 +144,8 @@ impl DdkRpc for DdkNode {
         let wallet_balance = self.inner.wallet.get_balance().unwrap();
 
         let response = WalletBalanceResponse {
-            confirmed: wallet_balance.confirmed,
-            unconfirmed: wallet_balance.trusted_pending + wallet_balance.untrusted_pending,
+            confirmed: wallet_balance.confirmed.to_sat(),
+            unconfirmed: (wallet_balance.trusted_pending + wallet_balance.untrusted_pending).to_sat(),
         };
         Ok(Response::new(response))
     }
@@ -186,14 +186,14 @@ impl DdkRpc for DdkNode {
     #[tracing::instrument(skip(self, _request), name = "grpc_server")]
     async fn list_peers(&self, _request: Request<ListPeersRequest>) -> Result<Response<ListPeersResponse>, Status> {
         tracing::info!("List peers request");
-        let peers = self.inner.transport.ln_peer_manager().get_peer_node_ids();
+        let peers = self.inner.transport.ln_peer_manager().list_peers();
         let peers = peers.iter()
             .map(|peer| {
-                let host = match &peer.1 {
+                let host = match &peer.socket_address {
                     Some(h) => h.to_string(),
                     None => "".to_string(),
                 };
-                let pubkey = peer.0.to_string();
+                let pubkey = peer.counterparty_node_id.to_string();
                 Peer {
                     pubkey,
                     host

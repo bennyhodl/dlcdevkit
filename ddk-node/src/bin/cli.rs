@@ -1,14 +1,12 @@
 use core::panic;
 
 use clap::{Parser, Subcommand};
-use ddk::bdk::bitcoin::{Address, Transaction};
-use ddk::bdk::LocalOutput;
+use ddk::bitcoin::{Address, Transaction};
+use ddk::LocalOutput;
 use ddk::dlc::{EnumerationPayout, Payout};
 use ddk::dlc_manager::contract::contract_input::ContractInput;
 use ddk::dlc_manager::contract::offered_contract::OfferedContract;
-use ddk::dlc_manager::contract::Contract;
 use ddk::dlc_messages::{AcceptDlc, OfferDlc};
-use ddk::util::deserialize_contract_bytes;
 use ddk_node::ddkrpc::ddk_rpc_client::DdkRpcClient;
 use ddk_node::ddkrpc::{
     AcceptOfferRequest, ConnectRequest, GetWalletTransactionsRequest, InfoRequest, ListContractsRequest, ListOffersRequest, ListOraclesRequest, ListPeersRequest, ListUtxosRequest, NewAddressRequest, SendOfferRequest, WalletBalanceRequest
@@ -218,14 +216,14 @@ async fn main() -> anyhow::Result<()> {
                     .into_inner();
                 for tx in transactions.transactions {
                     let transaction: Transaction = serde_json::from_slice(&tx.transaction)?;
-                    println!("TxId: {:?}", transaction.txid().to_string());
+                    println!("TxId: {:?}", transaction.compute_txid().to_string());
                     for output in transaction.output {
                         println!(
                             "\t\tValue: {:?}\tAddress: {:?}",
                             output.value,
                             Address::from_script(
                                 &output.script_pubkey,
-                                ddk::bdk::bitcoin::Network::Regtest
+                                ddk::bitcoin::Network::Regtest
                             )
                         )
                     }
@@ -246,7 +244,7 @@ async fn main() -> anyhow::Result<()> {
                         "\t\tAddress: {:?}",
                         Address::from_script(
                             &utxo.txout.script_pubkey,
-                            ddk::bdk::bitcoin::Network::Regtest
+                            ddk::bitcoin::Network::Regtest
                         )
                     );
                     println!("\t\tValue: {:?}", utxo.txout.value);

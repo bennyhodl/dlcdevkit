@@ -8,7 +8,7 @@ mod wallet;
 use dlc_manager::contract::ser::Serializable;
 use dlc_manager::error::Error;
 use sled::{Db, Tree};
-use std::io::{Cursor, Read};
+use lightning::io::{Cursor, Read};
 
 use crate::transport::PeerInformation;
 use crate::DdkStorage;

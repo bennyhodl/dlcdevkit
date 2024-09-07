@@ -14,7 +14,7 @@ pub struct EsploraClient {
 impl EsploraClient {
     pub fn new(esplora_host: &str, network: Network) -> anyhow::Result<EsploraClient> {
         let builder = Builder::new(esplora_host);
-        let blocking_client = builder.clone().build_blocking()?;
+        let blocking_client = builder.clone().build_blocking();
         let async_client = builder.build_async()?;
         Ok(EsploraClient {
             blocking_client,
@@ -25,7 +25,7 @@ impl EsploraClient {
 }
 
 impl dlc_manager::Blockchain for EsploraClient {
-    fn get_network(&self) -> Result<bitcoin::network::constants::Network, ManagerError> {
+    fn get_network(&self) -> Result<Network, ManagerError> {
         Ok(self.network)
     }
 
@@ -63,7 +63,7 @@ impl dlc_manager::Blockchain for EsploraClient {
 
         match block {
             Some(block) => Ok(block),
-            None => Err(esplora_err_to_manager_err(EsploraError::HttpResponse(404))),
+            None => Err(esplora_err_to_manager_err(EsploraError::HttpResponse { status: 404, message: "Block not found in esplore".into() })),
         }
     }
 
