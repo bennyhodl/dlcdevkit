@@ -1,4 +1,5 @@
 use bitcoin::{key::Secp256k1, secp256k1::{PublicKey, SecretKey}};
+use bitcoin::key::rand;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]

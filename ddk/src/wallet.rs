@@ -9,12 +9,12 @@ use bdk_wallet::{
         Address, Network, Txid,
     }, template::Bip86, AddressInfo, KeychainKind, LocalOutput, PersistedWallet, SignOptions, Wallet
 };
-use bitcoin::{psbt::Psbt, secp256k1::SecretKey, Amount, FeeRate, ScriptBuf, Transaction};
-use blake3::Hasher;
+use bitcoin::{hashes::{sha256::HashEngine, Hash}, psbt::Psbt, secp256k1::SecretKey, Amount, FeeRate, ScriptBuf, Transaction};
+use bitcoin::hashes::sha256::Hash as Sha256Hash;
 use crossbeam::channel::{unbounded, Receiver, Sender};
 use dlc_manager::{error::Error as ManagerError, SimpleSigner};
 use lightning::chain::chaininterface::{ConfirmationTarget, FeeEstimator};
-use std::sync::{atomic::Ordering, Arc};
+use std::{io::Write, sync::{atomic::Ordering, Arc}};
 use std::{collections::HashMap, path::Path};
 use std::{str::FromStr, sync::atomic::AtomicU32};
 use crate::error::WalletError;
@@ -355,13 +355,14 @@ impl<S: DdkStorage> dlc_manager::ContractSignerProvider for DlcDevKitWallet<S> {
             .xprv
             .derive_priv(&self.secp, &child_path)
             .expect("Could not get child key for derivation path.");
-        let mut hasher = Hasher::new();
-        hasher.update(&temp_id);
-        hasher.update(&child_key.encode());
-        let hash = hasher.finalize();
+
+        let mut hasher = HashEngine::default();
+        hasher.write_all(&temp_id).unwrap();
+        hasher.write_all(&child_key.encode()).unwrap();
+        let hash: Sha256Hash = Hash::from_engine(hasher);
 
         let mut key_id = [0u8; 32];
-        key_id.copy_from_slice(hash.as_bytes());
+        key_id.copy_from_slice(hash.as_byte_array());
         let public_key = PublicKey::from_secret_key(&self.secp, &child_key.private_key);
         let signer_info = SignerInformation {
             index: newest_index,

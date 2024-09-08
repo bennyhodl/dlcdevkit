@@ -1,8 +1,8 @@
 use bitcoin::bip32::Xpriv;
 use bitcoin::Network;
-use getrandom::getrandom;
+use bitcoin::key::rand;
+use rand::Fill;
 use std::{fs::File, io::Write, path::Path};
-
 use crate::config::SeedConfig;
 
 pub fn xprv_from_config(
@@ -21,7 +21,7 @@ pub fn xprv_from_config(
             } else {
                 let mut file = File::create(format!("{file}/seed.ddk"))?;
                 let mut entropy = [0u8; 64];
-                getrandom(&mut entropy)?;
+                entropy.try_fill(&mut rand::thread_rng())?;
                 // let _mnemonic = Mnemonic::from_entropy(&entropy)?;
                 let xprv = Xpriv::new_master(network, &entropy)?;
                 file.write_all(&entropy)?;
