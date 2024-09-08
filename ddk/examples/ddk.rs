@@ -9,7 +9,8 @@ use std::sync::Arc;
 
 type ApplicationDdk = ddk::DlcDevKit<LightningTransport, SledStorageProvider, P2PDOracleClient>;
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let mut config = DdkConfig::default();
     config.storage_path = current_dir()?;
 
@@ -26,7 +27,7 @@ fn main() -> Result<()> {
             .expect("No storage."),
     )?);
 
-    let oracle_client = Arc::new(P2PDOracleClient::new(ddk::ORACLE_HOST).expect("no oracle"));
+    let oracle_client = Arc::new(P2PDOracleClient::new(ddk::ORACLE_HOST).await.expect("no oracle"));
 
     let mut builder = DdkBuilder::new();
     builder.set_config(config);
