@@ -62,4 +62,6 @@ pub enum WalletError {
     ReceiveMessage(#[from] crossbeam::channel::RecvError),
     #[error("Sending error from wallet channel: {0}")]
     SendMessage(String),
+    #[error("Bincode error")]
+    Bincode(#[from] bincode::Error),
 }

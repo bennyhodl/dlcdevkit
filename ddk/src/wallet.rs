@@ -348,7 +348,7 @@ impl<S: DdkStorage> dlc_manager::ContractSignerProvider for DlcDevKitWallet<S> {
             .send(WalletOperation::NextDerivationIndex(sender))
             .expect("sender.");
         let newest_index = receiver.recv().expect("recv error");
-        let derivation_path = format!("m/86'/0'/0'/0'/{}", newest_index);
+        let derivation_path = format!("m/84'/0'/0'/0'/{}", newest_index);
         let child_path = DerivationPath::from_str(&derivation_path)
             .expect("Not a valid derivation path to derive signer key.");
         let child_key = self
@@ -378,18 +378,9 @@ impl<S: DdkStorage> dlc_manager::ContractSignerProvider for DlcDevKitWallet<S> {
     }
 
     fn derive_contract_signer(&self, key_id: [u8; 32]) -> Result<Self::Signer, ManagerError> {
-        let key_id_string = hex::encode(&key_id);
-        let index = self.derive_signer.get_index_for_key_id(key_id).unwrap();
-        let derivation_path = format!("m/86'/0'/0'/0'/{}", index);
-        let child_path = DerivationPath::from_str(&derivation_path)
-            .expect("Not a valid derivation path to derive signer key.");
-        let child_key = self
-            .xprv
-            .derive_priv(&self.secp, &child_path)
-            .expect("Could not get child key for derivation path.");
-
-        tracing::info!(key_id = key_id_string, "Derived new contract signer.");
-        Ok(SimpleSigner::new(child_key.private_key))
+        let info = self.derive_signer.get_key_information(key_id).unwrap();
+        tracing::info!("Derived new contract signer.");
+        Ok(SimpleSigner::new(info.secret_key))
     }
 
     fn get_secret_key_for_pubkey(&self, pubkey: &PublicKey) -> Result<SecretKey, ManagerError> {
@@ -505,5 +496,31 @@ impl<S: DdkStorage> dlc_manager::Wallet for DlcDevKitWallet<S> {
             .collect();
 
         Ok(dlc_utxos)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bitcoin::{key::rand::Fill, AddressType};
+    use dlc_manager::ContractSignerProvider;
+
+    use crate::test_util::TestWallet;
+
+    #[test]
+    fn address_is_p2wpkh() {
+        let test = TestWallet::create_wallet("p2wpkh-address");
+        let address = test.wallet.new_external_address().unwrap();
+        assert_eq!(address.address.address_type().unwrap(), AddressType::P2wpkh)
+    }
+
+    #[test]
+    fn derive_contract_signer() {
+        let test = TestWallet::create_wallet("derive_contract_signer");
+        let mut temp_key_id = [0u8; 32];
+        temp_key_id.try_fill(&mut bitcoin::key::rand::thread_rng()).unwrap();
+        let gen_key_id = test.wallet.derive_signer_key_id(true, temp_key_id);
+        println!("GEN {}", hex::encode(gen_key_id));
+        let key_info = test.wallet.derive_contract_signer(gen_key_id);
+        assert!(key_info.is_ok())
     }
 }

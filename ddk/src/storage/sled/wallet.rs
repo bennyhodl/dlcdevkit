@@ -20,16 +20,10 @@ impl WalletPersister for SledStorageProvider {
 impl DeriveSigner for SledStorageProvider {
     type Error = WalletError;
 
-    /// Get the index of a given key id.
-    fn get_index_for_key_id(&self, key_id: [u8; 32]) -> Result<u32, WalletError> {
-        if let Some(value) = self.signer_tree()?.get(key_id)? {
-            let signer_info: SignerInformation = bincode::deserialize(&value).unwrap();
-            Ok(signer_info.index)
-        } else {
-            let key_id = hex::encode(&key_id);
-            tracing::warn!(key_id, "Value not found in sled database. Defaulting to index 1.");
-            Ok(1)
-        }
+    fn get_key_information(&self, key_id: [u8;32]) -> Result<SignerInformation, Self::Error> {
+        let key = hex::encode(key_id);
+        let info = self.signer_tree()?.get(key)?.unwrap();
+        Ok(bincode::deserialize::<SignerInformation>(&info)?)
     }
 
     /// Store the secret and public with the givem key id
@@ -44,6 +38,9 @@ impl DeriveSigner for SledStorageProvider {
                 "Deserialization error aggregating changset.",
             )))
         })?;
+
+        // Store the key id string instead of bytes.
+        let key_id = hex::encode(key_id);
 
         self.signer_tree()?.insert(key_id, serialized_signer_info)?;
         Ok(())
@@ -71,37 +68,5 @@ impl DeriveSigner for SledStorageProvider {
 
     fn import_address_to_storage(&self, _address: &bitcoin::Address) -> Result<(), WalletError> {
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use bitcoin::key::Secp256k1;
-
-    use crate::{signer::SignerInformation, storage::SledStorageProvider, DeriveSigner};
-
-    #[test]
-    fn index_from_key_id() {
-        let path = "tests/data/dlc_storage/sleddb/index_from_key_id";
-        let storage = SledStorageProvider::new(path).unwrap();
-        let secp = Secp256k1::new();
-        let secret_key =
-            bitcoin::secp256k1::SecretKey::new(&mut bitcoin::secp256k1::rand::thread_rng());
-        let signer_info = SignerInformation {
-            index: 1,
-            secret_key,
-            public_key: secret_key.public_key(&secp),
-        };
-
-        let _ = storage.store_derived_key_id([0u8; 32], signer_info);
-
-        let index = storage.get_index_for_key_id([0u8; 32]).unwrap();
-        assert_eq!(index, 1);
-
-        let priv_key = storage
-            .get_secret_key(&secret_key.public_key(&secp))
-            .unwrap();
-        assert_eq!(priv_key, secret_key);
-        std::fs::remove_dir_all(path).unwrap();
     }
 }
