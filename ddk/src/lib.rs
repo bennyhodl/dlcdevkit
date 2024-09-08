@@ -8,6 +8,7 @@ mod ddk;
 mod error;
 mod io;
 mod signer;
+mod test_util;
 
 /// Build a DDK application.
 pub mod builder;
