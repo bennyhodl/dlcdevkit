@@ -8,15 +8,14 @@ documentation = "https://docs.rs/crate/ddk"
 repository = "https://github.com/bennyhodl/dlcdevkit"
 homepage = "https://dlcdevkit.com"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+nostr = ["dep:nostr", "dep:nostr-sdk", "dep:nostr-sqlite", "dep:nostr-relay-pool"]
 
 [dependencies]
-anyhow = "1.0.75"
-base64 = "0.13.0"
-# bdk = "=1.0.0-alpha.8"
-# bdk_file_store = "0.8.0"
-bdk_esplora = { version = "0.17", features = ["blocking", "async"] }
 bitcoin = { version = "0.32.2", features = ["rand", "serde"] }
+bdk_esplora = { version = "0.17", features = ["blocking", "async"] }
+bdk_wallet = { version = "1.0.0-beta.2", features = ["bdk_file_store"] }
+bdk_chain = "0.18.0"
 dlc = { version = "0.6.0", path = "/Users/ben/ernest/dev/libs/rust-dlc/master/dlc", features = ["use-serde"] }
 dlc-manager = { version = "0.6.0", path = "/Users/ben/ernest/dev/libs/rust-dlc/master/dlc-manager", features = ["use-serde"] }
 dlc-messages = { version = "0.6.0", path = "/Users/ben/ernest/dev/libs/rust-dlc/master/dlc-messages", features = [ "use-serde"] }
@@ -26,10 +25,14 @@ dlc-trie = { version = "0.6.0", path = "/Users/ben/ernest/dev/libs/rust-dlc/mast
 # dlc-manager = { version = "0.5.0", features = [ "use-serde"] }
 # dlc-messages = { version = "0.5.0", features = [ "use-serde"] }
 getrandom = { version = "0.2.11", features = ["js"] }
+anyhow = "1.0.75"
+base64 = "0.13.0"
 lightning = { version = "0.0.124", default-features = false, features = ["grind_signatures", "std"] }
 lightning-net-tokio = "0.0.124"
-nostr = { version = "0.29.0", features = ["std"] }
-nostr-sdk = "0.29.0"
+nostr = { version = "0.29.0", features = ["std"], optional = true }
+nostr-sdk = { version = "0.29.0", optional = true }
+nostr-sqlite = { version = "0.28.0", optional = true }
+nostr-relay-pool = { version = "0.29.1", optional = true }
 rand = "0.8.5"
 reqwest = { version = "0.11.22", features = ["blocking"] }
 serde = { version = "1.0.192", features = ["derive"] }
@@ -37,8 +40,6 @@ serde_json = "1.0.108"
 serde_with = "3.4.0"
 thiserror = "1.0.50"
 tokio = { version = "1.34.0", features = ["full"] }
-nostr-sqlite = "0.28.0"
-nostr-relay-pool = "0.29.1"
 bip39 = "2.0.0"
 blake3 = "1.5.1"
 tracing = "0.1.40"
@@ -50,9 +51,7 @@ async-trait = "0.1.80"
 kormir = { version = "0.3.0", path = "/Users/ben/ernest/dev/oracles/kormir/kormir" }
 hex = "0.4.3"
 bincode = "1.3.3"
-bdk_chain = "0.18.0"
 crossbeam = "0.8.4"
-bdk_wallet = { version = "1.0.0-beta.2", features = ["bdk_file_store"] }
 
 [dev-dependencies]
 # electrsd = { version = "0.22.0", features = ["legacy", "esplora_a33e97e1", "bitcoind_23_0"] }

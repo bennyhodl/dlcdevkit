@@ -1,5 +1,4 @@
-use bitcoin::secp256k1::{PublicKey, SecretKey};
-use nostr::Keys;
+use bitcoin::{key::Secp256k1, secp256k1::{PublicKey, SecretKey}};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
@@ -46,8 +45,9 @@ impl DeriveSigner for SimpleDeriveSigner {
 
     /// Retrieve the secrety key for a given public key.
     fn get_secret_key(&self, _public_key: &PublicKey) -> Result<SecretKey, String> {
-        let keys = Keys::generate();
-        let secret_key = keys.secret_key().unwrap();
+        let secp = Secp256k1::new();
+        let keys = bitcoin::key::Keypair::new(&secp, &mut rand::thread_rng());
+        let secret_key = keys.secret_key();
         let bytes = secret_key.secret_bytes();
         Ok(bitcoin::secp256k1::SecretKey::from_slice(&bytes).expect("no bytes zone!"))
     }
