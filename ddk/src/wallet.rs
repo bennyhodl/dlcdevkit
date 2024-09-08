@@ -7,7 +7,7 @@ use bdk_wallet::{
         bip32::{DerivationPath, Xpriv},
         secp256k1::{All, PublicKey, Secp256k1},
         Address, Network, Txid,
-    }, template::Bip86, AddressInfo, KeychainKind, LocalOutput, PersistedWallet, SignOptions, Wallet
+    }, template::Bip84, AddressInfo, KeychainKind, LocalOutput, PersistedWallet, SignOptions, Wallet
 };
 use bitcoin::{hashes::{sha256::HashEngine, Hash}, psbt::Psbt, secp256k1::SecretKey, Amount, FeeRate, ScriptBuf, Transaction};
 use bitcoin::hashes::sha256::Hash as Sha256Hash;
@@ -73,8 +73,8 @@ impl<S: DdkStorage> DlcDevKitWallet<S> {
         let secp = Secp256k1::new();
         let wallet_storage_path = wallet_storage_path.as_ref().join("wallet-db");
 
-        let external_descriptor = Bip86(xprv, KeychainKind::External);
-        let internal_descriptor = Bip86(xprv, KeychainKind::Internal);
+        let external_descriptor = Bip84(xprv, KeychainKind::External);
+        let internal_descriptor = Bip84(xprv, KeychainKind::Internal);
         // let file_store = bdk_file_store::Store::<ChangeSet>::open_or_create_new(b"ddk-wallet", wallet_storage_path)?;
         let mut storage = SledStorageProvider::new(wallet_storage_path.to_str().unwrap())?;
 
