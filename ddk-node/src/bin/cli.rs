@@ -1,12 +1,10 @@
 use core::panic;
 
 use clap::{Parser, Subcommand};
-use ddk::bitcoin::{Address, Transaction};
-use ddk::LocalOutput;
+use ddk::bitcoin::Transaction;
 use ddk::dlc::{EnumerationPayout, Payout};
 use ddk::dlc_manager::contract::contract_input::ContractInput;
 use ddk::dlc_manager::contract::offered_contract::OfferedContract;
-use ddk::dlc_messages::{AcceptDlc, OfferDlc};
 use ddk_node::ddkrpc::ddk_rpc_client::DdkRpcClient;
 use ddk_node::ddkrpc::{
     AcceptOfferRequest, ConnectRequest, GetWalletTransactionsRequest, InfoRequest, ListContractsRequest, ListOffersRequest, ListOraclesRequest, ListPeersRequest, ListUtxosRequest, NewAddressRequest, SendOfferRequest, WalletBalanceRequest
@@ -91,7 +89,7 @@ async fn main() -> anyhow::Result<()> {
     match args.command {
         CliCommand::Info => {
             let info = client.info(InfoRequest::default()).await?.into_inner();
-            println!("{:?}", info);
+            print!("{}", serde_json::to_string_pretty(&info)?);
         }
         CliCommand::OfferContract(arg) => {
             // TODO: support multiple oracles
@@ -143,8 +141,8 @@ async fn main() -> anyhow::Result<()> {
 
             let contract_input = serde_json::to_vec(&contract_input)?;
             let offer = client.send_offer(SendOfferRequest { contract_input, counter_party: arg.counter_party}).await?.into_inner();
-            let offer_dlc = serde_json::from_slice::<OfferDlc>(&offer.offer_dlc)?;
-            println!("{:?}", offer_dlc);
+            let offer_dlc = serde_json::to_string_pretty(&offer.offer_dlc)?;
+            print!("{}", offer_dlc);
         }
         CliCommand::Offers => {
             let offers_request = client.list_offers(ListOffersRequest {}).await?.into_inner();
@@ -172,8 +170,7 @@ async fn main() -> anyhow::Result<()> {
                 })
                 .await?
                 .into_inner();
-            println!("Contract {} accepted with {}", accept.contract_id, accept.counter_party);
-            let accept_dlc = serde_json::from_slice::<AcceptDlc>(&accept.accept_dlc)?;
+            let accept_dlc = serde_json::to_string_pretty(&accept.accept_dlc)?;
             println!("{:?}", accept_dlc)
         }
         CliCommand::Contracts => {
@@ -200,65 +197,48 @@ async fn main() -> anyhow::Result<()> {
                     .wallet_balance(WalletBalanceRequest::default())
                     .await?
                     .into_inner();
-                println!("Balance: {:?}", balance);
+                let pretty_string = serde_json::to_string_pretty(&balance)?;
+                println!("{}", pretty_string);
             }
             WalletCommand::NewAddress => {
                 let address = client
                     .new_address(NewAddressRequest::default())
                     .await?
                     .into_inner();
-                println!("{:?}", address)
+                let pretty_string = serde_json::to_string_pretty(&address)?;
+                println!("{}", pretty_string);
             }
             WalletCommand::Transactions => {
                 let transactions = client
                     .get_wallet_transactions(GetWalletTransactionsRequest::default())
                     .await?
                     .into_inner();
-                for tx in transactions.transactions {
-                    let transaction: Transaction = serde_json::from_slice(&tx.transaction)?;
-                    println!("TxId: {:?}", transaction.compute_txid().to_string());
-                    for output in transaction.output {
-                        println!(
-                            "\t\tValue: {:?}\tAddress: {:?}",
-                            output.value,
-                            Address::from_script(
-                                &output.script_pubkey,
-                                ddk::bitcoin::Network::Regtest
-                            )
-                        )
-                    }
-                }
+                let txns = transactions.transactions
+                    .iter()
+                    .map(|txn| serde_json::from_slice(txn).unwrap())
+                    .collect::<Vec<Transaction>>();
+                let txns = serde_json::to_string_pretty(&txns)?;
+                print!("{}", txns)
             }
             WalletCommand::Utxos => {
                 let utxos = client
                     .list_utxos(ListUtxosRequest::default())
                     .await?
                     .into_inner();
-                for utxo in utxos.utxos {
-                    let utxo: LocalOutput = serde_json::from_slice(&utxo)?;
-                    println!(
-                        "TxId: {:?} Index: {:?}",
-                        utxo.outpoint.txid, utxo.outpoint.vout
-                    );
-                    println!(
-                        "\t\tAddress: {:?}",
-                        Address::from_script(
-                            &utxo.txout.script_pubkey,
-                            ddk::bitcoin::Network::Regtest
-                        )
-                    );
-                    println!("\t\tValue: {:?}", utxo.txout.value);
-                }
+                let utxos = serde_json::to_string_pretty(&utxos.utxos)?;
+                print!("{}", utxos)
             }
         },
         CliCommand::Peers => {
-            let peers = client.list_peers(ListPeersRequest::default()).await?.into_inner();
-            peers.peers.iter().for_each(|peer| println!("{}\t{}", peer.pubkey, peer.host))
+            let peers_response = client.list_peers(ListPeersRequest::default()).await?.into_inner();
+            let peers = serde_json::to_string_pretty(&peers_response.peers)?;
+            print!("{}", peers)
+             
         }
         CliCommand::Connect { connect_string } => {
             let parts = connect_string.split("@").collect::<Vec<&str>>();
             client.connect_peer(ConnectRequest { pubkey: parts[0].to_string(), host: parts[1].to_string() }).await?;
-            println!("Connected")
+            println!("Connected to {}", parts[0])
         }
     }
 

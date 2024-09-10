@@ -17,9 +17,8 @@ use crate::config::SeedConfig;
 pub struct DlcDevKitLogger;
 
 impl Logger for DlcDevKitLogger {
-    fn log(&self, _record: Record) {
-        // tracing::info!("{}", record.args);
-        tracing::info!("New record message from LN peer manager.");
+    fn log(&self, record: Record) {
+        tracing::info!("{}", record.args);
     }
 }
 

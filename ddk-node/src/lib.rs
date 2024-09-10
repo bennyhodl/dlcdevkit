@@ -157,11 +157,9 @@ impl DdkRpc for DdkNode {
     ) -> Result<Response<GetWalletTransactionsResponse>, Status> {
         tracing::info!("Request for all wallet transactions.");
         let wallet_transactions = self.inner.wallet.get_transactions().unwrap();
-        let transactions: Vec<ddkrpc::Transaction> = wallet_transactions
+        let transactions: Vec<Vec<u8>> = wallet_transactions
             .iter()
-            .map(|t| ddkrpc::Transaction {
-                transaction: serde_json::to_vec(t).unwrap(),
-            })
+            .map(|t| serde_json::to_vec(&t).unwrap())
             .collect();
         Ok(Response::new(GetWalletTransactionsResponse {
             transactions,

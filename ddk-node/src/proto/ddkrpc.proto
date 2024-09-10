@@ -55,11 +55,6 @@ message NewAddressResponse {
   string address = 1;
 }
 
-message Balance {
-  uint64 confirmed = 1;
-  uint64 unconfirmed = 2;
-}
-
 message WalletBalanceRequest {}
 
 message WalletBalanceResponse {
@@ -70,11 +65,7 @@ message WalletBalanceResponse {
 message GetWalletTransactionsRequest {}
 
 message GetWalletTransactionsResponse {
-  repeated Transaction transactions = 1;
-}
-
-message Transaction {
-  bytes transaction = 1;
+  repeated bytes transactions = 1;
 }
 
 message ListUtxosRequest {}

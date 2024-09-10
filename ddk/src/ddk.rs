@@ -107,7 +107,6 @@ where
 
     fn run_manager(manager: Arc<DlcDevKitDlcManager<S, O>>, transport: Arc<T>, receiver: Arc<Receiver<DlcManagerMessage>>) {
         while let Ok(msg) = receiver.recv() {
-            tracing::info!(message=?msg, "Received dlc manager message.");
             match msg {
                 DlcManagerMessage::OfferDlc { contract_input, counter_party, oracle_announcements, responder } => {
                     let offer = manager.send_offer_with_announcements(&contract_input, counter_party, vec![oracle_announcements]).expect("can't create offerdlc");

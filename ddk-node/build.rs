@@ -15,6 +15,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build_client(true)
         .build_server(true)
         .out_dir("./src")
+        .type_attribute("InfoResponse", "#[derive(serde::Serialize, serde::Deserialize)]")
+        .type_attribute("WalletBalanceResponse", "#[derive(serde::Serialize, serde::Deserialize)]")
+        .type_attribute("NewAddressResponse", "#[derive(serde::Serialize, serde::Deserialize)]")
+        .type_attribute("Peer", "#[derive(serde::Serialize, serde::Deserialize)]")
         .compile(&proto_paths, &[dir])?;
 
     Ok(())
