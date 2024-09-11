@@ -64,24 +64,36 @@ Ready-to-go clients for developing applications:
 * [`P2PDerivatives`](./ddk/src/oracle/p2p_derivatives.rs)
 * [`kormir`](./ddk/src/oracle/kormir.rs)
 
-### Examples
-* [`bella`](./bella) - Example client built with [`tauri`](https://tauri.app) to test `dlcdevkit`
-* [`payouts`](./payouts) - example payout curves for DLC applications
-
 ## Development
 
-Running the example client [`bella`](./bella/) requires running a bitcoin node, esplora server, & oracle. Dependencies can be started with the `docker-compose.yaml` file.
-
+Start by cloning the repo and opening the directory:
 ```
-git clone git@github.com:bennyhodl/dlcdevkit.git
+git clone https://github.com/bennyhodl/dlcdevkit.git
 cd dlcdevkit
+```
 
+Next you will need to create and configure a testconfig directory, modifying the path in the commands below to point to your local /dlcdevkit/ directory:
+```
+# Create the testconfig directory and expected sub-directories
+mkdir -p /path/to/your/dlcdevkit/testconfig/oracle/certs/db
+
+# Generate a private key via openssl
+openssl genrsa -out db.key 2048
+# Generate a self-signed certificate via openssl
+openssl req -new -x509 -key db.key -out db.crt -days 365 -subj "/CN=localhost"
+
+# Move the key and cert into the testconfig directory
+mv db.crt /path/to/your/dlcdevkit/testconfig/oracle/certs/db/
+mv db.key /path/to/your/dlcdevkit/testconfig/oracle/certs/db/
+```
+
+Next you will need to create the oracledb.dockerfile for your testconfig.
+
+Finally, build and spin up your containers via
+```
 docker-compose up -d --build
+```
 
 # Alias for interacting w/ bitcoin node
 source alias
 bc -generate
-
-cd bella && pnpm install && pnpm tauri dev
-```
-
