@@ -1018,6 +1018,7 @@ dependencies = [
 [[package]]
 name = "dlc"
 version = "0.6.0"
+source = "git+https://github.com/bennyhodl/rust-dlc?branch=bitcoin-32#f950b848ec5c038bb98397e6ec16be013cd37ff4"
 dependencies = [
  "bitcoin 0.32.2",
  "miniscript",
@@ -1029,6 +1030,7 @@ dependencies = [
 [[package]]
 name = "dlc-manager"
 version = "0.6.0"
+source = "git+https://github.com/bennyhodl/rust-dlc?branch=bitcoin-32#f950b848ec5c038bb98397e6ec16be013cd37ff4"
 dependencies = [
  "async-trait",
  "bitcoin 0.32.2",
@@ -1045,6 +1047,7 @@ dependencies = [
 [[package]]
 name = "dlc-messages"
 version = "0.6.0"
+source = "git+https://github.com/bennyhodl/rust-dlc?branch=bitcoin-32#f950b848ec5c038bb98397e6ec16be013cd37ff4"
 dependencies = [
  "bitcoin 0.32.2",
  "dlc",
@@ -1056,6 +1059,7 @@ dependencies = [
 [[package]]
 name = "dlc-trie"
 version = "0.6.0"
+source = "git+https://github.com/bennyhodl/rust-dlc?branch=bitcoin-32#f950b848ec5c038bb98397e6ec16be013cd37ff4"
 dependencies = [
  "bitcoin 0.32.2",
  "dlc",
@@ -1824,6 +1828,7 @@ dependencies = [
 [[package]]
 name = "kormir"
 version = "0.3.0"
+source = "git+https://github.com/bennyhodl/kormir?branch=bitcoin-32#fa6a2439509350747330918629593076c6c8a1d6"
 dependencies = [
  "bitcoin 0.32.2",
  "dlc",

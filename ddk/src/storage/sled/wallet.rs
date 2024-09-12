@@ -1,26 +1,38 @@
 use super::SledStorageProvider;
+use crate::error::WalletError;
 use crate::signer::{DeriveSigner, SignerInformation};
 use bdk_wallet::ChangeSet;
-use bitcoin::secp256k1::{PublicKey, SecretKey};
-use crate::error::WalletError;
 use bdk_wallet::WalletPersister;
+use bitcoin::{
+    key::rand::{thread_rng, Rng},
+    secp256k1::{PublicKey, SecretKey},
+};
 
 impl WalletPersister for SledStorageProvider {
     type Error = WalletError;
 
-    fn persist(_persister: &mut Self, _changeset: &ChangeSet) -> Result<(), Self::Error> {
-       Ok(()) 
+    fn persist(persister: &mut Self, changeset: &ChangeSet) -> Result<(), Self::Error> {
+        let wallet_tree = persister.wallet_tree()?;
+        let rand_key: [u8; 32] = thread_rng().gen();
+        let new_changeset = bincode::serialize(changeset).map_err(|_| {
+            WalletError::StorageError(sled::Error::Io(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Serialization error",
+            )))
+        })?;
+        wallet_tree.insert(rand_key, new_changeset)?;
+        Ok(())
     }
 
     fn initialize(_persister: &mut Self) -> Result<ChangeSet, Self::Error> {
-       Ok(ChangeSet::default()) 
+        Ok(ChangeSet::default())
     }
 }
 
 impl DeriveSigner for SledStorageProvider {
     type Error = WalletError;
 
-    fn get_key_information(&self, key_id: [u8;32]) -> Result<SignerInformation, Self::Error> {
+    fn get_key_information(&self, key_id: [u8; 32]) -> Result<SignerInformation, Self::Error> {
         let key = hex::encode(key_id);
         let info = self.signer_tree()?.get(key)?.unwrap();
         Ok(bincode::deserialize::<SignerInformation>(&info)?)
@@ -63,7 +75,9 @@ impl DeriveSigner for SledStorageProvider {
             }
         }
 
-        Err(WalletError::SignerError("Could not find secret key.".into()))
+        Err(WalletError::SignerError(
+            "Could not find secret key.".into(),
+        ))
     }
 
     fn import_address_to_storage(&self, _address: &bitcoin::Address) -> Result<(), WalletError> {
