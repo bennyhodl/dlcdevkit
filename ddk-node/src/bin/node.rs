@@ -16,22 +16,27 @@ use tracing::level_filters::LevelFilter;
 type DdkServer = ddk::DlcDevKit<LightningTransport, SledStorageProvider, KormirOracleClient>;
 
 #[derive(Parser, Clone, Debug)]
+#[clap(name = "ddk-node")]
+#[clap(about = "DDK Node for DLC Contracts", author = "benny b <ben@bitcoinbay.foundation>")]
+#[clap(version = option_env ! ("CARGO_PKG_VERSION").unwrap_or("unknown"))]
 struct NodeArgs {
     #[arg(long)]
     #[arg(help = "Set the log level.")]
     #[arg(default_value = "info")]
+    #[arg(value_parser = ["info", "debug"])]
     log: String,
     #[arg(short, long)]
     #[arg(help = "Set the Bitcoin network for DDK")]
     #[arg(default_value = "regtest")]
+    #[arg(value_parser = ["regtest", "mainnet", "signet"])]
     network: String,
     #[arg(short, long)]
-    #[arg(help = "The path where DlcDevKit will store data.")]
+    #[arg(help = "The path where ddk-node stores data. ddk-node will try to store in the $HOME directory by default.")]
     storage_dir: Option<PathBuf>,
     #[arg(short = 'p')]
     #[arg(long = "port")]
     #[arg(default_value = "1776")]
-    #[arg(help = "Listening port for network transport.")]
+    #[arg(help = "Listening port for the lightning network transport.")]
     listening_port: u16,
     #[arg(long = "grpc")]
     #[arg(default_value = "0.0.0.0:3030")]
@@ -39,15 +44,16 @@ struct NodeArgs {
     grpc_host: String,
     #[arg(long = "esplora")]
     #[arg(default_value = "http://127.0.0.1:30000")]
-    #[arg(help = "Host to connect to an esplora server.")]
+    #[arg(help = "Esplora server to connect to.")]
     esplora_host: String,
     #[arg(long = "oracle")]
     #[arg(default_value = "http://127.0.0.1:8082")]
-    #[arg(help = "Host to connect to an oracle server.")]
+    #[arg(help = "Kormir oracle to connect to.")]
     oracle_host: String,
     #[arg(long)]
-    #[arg(help = "Seed config strategy ('bytes' OR 'file')")]
+    #[arg(help = "Seed config strategy.")]
     #[arg(default_value = "file")]
+    #[arg(value_parser = ["file", "bytes"])]
     seed: String
 }
 

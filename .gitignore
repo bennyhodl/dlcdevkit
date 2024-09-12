@@ -1,6 +1,6 @@
 /target
 
-/regtest/bitcoin/*
-
 .idea
 
+/testconfig/kormir
+/testconfig/kormir-server

@@ -4,15 +4,13 @@ use ddk::config::DdkConfig;
 use ddk::oracle::P2PDOracleClient;
 use ddk::storage::SledStorageProvider;
 use ddk::transport::lightning::LightningTransport;
-use std::env::current_dir;
 use std::sync::Arc;
 
 type ApplicationDdk = ddk::DlcDevKit<LightningTransport, SledStorageProvider, P2PDOracleClient>;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let mut config = DdkConfig::default();
-    config.storage_path = current_dir()?;
+    let config = DdkConfig::default();
 
     let transport = Arc::new(LightningTransport::new(
         &config.seed_config,
@@ -27,7 +25,7 @@ async fn main() -> Result<()> {
             .expect("No storage."),
     )?);
 
-    let oracle_client = Arc::new(P2PDOracleClient::new(ddk::ORACLE_HOST).await.expect("no oracle"));
+    let oracle_client = Arc::new(P2PDOracleClient::new("host").await.expect("no oracle"));
 
     let mut builder = DdkBuilder::new();
     builder.set_config(config);
@@ -43,5 +41,5 @@ async fn main() -> Result<()> {
 
     ddk.start().expect("couldn't start ddk");
 
-    loop {}
+    Ok(())
 }

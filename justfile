@@ -1,5 +1,11 @@
+deps:
+  - docker compose --profile "*" up -d
+
+kormir:
+  - {{justfile_directory()}}/testconfig/use-kormir.sh
+
 bc *args:
-  - docker exec -it ernest-bitcoin bitcoin-cli --rpcport=18443 --rpcuser=ernest --rpcpassword=ernest -rpcwallet=ddk {{args}}
+  - docker exec -it bitcoin bitcoin-cli --rpcport=18443 --rpcuser=ddk --rpcpassword=ddk -rpcwallet=ddk {{args}}
 
 node-one:
   - cargo run --bin ddk-node

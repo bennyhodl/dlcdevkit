@@ -7,6 +7,7 @@ description = "application tooling for DLCs 🌊"
 documentation = "https://docs.rs/crate/ddk"
 repository = "https://github.com/bennyhodl/dlcdevkit"
 homepage = "https://dlcdevkit.com"
+readme = "../README.md"
 
 [features]
 nostr = ["dep:nostr", "dep:nostr-sdk", "dep:nostr-sqlite", "dep:nostr-relay-pool", "dep:base64"]
