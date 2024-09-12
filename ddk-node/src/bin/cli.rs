@@ -12,11 +12,12 @@ use ddk_node::ddkrpc::{
 use inquire::{Select, Text};
 
 #[derive(Debug, Clone, Parser)]
-#[clap(name = "ddk")]
-#[command(about = "A CLI tool for DDK", version = "1.0")]
+#[clap(name = "ddk-cli")]
+#[clap(about = "CLI for ddk-node", author = "benny b <ben@bitcoinbay.foundation>")]
+#[clap(version = option_env ! ("CARGO_PKG_VERSION").unwrap_or("unknown"))]
 struct DdkCliArgs {
     #[arg(short, long)]
-    #[arg(help = "DDK gRPC server to connect to.")]
+    #[arg(help = "ddk-node gRPC server to connect to.")]
     #[arg(default_value = "http://127.0.0.1:3030")]
     pub server: String,
     #[clap(subcommand)]
@@ -25,17 +26,17 @@ struct DdkCliArgs {
 
 #[derive(Debug, Clone, Subcommand)]
 enum CliCommand {
-    // Gets information about the DDK instance
+    /// Gets information about the DDK instance
     Info,
-    // Pass a contract input to send an offer
+    /// Pass a contract input to send an offer
     OfferContract(Offer),
-    // Retrieve the offers that ddk-node has received.
+    /// Retrieve the offers that ddk-node has received.
     Offers,
-    // Accept a DLC offer with the contract id string.
+    /// Accept a DLC offer with the contract id string.
     AcceptOffer(Accept),
-    // List contracts.
+    /// List contracts.
     Contracts,
-    // Wallet commands
+    /// Wallet commands
     #[clap(subcommand)]
     Wallet(WalletCommand),
     /// Get the peers connected to the node.

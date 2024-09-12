@@ -1,6 +1,6 @@
 # DLC Dev Kit
 
-[![Crate](https://img.shields.io/crates/v/dlcdevkit.svg?logo=rust)](https://crates.io/crates/ddk)
+[![Crate](https://img.shields.io/crates/v/ddk.svg?logo=rust)](https://crates.io/crates/ddk)
 [![Documentation](https://img.shields.io/static/v1?logo=read-the-docs&label=docs.rs&message=ddk&color=informational)](https://docs.rs/ddk)
 ![Crates.io Total Downloads](https://img.shields.io/crates/d/ddk)
 
@@ -18,53 +18,65 @@ $ cargo add ddk
 ```rust
 use ddk::config::DdkConfig;
 use ddk::builder::DdkBuilder;
-use ddk::oracle::P2PDOracleClient;
 use ddk::storage::SledStorageProvider;
 use ddk::transport::lightning::LightningTransport;
-use std::env::current_dir;
+use ddk::oracle::P2PDOracleClient;
+use bitcoin::Network;
 use std::sync::Arc;
 
 type ApplicationDdk = ddk::DlcDevKit<LightningTransport, SledStorageProvider, P2PDOracleClient>;
 
-fn main() -> Result<()> {
-    let mut config = DdkConfig::default();
-    config.storage_path = current_dir()?;
+fn main() {
+    let config = DdkConfig::default();
 
-    let transport = Arc::new(LightningTransport::new(&config.seed_config, config.network)?);
-    let storage = Arc::new(SledStorageProvider::new(
-        config.storage_path.join("sled_db").to_str().expect("No storage."),
-    )?);
+    let transport = Arc::new(LightningTransport::new(&config.seed_config, PORT, Network::Regtest));
+    let storage = Arc::new(SledStorageProvider::new("<storage path>")?);
+    let oracle_client = Arc::new(P2PDOracleClient::new("<oracle host>")?);
 
-    let oracle_client = Arc::new(P2PDOracleClient::new(ddk::ORACLE_HOST).expect("no oracle"));
+    let ddk: ApplicationDdk = DdkBuilder::new()
+        .set_config(config)
+        .set_transport(transport.clone())
+        .set_storage(storage.clone())
+        .set_oracle(oracle_client.clone())
+        .finish()
+        .expect("could not build ddk node");
 
-    let mut builder = DdkBuilder::new();
-    builder.set_config(config);
-    builder.set_transport(transport.clone());
-    builder.set_storage(storage.clone());
-    builder.set_oracle(oracle_client.clone());
-
-    let ddk: ApplicationDdk = builder.finish()?;
-
-    let wallet = ddk.wallet.new_external_address();
-
-    assert!(wallet.is_ok());
-
-    ddk.start().expect("couldn't start ddk");
+    ddk.start().expect("ddk could not start");
 }
 ```
 
 ## Crates
 Ready-to-go clients for developing applications:
-* `ddk` - Contains DLC management w/ [rust-dlc](https://github.com/p2pderivatives/rust-dlc) and the internal wallet w/ [bdk](https://github.com/bitcoindevkit/bdk).
+[`ddk`](./ddk/) - DLC management with an internal BDK wallet.
+[`ddk-node`](./ddk-node/) - A ready-to-go node with an accompanying cli.
+[`payouts`](./payouts/) - Functions to build DLC contracts.
+
+You can create a custom DDK instance by implementing the required traits for storage and transport. DDK traits are defined in [ddk/src/lib.rs](./ddk/src/lib.rs). The traits are super traits from what is required in `bdk` and `rust-dlc`.
+
+To quickly get started building a DDK application, there are pre-built components.
 
 ### Storage
-* `filestore` - flat file store for DLC contracts
-* `sqlite` - sqlite store for DLC contracts
+[`sled`](./ddk/src/storage/sled) - A simple file based storage using [sled](https://crates.io/crates/sled)
 
 ### Transport
-* [`tcp (lightning p2p)`](https://github.com/bennyhodl/dlcdevkit/tree/master/ddk/src/transport/lightning) - Tcp listener with the [ldk peer manager](https://lightningdevkit.org/introduction/peer-management/)
-* [`nostr`](https://github.com/bennyhodl/dlcdevkit/tree/master/ddk/src/transport/nostr) - NIP04 encrypted transport
+[`LDK Peer Manager`](./ddk/src/transport/lightning/) - Communication over Lightning gossip using [`rust-dlc's implementation`](https://github.com/p2pderivatives/rust-dlc/blob/master/dlc-messages/src/message_handler.rs)
+[`nostr`](./ddk/src/transport/nostr/) - DLC communication from the [NIP-88 spec](https://github.com/nostr-protocol/nips/pull/919)
 
 ### Oracle Clients
-* [`P2PDerivatives`](https://github.com/bennyhodl/dlcdevkit/blob/master/ddk/src/oracle/p2p_derivatives.rs) 
-* [`kormir`](https://github.com/bennyhodl/dlcdevkit/blob/master/ddk/src/oracle/kormir.rs)
+[`P2PDerivatives`](./ddk/src/oracle/p2p_derivatives.rs) - Spot price futures on the Bitcoin price [repo](https://github.com/p2pderivatives/p2pderivatives-oracle)
+[`kormir`](./ddk/src/oracle/kormir.rs) - Enumeration based oracle with server and nostr support [repo](https://github.com/benthecarman/kormir)
+
+### Examples
+* [`bella`](./bella) - Example client built with [`tauri`](https://tauri.app) to test `dlcdevkit`
+* [`payouts`](./payouts) - example payout curves for DLC applications
+
+## Development
+
+A bitcoin node, esplora server, and oracle server are required to run DDK. Developers can spin up a development environment with the `justfile` provided.
+
+```
+# Starts a regtest bitcoin node, esplora server, nostr relay (optional), p2p derivatives oracle, and a kormir oracle.
+$ just deps
+```
+
+Go to the README in [ddk-node](./ddk-node/README.md) to start the project's DDK node example.

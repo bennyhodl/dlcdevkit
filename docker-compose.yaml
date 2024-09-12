@@ -1,9 +1,8 @@
-version: "3.3"
-name: "ernest"
+name: "dlcdevkit"
 services:
-  ernest-bitcoin:
+  bitcoin:
     image: kylemanna/bitcoind:latest
-    container_name: ernest-bitcoin
+    container_name: bitcoin
     command: |
       -conf=/config/bitcoin.conf
       -printtoconsole
@@ -11,41 +10,12 @@ services:
     ports:
       # regtest ports
       - 18443:18443
-      - 18444:18444
     volumes:
       - ddk-bitcoin:/home/bitcoin/.bitcoin
-      - ./regtest/bitcoin:/config
-  # ernest-bitcoin:
-  #   environment:
-  #     USERID: ${USERID:-1000}
-  #     GROUPID: ${GROUPID:-1000}
-  #   stop_grace_period: 5m
-  #   image: polarlightning/bitcoind:26.0
-  #   container_name: ernest-bitcoin
-  #   hostname: bitcoin
-  #   command: >-
-  #     bitcoind -server=1 -regtest=1
-  #     -rpcauth=ernest:940d5191606fbdb08b4f749fb6496247$4a8abbde943b578c1f5828773038a52e43621346e6444619399e11ece8ca7a5d
-  #     -debug=1 -zmqpubrawblock=tcp://0.0.0.0:28333
-  #     -zmqpubrawtx=tcp://0.0.0.0:28332 -zmqpubhashblock=tcp://0.0.0.0:28334
-  #     -txindex=1 -dnsseed=0 -upnp=0 -rpcbind=0.0.0.0 -rpcallowip=0.0.0.0/0
-  #     -rpcport=18443 -rest -listen=1 -listenonion=0 -fallbackfee=0.0002
-  #     -blockfilterindex=1 -peerblockfilters=1
-  #   volumes:
-  #     - ddk-bitcoin:/home/bitcoin/.bitcoin
-    # expose:
-    #   - '18443'
-    #   - '18444'
-    #   - '28332'
-    #   - '28333'
-    # ports:
-    #   - '18443:18443'
-    #   - '19444:18444'
-    #   - '28332:28332'
-    #   - '28333:28333'
-  ernest-electrs:
+      - ./testconfig/bitcoin.conf:/config/bitcoin.conf
+  electrs:
     image: ghcr.io/vulpemventures/electrs:latest
-    container_name: ernest-electrs
+    container_name: electrs
     entrypoint:
       - /build/electrs
     command:
@@ -55,9 +25,9 @@ services:
       - --daemon-dir
       - /config
       - --daemon-rpc-addr
-      - ernest-bitcoin:18443
+      - bitcoin:18443
       - --cookie
-      - ernest:ernest
+      - ddk:ddk
       - --http-addr
       - 0.0.0.0:30000
       - --electrum-rpc-addr
@@ -66,7 +36,7 @@ services:
       - "*"
       - --jsonrpc-import
     depends_on:
-      - ernest-bitcoin
+      - bitcoin
     ports:
       - 50000:50000
       - 30000:30000
@@ -77,6 +47,7 @@ services:
       - ddk-bitcoin:/config
     restart: unless-stopped
   kormir-oracle-db:
+    profiles: [kormir]
     image: postgres:latest
     container_name: kormir-oracle-db
     hostname: kormir-oracle-db
@@ -85,34 +56,45 @@ services:
       - POSTGRES_USER=kormir
     ports:
       - "5433:5432"
-  oracle-server:
+    volumes:
+      - oracle-db-data:/kormir
+  nostr-relay:
+    profiles: [nostr, kormir]
+    image: scsibug/nostr-rs-relay
+    container_name: nostr-relay
+    hostname: nostr-relay
+    ports:
+      - "8081:8081"
+    volumes:
+      - nostr-relay:/usr/src/app/db
+      - ./testconfig/config.toml:/usr/src/app/config.toml
+  p2p-oracle-server:
+    profiles: [p2p]
     image: ghcr.io/p2pderivatives/oracle:v0.2.3
     container_name: oracle-server
-    # profiles: [oracle]
     command: |
       -config /config
       -appname p2pdoracle
       -e integration
       -migrate
     environment:
-      - P2PDORACLE_DATABASE_HOST=oracle-db
+      - P2PDORACLE_DATABASE_HOST=p2p-oracle-db
       - P2PDORACLE_ORACLE_KEYFILE=/key/key.pem
       - P2PDORACLE_ORACLE_KEYPASS_FILE=/key/pass.txt
     restart: always
     depends_on:
-      - oracle-db
+      - p2p-oracle-db
     ports:
-      - 8080:8080
+      - "8080:8080"
     volumes:
-      - ./regtest/oracle:/config
-      - ./regtest/oracle/certs/oracle:/key
-
-  oracle-db:
+      - ./testconfig/p2p-oracle:/config
+      - ./testconfig/p2p-oracle/certs/oracle:/key
+  p2p-oracle-db:
+    profiles: [p2p]
     image: oracledb:latest
     build:
       context: .
-      dockerfile: ./testconfig/oracle/oracledb.dockerfile
-    # profiles: [oracle]
+      dockerfile: ./testconfig/p2p-oracle/oracledb.dockerfile
     command: |
       -c log_statement=all
       -c ssl=on
@@ -120,17 +102,18 @@ services:
       -c ssl_key_file=/certs/db.key
     restart: always
     ports:
-      - 5432:5432
+      - "5432:5432"
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=1234
       - POSTGRES_DB=db
     volumes:
-      - oracle-db-data:/var/lib/postgresql/data/ # persist data even if container shuts down
+      - oracle-db-data:/var/lib/postgresql/data/
 volumes:
   oracle-db-data:
   ddk-bitcoin:
+  nostr-relay:
 
 networks:
-  ernest:
-    name: "ernest"
+  dlcdevkit:
+    name: "dlcdevkit"
