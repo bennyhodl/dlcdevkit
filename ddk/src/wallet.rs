@@ -1,23 +1,35 @@
+use crate::error::WalletError;
 use crate::{
     chain::EsploraClient, signer::SignerInformation, storage::SledStorageProvider, DdkStorage,
 };
-use bdk_chain::Balance;
+use bdk_chain::{spk_client::FullScanRequest, Balance};
+use bdk_esplora::EsploraExt;
 use bdk_wallet::{
     bitcoin::{
         bip32::{DerivationPath, Xpriv},
         secp256k1::{All, PublicKey, Secp256k1},
         Address, Network, Txid,
-    }, template::Bip84, AddressInfo, KeychainKind, LocalOutput, PersistedWallet, SignOptions, Wallet
+    },
+    template::Bip84,
+    AddressInfo, KeychainKind, LocalOutput, PersistedWallet, SignOptions, Update, Wallet,
 };
-use bitcoin::{hashes::{sha256::HashEngine, Hash}, psbt::Psbt, secp256k1::SecretKey, Amount, FeeRate, ScriptBuf, Transaction};
 use bitcoin::hashes::sha256::Hash as Sha256Hash;
+use bitcoin::{
+    hashes::{sha256::HashEngine, Hash},
+    psbt::Psbt,
+    secp256k1::SecretKey,
+    Amount, FeeRate, ScriptBuf, Transaction,
+};
 use crossbeam::channel::{unbounded, Receiver, Sender};
 use dlc_manager::{error::Error as ManagerError, SimpleSigner};
 use lightning::chain::chaininterface::{ConfirmationTarget, FeeEstimator};
-use std::{io::Write, sync::{atomic::Ordering, Arc}};
+use std::{
+    collections::BTreeMap,
+    io::Write,
+    sync::{atomic::Ordering, Arc},
+};
 use std::{collections::HashMap, path::Path};
 use std::{str::FromStr, sync::atomic::AtomicU32};
-use crate::error::WalletError;
 
 /// Internal [bdk::Wallet] for ddk.
 /// Uses eplora blocking for the [ddk::DlcDevKit] being sync only
@@ -89,7 +101,7 @@ impl<S: DdkStorage> DlcDevKitWallet<S> {
             Some(w) => w,
             None => Wallet::create(external_descriptor, internal_descriptor)
                 .network(network)
-                .create_wallet(&mut storage)?
+                .create_wallet(&mut storage)?,
         };
 
         let blockchain = Arc::new(EsploraClient::new(esplora_url, network)?);
@@ -126,7 +138,7 @@ impl<S: DdkStorage> DlcDevKitWallet<S> {
         let (sender, receiver) = unbounded::<WalletOperation>();
 
         let esplora = blockchain.clone();
-        std::thread::spawn(move || Self::run(&mut wallet, receiver, esplora));
+        std::thread::spawn(move || Self::run(&mut wallet, receiver, &mut storage, esplora));
 
         Ok(DlcDevKitWallet {
             blockchain,
@@ -143,29 +155,46 @@ impl<S: DdkStorage> DlcDevKitWallet<S> {
     pub fn run(
         wallet: &mut PersistedWallet<SledStorageProvider>,
         receiver: Receiver<WalletOperation>,
+        db: &mut SledStorageProvider,
         blockchain: Arc<EsploraClient>,
     ) {
         while let Ok(op) = receiver.recv() {
             match op {
                 WalletOperation::Sync(responder) => {
-                    let sync_inner = |_wallet: &mut PersistedWallet<SledStorageProvider>| -> Result<(), WalletError> {
-                        // let prev_tip = wallet.latest_checkpoint();
-                        // let keychain_spks = wallet.all_unbounded_spk_iters().collect();
-                        // let scan_result = blockchain
-                        //     .blocking_client
-                        //     .full_scan(keychain_spks, 5, 1)?;
-                        // let missing_height = update_graph.missing_heights(wallet.local_chain());
-                        // let chain_update = blockchain
-                        //     .blocking_client
-                        //     .update_local_chain(prev_tip, missing_height)?;
-                        // let update = Update {
-                        //     last_active_indices,
-                        //     graph: update_graph,
-                        //     chain: Some(chain_update),
-                        // };
-                        //
-                        // wallet.apply_update(update)?;
-                        // wallet.commit()?;
+                    let mut sync_inner = |wallet: &mut PersistedWallet<SledStorageProvider>| -> Result<(), WalletError> {
+                        let prev_tip = wallet.latest_checkpoint();
+                        tracing::debug!(height=prev_tip.height(), "Syncing wallet with latest known height.");
+                        let sync_result = if prev_tip.height() == 0 {
+                            tracing::info!("Performing a full chain scan.");
+                            let spks = wallet.all_unbounded_spk_iters().get(&KeychainKind::External).unwrap().to_owned();
+                            let chain = FullScanRequest::builder()
+                                .spks_for_keychain(KeychainKind::External, spks.clone())
+                                .chain_tip(prev_tip)
+                                .build();
+                            let sync = blockchain.blocking_client.full_scan(chain, 10, 1)?;
+                            Update {
+                                last_active_indices: sync.last_active_indices,
+                                tx_update: sync.tx_update,
+                                chain: sync.chain_update
+                            }
+                        } else {
+                            let spks = wallet.start_sync_with_revealed_spks()
+                                .chain_tip(prev_tip)
+                                .build();
+                            let sync = blockchain.blocking_client.sync(spks, 1)?;
+                            let indices = wallet.derivation_index(KeychainKind::External).unwrap_or(0);
+                            let internal_index = wallet.derivation_index(KeychainKind::Internal).unwrap_or(0);
+                            let mut last_active_indices = BTreeMap::new();
+                            last_active_indices.insert(KeychainKind::External, indices);
+                            last_active_indices.insert(KeychainKind::Internal, internal_index);
+                            Update {
+                                last_active_indices,
+                                tx_update: sync.tx_update,
+                                chain: sync.chain_update
+                            }
+                        };
+                        wallet.apply_update(sync_result)?;
+                        wallet.persist(db)?;
                         Ok(())
                     };
                     let result = sync_inner(wallet);
@@ -181,12 +210,16 @@ impl<S: DdkStorage> DlcDevKitWallet<S> {
                 }
                 WalletOperation::NewExternalAddress(responder) => {
                     let address = wallet.next_unused_address(KeychainKind::External);
+                    // TODO: handle error.
+                    let _ = wallet.persist(db);
                     if let Err(e) = responder.send(address) {
                         tracing::error!(message=?e, "Could not send message in balance message")
                     }
                 }
                 WalletOperation::NewChangeAddress(responder) => {
                     let address = wallet.next_unused_address(KeychainKind::Internal);
+                    // TODO: handle error.
+                    let _ = wallet.persist(db);
                     if let Err(e) = responder.send(address) {
                         tracing::error!(message=?e, "Could not send message in balance message")
                     }
@@ -241,7 +274,9 @@ impl<S: DdkStorage> DlcDevKitWallet<S> {
                     }
                 }
                 WalletOperation::SignPsbtInput(psbt, _input_index, responder) => {
-                    let sign = |psbt: Psbt, wallet: &mut PersistedWallet<SledStorageProvider>, | -> Result<(), WalletError> {
+                    let sign = |psbt: Psbt,
+                                wallet: &mut PersistedWallet<SledStorageProvider>|
+                     -> Result<(), WalletError> {
                         let mut psbt = psbt.clone();
                         wallet.sign(&mut psbt, SignOptions::default())?;
                         Ok(())
@@ -370,7 +405,8 @@ impl<S: DdkStorage> dlc_manager::ContractSignerProvider for DlcDevKitWallet<S> {
             secret_key: child_key.private_key,
         };
         self.derive_signer
-            .store_derived_key_id(key_id, signer_info).unwrap();
+            .store_derived_key_id(key_id, signer_info)
+            .unwrap();
 
         let key_id_string = hex::encode(&key_id);
         tracing::info!(key_id = key_id_string, "Derived new key id for signer.");
@@ -379,7 +415,10 @@ impl<S: DdkStorage> dlc_manager::ContractSignerProvider for DlcDevKitWallet<S> {
 
     fn derive_contract_signer(&self, key_id: [u8; 32]) -> Result<Self::Signer, ManagerError> {
         let info = self.derive_signer.get_key_information(key_id).unwrap();
-        tracing::info!("Derived new contract signer.");
+        tracing::info!(
+            key_id = hex::encode(key_id),
+            "Derived secret key for contract."
+        );
         Ok(SimpleSigner::new(info.secret_key))
     }
 
@@ -416,10 +455,7 @@ impl<S: DdkStorage> dlc_manager::Wallet for DlcDevKitWallet<S> {
         self.sender
             .send(WalletOperation::NewExternalAddress(sender))
             .expect("couldn't send new address");
-        Ok(receiver
-            .recv()
-            .expect("no receive")
-            .address)
+        Ok(receiver.recv().expect("no receive").address)
     }
 
     fn get_new_change_address(&self) -> Result<bitcoin::Address, ManagerError> {
@@ -428,10 +464,7 @@ impl<S: DdkStorage> dlc_manager::Wallet for DlcDevKitWallet<S> {
         self.sender
             .send(WalletOperation::NewChangeAddress(sender))
             .expect("couldn't send new address");
-        Ok(receiver
-            .recv()
-            .expect("no receive")
-            .address)
+        Ok(receiver.recv().expect("no receive").address)
     }
 
     fn sign_psbt_input(
@@ -476,9 +509,7 @@ impl<S: DdkStorage> dlc_manager::Wallet for DlcDevKitWallet<S> {
         self.sender
             .send(WalletOperation::ListUtxos(sender))
             .expect("list utxos");
-        let local_utxos = receiver
-            .recv()
-            .expect("no receiver");
+        let local_utxos = receiver.recv().expect("no receiver");
 
         let dlc_utxos = local_utxos
             .iter()
@@ -517,7 +548,9 @@ mod tests {
     fn derive_contract_signer() {
         let test = TestWallet::create_wallet("derive_contract_signer");
         let mut temp_key_id = [0u8; 32];
-        temp_key_id.try_fill(&mut bitcoin::key::rand::thread_rng()).unwrap();
+        temp_key_id
+            .try_fill(&mut bitcoin::key::rand::thread_rng())
+            .unwrap();
         let gen_key_id = test.wallet.derive_signer_key_id(true, temp_key_id);
         println!("GEN {}", hex::encode(gen_key_id));
         let key_info = test.wallet.derive_contract_signer(gen_key_id);

@@ -1,31 +1,41 @@
 use super::SledStorageProvider;
 use crate::error::WalletError;
 use crate::signer::{DeriveSigner, SignerInformation};
+use bdk_chain::Merge;
 use bdk_wallet::ChangeSet;
 use bdk_wallet::WalletPersister;
-use bitcoin::{
-    key::rand::{thread_rng, Rng},
-    secp256k1::{PublicKey, SecretKey},
-};
+use bitcoin::secp256k1::{PublicKey, SecretKey};
+
+const CHANGESET_KEY: &str = "changeset";
 
 impl WalletPersister for SledStorageProvider {
     type Error = WalletError;
 
     fn persist(persister: &mut Self, changeset: &ChangeSet) -> Result<(), Self::Error> {
+        tracing::info!("Presisting changeset to wallet persistance.");
         let wallet_tree = persister.wallet_tree()?;
-        let rand_key: [u8; 32] = thread_rng().gen();
-        let new_changeset = bincode::serialize(changeset).map_err(|_| {
-            WalletError::StorageError(sled::Error::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Serialization error",
-            )))
-        })?;
-        wallet_tree.insert(rand_key, new_changeset)?;
+        let new_changeset = if let Some(cs) = wallet_tree.get(CHANGESET_KEY)? {
+            let mut stored_changeset = bincode::deserialize::<ChangeSet>(&cs)?;
+            stored_changeset.merge(changeset.clone());
+            stored_changeset
+        } else {
+            changeset.to_owned()
+        };
+        let new_changeset_bytes = bincode::serialize(&new_changeset)?;
+        wallet_tree
+            .insert(CHANGESET_KEY, new_changeset_bytes)
+            .unwrap();
         Ok(())
     }
 
-    fn initialize(_persister: &mut Self) -> Result<ChangeSet, Self::Error> {
-        Ok(ChangeSet::default())
+    fn initialize(persister: &mut Self) -> Result<ChangeSet, Self::Error> {
+        tracing::info!("Initializing wallet persistance.");
+        if let Some(cs) = persister.wallet_tree()?.get(CHANGESET_KEY)? {
+            let cs = bincode::deserialize::<ChangeSet>(&cs)?;
+            Ok(cs)
+        } else {
+            Ok(ChangeSet::default())
+        }
     }
 }
 
