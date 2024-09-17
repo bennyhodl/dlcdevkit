@@ -52,8 +52,11 @@ nostr = { version = "0.29.0", features = ["std"], optional = true }
 nostr-sdk = { version = "0.29.0", optional = true }
 nostr-sqlite = { version = "0.28.0", optional = true }
 nostr-relay-pool = { version = "0.29.1", optional = true }
+ddk-payouts = { path = "../payouts/" }
 
 [dev-dependencies]
 # electrsd = { version = "0.22.0", features = ["legacy", "esplora_a33e97e1", "bitcoind_23_0"] }
 electrum-client = "0.12.0"
 futures = "0.3.29"
+test-log = { version = "0.2.16", features = ["trace"] }
+rstest = "0.22.0"

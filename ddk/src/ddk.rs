@@ -4,6 +4,8 @@ use crate::{DdkOracle, DdkStorage, DdkTransport};
 use anyhow::anyhow;
 use bitcoin::secp256k1::PublicKey;
 use bitcoin::Network;
+use crossbeam::channel::{unbounded, Receiver, Sender};
+use dlc_manager::error::Error;
 use dlc_manager::{
     contract::contract_input::ContractInput, CachedContractSignerProvider, ContractId,
     SimpleSigner, SystemTimeProvider,
@@ -13,7 +15,6 @@ use dlc_messages::{AcceptDlc, Message, OfferDlc};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio::runtime::Runtime;
-use crossbeam::channel::{unbounded, Sender, Receiver};
 
 /// DlcDevKit type alias for the [dlc_manager::manager::Manager]
 pub type DlcDevKitDlcManager<S, O> = dlc_manager::manager::Manager<
@@ -31,7 +32,7 @@ pub type DlcDevKitDlcManager<S, O> = dlc_manager::manager::Manager<
 pub enum DlcManagerMessage {
     AcceptDlc {
         contract: ContractId,
-        responder: Sender<(ContractId, PublicKey, AcceptDlc)>
+        responder: Sender<Result<(ContractId, PublicKey, AcceptDlc), Error>>,
     },
     OfferDlc {
         contract_input: ContractInput,
@@ -55,8 +56,10 @@ pub struct DlcDevKit<T: DdkTransport, S: DdkStorage, O: DdkOracle> {
 }
 
 impl<T, S, O> DlcDevKit<T, S, O>
-where 
-    T: DdkTransport, S: DdkStorage, O: DdkOracle
+where
+    T: DdkTransport,
+    S: DdkStorage,
+    O: DdkOracle,
 {
     pub fn start(&self) -> anyhow::Result<()> {
         let mut runtime_lock = self.runtime.write().unwrap();
@@ -69,11 +72,12 @@ where
             .enable_all()
             .build()?;
 
-        
         let manager_transport = self.transport.clone();
         let manager_clone = self.manager.clone();
         let receiver_clone = self.receiver.clone();
-        std::thread::spawn(move || Self::run_manager(manager_clone, manager_transport, receiver_clone));
+        std::thread::spawn(move || {
+            Self::run_manager(manager_clone, manager_transport, receiver_clone)
+        });
 
         let transport_clone = self.transport.clone();
         runtime.spawn(async move {
@@ -94,7 +98,9 @@ where
             let mut timer = tokio::time::interval(Duration::from_secs(5));
             loop {
                 timer.tick().await;
-                processor.send(DlcManagerMessage::ProcessMessages).expect("couldn't send message");
+                processor
+                    .send(DlcManagerMessage::ProcessMessages)
+                    .expect("couldn't send message");
             }
         });
 
@@ -105,16 +111,48 @@ where
         Ok(())
     }
 
-    fn run_manager(manager: Arc<DlcDevKitDlcManager<S, O>>, transport: Arc<T>, receiver: Arc<Receiver<DlcManagerMessage>>) {
+    pub fn stop(&self) -> anyhow::Result<()> {
+        let mut runtime_lock = self.runtime.write().unwrap();
+        if let Some(rt) = runtime_lock.take() {
+            rt.shutdown_background();
+            Ok(())
+        } else {
+            return Err(anyhow!("Runtime is not running."));
+        }
+    }
+
+    fn run_manager(
+        manager: Arc<DlcDevKitDlcManager<S, O>>,
+        transport: Arc<T>,
+        receiver: Arc<Receiver<DlcManagerMessage>>,
+    ) {
         while let Ok(msg) = receiver.recv() {
             match msg {
-                DlcManagerMessage::OfferDlc { contract_input, counter_party, oracle_announcements, responder } => {
-                    let offer = manager.send_offer_with_announcements(&contract_input, counter_party, vec![oracle_announcements]).expect("can't create offerdlc");
+                DlcManagerMessage::OfferDlc {
+                    contract_input,
+                    counter_party,
+                    oracle_announcements,
+                    responder,
+                } => {
+                    let offer = manager
+                        .send_offer_with_announcements(
+                            &contract_input,
+                            counter_party,
+                            vec![oracle_announcements],
+                        )
+                        .expect("can't create offerdlc");
+
+                    transport.send_message(counter_party, Message::Offer(offer.clone()));
                     responder.send(offer).expect("send offer error")
-                },
-                DlcManagerMessage::AcceptDlc { contract, responder } => {
-                    let accept = manager.accept_contract_offer(&contract).expect("can't accept offer");
-                    responder.send(accept).expect("can't send")
+                }
+                DlcManagerMessage::AcceptDlc {
+                    contract,
+                    responder,
+                } => {
+                    println!("Contract id: {}", contract.len());
+                    let accept_dlc = manager.accept_contract_offer(&contract);
+
+                    responder.send(accept_dlc).expect("can't send")
                 }
                 DlcManagerMessage::ProcessMessages => {
                     let messages = transport.get_and_clear_received_messages();
@@ -125,7 +163,9 @@ where
                             "Processing DLC message"
                         );
 
-                        let message_response = manager.on_dlc_message(&message, counter_party).expect("no on dlc message");
+                        let message_response = manager
+                            .on_dlc_message(&message, counter_party)
+                            .expect("no on dlc message");
                         if let Some(msg) = message_response {
                             tracing::info!("Responding to message received.");
                             tracing::debug!(message=?msg);
@@ -139,7 +179,6 @@ where
                 }
             }
         }
-
     }
 
     pub fn connect_if_necessary(&self) -> anyhow::Result<()> {
@@ -161,7 +200,14 @@ where
         oracle_announcements: Vec<OracleAnnouncement>,
     ) -> anyhow::Result<OfferDlc> {
         let (responder, receiver) = unbounded();
-        self.sender.send(DlcManagerMessage::OfferDlc { contract_input: contract_input.to_owned(), counter_party, oracle_announcements, responder }).expect("sending offer message");
+        self.sender
+            .send(DlcManagerMessage::OfferDlc {
+                contract_input: contract_input.to_owned(),
+                counter_party,
+                oracle_announcements,
+                responder,
+            })
+            .expect("sending offer message");
         let offer = receiver.recv().expect("no offer dlc");
 
         let contract_id = hex::encode(&offer.temporary_contract_id);
@@ -180,9 +226,18 @@ where
         &self,
         contract: [u8; 32],
     ) -> anyhow::Result<(String, String, AcceptDlc)> {
+        println!("Contract id: {}", contract.len());
         let (responder, receiver) = unbounded();
-        self.sender.send(DlcManagerMessage::AcceptDlc { contract, responder }).expect("couldnt send accept");
-        let (contract_id, public_key, accept_dlc) = receiver.recv().expect("coudlnt accept dlc");
+        self.sender
+            .send(DlcManagerMessage::AcceptDlc {
+                contract,
+                responder,
+            })
+            .expect("couldnt send accept");
+        let (contract_id, public_key, accept_dlc) = receiver.recv()?.map_err(|e| {
+            tracing::error!(error=?e, "Could not accept offer.");
+            anyhow!("Could not accept dlc offer.")
+        })?;
 
         self.transport
             .send_message(public_key, Message::Accept(accept_dlc.clone()));
@@ -195,3 +250,54 @@ where
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use crate::test_util::{test_ddk, TestSuite};
+    use ddk_payouts::enumeration::create_contract_input;
+    use dlc::EnumerationPayout;
+    use dlc_manager::Oracle;
+    use rstest::rstest;
+
+    #[rstest]
+    #[test_log::test(tokio::test)]
+    async fn send_offer(
+        #[future] test_ddk: (
+            TestSuite,
+            TestSuite,
+            dlc_messages::oracle_msgs::OracleAnnouncement,
+        ),
+    ) {
+        let (test, test_two, announcement) = test_ddk.await;
+        let contract_input = create_contract_input(
+            vec![
+                EnumerationPayout {
+                    outcome: "billions".to_string(),
+                    payout: dlc::Payout {
+                        offer: 100_000,
+                        accept: 0,
+                    },
+                },
+                EnumerationPayout {
+                    outcome: "suits".to_string(),
+                    payout: dlc::Payout {
+                        offer: 0,
+                        accept: 100_000,
+                    },
+                },
+            ],
+            50_000,
+            50_000,
+            1,
+            test.ddk.oracle.get_public_key().to_string(),
+            "test-ddk-5".to_string(),
+        );
+        let offer = test.ddk.send_dlc_offer(
+            &contract_input,
+            test_two.ddk.transport.node_id,
+            vec![announcement],
+        );
+        assert!(offer.is_ok());
+        test.ddk.stop().unwrap();
+        test_two.ddk.stop().unwrap();
+    }
+}

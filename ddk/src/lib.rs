@@ -8,20 +8,21 @@ mod ddk;
 mod error;
 mod io;
 mod signer;
+#[cfg(test)]
 mod test_util;
 
 /// Build a DDK application.
 pub mod builder;
 /// Configuration for a DDK application.
 pub mod config;
-/// DLC utilities.
-pub mod util;
 /// Oracle clients.
 pub mod oracle;
 /// Storage implementations.
 pub mod storage;
 /// Transport services.
 pub mod transport;
+/// DLC utilities.
+pub mod util;
 /// The internal [bdk::Wallet].
 pub mod wallet;
 /// DDK object with all services
@@ -29,12 +30,12 @@ pub use ddk::DlcDevKit;
 /// Type alias for [dlc_manager::manager::Manager]
 pub use ddk::DlcDevKitDlcManager;
 
+pub use bdk_wallet::LocalOutput;
 /// Re-exports
 pub use bitcoin;
 pub use dlc;
 pub use dlc_manager;
 pub use dlc_messages;
-pub use bdk_wallet::LocalOutput;
 
 /// Nostr relay host. TODO: nostr feature
 pub const RELAY_HOST: &str = "ws://localhost:8081";
@@ -44,13 +45,13 @@ pub const ORACLE_HOST: &str = "http://localhost:8080";
 pub const ESPLORA_HOST: &str = "http://localhost:30000";
 
 use async_trait::async_trait;
+use bdk_wallet::WalletPersister;
+use bitcoin::key::XOnlyPublicKey;
 use bitcoin::secp256k1::PublicKey;
 use dlc_messages::oracle_msgs::OracleAnnouncement;
 use dlc_messages::Message;
 use signer::DeriveSigner;
 use transport::PeerInformation;
-use bdk_wallet::WalletPersister;
-use bitcoin::key::XOnlyPublicKey;
 
 /// Allows ddk to open a listening connection and send/receive dlc messages functionality.
 ///
@@ -83,7 +84,14 @@ pub trait DdkTransport: std::marker::Send + std::marker::Sync + 'static {
 }
 
 /// Storage for DLC contracts.
-pub trait DdkStorage: dlc_manager::Storage + DeriveSigner + std::marker::Send + std::marker::Sync + 'static + WalletPersister {
+pub trait DdkStorage:
+    dlc_manager::Storage
+    + DeriveSigner
+    + std::marker::Send
+    + std::marker::Sync
+    + 'static
+    + WalletPersister
+{
     fn list_peers(&self) -> anyhow::Result<Vec<PeerInformation>>;
     fn save_peer(&self, peer: PeerInformation) -> anyhow::Result<()>;
 }

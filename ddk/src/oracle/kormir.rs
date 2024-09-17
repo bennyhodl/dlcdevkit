@@ -38,7 +38,11 @@ impl KormirOracleClient {
         let client = reqwest::Client::new();
         tracing::info!(pubkey = pubkey.to_string(), "Connected to Kormir client.");
 
-        Ok(KormirOracleClient { pubkey, client, host: host.to_string() })
+        Ok(KormirOracleClient {
+            pubkey,
+            client,
+            host: host.to_string(),
+        })
     }
 
     pub async fn get_pubkey(&self) -> anyhow::Result<XOnlyPublicKey> {
@@ -50,13 +54,24 @@ impl KormirOracleClient {
     }
 
     pub async fn list_events(&self) -> anyhow::Result<Vec<OracleAnnouncement>> {
-        let oracle_events: Vec<OracleEventData> = reqwest::get(format!("{}/list-events", self.host)).await?.json().await?;
+        let oracle_events: Vec<OracleEventData> =
+            reqwest::get(format!("{}/list-events", self.host))
+                .await?
+                .json()
+                .await?;
         println!("oracle_events: {:?}", oracle_events);
 
-        Ok(oracle_events.iter().map(|event| event.announcement.clone()).collect::<Vec<OracleAnnouncement>>())
+        Ok(oracle_events
+            .iter()
+            .map(|event| event.announcement.clone())
+            .collect::<Vec<OracleAnnouncement>>())
     }
 
-    pub async fn create_event(&self, outcomes: Vec<String>, maturity: u32) -> anyhow::Result<()> {
+    pub async fn create_event(
+        &self,
+        outcomes: Vec<String>,
+        maturity: u32,
+    ) -> anyhow::Result<OracleAnnouncement> {
         let event_id = Uuid::new_v4().to_string();
 
         let create_event_request = CreateEnumEvent {
@@ -64,13 +79,16 @@ impl KormirOracleClient {
             outcomes,
             event_maturity_epoch: maturity,
         };
-        self.client
-            .post(format!("{}/create-event", self.host))
+        let announcement: OracleAnnouncement = self
+            .client
+            .post(format!("{}/create-enum", self.host))
             .json(&create_event_request)
             .send()
+            .await?
+            .json()
             .await?;
 
-        Ok(())
+        Ok(announcement)
     }
 }
 
@@ -117,13 +135,14 @@ impl crate::DdkOracle for KormirOracleClient {
             .json::<Vec<OracleEventData>>()
             .await
             .map_err(|_| Error::OracleError("Could not get announcements async.".into()))?;
-        
-        let event = announcements.iter().find(|event| event.announcement.oracle_event.event_id == event_id);
+
+        let event = announcements
+            .iter()
+            .find(|event| event.announcement.oracle_event.event_id == event_id);
 
         match event {
             Some(event_data) => Ok(event_data.announcement.to_owned()),
-            None => return Err(Error::OracleError("No event found".to_string()))
+            None => return Err(Error::OracleError("No event found".to_string())),
         }
-
     }
 }

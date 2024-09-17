@@ -535,25 +535,25 @@ mod tests {
     use bitcoin::{key::rand::Fill, AddressType};
     use dlc_manager::ContractSignerProvider;
 
-    use crate::test_util::TestWallet;
+    use crate::test_util::TestSuite;
 
     #[test]
     fn address_is_p2wpkh() {
-        let test = TestWallet::create_wallet("p2wpkh-address");
-        let address = test.wallet.new_external_address().unwrap();
+        let test = TestSuite::create_wallet("p2wpkh-address");
+        let address = test.new_external_address().unwrap();
         assert_eq!(address.address.address_type().unwrap(), AddressType::P2wpkh)
     }
 
     #[test]
     fn derive_contract_signer() {
-        let test = TestWallet::create_wallet("derive_contract_signer");
+        let test = TestSuite::create_wallet("derive_contract_signer");
         let mut temp_key_id = [0u8; 32];
         temp_key_id
             .try_fill(&mut bitcoin::key::rand::thread_rng())
             .unwrap();
-        let gen_key_id = test.wallet.derive_signer_key_id(true, temp_key_id);
+        let gen_key_id = test.derive_signer_key_id(true, temp_key_id);
         println!("GEN {}", hex::encode(gen_key_id));
-        let key_info = test.wallet.derive_contract_signer(gen_key_id);
+        let key_info = test.derive_contract_signer(gen_key_id);
         assert!(key_info.is_ok())
     }
 }
