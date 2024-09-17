@@ -1,6 +1,6 @@
 [package]
 name = "ddk-node"
-version = "0.0.11"
+version = "0.0.12"
 authors = ["benny b <ben@bitcoinbay.foundation>"]
 description = "DDK node to facilitate DLC contracts."
 license = "MIT"
@@ -8,9 +8,11 @@ repository = "https://github.com/bennyhodl/dlcdevkit"
 edition = "2021"
 
 [dependencies]
+ddk = { version = "0.0.12", path = "../ddk/" }
+ddk-payouts = { version = "0.0.12", path = "../payouts" }
+
 anyhow = "1.0.86"
 clap = { version = "4.5.9", features = ["derive"] }
-ddk = { version = "0.0.11", path = "../ddk/" }
 hex = "0.4.3"
 homedir = "0.3.3"
 inquire = "0.7.5"
@@ -22,7 +24,6 @@ toml = "0.8.19"
 tonic = "0.10.2"
 tracing = "0.1.40"
 tracing-subscriber = "0.3.18"
-ddk-payouts = { version = "0.0.11", path = "../payouts" }
 reqwest = "0.12.7"
 
 [build-dependencies]
