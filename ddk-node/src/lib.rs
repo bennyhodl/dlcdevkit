@@ -1,4 +1,5 @@
 pub mod ddkrpc;
+pub mod types;
 
 use std::str::FromStr;
 use std::sync::Arc;
@@ -14,13 +15,18 @@ use ddk::DlcDevKit;
 use ddk::{DdkOracle, DdkTransport};
 use ddkrpc::ddk_rpc_server::DdkRpc;
 use ddkrpc::{
-    AcceptOfferRequest, AcceptOfferResponse, ConnectRequest, ConnectResponse, GetWalletTransactionsRequest, GetWalletTransactionsResponse, ListContractsRequest, ListContractsResponse, ListOffersRequest, ListOffersResponse, ListOraclesRequest, ListOraclesResponse, ListPeersRequest, ListPeersResponse, ListUtxosRequest, ListUtxosResponse, NewAddressRequest, NewAddressResponse, Peer, SendOfferRequest, SendOfferResponse, WalletBalanceRequest, WalletBalanceResponse
+    AcceptOfferRequest, AcceptOfferResponse, ConnectRequest, ConnectResponse,
+    GetWalletTransactionsRequest, GetWalletTransactionsResponse, ListContractsRequest,
+    ListContractsResponse, ListOffersRequest, ListOffersResponse, ListOraclesRequest,
+    ListOraclesResponse, ListPeersRequest, ListPeersResponse, ListUtxosRequest, ListUtxosResponse,
+    NewAddressRequest, NewAddressResponse, Peer, SendOfferRequest, SendOfferResponse,
+    WalletBalanceRequest, WalletBalanceResponse,
 };
 use ddkrpc::{InfoRequest, InfoResponse};
-use tonic::{async_trait, Code};
 use tonic::Request;
 use tonic::Response;
 use tonic::Status;
+use tonic::{async_trait, Code};
 
 type DdkServer = DlcDevKit<LightningTransport, SledStorageProvider, KormirOracleClient>;
 
@@ -32,7 +38,6 @@ impl DdkNode {
     pub fn new(ddk: DdkServer) -> Self {
         Self {
             inner: Arc::new(ddk),
-
         }
     }
 }
@@ -67,14 +72,28 @@ impl DdkRpc for DdkNode {
             serde_json::from_slice(&contract_input).expect("couldn't get bytes correct");
         let mut oracle_announcements = Vec::new();
         for info in &contract_input.contract_infos {
-            let announcement = self.inner.oracle.get_announcement_async(&info.oracles.event_id).await.unwrap();
+            let announcement = self
+                .inner
+                .oracle
+                .get_announcement_async(&info.oracles.event_id)
+                .await
+                .unwrap();
             oracle_announcements.push(announcement)
         }
 
         let counter_party = PublicKey::from_str(&counter_party).expect("no public key");
         let offer_msg = self
             .inner
-            .send_dlc_offer(&contract_input, counter_party, oracle_announcements).map_err(|e| Status::new(Code::Cancelled, format!("Contract offer could not be sent to counterparty. error={:?}", e)))?;
+            .send_dlc_offer(&contract_input, counter_party, oracle_announcements)
+            .map_err(|e| {
+                Status::new(
+                    Code::Cancelled,
+                    format!(
+                        "Contract offer could not be sent to counterparty. error={:?}",
+                        e
+                    ),
+                )
+            })?;
 
         let offer_dlc =
             serde_json::to_vec(&offer_msg).expect("OfferDlc could not be converted to vec.");
@@ -93,9 +112,12 @@ impl DdkRpc for DdkNode {
         println!("{:?}", contract_id);
         let (contract_id, counter_party, accept_dlc) = self
             .inner
-            .accept_dlc_offer(contract_id).map_err(|_| Status::new(Code::Cancelled, "Contract could not be accepted."))?;
+            .accept_dlc_offer(contract_id)
+            .map_err(|_| Status::new(Code::Cancelled, "Contract could not be accepted."))?;
 
-        let accept_dlc = serde_json::to_vec(&accept_dlc).map_err(|_| Status::new(Code::Cancelled, "Accept DLC is malformed to create bytes."))?;
+        let accept_dlc = serde_json::to_vec(&accept_dlc).map_err(|_| {
+            Status::new(Code::Cancelled, "Accept DLC is malformed to create bytes.")
+        })?;
 
         Ok(Response::new(AcceptOfferResponse {
             contract_id,
@@ -145,7 +167,8 @@ impl DdkRpc for DdkNode {
 
         let response = WalletBalanceResponse {
             confirmed: wallet_balance.confirmed.to_sat(),
-            unconfirmed: (wallet_balance.trusted_pending + wallet_balance.untrusted_pending).to_sat(),
+            unconfirmed: (wallet_balance.trusted_pending + wallet_balance.untrusted_pending)
+                .to_sat(),
         };
         Ok(Response::new(response))
     }
@@ -180,47 +203,69 @@ impl DdkRpc for DdkNode {
         Ok(Response::new(ListUtxosResponse { utxos }))
     }
 
-
     #[tracing::instrument(skip(self, _request), name = "grpc_server")]
-    async fn list_peers(&self, _request: Request<ListPeersRequest>) -> Result<Response<ListPeersResponse>, Status> {
+    async fn list_peers(
+        &self,
+        _request: Request<ListPeersRequest>,
+    ) -> Result<Response<ListPeersResponse>, Status> {
         tracing::info!("List peers request");
         let peers = self.inner.transport.ln_peer_manager().list_peers();
-        let peers = peers.iter()
+        let peers = peers
+            .iter()
             .map(|peer| {
                 let host = match &peer.socket_address {
                     Some(h) => h.to_string(),
                     None => "".to_string(),
                 };
                 let pubkey = peer.counterparty_node_id.to_string();
-                Peer {
-                    pubkey,
-                    host
-                }
+                Peer { pubkey, host }
             })
             .collect::<Vec<Peer>>();
 
-        Ok(Response::new(ListPeersResponse {peers}))
+        Ok(Response::new(ListPeersResponse { peers }))
     }
 
     #[tracing::instrument(skip(self, request), name = "grpc_server")]
-    async fn connect_peer(&self, request: Request<ConnectRequest>) -> Result<Response<ConnectResponse>, Status> {
+    async fn connect_peer(
+        &self,
+        request: Request<ConnectRequest>,
+    ) -> Result<Response<ConnectResponse>, Status> {
         let ConnectRequest { pubkey, host } = request.into_inner();
         let pubkey = PublicKey::from_str(&pubkey).unwrap();
         self.inner.transport.connect_outbound(pubkey, &host).await;
         Ok(Response::new(ConnectResponse {}))
     }
 
-    async fn list_oracles(&self, _request: Request<ListOraclesRequest>) -> Result<Response<ListOraclesResponse>, Status> {
-        let pubkey = self.inner.oracle.get_public_key_async().await.unwrap().to_string();
+    async fn list_oracles(
+        &self,
+        _request: Request<ListOraclesRequest>,
+    ) -> Result<Response<ListOraclesResponse>, Status> {
+        let pubkey = self
+            .inner
+            .oracle
+            .get_public_key_async()
+            .await
+            .unwrap()
+            .to_string();
         let name = self.inner.oracle.name();
         Ok(Response::new(ListOraclesResponse { name, pubkey }))
     }
 
-    async fn list_contracts(&self, _request: Request<ListContractsRequest>) -> Result<Response<ListContractsResponse>, Status> {
-        let contracts = self.inner.storage.get_contracts().map_err(|e| Status::new(Code::Cancelled, e.to_string()))?;
-        let contract_bytes: Vec<Vec<u8>> = contracts.iter()
+    async fn list_contracts(
+        &self,
+        _request: Request<ListContractsRequest>,
+    ) -> Result<Response<ListContractsResponse>, Status> {
+        let contracts = self
+            .inner
+            .storage
+            .get_contracts()
+            .map_err(|e| Status::new(Code::Cancelled, e.to_string()))?;
+        let contract_bytes: Vec<Vec<u8>> = contracts
+            .iter()
             .map(|contract| serialize_contract(contract).unwrap())
             .collect();
-        Ok(Response::new(ListContractsResponse {contracts: contract_bytes}))
+        Ok(Response::new(ListContractsResponse {
+            contracts: contract_bytes,
+        }))
     }
 }
