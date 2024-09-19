@@ -223,14 +223,12 @@ where
         &self,
         contract: [u8; 32],
     ) -> anyhow::Result<(String, String, AcceptDlc)> {
-        println!("Contract id: {}", contract.len());
         let (responder, receiver) = unbounded();
-        self.sender
-            .send(DlcManagerMessage::AcceptDlc {
-                contract,
-                responder,
-            })
-            .expect("couldnt send accept");
+        self.sender.send(DlcManagerMessage::AcceptDlc {
+            contract,
+            responder,
+        })?;
+
         let (contract_id, public_key, accept_dlc) = receiver.recv()?.map_err(|e| {
             tracing::error!(error=?e, "Could not accept offer.");
             anyhow!("Could not accept dlc offer.")

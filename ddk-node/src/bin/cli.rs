@@ -5,15 +5,19 @@ use ddk::bitcoin::Transaction;
 use ddk::dlc::{EnumerationPayout, Payout};
 use ddk::dlc_manager::contract::contract_input::ContractInput;
 use ddk::dlc_manager::contract::offered_contract::OfferedContract;
+use ddk::dlc_manager::contract::Contract;
+use ddk::dlc_messages::{AcceptDlc, OfferDlc};
+use ddk::util::deserialize_contract_bytes;
 use ddk::LocalOutput;
+use ddk_node::convert::*;
 use ddk_node::ddkrpc::ddk_rpc_client::DdkRpcClient;
 use ddk_node::ddkrpc::{
     AcceptOfferRequest, ConnectRequest, GetWalletTransactionsRequest, InfoRequest,
     ListContractsRequest, ListOffersRequest, ListOraclesRequest, ListPeersRequest,
     ListUtxosRequest, NewAddressRequest, SendOfferRequest, WalletBalanceRequest,
 };
-use ddk_node::types::*;
 use inquire::{Select, Text};
+use serde_json::Value;
 
 #[derive(Debug, Clone, Parser)]
 #[clap(name = "ddk-cli")]
@@ -187,8 +191,9 @@ async fn main() -> anyhow::Result<()> {
                 })
                 .await?
                 .into_inner();
-            let offer_dlc = serde_json::to_string_pretty(&offer.offer_dlc)?;
-            print!("{}", offer_dlc);
+            let offer_dlc: OfferDlc = serde_json::from_slice(&offer.offer_dlc)?;
+            let offer = serde_json::to_string_pretty(&offer_dlc)?;
+            print!("{}", offer);
         }
         CliCommand::Offers => {
             let offers_request = client.list_offers(ListOffersRequest {}).await?.into_inner();
@@ -206,30 +211,24 @@ async fn main() -> anyhow::Result<()> {
                 })
                 .await?
                 .into_inner();
-            let accept_dlc = serde_json::to_string_pretty(&accept.accept_dlc)?;
-            println!("{:?}", accept_dlc)
+            let accept_dlc: AcceptDlc = serde_json::from_slice(&accept.accept_dlc)?;
+            let accept_dlc = serde_json::to_string_pretty(&accept_dlc)?;
+            print!("{}", accept_dlc)
         }
         CliCommand::Contracts => {
-            let _contracts = client
+            let contracts = client
                 .list_contracts(ListContractsRequest {})
                 .await?
                 .into_inner()
                 .contracts;
-            // for contract in contracts {
-            //     let contract = deserialize_contract_bytes(&contract).unwrap();
-            //     match contract {
-            //         ddk::dlc_manager::contract::Contract::Offered(o) => {
-            //             print!("{:?}", o)
-            //         }
-            //         Contract::Signed(s) => {
-            //             print!("{:?}", s)
-            //         }
-            //         Contract::Accepted(a) => {
-            //             print!("{:?}", a)
-            //         }
-            //         _ => (),
-            //     }
-            // }
+            let contract_values = contracts
+                .iter()
+                .map(|c| {
+                    let contract: Contract = deserialize_contract_bytes(&c).unwrap();
+                    contract_to_value(&contract)
+                })
+                .collect::<Vec<Value>>();
+            print!("{}", serde_json::to_string_pretty(&contract_values)?)
         }
         CliCommand::Wallet(wallet) => match wallet {
             WalletCommand::Balance => {
