@@ -141,15 +141,12 @@ where
                             vec![oracle_announcements],
                         )
                         .expect("can't create offerdlc");
-
-                    transport.send_message(counter_party, Message::Offer(offer.clone()));
                     responder.send(offer).expect("send offer error")
                 }
                 DlcManagerMessage::AcceptDlc {
                     contract,
                     responder,
                 } => {
-                    println!("Contract id: {}", contract.len());
                     let accept_dlc = manager.accept_contract_offer(&contract);
 
                     responder.send(accept_dlc).expect("can't send")
