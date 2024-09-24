@@ -12,7 +12,7 @@ Build DLC application by plugging in your own transport, storage, and oracle cli
 
 ## Get Started
 ```
-$ cargo add ddk
+$ cargo add ddk --features lightning
 ```
 
 ```rust

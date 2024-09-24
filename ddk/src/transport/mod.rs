@@ -1,3 +1,4 @@
+#[cfg(feature = "lightning")]
 pub mod lightning;
 #[cfg(feature = "nostr")]
 pub mod nostr;

@@ -8,7 +8,7 @@ repository = "https://github.com/bennyhodl/dlcdevkit"
 edition = "2021"
 
 [dependencies]
-ddk = { version = "0.0.12", path = "../ddk/" }
+ddk = { version = "0.0.12", path = "../ddk/", features = ["lightning"] }
 ddk-payouts = { version = "0.0.12", path = "../payouts" }
 
 anyhow = "1.0.86"
