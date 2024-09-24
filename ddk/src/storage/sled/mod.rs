@@ -7,8 +7,8 @@ mod wallet;
 
 use dlc_manager::contract::ser::Serializable;
 use dlc_manager::error::Error;
-use sled::{Db, Tree};
 use lightning::io::{Cursor, Read};
+use sled::{Db, Tree};
 
 use crate::transport::PeerInformation;
 use crate::DdkStorage;
@@ -23,14 +23,14 @@ const WALLET_TREE: u8 = 7;
 
 /// Implementation of Storage interface using the sled DB backend.
 #[derive(Debug, Clone)]
-pub struct SledStorageProvider {
+pub struct SledStorage {
     db: Db,
 }
 
-impl SledStorageProvider {
-    /// Creates a new instance of a SledStorageProvider.
+impl SledStorage {
+    /// Creates a new instance of a SledStorage.
     pub fn new(path: &str) -> Result<Self, sled::Error> {
-        Ok(SledStorageProvider {
+        Ok(SledStorage {
             db: sled::open(path)?,
         })
     }
@@ -83,7 +83,7 @@ impl SledStorageProvider {
     }
 }
 
-impl DdkStorage for SledStorageProvider {
+impl DdkStorage for SledStorage {
     fn list_peers(&self) -> anyhow::Result<Vec<PeerInformation>> {
         if let Some(bytes) = self.db.get("peers")? {
             let peers: Vec<PeerInformation> = serde_json::from_slice(&bytes)?;

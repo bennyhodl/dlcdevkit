@@ -2,11 +2,11 @@ use anyhow::Result;
 use ddk::builder::DdkBuilder;
 use ddk::config::DdkConfig;
 use ddk::oracle::P2PDOracleClient;
-use ddk::storage::SledStorageProvider;
+use ddk::storage::SledStorage;
 use ddk::transport::lightning::LightningTransport;
 use std::sync::Arc;
 
-type ApplicationDdk = ddk::DlcDevKit<LightningTransport, SledStorageProvider, P2PDOracleClient>;
+type ApplicationDdk = ddk::DlcDevKit<LightningTransport, SledStorage, P2PDOracleClient>;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -17,7 +17,7 @@ async fn main() -> Result<()> {
         1776,
         config.network,
     )?);
-    let storage = Arc::new(SledStorageProvider::new(
+    let storage = Arc::new(SledStorage::new(
         config
             .storage_path
             .join("sled_db")

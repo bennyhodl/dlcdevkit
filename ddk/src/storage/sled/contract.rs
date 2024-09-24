@@ -1,4 +1,5 @@
-use super::{SledStorageProvider, CHAIN_MONITOR_KEY, CHAIN_MONITOR_TREE};
+use super::{SledStorage, CHAIN_MONITOR_KEY, CHAIN_MONITOR_TREE};
+use crate::util::{deserialize_contract, serialize_contract};
 use bitcoin::consensus::ReadExt;
 use dlc_manager::chain_monitor::ChainMonitor;
 use dlc_manager::channel::accepted_channel::AcceptedChannel;
@@ -15,7 +16,6 @@ use dlc_manager::{error::Error, ContractId, Storage};
 use sled::transaction::{ConflictableTransactionResult, UnabortableTransactionError};
 use sled::Transactional;
 use std::convert::TryInto;
-use crate::util::{serialize_contract, deserialize_contract};
 
 macro_rules! convertible_enum {
     (enum $name:ident {
@@ -116,7 +116,7 @@ where
     Error::StorageError(e.to_string())
 }
 
-impl Storage for SledStorageProvider {
+impl Storage for SledStorage {
     fn get_contract(&self, contract_id: &ContractId) -> Result<Option<Contract>, Error> {
         match self
             .contract_tree()?
@@ -402,7 +402,7 @@ mod tests {
                     std::stringify!($name)
                 );
                 {
-                    let storage = SledStorageProvider::new(&path).expect("Error opening sled DB");
+                    let storage = SledStorage::new(&path).expect("Error opening sled DB");
                     #[allow(clippy::redundant_closure_call)]
                     $body(storage);
                 }
@@ -419,76 +419,67 @@ mod tests {
         T::deserialize(&mut cursor).unwrap()
     }
 
-    sled_test!(
-        create_contract_can_be_retrieved,
-        |storage: SledStorageProvider| {
-            let serialized = include_bytes!("../../../tests/data/dlc_storage/sled/Offered");
-            let contract = deserialize_object(serialized);
+    sled_test!(create_contract_can_be_retrieved, |storage: SledStorage| {
+        let serialized = include_bytes!("../../../tests/data/dlc_storage/sled/Offered");
+        let contract = deserialize_object(serialized);
 
-            storage
-                .create_contract(&contract)
-                .expect("Error creating contract");
+        storage
+            .create_contract(&contract)
+            .expect("Error creating contract");
 
-            let retrieved = storage
-                .get_contract(&contract.id)
-                .expect("Error retrieving contract.");
+        let retrieved = storage
+            .get_contract(&contract.id)
+            .expect("Error retrieving contract.");
 
-            if let Some(Contract::Offered(retrieved_offer)) = retrieved {
-                assert_eq!(serialized[..], retrieved_offer.serialize().unwrap()[..]);
-            } else {
-                unreachable!();
-            }
+        if let Some(Contract::Offered(retrieved_offer)) = retrieved {
+            assert_eq!(serialized[..], retrieved_offer.serialize().unwrap()[..]);
+        } else {
+            unreachable!();
         }
-    );
+    });
 
-    sled_test!(
-        update_contract_is_updated,
-        |storage: SledStorageProvider| {
-            let serialized = include_bytes!("../../../tests/data/dlc_storage/sled/Offered");
-            let offered_contract = deserialize_object(serialized);
-            let serialized = include_bytes!("../../../tests/data/dlc_storage/sled/Accepted");
-            let accepted_contract = deserialize_object(serialized);
-            let accepted_contract = Contract::Accepted(accepted_contract);
+    sled_test!(update_contract_is_updated, |storage: SledStorage| {
+        let serialized = include_bytes!("../../../tests/data/dlc_storage/sled/Offered");
+        let offered_contract = deserialize_object(serialized);
+        let serialized = include_bytes!("../../../tests/data/dlc_storage/sled/Accepted");
+        let accepted_contract = deserialize_object(serialized);
+        let accepted_contract = Contract::Accepted(accepted_contract);
 
-            storage
-                .create_contract(&offered_contract)
-                .expect("Error creating contract");
+        storage
+            .create_contract(&offered_contract)
+            .expect("Error creating contract");
 
-            storage
-                .update_contract(&accepted_contract)
-                .expect("Error updating contract.");
-            let retrieved = storage
-                .get_contract(&accepted_contract.get_id())
-                .expect("Error retrieving contract.");
+        storage
+            .update_contract(&accepted_contract)
+            .expect("Error updating contract.");
+        let retrieved = storage
+            .get_contract(&accepted_contract.get_id())
+            .expect("Error retrieving contract.");
 
-            if let Some(Contract::Accepted(_)) = retrieved {
-            } else {
-                unreachable!();
-            }
+        if let Some(Contract::Accepted(_)) = retrieved {
+        } else {
+            unreachable!();
         }
-    );
+    });
 
-    sled_test!(
-        delete_contract_is_deleted,
-        |storage: SledStorageProvider| {
-            let serialized = include_bytes!("../../../tests/data/dlc_storage/sled/Offered");
-            let contract = deserialize_object(serialized);
-            storage
-                .create_contract(&contract)
-                .expect("Error creating contract");
+    sled_test!(delete_contract_is_deleted, |storage: SledStorage| {
+        let serialized = include_bytes!("../../../tests/data/dlc_storage/sled/Offered");
+        let contract = deserialize_object(serialized);
+        storage
+            .create_contract(&contract)
+            .expect("Error creating contract");
 
-            storage
-                .delete_contract(&contract.id)
-                .expect("Error deleting contract");
+        storage
+            .delete_contract(&contract.id)
+            .expect("Error deleting contract");
 
-            assert!(storage
-                .get_contract(&contract.id)
-                .expect("Error querying contract")
-                .is_none());
-        }
-    );
+        assert!(storage
+            .get_contract(&contract.id)
+            .expect("Error querying contract")
+            .is_none());
+    });
 
-    fn insert_offered_signed_and_confirmed(storage: &mut SledStorageProvider) {
+    fn insert_offered_signed_and_confirmed(storage: &mut SledStorage) {
         let serialized = include_bytes!("../../../tests/data/dlc_storage/sled/Offered");
         let offered_contract = deserialize_object(serialized);
         storage
@@ -524,7 +515,7 @@ mod tests {
             .expect("Error creating contract");
     }
 
-    fn insert_offered_and_signed_channels(storage: &mut SledStorageProvider) {
+    fn insert_offered_and_signed_channels(storage: &mut SledStorage) {
         let serialized = include_bytes!("../../../tests/data/dlc_storage/sled/Offered");
         let offered_contract = deserialize_object(serialized);
         let serialized = include_bytes!("../../../tests/data/dlc_storage/sled/OfferedChannel");
@@ -553,7 +544,7 @@ mod tests {
 
     sled_test!(
         get_signed_contracts_only_signed,
-        |mut storage: SledStorageProvider| {
+        |mut storage: SledStorage| {
             insert_offered_signed_and_confirmed(&mut storage);
 
             let signed_contracts = storage
@@ -566,7 +557,7 @@ mod tests {
 
     sled_test!(
         get_confirmed_contracts_only_confirmed,
-        |mut storage: SledStorageProvider| {
+        |mut storage: SledStorage| {
             insert_offered_signed_and_confirmed(&mut storage);
 
             let confirmed_contracts = storage
@@ -579,7 +570,7 @@ mod tests {
 
     sled_test!(
         get_offered_contracts_only_offered,
-        |mut storage: SledStorageProvider| {
+        |mut storage: SledStorage| {
             insert_offered_signed_and_confirmed(&mut storage);
 
             let offered_contracts = storage
@@ -592,7 +583,7 @@ mod tests {
 
     sled_test!(
         get_preclosed_contracts_only_preclosed,
-        |mut storage: SledStorageProvider| {
+        |mut storage: SledStorage| {
             insert_offered_signed_and_confirmed(&mut storage);
 
             let preclosed_contracts = storage
@@ -602,32 +593,26 @@ mod tests {
             assert_eq!(1, preclosed_contracts.len());
         }
     );
-    sled_test!(
-        get_contracts_all_returned,
-        |mut storage: SledStorageProvider| {
-            insert_offered_signed_and_confirmed(&mut storage);
+    sled_test!(get_contracts_all_returned, |mut storage: SledStorage| {
+        insert_offered_signed_and_confirmed(&mut storage);
 
-            let contracts = storage.get_contracts().expect("Error retrieving contracts");
+        let contracts = storage.get_contracts().expect("Error retrieving contracts");
 
-            assert_eq!(6, contracts.len());
-        }
-    );
+        assert_eq!(6, contracts.len());
+    });
 
-    sled_test!(
-        persist_chain_monitor_test,
-        |storage: SledStorageProvider| {
-            let chain_monitor = ChainMonitor::new(123);
+    sled_test!(persist_chain_monitor_test, |storage: SledStorage| {
+        let chain_monitor = ChainMonitor::new(123);
 
-            storage
-                .persist_chain_monitor(&chain_monitor)
-                .expect("to be able to persist the chain monistor.");
+        storage
+            .persist_chain_monitor(&chain_monitor)
+            .expect("to be able to persist the chain monistor.");
 
-            let retrieved = storage
-                .get_chain_monitor()
-                .expect("to be able to retrieve the chain monitor.")
-                .expect("to have a persisted chain monitor.");
+        let retrieved = storage
+            .get_chain_monitor()
+            .expect("to be able to retrieve the chain monitor.")
+            .expect("to have a persisted chain monitor.");
 
-            assert_eq!(chain_monitor, retrieved);
-        }
-    );
+        assert_eq!(chain_monitor, retrieved);
+    });
 }

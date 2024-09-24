@@ -1,3 +1,4 @@
 mod sled;
 
-pub use sled::SledStorageProvider;
+#[cfg(feature = "sled")]
+pub use sled::SledStorage;

@@ -1,4 +1,4 @@
-use super::SledStorageProvider;
+use super::SledStorage;
 use crate::error::WalletError;
 use crate::signer::{DeriveSigner, SignerInformation};
 use bdk_chain::Merge;
@@ -8,7 +8,7 @@ use bitcoin::secp256k1::{PublicKey, SecretKey};
 
 const CHANGESET_KEY: &str = "changeset";
 
-impl WalletPersister for SledStorageProvider {
+impl WalletPersister for SledStorage {
     type Error = WalletError;
 
     fn persist(persister: &mut Self, changeset: &ChangeSet) -> Result<(), Self::Error> {
@@ -39,7 +39,7 @@ impl WalletPersister for SledStorageProvider {
     }
 }
 
-impl DeriveSigner for SledStorageProvider {
+impl DeriveSigner for SledStorage {
     type Error = WalletError;
 
     fn get_key_information(&self, key_id: [u8; 32]) -> Result<SignerInformation, Self::Error> {

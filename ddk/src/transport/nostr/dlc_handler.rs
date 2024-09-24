@@ -1,19 +1,13 @@
 use lightning::io::Cursor;
 
-use crate::storage::SledStorageProvider;
 use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
 use lightning::util::ser::Readable;
 use nostr_sdk::{Event, Kind};
 
-pub struct NostrDlcHandler {
-    pub storage: SledStorageProvider,
-}
+#[derive(Default)]
+pub struct NostrDlcHandler;
 
 impl NostrDlcHandler {
-    pub fn new(storage: SledStorageProvider) -> Self {
-        Self { storage }
-    }
-
     pub fn receive_event(&self, event: Event) {
         match event.kind {
             Kind::Custom(88) => {

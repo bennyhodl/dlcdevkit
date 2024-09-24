@@ -1,23 +1,26 @@
+use clap::Parser;
+use ddk::bitcoin::Network;
+use ddk::builder::DdkBuilder;
+use ddk::config::{DdkConfig, SeedConfig};
+use ddk::oracle::KormirOracleClient;
+use ddk::storage::SledStorage;
+use ddk::transport::lightning::LightningTransport;
+use ddk_node::ddkrpc::ddk_rpc_server::DdkRpcServer;
+use ddk_node::DdkNode;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
-use clap::Parser;
-use ddk::config::{DdkConfig, SeedConfig};
-use ddk::builder::DdkBuilder;
-use ddk::storage::SledStorageProvider;
-use ddk::oracle::KormirOracleClient;
-use ddk::transport::lightning::LightningTransport;
-use ddk::bitcoin::Network;
-use ddk_node::ddkrpc::ddk_rpc_server::DdkRpcServer;
-use ddk_node::DdkNode;
 use tonic::transport::Server;
 use tracing::level_filters::LevelFilter;
 
-type DdkServer = ddk::DlcDevKit<LightningTransport, SledStorageProvider, KormirOracleClient>;
+type DdkServer = ddk::DlcDevKit<LightningTransport, SledStorage, KormirOracleClient>;
 
 #[derive(Parser, Clone, Debug)]
 #[clap(name = "ddk-node")]
-#[clap(about = "DDK Node for DLC Contracts", author = "benny b <ben@bitcoinbay.foundation>")]
+#[clap(
+    about = "DDK Node for DLC Contracts",
+    author = "benny b <ben@bitcoinbay.foundation>"
+)]
 #[clap(version = option_env ! ("CARGO_PKG_VERSION").unwrap_or("unknown"))]
 struct NodeArgs {
     #[arg(long)]
@@ -31,7 +34,9 @@ struct NodeArgs {
     #[arg(value_parser = ["regtest", "mainnet", "signet"])]
     network: String,
     #[arg(short, long)]
-    #[arg(help = "The path where ddk-node stores data. ddk-node will try to store in the $HOME directory by default.")]
+    #[arg(
+        help = "The path where ddk-node stores data. ddk-node will try to store in the $HOME directory by default."
+    )]
     storage_dir: Option<PathBuf>,
     #[arg(short = 'p')]
     #[arg(long = "port")]
@@ -54,7 +59,7 @@ struct NodeArgs {
     #[arg(help = "Seed config strategy.")]
     #[arg(default_value = "file")]
     #[arg(value_parser = ["file", "bytes"])]
-    seed: String
+    seed: String,
 }
 
 #[tokio::main]
@@ -71,7 +76,11 @@ async fn main() -> anyhow::Result<()> {
     let mut config = DdkConfig::default();
     let storage_path = match args.storage_dir {
         Some(storage) => storage,
-        None => homedir::my_home().expect("Provide a directory for ddk.").unwrap().join(".ddk").join("default-ddk")
+        None => homedir::my_home()
+            .expect("Provide a directory for ddk.")
+            .unwrap()
+            .join(".ddk")
+            .join("default-ddk"),
     };
     config.storage_path = storage_path.clone();
     config.esplora_host = args.esplora_host;
@@ -85,8 +94,12 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("Starting DDK node.");
 
-    let transport = Arc::new(LightningTransport::new(&config.seed_config, args.listening_port, config.network)?);
-    let storage = Arc::new(SledStorageProvider::new(
+    let transport = Arc::new(LightningTransport::new(
+        &config.seed_config,
+        args.listening_port,
+        config.network,
+    )?);
+    let storage = Arc::new(SledStorage::new(
         config.storage_path.join("sled_db").to_str().unwrap(),
     )?);
 

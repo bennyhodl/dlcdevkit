@@ -9,13 +9,13 @@ use crate::{
     chain::EsploraClient,
     config::{DdkConfig, SeedConfig},
     oracle::KormirOracleClient,
-    storage::SledStorageProvider,
+    storage::SledStorage,
     transport::lightning::LightningTransport,
     wallet::DlcDevKitWallet,
     DdkTransport, DlcDevKit,
 };
 
-type TestDlcDevKit = DlcDevKit<LightningTransport, SledStorageProvider, KormirOracleClient>;
+type TestDlcDevKit = DlcDevKit<LightningTransport, SledStorage, KormirOracleClient>;
 
 #[rstest::fixture]
 pub async fn test_ddk() -> (TestSuite, TestSuite, OracleAnnouncement) {
@@ -54,18 +54,18 @@ pub async fn test_ddk() -> (TestSuite, TestSuite, OracleAnnouncement) {
 
 type DlcManager = Arc<
     Manager<
-        Arc<DlcDevKitWallet<SledStorageProvider>>,
+        Arc<DlcDevKitWallet<SledStorage>>,
         Arc<
             dlc_manager::CachedContractSignerProvider<
-                Arc<DlcDevKitWallet<SledStorageProvider>>,
+                Arc<DlcDevKitWallet<SledStorage>>,
                 dlc_manager::SimpleSigner,
             >,
         >,
         Arc<EsploraClient>,
-        Arc<SledStorageProvider>,
+        Arc<SledStorage>,
         Arc<KormirOracleClient>,
         Arc<SystemTimeProvider>,
-        Arc<DlcDevKitWallet<SledStorageProvider>>,
+        Arc<DlcDevKitWallet<SledStorage>>,
         dlc_manager::SimpleSigner,
     >,
 >;
@@ -89,8 +89,7 @@ impl TestSuite {
             Arc::new(LightningTransport::new(&config.seed_config, port, config.network).unwrap());
         print!("transport");
         let storage = Arc::new(
-            SledStorageProvider::new(config.storage_path.join("sled_db").to_str().unwrap())
-                .unwrap(),
+            SledStorage::new(config.storage_path.join("sled_db").to_str().unwrap()).unwrap(),
         );
         print!("storage");
         let oracle = Arc::new(
@@ -119,7 +118,7 @@ impl TestSuite {
         name: &str,
         config: DdkConfig,
         transport: Arc<LightningTransport>,
-        storage: Arc<SledStorageProvider>,
+        storage: Arc<SledStorage>,
         oracle: Arc<KormirOracleClient>,
     ) -> TestDlcDevKit {
         let ddk: TestDlcDevKit = DdkBuilder::new()
@@ -134,9 +133,9 @@ impl TestSuite {
         ddk
     }
 
-    pub fn create_wallet(name: &str) -> DlcDevKitWallet<SledStorageProvider> {
+    pub fn create_wallet(name: &str) -> DlcDevKitWallet<SledStorage> {
         let path = format!("tests/data/{name}");
-        let storage = Arc::new(SledStorageProvider::new(&path).unwrap());
+        let storage = Arc::new(SledStorage::new(&path).unwrap());
         let mut entropy = [0u8; 64];
         entropy
             .try_fill(&mut bitcoin::key::rand::thread_rng())

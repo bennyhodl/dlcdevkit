@@ -8,7 +8,7 @@ use ddk::bitcoin::secp256k1::PublicKey;
 use ddk::dlc_manager::contract::contract_input::ContractInput;
 use ddk::dlc_manager::Storage;
 use ddk::oracle::KormirOracleClient;
-use ddk::storage::SledStorageProvider;
+use ddk::storage::SledStorage;
 use ddk::transport::lightning::LightningTransport;
 use ddk::util::serialize_contract;
 use ddk::DlcDevKit;
@@ -28,7 +28,7 @@ use tonic::Response;
 use tonic::Status;
 use tonic::{async_trait, Code};
 
-type DdkServer = DlcDevKit<LightningTransport, SledStorageProvider, KormirOracleClient>;
+type DdkServer = DlcDevKit<LightningTransport, SledStorage, KormirOracleClient>;
 
 pub struct DdkNode {
     pub inner: Arc<DdkServer>,

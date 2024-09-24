@@ -18,19 +18,19 @@ $ cargo add ddk
 ```rust
 use ddk::config::DdkConfig;
 use ddk::builder::DdkBuilder;
-use ddk::storage::SledStorageProvider;
+use ddk::storage::SledStorage;
 use ddk::transport::lightning::LightningTransport;
 use ddk::oracle::P2PDOracleClient;
 use bitcoin::Network;
 use std::sync::Arc;
 
-type ApplicationDdk = ddk::DlcDevKit<LightningTransport, SledStorageProvider, P2PDOracleClient>;
+type ApplicationDdk = ddk::DlcDevKit<LightningTransport, SledStorage, P2PDOracleClient>;
 
 fn main() {
     let config = DdkConfig::default();
 
     let transport = Arc::new(LightningTransport::new(&config.seed_config, PORT, Network::Regtest));
-    let storage = Arc::new(SledStorageProvider::new("<storage path>")?);
+    let storage = Arc::new(SledStorage::new("<storage path>")?);
     let oracle_client = Arc::new(P2PDOracleClient::new("<oracle host>")?);
 
     let ddk: ApplicationDdk = DdkBuilder::new()
