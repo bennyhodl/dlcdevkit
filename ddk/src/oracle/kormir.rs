@@ -59,7 +59,6 @@ impl KormirOracleClient {
                 .await?
                 .json()
                 .await?;
-        println!("oracle_events: {:?}", oracle_events);
 
         Ok(oracle_events
             .iter()
@@ -71,24 +70,22 @@ impl KormirOracleClient {
         &self,
         outcomes: Vec<String>,
         maturity: u32,
-    ) -> anyhow::Result<OracleAnnouncement> {
+    ) -> anyhow::Result<String> {
         let event_id = Uuid::new_v4().to_string();
 
         let create_event_request = CreateEnumEvent {
-            event_id,
+            event_id: event_id.clone(),
             outcomes,
             event_maturity_epoch: maturity,
         };
-        let announcement: OracleAnnouncement = self
-            .client
+
+        self.client
             .post(format!("{}/create-enum", self.host))
             .json(&create_event_request)
             .send()
-            .await?
-            .json()
             .await?;
 
-        Ok(announcement)
+        Ok(event_id)
     }
 }
 
