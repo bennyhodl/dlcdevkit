@@ -5,6 +5,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use ddk::bitcoin::secp256k1::PublicKey;
+use ddk::bitcoin::{Address, Amount, FeeRate};
 use ddk::dlc_manager::contract::contract_input::ContractInput;
 use ddk::dlc_manager::Storage;
 use ddk::oracle::KormirOracleClient;
@@ -19,8 +20,8 @@ use ddkrpc::{
     GetWalletTransactionsRequest, GetWalletTransactionsResponse, ListContractsRequest,
     ListContractsResponse, ListOffersRequest, ListOffersResponse, ListOraclesRequest,
     ListOraclesResponse, ListPeersRequest, ListPeersResponse, ListUtxosRequest, ListUtxosResponse,
-    NewAddressRequest, NewAddressResponse, Peer, SendOfferRequest, SendOfferResponse,
-    WalletBalanceRequest, WalletBalanceResponse,
+    NewAddressRequest, NewAddressResponse, Peer, SendOfferRequest, SendOfferResponse, SendRequest,
+    SendResponse, WalletBalanceRequest, WalletBalanceResponse,
 };
 use ddkrpc::{InfoRequest, InfoResponse};
 use tonic::Request;
@@ -109,7 +110,6 @@ impl DdkRpc for DdkNode {
         let mut contract_id = [0u8; 32];
         let contract_id_bytes = hex::decode(&request.into_inner().contract_id).unwrap();
         contract_id.copy_from_slice(&contract_id_bytes);
-        println!("{:?}", contract_id);
         let (contract_id, counter_party, accept_dlc) = self
             .inner
             .accept_dlc_offer(contract_id)
@@ -267,5 +267,27 @@ impl DdkRpc for DdkNode {
         Ok(Response::new(ListContractsResponse {
             contracts: contract_bytes,
         }))
+    }
+
+    async fn send(&self, request: Request<SendRequest>) -> Result<Response<SendResponse>, Status> {
+        let SendRequest {
+            address,
+            amount,
+            fee_rate,
+        } = request.into_inner();
+        let address = Address::from_str(&address).unwrap().assume_checked();
+        let amount = Amount::from_sat(amount);
+        let fee_rate = match FeeRate::from_sat_per_vb(fee_rate) {
+            Some(f) => f,
+            None => return Err(Status::new(Code::InvalidArgument, "Invalid fee rate.")),
+        };
+        let txn = self.inner.wallet.send_to_address(address, amount, fee_rate);
+        if let Ok(tx) = txn {
+            Ok(Response::new(SendResponse {
+                txid: tx.to_string(),
+            }))
+        } else {
+            Err(Status::new(Code::Internal, "Transaction sending failed."))
+        }
     }
 }

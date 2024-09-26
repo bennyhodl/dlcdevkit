@@ -14,7 +14,7 @@ use ddk_node::ddkrpc::ddk_rpc_client::DdkRpcClient;
 use ddk_node::ddkrpc::{
     AcceptOfferRequest, ConnectRequest, GetWalletTransactionsRequest, InfoRequest,
     ListContractsRequest, ListOffersRequest, ListOraclesRequest, ListPeersRequest,
-    ListUtxosRequest, NewAddressRequest, SendOfferRequest, WalletBalanceRequest,
+    ListUtxosRequest, NewAddressRequest, SendOfferRequest, SendRequest, WalletBalanceRequest,
 };
 use inquire::{Select, Text};
 use serde_json::Value;
@@ -78,6 +78,15 @@ enum WalletCommand {
     Transactions,
     #[command(about = "Get the wallet utxos.")]
     Utxos,
+    #[command(about = "Send a Bitcoin amount to an address")]
+    Send {
+        /// Address to send to.
+        address: String,
+        /// Amount in sats to send to.
+        amount: u64,
+        /// Fee rate in sats/vbyte
+        fee_rate: u64,
+    },
 }
 
 #[derive(Parser, Clone, Debug)]
@@ -272,6 +281,21 @@ async fn main() -> anyhow::Result<()> {
                     .collect::<Vec<LocalOutput>>();
 
                 print!("{}", serde_json::to_string_pretty(&local_outputs).unwrap())
+            }
+            WalletCommand::Send {
+                address,
+                amount,
+                fee_rate,
+            } => {
+                let txid = client
+                    .send(SendRequest {
+                        address,
+                        amount,
+                        fee_rate,
+                    })
+                    .await?
+                    .into_inner();
+                print!("{}", serde_json::to_string_pretty(&txid)?)
             }
         },
         CliCommand::Peers => {

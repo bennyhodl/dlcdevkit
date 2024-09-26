@@ -14,6 +14,7 @@ service DdkRpc {
   rpc ConnectPeer (ConnectRequest) returns (ConnectResponse);
   rpc ListOracles (ListOraclesRequest) returns (ListOraclesResponse);
   rpc ListContracts (ListContractsRequest) returns (ListContractsResponse);
+  rpc Send (SendRequest) returns (SendResponse);
 }
 
 message InfoRequest {}
@@ -103,4 +104,14 @@ message ListContractsRequest {}
 
 message ListContractsResponse {
   repeated bytes contracts = 1;
+}
+
+message SendRequest {
+  string address = 1;
+  uint64 amount = 2;
+  uint64 fee_rate = 3;
+}
+
+message SendResponse {
+  string txid = 1;
 }
