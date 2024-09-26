@@ -47,7 +47,7 @@ fn offered_contract_to_value(offered_contract: &OfferedContract, state: &str) ->
         "state": state,
         "contract_id": contract_id,
         "is_offer_party": offered_contract.is_offer_party,
-        "counterparty": offered_contract.counter_party,
+        "counter_party": offered_contract.counter_party,
         "collateral": offered_contract.total_collateral,
         "event_ids": event_ids,
     })
@@ -57,11 +57,12 @@ fn accepted_contract_to_value(accepted: &AcceptedContract) -> Value {
     let offered_contract = offered_contract_to_value(&accepted.offered_contract, "offered");
     json!({
         "contract_id": hex::encode(accepted.offered_contract.id),
-        "offered_contract": offered_contract,
-        "accept_params": accepted.accept_params,
+        "counter_party": offered_contract["counter_party"],
+        "collateral": offered_contract["collateral"],
+        "event_ids": offered_contract["event_ids"],
         "num_cets": accepted.dlc_transactions.cets.len(),
-        "funding_transaction": accepted.dlc_transactions.fund,
-        "refund_transaction": accepted.dlc_transactions.refund,
+        "funding_txid": accepted.dlc_transactions.fund.compute_txid(),
+        "refund_transaction": accepted.dlc_transactions.refund.compute_txid(),
     })
 }
 
@@ -69,9 +70,11 @@ fn signed_contract_to_value(signed: &SignedContract, state: &str) -> Value {
     let accepted_contract = accepted_contract_to_value(&signed.accepted_contract);
     json!({
         "state": state,
-        "accepted_contract": accepted_contract,
-        "funcding_signatures": signed.funding_signatures,
-        "offer_refund_signature": signed.offer_refund_signature,
+        "contract_id": accepted_contract["contract_id"],
+        "counterparty": accepted_contract["counter_party"],
+        "collateral": accepted_contract["collateral"],
+        "event_ids": accepted_contract["event_ids"],
+        "funding_txid": accepted_contract["funding_txid"],
     })
 }
 
