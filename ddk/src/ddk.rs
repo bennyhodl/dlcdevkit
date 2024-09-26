@@ -41,6 +41,7 @@ pub enum DlcManagerMessage {
         responder: Sender<OfferDlc>,
     },
     ProcessMessages,
+    PeriodicCheck,
 }
 
 pub struct DlcDevKit<T: DdkTransport, S: DdkStorage, O: DdkOracle> {
@@ -101,6 +102,10 @@ where
                 processor
                     .send(DlcManagerMessage::ProcessMessages)
                     .expect("couldn't send message");
+
+                processor
+                    .send(DlcManagerMessage::PeriodicCheck)
+                    .expect("couldn't send periodic check");
             }
         });
 
@@ -173,6 +178,9 @@ where
                     if transport.has_pending_messages() {
                         transport.process_messages()
                     }
+                }
+                DlcManagerMessage::PeriodicCheck => {
+                    manager.periodic_check(false).unwrap();
                 }
             }
         }
@@ -247,33 +255,31 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::test_util::{test_ddk, TestSuite};
+    use std::time::Duration;
+
+    use crate::test_util::{generate_blocks, test_ddk, TestSuite};
     use ddk_payouts::enumeration::create_contract_input;
     use dlc::EnumerationPayout;
-    use dlc_manager::Oracle;
+    use dlc_manager::Storage;
+    use dlc_messages::oracle_msgs::OracleAnnouncement;
     use rstest::rstest;
+    use tokio::time::sleep;
 
     #[rstest]
     #[test_log::test(tokio::test)]
-    async fn send_offer(
-        #[future] test_ddk: (
-            TestSuite,
-            TestSuite,
-            dlc_messages::oracle_msgs::OracleAnnouncement,
-        ),
-    ) {
+    async fn send_offer(#[future] test_ddk: (TestSuite, TestSuite, OracleAnnouncement)) {
         let (test, test_two, announcement) = test_ddk.await;
         let contract_input = create_contract_input(
             vec![
                 EnumerationPayout {
-                    outcome: "billions".to_string(),
+                    outcome: "rust".to_string(),
                     payout: dlc::Payout {
                         offer: 100_000,
                         accept: 0,
                     },
                 },
                 EnumerationPayout {
-                    outcome: "suits".to_string(),
+                    outcome: "go".to_string(),
                     payout: dlc::Payout {
                         offer: 0,
                         accept: 100_000,
@@ -283,15 +289,37 @@ mod tests {
             50_000,
             50_000,
             1,
-            test.ddk.oracle.get_public_key().to_string(),
-            "test-ddk-5".to_string(),
+            announcement.oracle_public_key.clone().to_string(),
+            announcement.oracle_event.event_id.clone(),
         );
         let offer = test.ddk.send_dlc_offer(
             &contract_input,
             test_two.ddk.transport.node_id,
             vec![announcement],
         );
+
         assert!(offer.is_ok());
+        sleep(Duration::from_secs(10)).await;
+
+        let contract_id = offer.unwrap().temporary_contract_id.clone();
+        let sent_contract = test.ddk.storage.get_contract_offers().unwrap();
+        let offered_contract = sent_contract.iter().find(|o| o.id == contract_id);
+
+        assert!(offered_contract.is_some());
+
+        let accept = test_two.ddk.accept_dlc_offer(contract_id);
+
+        sleep(Duration::from_secs(20)).await;
+
+        generate_blocks(2);
+
+        assert!(accept.is_ok());
+
+        test.ddk.manager.periodic_check(false).unwrap();
+        test_two.ddk.manager.periodic_check(false).unwrap();
+
+        sleep(Duration::from_secs(15)).await;
+
         test.ddk.stop().unwrap();
         test_two.ddk.stop().unwrap();
     }
