@@ -50,6 +50,7 @@ use bitcoin::key::XOnlyPublicKey;
 use bitcoin::secp256k1::PublicKey;
 use dlc_messages::oracle_msgs::OracleAnnouncement;
 use dlc_messages::Message;
+use kormir::OracleAttestation;
 use signer::DeriveSigner;
 use transport::PeerInformation;
 
@@ -105,4 +106,8 @@ pub trait DdkOracle: dlc_manager::Oracle + std::marker::Send + std::marker::Sync
         event_id: &str,
     ) -> Result<OracleAnnouncement, dlc_manager::error::Error>;
     async fn get_public_key_async(&self) -> Result<XOnlyPublicKey, dlc_manager::error::Error>;
+    async fn get_attestation_async(
+        &self,
+        event_id: &str,
+    ) -> Result<OracleAttestation, dlc_manager::error::Error>;
 }

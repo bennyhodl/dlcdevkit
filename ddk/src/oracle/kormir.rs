@@ -96,9 +96,9 @@ impl dlc_manager::Oracle for KormirOracleClient {
 
     fn get_attestation(
         &self,
-        _event_id: &str,
+        event_id: &str,
     ) -> Result<dlc_messages::oracle_msgs::OracleAttestation, dlc_manager::error::Error> {
-        get::<OracleAttestation>(&self.host, "attestation")
+        get::<OracleAttestation>(&self.host, &format!("attestation/{event_id}"))
             .map_err(|_| dlc_manager::error::Error::OracleError("Could not get attestation".into()))
     }
 
@@ -141,5 +141,19 @@ impl crate::DdkOracle for KormirOracleClient {
             Some(event_data) => Ok(event_data.announcement.to_owned()),
             None => return Err(Error::OracleError("No event found".to_string())),
         }
+    }
+
+    async fn get_attestation_async(
+        &self,
+        event_id: &str,
+    ) -> Result<OracleAttestation, dlc_manager::error::Error> {
+        let attestation = reqwest::get(format!("{}/attestation/{}", &self.host, event_id))
+            .await
+            .map_err(|_| Error::OracleError("Could not get attestation async.".into()))?
+            .json::<OracleAttestation>()
+            .await
+            .map_err(|_| Error::OracleError("Could not get attestation async.".into()))?;
+
+        Ok(attestation)
     }
 }
