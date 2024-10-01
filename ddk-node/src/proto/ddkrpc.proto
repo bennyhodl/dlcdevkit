@@ -15,6 +15,7 @@ service DdkRpc {
   rpc ListOracles (ListOraclesRequest) returns (ListOraclesResponse);
   rpc ListContracts (ListContractsRequest) returns (ListContractsResponse);
   rpc Send (SendRequest) returns (SendResponse);
+  rpc OracleAnnouncements (OracleAnnouncementsRequest) returns (OracleAnnouncementsResponse);
 }
 
 message InfoRequest {}
@@ -114,4 +115,10 @@ message SendRequest {
 
 message SendResponse {
   string txid = 1;
+}
+
+message OracleAnnouncementsRequest {}
+
+message OracleAnnouncementsResponse {
+  repeated bytes announcements = 1;
 }
