@@ -7,6 +7,7 @@ mod wallet;
 
 use dlc_manager::contract::ser::Serializable;
 use dlc_manager::error::Error;
+use dlc_messages::oracle_msgs::OracleAnnouncement;
 use lightning::io::{Cursor, Read};
 use sled::{Db, Tree};
 
@@ -20,6 +21,9 @@ pub const CHAIN_MONITOR_KEY: u8 = 4;
 const PEER_KEY: u8 = 5;
 const SIGNER_TREE: u8 = 6;
 const WALLET_TREE: u8 = 7;
+const MARKETPLACE_TREE: u8 = 8;
+
+const MARKETPLACE_KEY: &str = "marketplace";
 
 /// Implementation of Storage interface using the sled DB backend.
 #[derive(Debug, Clone)]
@@ -81,6 +85,10 @@ impl SledStorage {
     pub fn wallet_tree(&self) -> Result<Tree, sled::Error> {
         self.db.open_tree(&[WALLET_TREE])
     }
+
+    pub fn marketplace_tree(&self) -> Result<Tree, sled::Error> {
+        self.db.open_tree(&[MARKETPLACE_TREE])
+    }
 }
 
 impl DdkStorage for SledStorage {
@@ -106,5 +114,32 @@ impl DdkStorage for SledStorage {
         self.db.insert("peers", peer_vec)?;
 
         Ok(())
+    }
+
+    fn save_announcement(&self, announcement: OracleAnnouncement) -> anyhow::Result<()> {
+        let marketplace = self.marketplace_tree()?;
+        let stored_announcements: Vec<OracleAnnouncement> =
+            match marketplace.get(MARKETPLACE_KEY)? {
+                Some(o) => bincode::deserialize(&o)?,
+                None => vec![],
+            };
+        let mut announcements =
+            crate::util::filter_expired_oracle_announcements(stored_announcements);
+        announcements.push(announcement);
+
+        let serialize_announcements = bincode::serialize(&announcements)?;
+        marketplace.insert(MARKETPLACE_KEY, serialize_announcements)?;
+
+        Ok(())
+    }
+
+    fn get_marketplace_announcements(&self) -> anyhow::Result<Vec<OracleAnnouncement>> {
+        let marketplace = self.marketplace_tree()?;
+        let prev_announcements = match marketplace.get(MARKETPLACE_KEY)? {
+            Some(o) => o.to_vec(),
+            None => vec![],
+        };
+        let announcements: Vec<OracleAnnouncement> = bincode::deserialize(&prev_announcements)?;
+        Ok(announcements)
     }
 }

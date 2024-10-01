@@ -1,3 +1,4 @@
+use chrono::Utc;
 use dlc_manager::contract::accepted_contract::AcceptedContract;
 use dlc_manager::contract::offered_contract::OfferedContract;
 use dlc_manager::contract::ser::Serializable;
@@ -6,6 +7,7 @@ use dlc_manager::contract::{
     ClosedContract, Contract, FailedAcceptContract, FailedSignContract, PreClosedContract,
 };
 use dlc_manager::error::Error;
+use kormir::OracleAnnouncement;
 use lightning::io::Read;
 
 macro_rules! convertible_enum {
@@ -169,3 +171,24 @@ pub fn deserialize_contract_bytes(buff: &Vec<u8>) -> Result<Contract, Error> {
     Ok(contract)
 }
 
+pub fn filter_expired_oracle_announcements(
+    announcements: Vec<OracleAnnouncement>,
+) -> Vec<OracleAnnouncement> {
+    let now = Utc::now().timestamp() as u32;
+    announcements
+        .iter()
+        .filter(|ann| ann.oracle_event.event_maturity_epoch < now)
+        .cloned()
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_stored_announcements_filter() {
+        let filter = filter_expired_oracle_announcements(vec![]);
+        assert!(filter.is_empty())
+    }
+}
