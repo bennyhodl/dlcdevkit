@@ -11,6 +11,7 @@ readme = "../README.md"
 
 [features]
 nostr = ["dep:nostr", "dep:nostr-sdk", "dep:nostr-sqlite", "dep:nostr-relay-pool", "dep:base64"]
+marketplace = ["dep:nostr", "dep:nostr-sdk"]
 lightning = ["dep:lightning-net-tokio"]
 
 [dependencies]
@@ -18,10 +19,10 @@ bitcoin = { version = "0.32.2", features = ["rand", "serde"] }
 bdk_esplora = { version = "0.17", features = ["blocking", "async"] }
 bdk_wallet = { version = "1.0.0-beta.2", features = ["bdk_file_store"] }
 bdk_chain = "0.18.0"
-dlc = { version = "0.6.0", git = "https://github.com/bennyhodl/rust-dlc", branch = "bitcoin-32", features = ["use-serde"] }
-dlc-manager = { version = "0.6.0", git = "https://github.com/bennyhodl/rust-dlc", branch = "bitcoin-32", features = ["use-serde"] }
-dlc-messages = { version = "0.6.0", git = "https://github.com/bennyhodl/rust-dlc", branch = "bitcoin-32", features = [ "use-serde"] }
-dlc-trie = { version = "0.6.0", git = "https://github.com/bennyhodl/rust-dlc", branch = "bitcoin-32", features = ["use-serde"] }
+dlc = { version = "0.6.0", git = "https://github.com/bennyhodl/rust-dlc", branch = "better-error-messages", features = ["use-serde"] }
+dlc-manager = { version = "0.6.0", git = "https://github.com/bennyhodl/rust-dlc", branch = "better-error-messages", features = ["use-serde"] }
+dlc-messages = { version = "0.6.0", git = "https://github.com/bennyhodl/rust-dlc", branch = "better-error-messages", features = [ "use-serde"] }
+dlc-trie = { version = "0.6.0", git = "https://github.com/bennyhodl/rust-dlc", branch = "better-error-messages", features = ["use-serde"] }
 # dlc-trie = { version = "0.5.0", features = [ "use-serde"] }
 # dlc = { version = "0.5.0", features = [ "use-serde"] }
 # dlc-manager = { version = "0.5.0", features = [ "use-serde"] }
@@ -41,7 +42,7 @@ chrono = { version = "0.4.38", features = ["serde"] }
 sled = "0.34.7"
 async-trait = "0.1.80"
 # kormir = "0.2.0"
-kormir = { version = "0.3.0", git = "https://github.com/bennyhodl/kormir", branch = "bitcoin-32" }
+kormir = { version = "0.3.0", git = "https://github.com/bennyhodl/kormir", rev = "9c02e83" }
 hex = "0.4.3"
 bincode = "1.3.3"
 crossbeam = "0.8.4"
@@ -63,3 +64,4 @@ futures = "0.3.29"
 test-log = { version = "0.2.16", features = ["trace"] }
 rstest = "0.22.0"
 ddk-payouts = { path = "../payouts/" }
+bitcoincore-rpc = "0.19.0"

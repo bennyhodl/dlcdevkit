@@ -30,6 +30,7 @@ impl dlc_manager::Blockchain for EsploraClient {
     }
 
     fn get_transaction(&self, tx_id: &Txid) -> Result<Transaction, ManagerError> {
+        tracing::info!(txid = tx_id.to_string(), "Broadcasting transaction.");
         let txn = self
             .blocking_client
             .get_tx(&tx_id)
@@ -63,7 +64,10 @@ impl dlc_manager::Blockchain for EsploraClient {
 
         match block {
             Some(block) => Ok(block),
-            None => Err(esplora_err_to_manager_err(EsploraError::HttpResponse { status: 404, message: "Block not found in esplore".into() })),
+            None => Err(esplora_err_to_manager_err(EsploraError::HttpResponse {
+                status: 404,
+                message: "Block not found in esplore".into(),
+            })),
         }
     }
 

@@ -542,6 +542,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "bitcoincore-rpc"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aedd23ae0fd321affb4bbbc36126c6f49a32818dc6b979395d24da8c9d4e80ee"
+dependencies = [
+ "bitcoincore-rpc-json",
+ "jsonrpc",
+ "log",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "bitcoincore-rpc-json"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d8909583c5fab98508e80ef73e5592a651c954993dc6b7739963257d19f0e71a"
+dependencies = [
+ "bitcoin 0.32.2",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "bitflags"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -889,6 +913,7 @@ dependencies = [
  "bincode",
  "bip39",
  "bitcoin 0.32.2",
+ "bitcoincore-rpc",
  "chrono",
  "crossbeam",
  "ddk-payouts",
@@ -1021,7 +1046,7 @@ dependencies = [
 [[package]]
 name = "dlc"
 version = "0.6.0"
-source = "git+https://github.com/bennyhodl/rust-dlc?branch=bitcoin-32#5d24fb3f1eeeb9f900e5f0c3ec2aa3884f5ff120"
+source = "git+https://github.com/bennyhodl/rust-dlc?branch=better-error-messages#ff3d3144eaa9e7a5877051e7b2198040cfac210f"
 dependencies = [
  "bitcoin 0.32.2",
  "miniscript",
@@ -1033,7 +1058,7 @@ dependencies = [
 [[package]]
 name = "dlc-manager"
 version = "0.6.0"
-source = "git+https://github.com/bennyhodl/rust-dlc?branch=bitcoin-32#5d24fb3f1eeeb9f900e5f0c3ec2aa3884f5ff120"
+source = "git+https://github.com/bennyhodl/rust-dlc?branch=better-error-messages#ff3d3144eaa9e7a5877051e7b2198040cfac210f"
 dependencies = [
  "async-trait",
  "bitcoin 0.32.2",
@@ -1050,7 +1075,7 @@ dependencies = [
 [[package]]
 name = "dlc-messages"
 version = "0.6.0"
-source = "git+https://github.com/bennyhodl/rust-dlc?branch=bitcoin-32#5d24fb3f1eeeb9f900e5f0c3ec2aa3884f5ff120"
+source = "git+https://github.com/bennyhodl/rust-dlc?branch=better-error-messages#ff3d3144eaa9e7a5877051e7b2198040cfac210f"
 dependencies = [
  "bitcoin 0.32.2",
  "dlc",
@@ -1062,7 +1087,7 @@ dependencies = [
 [[package]]
 name = "dlc-trie"
 version = "0.6.0"
-source = "git+https://github.com/bennyhodl/rust-dlc?branch=bitcoin-32#5d24fb3f1eeeb9f900e5f0c3ec2aa3884f5ff120"
+source = "git+https://github.com/bennyhodl/rust-dlc?branch=better-error-messages#ff3d3144eaa9e7a5877051e7b2198040cfac210f"
 dependencies = [
  "bitcoin 0.32.2",
  "dlc",
@@ -1862,9 +1887,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "jsonrpc"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3662a38d341d77efecb73caf01420cfa5aa63c0253fd7bc05289ef9f6616e1bf"
+dependencies = [
+ "base64 0.13.1",
+ "minreq",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "kormir"
 version = "0.3.0"
-source = "git+https://github.com/bennyhodl/kormir?branch=bitcoin-32#fa6a2439509350747330918629593076c6c8a1d6"
+source = "git+https://github.com/bennyhodl/kormir?rev=9c02e83#9c02e83bbd22991b80e58049ae7e314971734113"
 dependencies = [
  "bitcoin 0.32.2",
  "dlc",

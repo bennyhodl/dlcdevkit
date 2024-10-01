@@ -1,6 +1,11 @@
 use bitcoin::{address::NetworkChecked, bip32::Xpriv, key::rand::Fill, Address, Amount, Network};
-use chrono::{Days, Local};
-use dlc_manager::{manager::Manager, ContractId, Storage, SystemTimeProvider};
+use chrono::{DateTime, Days, Local, TimeDelta};
+use ddk_payouts::enumeration::create_contract_input;
+use dlc::EnumerationPayout;
+use dlc_manager::{
+    contract::contract_input::ContractInput, manager::Manager, ContractId, Storage,
+    SystemTimeProvider,
+};
 use kormir::OracleAnnouncement;
 use std::{path::PathBuf, str::FromStr, sync::Arc, thread::sleep, time::Duration};
 
@@ -12,33 +17,34 @@ use crate::{
     storage::SledStorage,
     transport::lightning::LightningTransport,
     wallet::DlcDevKitWallet,
-    DdkOracle, DdkTransport, DlcDevKit,
+    DdkOracle, DlcDevKit,
 };
 use bitcoincore_rpc::RpcApi;
 
 type TestDlcDevKit = DlcDevKit<LightningTransport, SledStorage, KormirOracleClient>;
 
 #[rstest::fixture]
-pub async fn test_ddk() -> (TestSuite, TestSuite, OracleAnnouncement) {
+pub async fn test_ddk() -> (TestSuite, TestSuite, OracleAnnouncement, ContractInput) {
     let test = TestSuite::new("send_offer", 1778).await;
     let test_two = TestSuite::new("sender_offer_two", 1779).await;
-    test.ddk.start().unwrap();
-    test_two.ddk.start().unwrap();
+    // test.ddk.start().unwrap();
+    // test_two.ddk.start().unwrap();
 
-    let test_two_transport = test_two.ddk.transport.clone();
-    let test_transport = test.ddk.transport.clone();
+    // let test_two_transport = test_two.ddk.transport.clone();
+    // let test_transport = test.ddk.transport.clone();
+    //
+    // let pubkey_one = test.ddk.transport.node_id;
+    // test_two_transport
+    //     .connect_outbound(pubkey_one, "127.0.0.1:1778")
+    //     .await;
 
-    let pubkey_one = test.ddk.transport.node_id;
-    test_two_transport
-        .connect_outbound(pubkey_one, "127.0.0.1:1778")
-        .await;
+    // tokio::time::sleep(Duration::from_millis(200)).await;
 
-    tokio::time::sleep(Duration::from_millis(200)).await;
-
-    let peers = test_transport.ln_peer_manager().list_peers();
-    assert!(peers.len() > 0);
+    // let peers = test_transport.ln_peer_manager().list_peers();
+    // assert!(peers.len() > 0);
 
     let announcement = create_oracle_announcement().await;
+    let contract_input = contract_input(&announcement);
 
     let node_one_address = test.ddk.wallet.new_external_address().unwrap().address;
     let node_two_address = test_two.ddk.wallet.new_external_address().unwrap().address;
@@ -48,7 +54,7 @@ pub async fn test_ddk() -> (TestSuite, TestSuite, OracleAnnouncement) {
     test.ddk.wallet.sync().unwrap();
     test_two.ddk.wallet.sync().unwrap();
 
-    (test, test_two, announcement)
+    (test, test_two, announcement, contract_input)
 }
 
 fn fund_addresses(
@@ -102,8 +108,10 @@ async fn create_oracle_announcement() -> OracleAnnouncement {
     let kormir = KormirOracleClient::new("http://127.0.0.1:8082")
         .await
         .unwrap();
+
+    let expiry = TimeDelta::seconds(30);
     let timestamp: u32 = Local::now()
-        .checked_add_days(Days::new(1))
+        .checked_add_signed(expiry)
         .unwrap()
         .timestamp()
         .try_into()
@@ -115,6 +123,32 @@ async fn create_oracle_announcement() -> OracleAnnouncement {
         .unwrap();
 
     kormir.get_announcement_async(&event_id).await.unwrap()
+}
+
+pub fn contract_input(announcement: &OracleAnnouncement) -> ContractInput {
+    create_contract_input(
+        vec![
+            EnumerationPayout {
+                outcome: "rust".to_string(),
+                payout: dlc::Payout {
+                    offer: 100_000,
+                    accept: 0,
+                },
+            },
+            EnumerationPayout {
+                outcome: "go".to_string(),
+                payout: dlc::Payout {
+                    offer: 0,
+                    accept: 100_000,
+                },
+            },
+        ],
+        50_000,
+        50_000,
+        1,
+        announcement.oracle_public_key.clone().to_string(),
+        announcement.oracle_event.event_id.clone(),
+    )
 }
 
 type DlcManager = Arc<

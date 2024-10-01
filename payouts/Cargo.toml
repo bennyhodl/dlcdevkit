@@ -8,10 +8,14 @@ repository = "https://github.com/bennyhodl/dlcdevkit"
 edition = "2021"
 
 [dependencies]
-dlc = { version = "0.6.0", git = "https://github.com/bennyhodl/rust-dlc", branch = "bitcoin-32", features = ["use-serde"] }
-dlc-manager = { version = "0.6.0", git = "https://github.com/bennyhodl/rust-dlc", branch = "bitcoin-32", features = ["use-serde"] }
-dlc-messages = { version = "0.6.0", git = "https://github.com/bennyhodl/rust-dlc", branch = "bitcoin-32", features = [ "use-serde"] }
-dlc-trie = { version = "0.6.0", git = "https://github.com/bennyhodl/rust-dlc", branch = "bitcoin-32", features = ["use-serde"] }
+# dlc = { version = "0.6.0", git = "https://github.com/bennyhodl/rust-dlc", branch = "bitcoin-32", features = ["use-serde"] }
+# dlc-manager = { version = "0.6.0", git = "https://github.com/bennyhodl/rust-dlc", branch = "bitcoin-32", features = ["use-serde"] }
+# dlc-messages = { version = "0.6.0", git = "https://github.com/bennyhodl/rust-dlc", branch = "bitcoin-32", features = [ "use-serde"] }
+# dlc-trie = { version = "0.6.0", git = "https://github.com/bennyhodl/rust-dlc", branch = "bitcoin-32", features = ["use-serde"] }
+dlc = { version = "0.6.0", git = "https://github.com/bennyhodl/rust-dlc", branch = "better-error-messages", features = ["use-serde"] }
+dlc-manager = { version = "0.6.0", git = "https://github.com/bennyhodl/rust-dlc", branch = "better-error-messages", features = ["use-serde"] }
+dlc-messages = { version = "0.6.0", git = "https://github.com/bennyhodl/rust-dlc", branch = "better-error-messages", features = [ "use-serde"] }
+dlc-trie = { version = "0.6.0", git = "https://github.com/bennyhodl/rust-dlc", branch = "better-error-messages", features = ["use-serde"] }
 # dlc-trie = { version = "0.5.0", features = [ "use-serde"] }
 # dlc = { version = "0.5.0", features = [ "use-serde"] }
 # dlc-manager = { version = "0.5.0", features = [ "use-serde"] }
