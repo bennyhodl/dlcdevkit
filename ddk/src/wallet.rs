@@ -61,7 +61,7 @@ pub enum WalletOperation {
     // Get all UTXO's owned by the wallet.
     ListUtxos(Sender<Vec<LocalOutput>>),
     // Sign an input.
-    SignPsbtInput(Psbt, usize, Sender<Result<(), WalletError>>),
+    SignPsbtInput(Psbt, usize, Sender<Result<Psbt, WalletError>>),
     // Get the next unused derivation path.
     NextDerivationIndex(Sender<u32>),
 }
@@ -240,6 +240,7 @@ impl<S: DdkStorage> DlcDevKitWallet<S> {
 
                             txn_builder
                                 .add_recipient(address.script_pubkey(), amount)
+                                .version(2)
                                 .fee_rate(fee_rate);
 
                             let mut psbt = txn_builder.finish().unwrap();
@@ -283,15 +284,19 @@ impl<S: DdkStorage> DlcDevKitWallet<S> {
                         tracing::error!(message=?e, "Could not send message to get utxos.")
                     }
                 }
-                WalletOperation::SignPsbtInput(psbt, _input_index, responder) => {
-                    let sign = |psbt: Psbt,
+                WalletOperation::SignPsbtInput(mut psbt, _input_index, responder) => {
+                    let sign = |psbt: &mut Psbt,
                                 wallet: &mut PersistedWallet<SledStorage>|
-                     -> Result<(), WalletError> {
-                        let mut psbt = psbt.clone();
-                        wallet.sign(&mut psbt, SignOptions::default())?;
-                        Ok(())
+                     -> Result<Psbt, WalletError> {
+                        let mut sign_options = SignOptions::default();
+                        sign_options.trust_witness_utxo = true;
+                        if let Err(e) = wallet.sign(psbt, sign_options) {
+                            tracing::error!("Could not sign PSBT: {:?}", e);
+                            return Err(WalletError::Signing(e));
+                        };
+                        Ok(psbt.clone())
                     };
-                    let sign_txn = sign(psbt, wallet);
+                    let sign_txn = sign(&mut psbt, wallet);
                     if let Err(e) = responder.send(sign_txn) {
                         tracing::error!(message=?e, "Could not send message to get utxos.")
                     }
@@ -486,12 +491,21 @@ impl<S: DdkStorage> dlc_manager::Wallet for DlcDevKitWallet<S> {
         let (sender, receiver) = unbounded();
         self.sender
             .send(WalletOperation::SignPsbtInput(
-                psbt.to_owned(),
+                psbt.clone(),
                 input_index,
                 sender,
             ))
             .expect("no send psbt input");
-        Ok(receiver.recv().expect("no sign").unwrap())
+        let signed_psbt = receiver
+            .recv()
+            .expect("receiver no sign")
+            .expect("psbt not signed");
+        let tx = psbt.unsigned_tx.clone();
+        let tx_input = tx.input[input_index].clone();
+        psbt.inputs[input_index].final_script_sig = Some(tx_input.script_sig);
+        psbt.inputs[input_index].final_script_witness = Some(tx_input.witness);
+        *psbt = signed_psbt;
+        Ok(())
     }
 
     // TODO: Does BDK have reserved UTXOs?
@@ -542,9 +556,9 @@ impl<S: DdkStorage> dlc_manager::Wallet for DlcDevKitWallet<S> {
 
 #[cfg(test)]
 mod tests {
-    use bitcoin::{key::rand::Fill, AddressType};
-
     use crate::test_util::TestSuite;
+    use bitcoin::{key::rand::Fill, AddressType};
+    use dlc_manager::ContractSignerProvider;
 
     #[test]
     fn address_is_p2wpkh() {
@@ -561,7 +575,6 @@ mod tests {
             .try_fill(&mut bitcoin::key::rand::thread_rng())
             .unwrap();
         let gen_key_id = test.derive_signer_key_id(true, temp_key_id);
-        println!("GEN {}", hex::encode(gen_key_id));
         let key_info = test.derive_contract_signer(gen_key_id);
         assert!(key_info.is_ok())
     }
