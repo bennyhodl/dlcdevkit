@@ -15,6 +15,8 @@ mod test_util;
 pub mod builder;
 /// Configuration for a DDK application.
 pub mod config;
+/// Nostr related functions.
+pub mod nostr;
 /// Oracle clients.
 pub mod oracle;
 /// Storage implementations.
@@ -95,6 +97,10 @@ pub trait DdkStorage:
 {
     fn list_peers(&self) -> anyhow::Result<Vec<PeerInformation>>;
     fn save_peer(&self, peer: PeerInformation) -> anyhow::Result<()>;
+    // #[cfg(feature = "marketplace")]
+    fn save_announcement(&self, announcement: OracleAnnouncement) -> anyhow::Result<()>;
+    // #[cfg(feature = "marketplace")]
+    fn get_marketplace_announcements(&self) -> anyhow::Result<Vec<OracleAnnouncement>>;
 }
 
 /// Oracle client

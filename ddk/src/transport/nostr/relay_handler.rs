@@ -1,4 +1,5 @@
 use crate::config::SeedConfig;
+use crate::nostr::DLC_MESSAGE_KIND;
 use crate::{io, RELAY_HOST};
 use bitcoin::Network;
 use dlc_messages::{message_handler::read_dlc_message, Message, WireMessage};
@@ -6,16 +7,12 @@ use lightning::{
     ln::wire::Type,
     util::ser::{Readable, Writeable},
 };
-use nostr::{
+use nostr_rs::{
     nips::nip04::{decrypt, encrypt},
     secp256k1::Secp256k1,
-    Event, EventBuilder, EventId, Filter, Keys, Kind, PublicKey, SecretKey, Tag, Timestamp, Url,
+    Event, EventBuilder, EventId, Keys, Kind, PublicKey, SecretKey, Tag, Timestamp, Url,
 };
 use nostr_sdk::Client;
-
-pub const DLC_MESSAGE_KIND: Kind = Kind::Custom(8_888);
-pub const ORACLE_ANNOUNCMENT_KIND: Kind = Kind::Custom(88);
-pub const ORACLE_ATTESTATION_KIND: Kind = Kind::Custom(89);
 
 pub struct NostrDlcRelayHandler {
     pub keys: Keys,
@@ -47,19 +44,6 @@ impl NostrDlcRelayHandler {
 
     pub fn public_key(&self) -> PublicKey {
         self.keys.public_key()
-    }
-
-    pub fn create_dlc_message_filter(&self, since: Timestamp) -> Filter {
-        Filter::new()
-            .kind(DLC_MESSAGE_KIND)
-            .since(since)
-            .pubkey(self.public_key())
-    }
-
-    pub fn create_oracle_message_filter(&self, since: Timestamp) -> Filter {
-        Filter::new()
-            .kinds([ORACLE_ANNOUNCMENT_KIND, ORACLE_ATTESTATION_KIND])
-            .since(since)
     }
 
     pub fn create_dlc_msg_event(
@@ -141,8 +125,9 @@ impl NostrDlcRelayHandler {
 
         client.add_relay(RELAY_HOST).await?;
 
-        let msg_subscription = self.create_dlc_message_filter(since);
-        let oracle_subscription = self.create_oracle_message_filter(since);
+        let msg_subscription =
+            crate::nostr::util::create_dlc_message_filter(since, self.public_key());
+        let oracle_subscription = crate::nostr::util::create_oracle_message_filter(since);
 
         client
             .subscribe(vec![msg_subscription, oracle_subscription], None)

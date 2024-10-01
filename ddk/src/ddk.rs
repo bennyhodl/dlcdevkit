@@ -1,4 +1,6 @@
 use crate::chain::EsploraClient;
+#[cfg(feature = "marketplace")]
+use crate::nostr::marketplace::*;
 use crate::wallet::DlcDevKitWallet;
 use crate::{DdkOracle, DdkStorage, DdkTransport};
 use anyhow::anyhow;
@@ -107,6 +109,15 @@ where
                     .send(DlcManagerMessage::PeriodicCheck)
                     .expect("couldn't send periodic check");
             }
+        });
+
+        #[cfg(feature = "marketplace")]
+        let storage_clone = self.storage.clone();
+        runtime.spawn(async move {
+            tracing::info!("Starting marketplace listener.");
+            marketplace_listener(&storage_clone, vec!["ws://127.0.0.1:8081"])
+                .await
+                .unwrap();
         });
 
         // TODO: connect stored peers.
