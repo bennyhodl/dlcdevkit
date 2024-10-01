@@ -1,11 +1,13 @@
 use core::panic;
 
+use anyhow::anyhow;
 use clap::{Parser, Subcommand};
 use ddk::bitcoin::Transaction;
 use ddk::dlc::{EnumerationPayout, Payout};
 use ddk::dlc_manager::contract::contract_input::ContractInput;
 use ddk::dlc_manager::contract::offered_contract::OfferedContract;
 use ddk::dlc_manager::contract::Contract;
+use ddk::dlc_messages::oracle_msgs::{EventDescriptor, OracleAnnouncement};
 use ddk::dlc_messages::{AcceptDlc, OfferDlc};
 use ddk::util::deserialize_contract_bytes;
 use ddk::LocalOutput;
@@ -14,7 +16,8 @@ use ddk_node::ddkrpc::ddk_rpc_client::DdkRpcClient;
 use ddk_node::ddkrpc::{
     AcceptOfferRequest, ConnectRequest, GetWalletTransactionsRequest, InfoRequest,
     ListContractsRequest, ListOffersRequest, ListOraclesRequest, ListPeersRequest,
-    ListUtxosRequest, NewAddressRequest, SendOfferRequest, SendRequest, WalletBalanceRequest,
+    ListUtxosRequest, NewAddressRequest, OracleAnnouncementsRequest, SendOfferRequest, SendRequest,
+    WalletBalanceRequest,
 };
 use inquire::{Select, Text};
 use serde_json::Value;
@@ -50,6 +53,9 @@ enum CliCommand {
     /// Wallet commands
     #[clap(subcommand)]
     Wallet(WalletCommand),
+    /// Interface with the oracle
+    #[clap(subcommand)]
+    Oracle(OracleCommand),
     /// Get the peers connected to the node.
     Peers,
     /// Connect to another DDK node.
@@ -89,6 +95,12 @@ enum WalletCommand {
     },
 }
 
+#[derive(Clone, Debug, Subcommand)]
+enum OracleCommand {
+    #[command(about = "Get all known oracle announcements.")]
+    Announcements,
+}
+
 #[derive(Parser, Clone, Debug)]
 struct Accept {
     // The contract id string to accept.
@@ -113,18 +125,70 @@ async fn main() -> anyhow::Result<()> {
             print!("{}", serde_json::to_string_pretty(&info)?);
         }
         CliCommand::OfferContract(arg) => {
-            // TODO: support multiple oracles
-            let oracle = client
-                .list_oracles(ListOraclesRequest::default())
-                .await?
-                .into_inner();
-
             let contract_input = if let Some(file) = arg.contract_input_file {
                 let contract_string = std::fs::read_to_string(file)?;
                 serde_json::from_str::<ContractInput>(&contract_string)?
             } else {
                 let contract_type =
                     Select::new("Select type of contract.", vec!["enum", "numerical"]).prompt()?;
+                // TODO: support multiple oracles
+                let oracle = client
+                    .list_oracles(ListOraclesRequest::default())
+                    .await?
+                    .into_inner();
+
+                let announcements = client
+                    .oracle_announcements(OracleAnnouncementsRequest {})
+                    .await?
+                    .into_inner()
+                    .announcements
+                    .iter()
+                    .map(|ann| serde_json::from_slice(ann).unwrap())
+                    .collect::<Vec<OracleAnnouncement>>()
+                    .into_iter()
+                    .filter(|ann| ann.oracle_public_key.to_string() == oracle.pubkey)
+                    .collect::<Vec<OracleAnnouncement>>()
+                    .into_iter()
+                    .filter(|ann| {
+                        if contract_type == "enum" {
+                            matches!(
+                                ann.oracle_event.event_descriptor,
+                                EventDescriptor::EnumEvent(_)
+                            )
+                        } else {
+                            matches!(
+                                ann.oracle_event.event_descriptor,
+                                EventDescriptor::DigitDecompositionEvent(_)
+                            )
+                        }
+                    })
+                    .collect::<Vec<OracleAnnouncement>>();
+
+                if announcements.is_empty() {
+                    println!("There aren't any oracle announcements to choose from.");
+                    return Ok(());
+                }
+
+                let ann_selection = announcements
+                    .clone()
+                    .iter()
+                    .map(|ann| ann.oracle_event.event_id.clone())
+                    .collect::<Vec<String>>();
+
+                let announcement =
+                    Select::new("Select known announcement:", ann_selection).prompt()?;
+
+                let selected_announcement = match announcements
+                    .iter()
+                    .find(|ann| ann.oracle_event.event_id == announcement)
+                {
+                    Some(a) => a,
+                    None => {
+                        println!("Couldn't get selected announcement.");
+                        return Ok(());
+                    }
+                };
+
                 match contract_type {
                     "numerical" => {
                         let offer_collateral: u64 =
@@ -158,34 +222,36 @@ async fn main() -> anyhow::Result<()> {
                         let offer_collateral: u64 =
                             Text::new("Collateral from you (sats):").prompt()?.parse()?;
                         let accept_collateral: u64 =
-                            Text::new("Collateral from counterparty (sats):")
+                            Text::new("Collateral from your counterparty (sats):")
                                 .prompt()?
                                 .parse()?;
-                        let num_outcomes: usize =
-                            Text::new("Number of outcomes:").prompt()?.parse()?;
-                        let mut outcome_payouts = Vec::with_capacity(num_outcomes);
-                        for _ in 0..num_outcomes {
-                            let outcome = Text::new("Outcome:").prompt()?;
-                            let offer: u64 = Text::new("Payout: ").prompt()?.parse()?;
+                        let outcomes = match &selected_announcement.oracle_event.event_descriptor {
+                            EventDescriptor::EnumEvent(e) => e.outcomes.clone(),
+                            _ => return Err(anyhow!("Not an enum event from announcement.")),
+                        };
+                        let mut outcome_payouts = Vec::with_capacity(outcomes.len());
+                        println!("Specify the payouts for each outcome.");
+                        for outcome in outcomes {
+                            println!("> Event outcome: {}", outcome);
+                            let offer: u64 = Text::new("Your payout:").prompt()?.parse()?;
                             let accept: u64 =
                                 Text::new("Counterparty payout:").prompt()?.parse()?;
                             let outcome_payout = EnumerationPayout {
                                 outcome,
                                 payout: Payout { offer, accept },
                             };
-                            outcome_payouts.push(outcome_payout)
+                            outcome_payouts.push(outcome_payout);
                         }
                         let fee_rate: u64 =
                             Text::new("Fee rate (sats/vbyte):").prompt()?.parse()?;
                         // TODO: list possible events.
-                        let event_id = Text::new("Oracle event id:").prompt()?;
                         ddk_payouts::enumeration::create_contract_input(
                             outcome_payouts,
                             offer_collateral,
                             accept_collateral,
                             fee_rate,
-                            oracle.pubkey,
-                            event_id,
+                            selected_announcement.oracle_public_key.to_string(),
+                            selected_announcement.oracle_event.event_id.clone(),
                         )
                     }
                     _ => panic!("Invalid contract type."),
@@ -296,6 +362,19 @@ async fn main() -> anyhow::Result<()> {
                     .await?
                     .into_inner();
                 print!("{}", serde_json::to_string_pretty(&txid)?)
+            }
+        },
+        CliCommand::Oracle(command) => match command {
+            OracleCommand::Announcements => {
+                let announcements = client
+                    .oracle_announcements(OracleAnnouncementsRequest {})
+                    .await?
+                    .into_inner()
+                    .announcements
+                    .iter()
+                    .map(|ann| serde_json::from_slice(ann).unwrap())
+                    .collect::<Vec<OracleAnnouncement>>();
+                print!("{}", serde_json::to_string_pretty(&announcements).unwrap())
             }
         },
         CliCommand::Peers => {

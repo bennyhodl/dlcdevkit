@@ -12,16 +12,17 @@ use ddk::oracle::KormirOracleClient;
 use ddk::storage::SledStorage;
 use ddk::transport::lightning::LightningTransport;
 use ddk::util::serialize_contract;
-use ddk::DlcDevKit;
 use ddk::{DdkOracle, DdkTransport};
+use ddk::{DdkStorage, DlcDevKit};
 use ddkrpc::ddk_rpc_server::DdkRpc;
 use ddkrpc::{
     AcceptOfferRequest, AcceptOfferResponse, ConnectRequest, ConnectResponse,
     GetWalletTransactionsRequest, GetWalletTransactionsResponse, ListContractsRequest,
     ListContractsResponse, ListOffersRequest, ListOffersResponse, ListOraclesRequest,
     ListOraclesResponse, ListPeersRequest, ListPeersResponse, ListUtxosRequest, ListUtxosResponse,
-    NewAddressRequest, NewAddressResponse, Peer, SendOfferRequest, SendOfferResponse, SendRequest,
-    SendResponse, WalletBalanceRequest, WalletBalanceResponse,
+    NewAddressRequest, NewAddressResponse, OracleAnnouncementsRequest, OracleAnnouncementsResponse,
+    Peer, SendOfferRequest, SendOfferResponse, SendRequest, SendResponse, WalletBalanceRequest,
+    WalletBalanceResponse,
 };
 use ddkrpc::{InfoRequest, InfoResponse};
 use tonic::Request;
@@ -289,5 +290,20 @@ impl DdkRpc for DdkNode {
         } else {
             Err(Status::new(Code::Internal, "Transaction sending failed."))
         }
+    }
+
+    async fn oracle_announcements(
+        &self,
+        _request: Request<OracleAnnouncementsRequest>,
+    ) -> Result<Response<OracleAnnouncementsResponse>, Status> {
+        let announcements: Vec<Vec<u8>> = self
+            .inner
+            .storage
+            .get_marketplace_announcements()
+            .unwrap()
+            .iter()
+            .map(|ann| serde_json::to_vec(ann).unwrap())
+            .collect();
+        Ok(Response::new(OracleAnnouncementsResponse { announcements }))
     }
 }
