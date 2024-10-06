@@ -1,5 +1,5 @@
 use bitcoin::{address::NetworkChecked, bip32::Xpriv, key::rand::Fill, Address, Amount, Network};
-use chrono::{DateTime, Days, Local, TimeDelta};
+use chrono::{Local, TimeDelta};
 use ddk_payouts::enumeration::create_contract_input;
 use dlc::EnumerationPayout;
 use dlc_manager::{
@@ -10,14 +10,8 @@ use kormir::OracleAnnouncement;
 use std::{path::PathBuf, str::FromStr, sync::Arc, thread::sleep, time::Duration};
 
 use crate::{
-    builder::DdkBuilder,
-    chain::EsploraClient,
-    config::{DdkConfig, SeedConfig},
-    oracle::KormirOracleClient,
-    storage::SledStorage,
-    transport::lightning::LightningTransport,
-    wallet::DlcDevKitWallet,
-    DdkOracle, DlcDevKit,
+    builder::Builder, chain::EsploraClient, oracle::KormirOracleClient, storage::SledStorage,
+    transport::lightning::LightningTransport, wallet::DlcDevKitWallet, DlcDevKit, Oracle,
 };
 use bitcoincore_rpc::RpcApi;
 
@@ -177,18 +171,14 @@ pub struct TestSuite {
 impl TestSuite {
     pub async fn new(name: &str, port: u16) -> TestSuite {
         let storage_path = format!("tests/data/{name}");
+        let seed =
+            crate::io::xprv_from_path(PathBuf::from_str(&storage_path).unwrap(), Network::Regtest)
+                .unwrap();
         std::fs::create_dir_all(storage_path.clone()).expect("couldn't create file");
-        let config = DdkConfig {
-            storage_path: PathBuf::from_str(&storage_path).unwrap(),
-            network: Network::Regtest,
-            esplora_host: "http://127.0.0.1:30000".to_string(),
-            seed_config: SeedConfig::File(storage_path.clone()),
-        };
+        let esplora_host = "http://127.0.0.1:30000".to_string();
         let transport =
-            Arc::new(LightningTransport::new(&config.seed_config, port, config.network).unwrap());
-        let storage = Arc::new(
-            SledStorage::new(config.storage_path.join("sled_db").to_str().unwrap()).unwrap(),
-        );
+            Arc::new(LightningTransport::new(&seed.private_key.secret_bytes(), port).unwrap());
+        let storage = Arc::new(SledStorage::new(&format!("{storage_path}/sleddb")).unwrap());
         let oracle = Arc::new(
             KormirOracleClient::new("http://127.0.0.1:8082")
                 .await
@@ -197,10 +187,13 @@ impl TestSuite {
 
         let ddk = Self::create_ddk(
             name,
-            config,
             transport.clone(),
             storage.clone(),
             oracle.clone(),
+            seed.private_key.secret_bytes(),
+            esplora_host,
+            Network::Regtest,
+            storage_path.clone(),
         )
         .await;
 
@@ -212,14 +205,20 @@ impl TestSuite {
 
     async fn create_ddk(
         name: &str,
-        config: DdkConfig,
         transport: Arc<LightningTransport>,
         storage: Arc<SledStorage>,
         oracle: Arc<KormirOracleClient>,
+        seed_bytes: [u8; 32],
+        esplora_host: String,
+        network: Network,
+        storage_path: String,
     ) -> TestDlcDevKit {
-        let ddk: TestDlcDevKit = DdkBuilder::new()
+        let ddk: TestDlcDevKit = Builder::new()
+            .set_network(network)
+            .set_seed_bytes(seed_bytes)
+            .set_esplora_host(esplora_host)
+            .set_storage_path(storage_path)
             .set_name(name)
-            .set_config(config)
             .set_oracle(oracle)
             .set_transport(transport)
             .set_storage(storage)
@@ -239,7 +238,7 @@ impl TestSuite {
         let xpriv = Xpriv::new_master(Network::Regtest, &entropy).unwrap();
         DlcDevKitWallet::new(
             "test".into(),
-            xpriv,
+            &xpriv.private_key.secret_bytes(),
             "http://localhost:30000",
             Network::Regtest,
             &path,

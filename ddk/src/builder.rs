@@ -9,7 +9,7 @@ use std::sync::{Arc, RwLock};
 use crate::chain::EsploraClient;
 use crate::ddk::{DlcDevKit, DlcManagerMessage};
 use crate::wallet::DlcDevKitWallet;
-use crate::{DdkOracle, DdkStorage, DdkTransport};
+use crate::{Oracle, Storage, Transport};
 
 pub const DEFAULT_STORAGE_PATH: &str = "/tmp/ddk";
 pub const DEFAULT_ESPLORA_HOST: &str = "https://mutinynet.com/api";
@@ -17,7 +17,7 @@ pub const DEFAULT_NETWORK: Network = Network::Signet;
 
 /// Builder pattern for creating a [crate::ddk::DlcDevKit] process.
 #[derive(Clone, Debug)]
-pub struct DdkBuilder<T, S, O> {
+pub struct Builder<T, S, O> {
     name: Option<String>,
     transport: Option<Arc<T>>,
     storage: Option<Arc<S>>,
@@ -58,7 +58,7 @@ impl std::error::Error for BuilderError {}
 /// Defaults when creating a DDK application
 /// Transport, storage, and oracle is set to none.
 /// Default [crate::config::DdkConfig] to mutiny net.
-impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> Default for DdkBuilder<T, S, O> {
+impl<T: Transport, S: Storage, O: Oracle> Default for Builder<T, S, O> {
     fn default() -> Self {
         Self {
             name: None,
@@ -74,10 +74,10 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> Default for DdkBuilder<T, S, 
     }
 }
 
-impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
+impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
     /// Create a new, default DDK builder.
     pub fn new() -> Self {
-        DdkBuilder::default()
+        Builder::default()
     }
 
     /// Set the name of the DDK process. Used as an identifier for the process created.
@@ -89,7 +89,7 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
         self
     }
 
-    /// The communication layer of DDK. Type MUST implement [crate::DdkTransport].
+    /// The communication layer of DDK. Type MUST implement [crate::Transport].
     /// Transport sets up listeners, communicates with counterparties, and passes
     /// DLC messages to the `Manager`.
     pub fn set_transport(&mut self, transport: Arc<T>) -> &mut Self {
@@ -98,7 +98,7 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
     }
 
     /// DLC contract storage. Storage is used by the [dlc_manager::manager::Manager] to create, update, retrieve, and
-    /// delete contracts. MUST implement [crate::DdkStorage]
+    /// delete contracts. MUST implement [crate::Storage]
     pub fn set_storage(&mut self, storage: Arc<S>) -> &mut Self {
         self.storage = Some(storage);
         self
@@ -114,7 +114,7 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
     }
 
     /// Oracle implementation for the [dlc_manager::manager::Manager] to retrieve oracle attestations and announcements.
-    /// MUST implement [crate::DdkOracle].
+    /// MUST implement [crate::Oracle].
     pub fn set_oracle(&mut self, oracle: Arc<O>) -> &mut Self {
         self.oracle = Some(oracle);
         self

@@ -1,6 +1,6 @@
 use clap::Parser;
 use ddk::bitcoin::Network;
-use ddk::builder::DdkBuilder;
+use ddk::builder::Builder;
 use ddk::oracle::KormirOracleClient;
 use ddk::storage::SledStorage;
 use ddk::transport::lightning::LightningTransport;
@@ -99,7 +99,7 @@ async fn main() -> anyhow::Result<()> {
     // let oracle = Arc::new(P2PDOracleClient::new(&oracle_host).await?);
     let oracle = Arc::new(KormirOracleClient::new(&args.oracle_host).await?);
 
-    let mut builder = DdkBuilder::new();
+    let mut builder = Builder::new();
     builder.set_storage_path(storage_path.to_str().unwrap().to_string());
     builder.set_esplora_host(args.esplora_host);
     builder.set_network(network);

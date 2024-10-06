@@ -2,7 +2,7 @@ use crate::chain::EsploraClient;
 #[cfg(feature = "marketplace")]
 use crate::nostr::marketplace::*;
 use crate::wallet::DlcDevKitWallet;
-use crate::{DdkOracle, DdkStorage, DdkTransport};
+use crate::{Oracle, Storage, Transport};
 use anyhow::anyhow;
 use bitcoin::secp256k1::PublicKey;
 use bitcoin::Network;
@@ -46,7 +46,7 @@ pub enum DlcManagerMessage {
     PeriodicCheck,
 }
 
-pub struct DlcDevKit<T: DdkTransport, S: DdkStorage, O: DdkOracle> {
+pub struct DlcDevKit<T: Transport, S: Storage, O: Oracle> {
     pub runtime: Arc<RwLock<Option<Runtime>>>,
     pub wallet: Arc<DlcDevKitWallet<S>>,
     pub manager: Arc<DlcDevKitDlcManager<S, O>>,
@@ -60,9 +60,9 @@ pub struct DlcDevKit<T: DdkTransport, S: DdkStorage, O: DdkOracle> {
 
 impl<T, S, O> DlcDevKit<T, S, O>
 where
-    T: DdkTransport,
-    S: DdkStorage,
-    O: DdkOracle,
+    T: Transport,
+    S: Storage,
+    O: Oracle,
 {
     pub fn start(&self) -> anyhow::Result<()> {
         let mut runtime_lock = self.runtime.write().unwrap();
@@ -270,7 +270,7 @@ mod tests {
 
     use crate::{
         test_util::{generate_blocks, test_ddk, TestSuite},
-        DdkOracle,
+        Oracle,
     };
     use dlc_manager::{contract::contract_input::ContractInput, Storage};
     use dlc_messages::{oracle_msgs::OracleAnnouncement, Message};

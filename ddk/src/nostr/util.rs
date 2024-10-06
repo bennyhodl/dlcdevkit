@@ -5,7 +5,7 @@ use lightning::io::Cursor;
 use lightning::util::ser::Readable;
 use nostr_rs::{Event, Filter, Kind, PublicKey as NostrPublicKey, Timestamp};
 
-use crate::DdkStorage;
+use crate::Storage;
 
 use super::{DLC_MESSAGE_KIND, ORACLE_ANNOUNCMENT_KIND, ORACLE_ATTESTATION_KIND};
 
@@ -24,7 +24,7 @@ pub fn create_oracle_message_filter(since: Timestamp) -> Filter {
 
 pub fn handle_dlc_msg_event<S: Deref>(storage: &S, event: Event)
 where
-    S::Target: DdkStorage,
+    S::Target: Storage,
 {
     match event.kind {
         Kind::Custom(89) => {

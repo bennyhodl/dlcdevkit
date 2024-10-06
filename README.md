@@ -16,8 +16,7 @@ $ cargo add ddk --features lightning
 ```
 
 ```rust
-use ddk::config::DdkConfig;
-use ddk::builder::DdkBuilder;
+use ddk::builder::Builder;
 use ddk::storage::SledStorage;
 use ddk::transport::lightning::LightningTransport;
 use ddk::oracle::P2PDOracleClient;
@@ -31,7 +30,7 @@ fn main() {
     let storage = Arc::new(SledStorage::new("<storage path>")?);
     let oracle_client = Arc::new(P2PDOracleClient::new("<oracle host>")?);
 
-    let ddk: ApplicationDdk = DdkBuilder::new()
+    let ddk: ApplicationDdk = Builder::new()
         .set_seed_bytes([0u8;32])
         .set_network(Network::Regtest)
         .set_storage_path("<storage path>")

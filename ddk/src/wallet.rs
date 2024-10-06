@@ -1,5 +1,5 @@
 use crate::error::WalletError;
-use crate::{chain::EsploraClient, signer::SignerInformation, storage::SledStorage, DdkStorage};
+use crate::{chain::EsploraClient, signer::SignerInformation, storage::SledStorage, Storage};
 use bdk_chain::{spk_client::FullScanRequest, Balance};
 use bdk_esplora::EsploraExt;
 use bdk_wallet::{
@@ -68,7 +68,7 @@ pub enum WalletOperation {
 
 const MIN_FEERATE: u32 = 253;
 
-impl<S: DdkStorage> DlcDevKitWallet<S> {
+impl<S: Storage> DlcDevKitWallet<S> {
     pub fn new<P>(
         name: &str,
         seed_bytes: &[u8; 32],
@@ -381,7 +381,7 @@ impl<S: DdkStorage> DlcDevKitWallet<S> {
     }
 }
 
-impl<S: DdkStorage> FeeEstimator for DlcDevKitWallet<S> {
+impl<S: Storage> FeeEstimator for DlcDevKitWallet<S> {
     fn get_est_sat_per_1000_weight(&self, confirmation_target: ConfirmationTarget) -> u32 {
         self.fees
             .get(&confirmation_target)
@@ -390,7 +390,7 @@ impl<S: DdkStorage> FeeEstimator for DlcDevKitWallet<S> {
     }
 }
 
-impl<S: DdkStorage> dlc_manager::ContractSignerProvider for DlcDevKitWallet<S> {
+impl<S: Storage> dlc_manager::ContractSignerProvider for DlcDevKitWallet<S> {
     type Signer = SimpleSigner;
 
     // Using the data deterministically generate a key id. From a child key.
@@ -465,7 +465,7 @@ impl<S: DdkStorage> dlc_manager::ContractSignerProvider for DlcDevKitWallet<S> {
     }
 }
 
-impl<S: DdkStorage> dlc_manager::Wallet for DlcDevKitWallet<S> {
+impl<S: Storage> dlc_manager::Wallet for DlcDevKitWallet<S> {
     fn get_new_address(&self) -> Result<bitcoin::Address, ManagerError> {
         tracing::info!("Retrieving new address for dlc manager");
         let (sender, receiver) = unbounded();
