@@ -1,7 +1,5 @@
 use anyhow::Result;
-use bitcoin::Network;
 use ddk::builder::DdkBuilder;
-use ddk::config::SeedConfig;
 use ddk::oracle::P2PDOracleClient;
 use ddk::storage::SledStorage;
 use ddk::transport::lightning::LightningTransport;
@@ -12,14 +10,10 @@ type ApplicationDdk = ddk::DlcDevKit<LightningTransport, SledStorage, P2PDOracle
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let transport = Arc::new(LightningTransport::new(
-        &SeedConfig::Bytes([0u8; 64]),
-        1776,
-        Network::Signet,
-    )?);
-    let storage = Arc::new(SledStorage::new(current_dir().unwrap().to_str().unwrap())?);
+    let transport = Arc::new(LightningTransport::new(&[0u8; 32], 1776)?);
+    let storage = Arc::new(SledStorage::new(current_dir()?.to_str().unwrap())?);
 
-    let oracle_client = Arc::new(P2PDOracleClient::new("host").await.expect("no oracle"));
+    let oracle_client = Arc::new(P2PDOracleClient::new("host").await?);
 
     let mut builder = DdkBuilder::new();
     builder.set_transport(transport.clone());

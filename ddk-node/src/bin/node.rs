@@ -1,7 +1,6 @@
 use clap::Parser;
 use ddk::bitcoin::Network;
 use ddk::builder::DdkBuilder;
-use ddk::config::SeedConfig;
 use ddk::oracle::KormirOracleClient;
 use ddk::storage::SledStorage;
 use ddk::transport::lightning::LightningTransport;
@@ -82,19 +81,15 @@ async fn main() -> anyhow::Result<()> {
             .join("default-ddk"),
     };
     let network = Network::from_str(&args.network)?;
-    let seed_config = match args.seed.as_str() {
-        "bytes" => SeedConfig::Bytes([0u8; 64]),
-        _ => SeedConfig::File(storage_path.to_str().unwrap().to_string()),
-    };
-
     std::fs::create_dir_all(storage_path.clone())?;
+
+    let seed_bytes = ddk::io::xprv_from_path(storage_path.clone(), network)?;
 
     tracing::info!("Starting DDK node.");
 
     let transport = Arc::new(LightningTransport::new(
-        &seed_config,
+        &seed_bytes.private_key.secret_bytes(),
         args.listening_port,
-        network,
     )?);
 
     let storage = Arc::new(SledStorage::new(

@@ -1,5 +1,5 @@
 use anyhow::anyhow;
-use bitcoin::{secp256k1::PublicKey, Network};
+use bitcoin::{key::rand::Fill, secp256k1::PublicKey};
 use dlc_messages::message_handler::MessageHandler as DlcMessageHandler;
 use lightning::{
     ln::peer_handler::{
@@ -11,8 +11,6 @@ use lightning::{
 };
 use lightning_net_tokio::SocketDescriptor;
 use std::{sync::Arc, time::SystemTime};
-
-use crate::config::SeedConfig;
 
 pub struct DlcDevKitLogger;
 
@@ -40,16 +38,9 @@ pub struct LightningTransport {
 }
 
 impl LightningTransport {
-    pub fn new(
-        seed_config: &SeedConfig,
-        listening_port: u16,
-        network: Network,
-    ) -> anyhow::Result<LightningTransport> {
-        let seed = crate::io::xprv_from_config(seed_config, network)?
-            .private_key
-            .secret_bytes();
+    pub fn new(seed_bytes: &[u8; 32], listening_port: u16) -> anyhow::Result<LightningTransport> {
         let time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?;
-        let key_signer = KeysManager::new(&seed, time.as_secs(), time.as_nanos() as u32);
+        let key_signer = KeysManager::new(&seed_bytes, time.as_secs(), time.as_nanos() as u32);
         let node_id = key_signer
             .get_node_id(lightning::sign::Recipient::Node)
             .map_err(|_| anyhow!("Could not get node id."))?;
@@ -62,11 +53,14 @@ impl LightningTransport {
             custom_message_handler: dlc_message_handler.clone(),
         };
 
+        let mut ephmeral_data = [0u8; 32];
+        ephmeral_data.try_fill(&mut bitcoin::key::rand::thread_rng())?;
+
         Ok(LightningTransport {
             peer_manager: Arc::new(LnPeerManager::new(
                 message_handler,
                 time.as_secs() as u32,
-                &seed,
+                &ephmeral_data,
                 Arc::new(DlcDevKitLogger {}),
                 Arc::new(key_signer),
             )),

@@ -71,7 +71,7 @@ const MIN_FEERATE: u32 = 253;
 impl<S: DdkStorage> DlcDevKitWallet<S> {
     pub fn new<P>(
         name: &str,
-        xprv: Xpriv,
+        seed_bytes: &[u8; 32],
         esplora_url: &str,
         network: Network,
         wallet_storage_path: P,
@@ -82,6 +82,8 @@ impl<S: DdkStorage> DlcDevKitWallet<S> {
     {
         let secp = Secp256k1::new();
         let wallet_storage_path = wallet_storage_path.as_ref().join("wallet-db");
+
+        let xprv = Xpriv::new_master(network, seed_bytes)?;
 
         let external_descriptor = Bip84(xprv, KeychainKind::External);
         let internal_descriptor = Bip84(xprv, KeychainKind::Internal);

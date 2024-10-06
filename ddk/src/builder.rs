@@ -1,4 +1,3 @@
-use crate::io;
 use bitcoin::Network;
 use core::fmt;
 use crossbeam::channel::unbounded;
@@ -8,7 +7,6 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use crate::chain::EsploraClient;
-use crate::config::SeedConfig;
 use crate::ddk::{DlcDevKit, DlcManagerMessage};
 use crate::wallet::DlcDevKitWallet;
 use crate::{DdkOracle, DdkStorage, DdkTransport};
@@ -28,6 +26,7 @@ pub struct DdkBuilder<T, S, O> {
     esplora_host: String,
     network: Network,
     storage_path: String,
+    seed_bytes: [u8; 32],
 }
 
 /// An error that could be thrown while building [crate::ddk::DlcDevKit]
@@ -39,8 +38,6 @@ pub enum BuilderError {
     NoStorage,
     /// An oracle client was not provided.
     NoOracle,
-    /// No seed provided
-    NoSeed,
     /// No wallet storage provided.
     NoWalletStorage,
 }
@@ -51,7 +48,6 @@ impl fmt::Display for BuilderError {
             BuilderError::NoTransport => write!(f, "A DLC transport was not provided."),
             BuilderError::NoStorage => write!(f, "A DLC storage implementation was not provided."),
             BuilderError::NoOracle => write!(f, "A DLC oracle client was not provided."),
-            BuilderError::NoSeed => write!(f, "No seed configuration was provided."),
             BuilderError::NoWalletStorage => write!(f, "No wallet storage was provided."),
         }
     }
@@ -73,6 +69,7 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> Default for DdkBuilder<T, S, 
             esplora_host: DEFAULT_ESPLORA_HOST.to_string(),
             network: DEFAULT_NETWORK,
             storage_path: DEFAULT_STORAGE_PATH.to_string(),
+            seed_bytes: [0u8; 32],
         }
     }
 }
@@ -141,6 +138,12 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
         self
     }
 
+    /// Set the seed bytes for the wallet.
+    pub fn set_seed_bytes(&mut self, bytes: [u8; 32]) -> &mut Self {
+        self.seed_bytes = bytes;
+        self
+    }
+
     /// Builds the `DlcDevKit` instance. Fails if any components are missing.
     pub fn finish(&self) -> anyhow::Result<DlcDevKit<T, S, O>> {
         tracing::info!("Using network {}", &self.network);
@@ -152,8 +155,6 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
         std::fs::create_dir_all(&self.storage_path)?;
         tracing::info!(path=?self.storage_path, "Created directory for ddk node.");
 
-        let xprv =
-            io::xprv_from_config(&SeedConfig::File(self.storage_path.clone()), self.network)?;
         tracing::info!("Loaded private key");
 
         let transport = self
@@ -178,7 +179,7 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
 
         let wallet = Arc::new(DlcDevKitWallet::new(
             &name,
-            xprv,
+            &self.seed_bytes,
             &self.esplora_host,
             self.network,
             &self.storage_path,
