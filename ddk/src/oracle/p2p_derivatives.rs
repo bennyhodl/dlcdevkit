@@ -8,7 +8,7 @@ use dlc::secp256k1_zkp::{schnorr::Signature, XOnlyPublicKey};
 use dlc_manager::error::Error as DlcManagerError;
 use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
 
-use crate::DdkOracle;
+use crate::Oracle;
 
 /// Enables interacting with a DLC oracle.
 pub struct P2PDOracleClient {
@@ -178,7 +178,7 @@ impl dlc_manager::Oracle for P2PDOracleClient {
 }
 
 #[async_trait::async_trait]
-impl DdkOracle for P2PDOracleClient {
+impl Oracle for P2PDOracleClient {
     fn name(&self) -> String {
         "p2pderivatives".into()
     }

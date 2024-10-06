@@ -1,6 +1,6 @@
 use std::ops::Deref;
 
-use crate::DdkStorage;
+use crate::Storage;
 use nostr_rs::{Filter, Timestamp};
 use nostr_sdk::{client::builder::ClientBuilder, RelayPoolNotification};
 
@@ -8,7 +8,7 @@ use super::ORACLE_ANNOUNCMENT_KIND;
 
 pub async fn marketplace_listener<S: Deref>(storage: &S, relays: Vec<&str>) -> anyhow::Result<()>
 where
-    S::Target: DdkStorage,
+    S::Target: Storage,
 {
     let client = ClientBuilder::new().build();
     client.add_relays(relays).await?;

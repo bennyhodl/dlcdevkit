@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::DdkTransport;
+use crate::Transport;
 use async_trait::async_trait;
 use bitcoin::secp256k1::PublicKey;
 use dlc_messages::Message;
@@ -11,7 +11,7 @@ pub use peer_manager::LightningTransport;
 use tokio::net::TcpListener;
 
 #[async_trait]
-impl DdkTransport for LightningTransport {
+impl Transport for LightningTransport {
     type PeerManager = Arc<super::lightning::peer_manager::LnPeerManager>;
     type MessageHandler = Arc<dlc_messages::message_handler::MessageHandler>;
 

@@ -58,7 +58,7 @@ use transport::PeerInformation;
 ///
 /// TODO: error handling and result types
 #[async_trait]
-pub trait DdkTransport: std::marker::Send + std::marker::Sync + 'static {
+pub trait Transport: std::marker::Send + std::marker::Sync + 'static {
     type PeerManager;
     type MessageHandler;
 
@@ -85,7 +85,7 @@ pub trait DdkTransport: std::marker::Send + std::marker::Sync + 'static {
 }
 
 /// Storage for DLC contracts.
-pub trait DdkStorage:
+pub trait Storage:
     dlc_manager::Storage
     + DeriveSigner
     + std::marker::Send
@@ -103,7 +103,7 @@ pub trait DdkStorage:
 
 /// Oracle client
 #[async_trait]
-pub trait DdkOracle: dlc_manager::Oracle + std::marker::Send + std::marker::Sync + 'static {
+pub trait Oracle: dlc_manager::Oracle + std::marker::Send + std::marker::Sync + 'static {
     fn name(&self) -> String;
     async fn get_announcement_async(
         &self,

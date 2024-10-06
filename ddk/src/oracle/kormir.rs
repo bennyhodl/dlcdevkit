@@ -113,7 +113,7 @@ impl dlc_manager::Oracle for KormirOracleClient {
 }
 
 #[async_trait::async_trait]
-impl crate::DdkOracle for KormirOracleClient {
+impl crate::Oracle for KormirOracleClient {
     fn name(&self) -> String {
         "kormir".into()
     }

@@ -12,7 +12,7 @@ use lightning::io::{Cursor, Read};
 use sled::{Db, Tree};
 
 use crate::transport::PeerInformation;
-use crate::DdkStorage;
+use crate::Storage;
 
 const CONTRACT_TREE: u8 = 1;
 const CHANNEL_TREE: u8 = 2;
@@ -91,7 +91,7 @@ impl SledStorage {
     }
 }
 
-impl DdkStorage for SledStorage {
+impl Storage for SledStorage {
     fn list_peers(&self) -> anyhow::Result<Vec<PeerInformation>> {
         if let Some(bytes) = self.db.get("peers")? {
             let peers: Vec<PeerInformation> = serde_json::from_slice(&bytes)?;

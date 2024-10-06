@@ -7,13 +7,13 @@ use std::sync::Arc;
 use ddk::bitcoin::secp256k1::PublicKey;
 use ddk::bitcoin::{Address, Amount, FeeRate};
 use ddk::dlc_manager::contract::contract_input::ContractInput;
-use ddk::dlc_manager::Storage;
+use ddk::dlc_manager::Storage as DlcStorage;
 use ddk::oracle::KormirOracleClient;
 use ddk::storage::SledStorage;
 use ddk::transport::lightning::LightningTransport;
 use ddk::util::serialize_contract;
-use ddk::{DdkOracle, DdkTransport};
-use ddk::{DdkStorage, DlcDevKit};
+use ddk::DlcDevKit;
+use ddk::{Oracle, Storage, Transport};
 use ddkrpc::ddk_rpc_server::DdkRpc;
 use ddkrpc::{
     AcceptOfferRequest, AcceptOfferResponse, ConnectRequest, ConnectResponse,
