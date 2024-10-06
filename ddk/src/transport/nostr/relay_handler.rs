@@ -1,6 +1,6 @@
-use crate::config::SeedConfig;
 use crate::nostr::DLC_MESSAGE_KIND;
-use crate::{io, RELAY_HOST};
+use crate::RELAY_HOST;
+use bitcoin::bip32::Xpriv;
 use bitcoin::Network;
 use dlc_messages::{message_handler::read_dlc_message, Message, WireMessage};
 use lightning::{
@@ -22,12 +22,12 @@ pub struct NostrDlcRelayHandler {
 
 impl NostrDlcRelayHandler {
     pub fn new(
-        seed_config: &SeedConfig,
+        seed_bytes: &[u8; 64],
         relay_host: &str,
         network: Network,
     ) -> anyhow::Result<NostrDlcRelayHandler> {
         let secp = Secp256k1::new();
-        let seed = io::xprv_from_config(seed_config, network)?;
+        let seed = Xpriv::new_master(network, seed_bytes)?;
         // TODO: Seed to bytes is 78 not 64?
         let secret_key = SecretKey::from_slice(&seed.encode())?;
         let keys = Keys::new_with_ctx(&secp, secret_key.into());

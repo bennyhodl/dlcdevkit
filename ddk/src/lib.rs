@@ -3,18 +3,16 @@
 #![allow(dead_code)]
 // #![allow(unused_imports)]
 mod chain;
-// pub mod ddk;
 mod ddk;
 mod error;
-mod io;
 mod signer;
 #[cfg(test)]
 mod test_util;
 
 /// Build a DDK application.
 pub mod builder;
-/// Configuration for a DDK application.
-pub mod config;
+/// IO utilities
+pub mod io;
 /// Nostr related functions.
 pub mod nostr;
 /// Oracle clients.
