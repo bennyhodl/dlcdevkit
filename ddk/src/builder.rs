@@ -1,4 +1,5 @@
 use crate::io;
+use bitcoin::Network;
 use core::fmt;
 use crossbeam::channel::unbounded;
 use dlc_manager::manager::Manager;
@@ -7,20 +8,26 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use crate::chain::EsploraClient;
-use crate::config::DdkConfig;
+use crate::config::SeedConfig;
 use crate::ddk::{DlcDevKit, DlcManagerMessage};
 use crate::wallet::DlcDevKitWallet;
 use crate::{DdkOracle, DdkStorage, DdkTransport};
+
+pub const DEFAULT_STORAGE_PATH: &str = "/tmp/ddk";
+pub const DEFAULT_ESPLORA_HOST: &str = "https://mutinynet.com/api";
+pub const DEFAULT_NETWORK: Network = Network::Signet;
 
 /// Builder pattern for creating a [crate::ddk::DlcDevKit] process.
 #[derive(Clone, Debug)]
 pub struct DdkBuilder<T, S, O> {
     name: Option<String>,
-    config: Option<DdkConfig>,
     transport: Option<Arc<T>>,
     storage: Option<Arc<S>>,
     oracle: Option<Arc<O>>,
     wallet_storage: Option<S>,
+    esplora_host: String,
+    network: Network,
+    storage_path: String,
 }
 
 /// An error that could be thrown while building [crate::ddk::DlcDevKit]
@@ -34,8 +41,6 @@ pub enum BuilderError {
     NoOracle,
     /// No seed provided
     NoSeed,
-    /// No config provided.
-    NoConfig,
     /// No wallet storage provided.
     NoWalletStorage,
 }
@@ -47,7 +52,6 @@ impl fmt::Display for BuilderError {
             BuilderError::NoStorage => write!(f, "A DLC storage implementation was not provided."),
             BuilderError::NoOracle => write!(f, "A DLC oracle client was not provided."),
             BuilderError::NoSeed => write!(f, "No seed configuration was provided."),
-            BuilderError::NoConfig => write!(f, "No config was provided"),
             BuilderError::NoWalletStorage => write!(f, "No wallet storage was provided."),
         }
     }
@@ -60,14 +64,15 @@ impl std::error::Error for BuilderError {}
 /// Default [crate::config::DdkConfig] to mutiny net.
 impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> Default for DdkBuilder<T, S, O> {
     fn default() -> Self {
-        let config = Some(DdkConfig::default());
         Self {
             name: None,
-            config,
             transport: None,
             storage: None,
             oracle: None,
             wallet_storage: None,
+            esplora_host: DEFAULT_ESPLORA_HOST.to_string(),
+            network: DEFAULT_NETWORK,
+            storage_path: DEFAULT_STORAGE_PATH.to_string(),
         }
     }
 }
@@ -118,32 +123,38 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
         self
     }
 
-    /// Configuration for `DlcDevKit`. Storage dir, seed config, network, and esplora host.
-    pub fn set_config(&mut self, config: DdkConfig) -> &mut Self {
-        self.config = Some(config);
+    /// Set the esplora server to connect to.
+    pub fn set_esplora_host(&mut self, host: String) -> &mut Self {
+        self.esplora_host = host;
+        self
+    }
+
+    /// Set the network DDK connects to.
+    pub fn set_network(&mut self, network: Network) -> &mut Self {
+        self.network = network;
+        self
+    }
+
+    /// Storage path to store DDK related data.
+    pub fn set_storage_path(&mut self, path: String) -> &mut Self {
+        self.storage_path = path;
         self
     }
 
     /// Builds the `DlcDevKit` instance. Fails if any components are missing.
     pub fn finish(&self) -> anyhow::Result<DlcDevKit<T, S, O>> {
-        let config = self
-            .config
-            .as_ref()
-            .map_or_else(|| Err(BuilderError::NoConfig), |c| Ok(c))?;
-        tracing::info!("Using network {}", config.network);
+        tracing::info!("Using network {}", &self.network);
 
         // Creates the DDK directory.
         //
         // TODO: Should have a storage config for no-std builds.
         // TODO: should be nested with the DDK name.
-        std::fs::create_dir_all(&config.storage_path)?;
-        tracing::info!(path=?config.storage_path, "Created directory for ddk node.");
+        std::fs::create_dir_all(&self.storage_path)?;
+        tracing::info!(path=?self.storage_path, "Created directory for ddk node.");
 
-        let xprv = io::xprv_from_config(&config.seed_config, config.network)?;
-        tracing::info!(
-            strategy = config.seed_config.to_string(),
-            "Loaded private key"
-        );
+        let xprv =
+            io::xprv_from_config(&SeedConfig::File(self.storage_path.clone()), self.network)?;
+        tracing::info!("Loaded private key");
 
         let transport = self
             .transport
@@ -168,9 +179,9 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
         let wallet = Arc::new(DlcDevKitWallet::new(
             &name,
             xprv,
-            &config.esplora_host,
-            config.network,
-            &config.storage_path,
+            &self.esplora_host,
+            self.network,
+            &self.storage_path,
             storage.clone(),
         )?);
         tracing::info!("Opened BDK wallet. name={}", name);
@@ -179,8 +190,8 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
         oracles.insert(oracle.get_public_key(), oracle.clone());
         tracing::info!(name = oracle.name(), "Connected to oracle.");
 
-        let esplora_client = Arc::new(EsploraClient::new(&config.esplora_host, config.network)?);
-        tracing::info!(host = config.esplora_host, "Connected to esplora client.");
+        let esplora_client = Arc::new(EsploraClient::new(&self.esplora_host, self.network)?);
+        tracing::info!(host = self.esplora_host, "Connected to esplora client.");
 
         let (sender, receiver) = unbounded::<DlcManagerMessage>();
 
@@ -204,7 +215,7 @@ impl<T: DdkTransport, S: DdkStorage, O: DdkOracle> DdkBuilder<T, S, O> {
             transport,
             storage,
             oracle,
-            network: config.network,
+            network: self.network,
         })
     }
 }

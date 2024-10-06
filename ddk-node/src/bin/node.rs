@@ -1,7 +1,7 @@
 use clap::Parser;
 use ddk::bitcoin::Network;
 use ddk::builder::DdkBuilder;
-use ddk::config::{DdkConfig, SeedConfig};
+use ddk::config::SeedConfig;
 use ddk::oracle::KormirOracleClient;
 use ddk::storage::SledStorage;
 use ddk::transport::lightning::LightningTransport;
@@ -73,7 +73,6 @@ async fn main() -> anyhow::Result<()> {
         .finish();
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
-    let mut config = DdkConfig::default();
     let storage_path = match args.storage_dir {
         Some(storage) => storage,
         None => homedir::my_home()
@@ -82,32 +81,33 @@ async fn main() -> anyhow::Result<()> {
             .join(".ddk")
             .join("default-ddk"),
     };
-    config.storage_path = storage_path.clone();
-    config.esplora_host = args.esplora_host;
-    config.network = Network::from_str(&args.network)?;
-    config.seed_config = match args.seed.as_str() {
+    let network = Network::from_str(&args.network)?;
+    let seed_config = match args.seed.as_str() {
         "bytes" => SeedConfig::Bytes([0u8; 64]),
         _ => SeedConfig::File(storage_path.to_str().unwrap().to_string()),
     };
 
-    std::fs::create_dir_all(storage_path)?;
+    std::fs::create_dir_all(storage_path.clone())?;
 
     tracing::info!("Starting DDK node.");
 
     let transport = Arc::new(LightningTransport::new(
-        &config.seed_config,
+        &seed_config,
         args.listening_port,
-        config.network,
+        network,
     )?);
+
     let storage = Arc::new(SledStorage::new(
-        config.storage_path.join("sled_db").to_str().unwrap(),
+        storage_path.join("sled_db").to_str().unwrap(),
     )?);
 
     // let oracle = Arc::new(P2PDOracleClient::new(&oracle_host).await?);
     let oracle = Arc::new(KormirOracleClient::new(&args.oracle_host).await?);
 
     let mut builder = DdkBuilder::new();
-    builder.set_config(config);
+    builder.set_storage_path(storage_path.to_str().unwrap().to_string());
+    builder.set_esplora_host(args.esplora_host);
+    builder.set_network(network);
     builder.set_transport(transport.clone());
     builder.set_storage(storage.clone());
     builder.set_oracle(oracle.clone());
