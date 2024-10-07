@@ -11,7 +11,7 @@ use std::{path::PathBuf, str::FromStr, sync::Arc, thread::sleep, time::Duration}
 
 use crate::{
     builder::Builder, chain::EsploraClient, oracle::KormirOracleClient, storage::SledStorage,
-    transport::lightning::LightningTransport, wallet::DlcDevKitWallet, DlcDevKit, Oracle,
+    transport::lightning::LightningTransport, wallet::DlcDevKitWallet, DlcDevKit,
 };
 use bitcoincore_rpc::RpcApi;
 
@@ -98,7 +98,7 @@ pub fn generate_blocks(num: u64) {
     }
 }
 
-async fn create_oracle_announcement() -> OracleAnnouncement {
+pub async fn create_oracle_announcement() -> OracleAnnouncement {
     let kormir = KormirOracleClient::new("http://127.0.0.1:8082")
         .await
         .unwrap();
@@ -111,12 +111,10 @@ async fn create_oracle_announcement() -> OracleAnnouncement {
         .try_into()
         .unwrap();
 
-    let event_id = kormir
+    kormir
         .create_event(vec!["rust".to_string(), "go".to_string()], timestamp)
         .await
-        .unwrap();
-
-    kormir.get_announcement_async(&event_id).await.unwrap()
+        .unwrap()
 }
 
 pub fn contract_input(announcement: &OracleAnnouncement) -> ContractInput {
@@ -171,10 +169,10 @@ pub struct TestSuite {
 impl TestSuite {
     pub async fn new(name: &str, port: u16) -> TestSuite {
         let storage_path = format!("tests/data/{name}");
+        std::fs::create_dir_all(storage_path.clone()).expect("couldn't create file");
         let seed =
             crate::io::xprv_from_path(PathBuf::from_str(&storage_path).unwrap(), Network::Regtest)
                 .unwrap();
-        std::fs::create_dir_all(storage_path.clone()).expect("couldn't create file");
         let esplora_host = "http://127.0.0.1:30000".to_string();
         let transport =
             Arc::new(LightningTransport::new(&seed.private_key.secret_bytes(), port).unwrap());

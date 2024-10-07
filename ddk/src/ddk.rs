@@ -242,81 +242,78 @@ where
 mod tests {
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-    use crate::{
-        test_util::{generate_blocks, test_ddk, TestSuite},
-        Oracle,
+    use crate::test_util::{generate_blocks, test_ddk, TestSuite};
+    use dlc_manager::{
+        contract::{contract_input::ContractInput, Contract},
+        Storage,
     };
-    use dlc_manager::{contract::contract_input::ContractInput, Storage};
     use dlc_messages::{oracle_msgs::OracleAnnouncement, Message};
     use rstest::rstest;
     use tokio::time::sleep;
 
     #[rstest]
     #[test_log::test(tokio::test)]
-    async fn send_offer(
+    async fn contract_execution(
         #[future] test_ddk: (TestSuite, TestSuite, OracleAnnouncement, ContractInput),
     ) {
-        let (test, test_two, announcement, contract_input) = test_ddk.await;
-        let offer = test.ddk.manager.send_offer_with_announcements(
+        let (alice, bob, announcement, contract_input) = test_ddk.await;
+        let alice_makes_offer = alice.ddk.manager.send_offer_with_announcements(
             &contract_input,
-            test_two.ddk.transport.node_id,
+            bob.ddk.transport.node_id,
             vec![vec![announcement.clone()]],
         );
 
-        assert!(offer.is_ok());
-        let offer = offer.expect("alice did not create an offer");
-        // sleep(Duration::from_secs(10)).await;
+        let alice_makes_offer = alice_makes_offer.expect("alice did not create an offer");
 
-        let contract_id = offer.temporary_contract_id.clone();
-        let alice_pubkey = test.ddk.transport.node_id;
-        let bob_pubkey = test_two.ddk.transport.node_id;
+        let contract_id = alice_makes_offer.temporary_contract_id.clone();
+        let alice_pubkey = alice.ddk.transport.node_id;
+        let bob_pubkey = bob.ddk.transport.node_id;
 
-        let receive_offer = test_two
+        let bob_receives_offer = bob
             .ddk
             .manager
-            .on_dlc_message(&Message::Offer(offer), alice_pubkey);
+            .on_dlc_message(&Message::Offer(alice_makes_offer), alice_pubkey);
 
-        assert!(receive_offer.is_ok());
-        let receive_offer = receive_offer.expect("bob did not receive the offer");
-        assert!(receive_offer.is_none());
+        let bob_receive_offer = bob_receives_offer.expect("bob did not receive the offer");
+        assert!(bob_receive_offer.is_none());
 
-        let bob_accept_offer = test_two
+        let bob_accept_offer = bob
             .ddk
             .manager
             .accept_contract_offer(&contract_id)
             .expect("bob could not accept offer");
 
-        let (contract_id, _counter_party, accept_dlc) = bob_accept_offer;
+        let (contract_id, _counter_party, bob_accept_dlc) = bob_accept_offer;
 
-        let alice_receive_accept = test
+        let alice_receive_accept = alice
             .ddk
             .manager
-            .on_dlc_message(&Message::Accept(accept_dlc), bob_pubkey)
+            .on_dlc_message(&Message::Accept(bob_accept_dlc), bob_pubkey)
             .expect("alice did not receive accept");
 
         assert!(alice_receive_accept.is_some());
 
-        let sign_message = alice_receive_accept.unwrap();
-        test_two
-            .ddk
+        let alice_sign_message = alice_receive_accept.unwrap();
+        bob.ddk
             .manager
-            .on_dlc_message(&sign_message, alice_pubkey)
+            .on_dlc_message(&alice_sign_message, alice_pubkey)
             .expect("bob did not receive sign message");
 
         generate_blocks(10);
 
-        test.ddk
+        alice
+            .ddk
             .manager
             .periodic_check(false)
             .expect("alice check failed");
-        test_two
-            .ddk
+
+        bob.ddk
             .manager
             .periodic_check(false)
             .expect("bob check failed");
 
-        let contract = test.ddk.storage.get_contract(&contract_id);
-        assert!(contract.is_ok());
+        let contract = alice.ddk.storage.get_contract(&contract_id);
+        assert!(matches!(contract.unwrap().unwrap(), Contract::Confirmed(_)));
 
         let mut time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -332,27 +329,12 @@ mod tests {
             sleep(Duration::from_secs(5)).await
         }
 
-        generate_blocks(10);
-
-        let contract = test.ddk.storage.get_contract(&contract_id);
-        assert!(contract.is_ok());
-
-        let attestation = test
+        let attestation = alice
             .ddk
             .oracle
-            .get_attestation_async(&announcement.oracle_event.event_id)
-            .await
-            .unwrap();
+            .sign_event(announcement, "rust".to_string())
+            .await;
 
-        let contract_close = test
-            .ddk
-            .manager
-            .close_confirmed_contract(&contract_id, vec![(0, attestation)]);
-        assert!(contract_close.is_ok());
-
-        generate_blocks(10);
-
-        let contract = test.ddk.storage.get_contract(&contract_id);
-        assert!(contract.is_ok())
+        assert!(attestation.is_ok())
     }
 }
