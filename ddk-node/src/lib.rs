@@ -210,7 +210,7 @@ impl DdkRpc for DdkNode {
         _request: Request<ListPeersRequest>,
     ) -> Result<Response<ListPeersResponse>, Status> {
         tracing::info!("List peers request");
-        let peers = self.inner.transport.ln_peer_manager().list_peers();
+        let peers = self.inner.transport.peer_manager.list_peers();
         let peers = peers
             .iter()
             .map(|peer| {
@@ -300,6 +300,7 @@ impl DdkRpc for DdkNode {
             .inner
             .storage
             .get_marketplace_announcements()
+            // TODO: fails if no announcements
             .unwrap()
             .iter()
             .map(|ann| serde_json::to_vec(ann).unwrap())

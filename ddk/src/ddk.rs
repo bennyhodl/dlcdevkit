@@ -42,7 +42,6 @@ pub enum DlcManagerMessage {
         oracle_announcements: Vec<OracleAnnouncement>,
         responder: Sender<OfferDlc>,
     },
-    ProcessMessages,
     PeriodicCheck,
 }
 
@@ -75,16 +74,19 @@ where
             .enable_all()
             .build()?;
 
-        let manager_transport = self.transport.clone();
         let manager_clone = self.manager.clone();
         let receiver_clone = self.receiver.clone();
-        std::thread::spawn(move || {
-            Self::run_manager(manager_clone, manager_transport, receiver_clone)
-        });
+        runtime.spawn(async move { Self::run_manager(manager_clone, receiver_clone).await });
 
         let transport_clone = self.transport.clone();
         runtime.spawn(async move {
             transport_clone.listen().await;
+        });
+
+        let transport_clone = self.transport.clone();
+        let manager_clone = self.manager.clone();
+        runtime.spawn(async move {
+            transport_clone.receive_messages(manager_clone).await;
         });
 
         let wallet_clone = self.wallet.clone();
@@ -101,10 +103,6 @@ where
             let mut timer = tokio::time::interval(Duration::from_secs(5));
             loop {
                 timer.tick().await;
-                processor
-                    .send(DlcManagerMessage::ProcessMessages)
-                    .expect("couldn't send message");
-
                 processor
                     .send(DlcManagerMessage::PeriodicCheck)
                     .expect("couldn't send periodic check");
@@ -137,9 +135,8 @@ where
         }
     }
 
-    fn run_manager(
+    async fn run_manager(
         manager: Arc<DlcDevKitDlcManager<S, O>>,
-        transport: Arc<T>,
         receiver: Arc<Receiver<DlcManagerMessage>>,
     ) {
         while let Ok(msg) = receiver.recv() {
@@ -166,29 +163,6 @@ where
                     let accept_dlc = manager.accept_contract_offer(&contract);
 
                     responder.send(accept_dlc).expect("can't send")
-                }
-                DlcManagerMessage::ProcessMessages => {
-                    let messages = transport.get_and_clear_received_messages();
-
-                    for (counter_party, message) in messages {
-                        tracing::info!(
-                            counter_party = counter_party.to_string(),
-                            "Processing DLC message"
-                        );
-
-                        let message_response = manager
-                            .on_dlc_message(&message, counter_party)
-                            .expect("no on dlc message");
-                        if let Some(msg) = message_response {
-                            tracing::info!("Responding to message received.");
-                            tracing::debug!(message=?msg);
-                            transport.send_message(counter_party, msg);
-                        }
-                    }
-
-                    if transport.has_pending_messages() {
-                        transport.process_messages()
-                    }
                 }
                 DlcManagerMessage::PeriodicCheck => {
                     manager.periodic_check(false).unwrap();

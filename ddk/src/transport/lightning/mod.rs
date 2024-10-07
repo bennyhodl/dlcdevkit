@@ -1,10 +1,8 @@
-use std::sync::Arc;
-
-use crate::Transport;
+use crate::{DlcDevKitDlcManager, Oracle, Storage, Transport};
 use async_trait::async_trait;
 use bitcoin::secp256k1::PublicKey;
-use dlc_messages::Message;
 use lightning_net_tokio::{connect_outbound, setup_inbound};
+use std::{sync::Arc, time::Duration};
 
 pub(crate) mod peer_manager;
 pub use peer_manager::LightningTransport;
@@ -12,22 +10,17 @@ use tokio::net::TcpListener;
 
 #[async_trait]
 impl Transport for LightningTransport {
-    type PeerManager = Arc<super::lightning::peer_manager::LnPeerManager>;
-    type MessageHandler = Arc<dlc_messages::message_handler::MessageHandler>;
-
     fn name(&self) -> String {
         "lightning".into()
     }
 
     async fn listen(&self) {
-        let peer_manager_connection_handler = self.peer_manager();
-
         let listener = TcpListener::bind(format!("0.0.0.0:{}", self.listening_port))
             .await
             .expect("Coldn't get port.");
 
         loop {
-            let peer_mgr = peer_manager_connection_handler.clone();
+            let peer_mgr = self.peer_manager.clone();
             let (tcp_stream, socket) = listener.accept().await.unwrap();
             tokio::spawn(async move {
                 tracing::info!(connection = socket.to_string(), "Received connection.");
@@ -36,32 +29,43 @@ impl Transport for LightningTransport {
         }
     }
 
-    fn message_handler(&self) -> Self::MessageHandler {
-        self.message_handler()
-    }
-
-    fn peer_manager(&self) -> Self::PeerManager {
-        self.ln_peer_manager()
-    }
-
-    fn process_messages(&self) {
-        tracing::info!("Processing lightning messages.");
-        self.ln_peer_manager().process_events()
-    }
-
     fn send_message(&self, counterparty: PublicKey, message: dlc_messages::Message) {
-        self.message_handler().send_message(counterparty, message)
+        self.message_handler.send_message(counterparty, message)
     }
 
-    fn get_and_clear_received_messages(&self) -> Vec<(PublicKey, Message)> {
-        self.message_handler().get_and_clear_received_messages()
-    }
+    async fn receive_messages<S: Storage, O: Oracle>(
+        &self,
+        manager: Arc<DlcDevKitDlcManager<S, O>>,
+    ) {
+        let mut timer = tokio::time::interval(Duration::from_secs(5));
+        loop {
+            timer.tick().await;
+            tracing::info!("message tick");
+            let messages = self.message_handler.get_and_clear_received_messages();
 
-    fn has_pending_messages(&self) -> bool {
-        self.message_handler().has_pending_messages()
+            for (counter_party, message) in messages {
+                tracing::info!(
+                    counter_party = counter_party.to_string(),
+                    "Processing DLC message"
+                );
+
+                let message_response = manager
+                    .on_dlc_message(&message, counter_party)
+                    .expect("no on dlc message");
+                if let Some(msg) = message_response {
+                    tracing::info!("Responding to message received.");
+                    tracing::debug!(message=?msg);
+                    self.message_handler.send_message(counter_party, msg);
+                }
+            }
+
+            if self.message_handler.has_pending_messages() {
+                self.peer_manager.process_events()
+            }
+        }
     }
 
     async fn connect_outbound(&self, pubkey: PublicKey, host: &str) {
-        connect_outbound(self.peer_manager(), pubkey, host.parse().unwrap()).await;
+        connect_outbound(self.peer_manager.clone(), pubkey, host.parse().unwrap()).await;
     }
 }
