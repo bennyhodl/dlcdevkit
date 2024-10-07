@@ -1,7 +1,9 @@
+use anyhow::anyhow;
 use bitcoin::key::XOnlyPublicKey;
 use dlc_manager::error::Error;
 use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
 use kormir::storage::OracleEventData;
+use lightning::{io::Cursor, util::ser::Readable};
 use serde::Serialize;
 use std::str::FromStr;
 use uuid::Uuid;
@@ -21,6 +23,12 @@ pub struct CreateEnumEvent {
     pub event_id: String,
     pub outcomes: Vec<String>,
     pub event_maturity_epoch: u32,
+}
+
+#[derive(Serialize)]
+struct SignEnumEvent {
+    pub id: u32,
+    pub outcome: String,
 }
 
 #[derive(Debug)]
@@ -53,24 +61,21 @@ impl KormirOracleClient {
         Ok(XOnlyPublicKey::from_str(&request)?)
     }
 
-    pub async fn list_events(&self) -> anyhow::Result<Vec<OracleAnnouncement>> {
+    pub async fn list_events(&self) -> anyhow::Result<Vec<OracleEventData>> {
         let oracle_events: Vec<OracleEventData> =
             reqwest::get(format!("{}/list-events", self.host))
                 .await?
                 .json()
                 .await?;
 
-        Ok(oracle_events
-            .iter()
-            .map(|event| event.announcement.clone())
-            .collect::<Vec<OracleAnnouncement>>())
+        Ok(oracle_events)
     }
 
     pub async fn create_event(
         &self,
         outcomes: Vec<String>,
         maturity: u32,
-    ) -> anyhow::Result<String> {
+    ) -> anyhow::Result<OracleAnnouncement> {
         let event_id = Uuid::new_v4().to_string();
 
         let create_event_request = CreateEnumEvent {
@@ -79,13 +84,62 @@ impl KormirOracleClient {
             event_maturity_epoch: maturity,
         };
 
-        self.client
+        let announcement = self
+            .client
             .post(format!("{}/create-enum", self.host))
             .json(&create_event_request)
             .send()
-            .await?;
+            .await?
+            .text()
+            .await?
+            .trim_matches('"')
+            .to_string();
 
-        Ok(event_id)
+        let announcement_bytes = hex::decode(&announcement)?;
+        let mut cursor = Cursor::new(&announcement_bytes);
+        let announcement: OracleAnnouncement = Readable::read(&mut cursor)
+            .map_err(|_| anyhow!("Can't read bytes for attestation."))?;
+
+        Ok(announcement)
+    }
+
+    pub async fn sign_event(
+        &self,
+        announcement: OracleAnnouncement,
+        outcome: String,
+    ) -> anyhow::Result<OracleAttestation> {
+        let event_id = match self.list_events().await?.iter().find(|event| {
+            event.announcement.oracle_event.event_id == announcement.oracle_event.event_id
+        }) {
+            Some(ann) => ann.id,
+            None => return Err(anyhow!("Announcement not found.")),
+        };
+
+        let id = match event_id {
+            Some(id) => id,
+            None => return Err(anyhow!("No id in kormir oracle event data.")),
+        };
+
+        let event = SignEnumEvent { id, outcome };
+
+        let hex = self
+            .client
+            .post(format!("{}/sign-enum", &self.host))
+            .json(&event)
+            .send()
+            .await?
+            .text()
+            .await?
+            .trim_matches('"')
+            .to_string();
+
+        let attestion_buffer = hex::decode(hex)?;
+
+        let mut cursor = lightning::io::Cursor::new(attestion_buffer);
+        let attestation: OracleAttestation = Readable::read(&mut cursor)
+            .map_err(|_| anyhow!("Can't read bytes for attestation."))?;
+
+        Ok(attestation)
     }
 }
 
@@ -155,5 +209,49 @@ impl crate::Oracle for KormirOracleClient {
             .map_err(|_| Error::OracleError("Could not get attestation async.".into()))?;
 
         Ok(attestation)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{Local, TimeDelta};
+
+    use super::*;
+    use crate::test_util::create_oracle_announcement;
+
+    async fn create_kormir() -> KormirOracleClient {
+        KormirOracleClient::new("http://127.0.0.1:8082")
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn create_announcement() {
+        let kormir = create_kormir().await;
+
+        let expiry = TimeDelta::seconds(30);
+        let timestamp: u32 = Local::now()
+            .checked_add_signed(expiry)
+            .unwrap()
+            .timestamp()
+            .try_into()
+            .unwrap();
+
+        let announcement = kormir
+            .create_event(vec!["rust".to_string(), "go".to_string()], timestamp)
+            .await;
+
+        assert!(announcement.is_ok())
+    }
+
+    #[tokio::test]
+    async fn sign_enum() {
+        let kormir = create_kormir().await;
+
+        let announcement = create_oracle_announcement().await;
+
+        let sign_enum = kormir.sign_event(announcement, "rust".to_string()).await;
+
+        assert!(sign_enum.is_ok())
     }
 }
