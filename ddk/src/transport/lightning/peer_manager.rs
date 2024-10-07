@@ -31,8 +31,8 @@ pub type LnPeerManager = LdkPeerManager<
 >;
 
 pub struct LightningTransport {
-    peer_manager: Arc<LnPeerManager>,
-    message_handler: Arc<DlcMessageHandler>,
+    pub peer_manager: Arc<LnPeerManager>,
+    pub message_handler: Arc<DlcMessageHandler>,
     pub node_id: PublicKey,
     pub listening_port: u16,
 }
@@ -68,13 +68,5 @@ impl LightningTransport {
             node_id,
             listening_port,
         })
-    }
-
-    pub fn ln_peer_manager(&self) -> Arc<LnPeerManager> {
-        self.peer_manager.clone()
-    }
-
-    pub fn message_handler(&self) -> Arc<DlcMessageHandler> {
-        self.message_handler.clone()
     }
 }

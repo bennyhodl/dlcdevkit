@@ -25,6 +25,8 @@ pub mod transport;
 pub mod util;
 /// The internal [bdk::Wallet].
 pub mod wallet;
+use std::sync::Arc;
+
 /// DDK object with all services
 pub use ddk::DlcDevKit;
 /// Type alias for [dlc_manager::manager::Manager]
@@ -59,27 +61,17 @@ use transport::PeerInformation;
 /// TODO: error handling and result types
 #[async_trait]
 pub trait Transport: std::marker::Send + std::marker::Sync + 'static {
-    type PeerManager;
-    type MessageHandler;
-
     /// Name for the transport service.
     fn name(&self) -> String;
     /// Open an incoming listener for DLC messages from peers.
     async fn listen(&self);
-    /// Retrieve the message handler.
-    /// TODO: could remove?
-    fn message_handler(&self) -> Self::MessageHandler;
-    /// Retrieve the peer handler.
-    /// TODO: could remove?
-    fn peer_manager(&self) -> Self::PeerManager;
-    /// Process messages
-    fn process_messages(&self);
+    /// Get messages that have not been processed yet.
+    async fn receive_messages<S: Storage, O: Oracle>(
+        &self,
+        manager: Arc<DlcDevKitDlcManager<S, O>>,
+    );
     /// Send a message to a specific counterparty.
     fn send_message(&self, counterparty: PublicKey, message: Message);
-    /// Get messages that have not been processed yet.
-    fn get_and_clear_received_messages(&self) -> Vec<(PublicKey, Message)>;
-    /// If their are messages that still need to be processed.
-    fn has_pending_messages(&self) -> bool;
     /// Connect to another peer
     async fn connect_outbound(&self, pubkey: PublicKey, host: &str);
 }

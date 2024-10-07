@@ -1,5 +1,5 @@
 use anyhow::Result;
-use ddk::builder::DdkBuilder;
+use ddk::builder::Builder;
 use ddk::oracle::P2PDOracleClient;
 use ddk::storage::SledStorage;
 use ddk::transport::lightning::LightningTransport;
@@ -15,7 +15,7 @@ async fn main() -> Result<()> {
 
     let oracle_client = Arc::new(P2PDOracleClient::new("host").await?);
 
-    let mut builder = DdkBuilder::new();
+    let mut builder = Builder::new();
     builder.set_transport(transport.clone());
     builder.set_storage(storage.clone());
     builder.set_oracle(oracle_client.clone());
