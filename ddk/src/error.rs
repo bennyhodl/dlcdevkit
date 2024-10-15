@@ -40,8 +40,14 @@ pub fn esplora_err_to_manager_err(e: EsploraError) -> ManagerError {
     DlcDevKitError::Esplora(e).into()
 }
 
+pub fn bdk_err_to_manager_err(e: WalletError) -> ManagerError {
+    ManagerError::WalletError(e.into())
+}
+
 #[derive(thiserror::Error, Debug)]
 pub enum WalletError {
+    #[error("Failed to get lock on BDK wallet.")]
+    Lock,
     #[error("Error syncing the internal BDK wallet.")]
     SyncError,
     #[error("Storage error.")]
