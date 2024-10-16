@@ -1,7 +1,8 @@
 use crate::error::{bdk_err_to_manager_err, WalletError};
-use crate::{chain::EsploraClient, signer::SignerInformation, storage::SledStorage, Storage};
+use crate::{chain::EsploraClient, signer::SignerInformation, Storage};
 use bdk_chain::{spk_client::FullScanRequest, Balance};
 use bdk_esplora::EsploraExt;
+use bdk_wallet::WalletPersister;
 use bdk_wallet::{
     bitcoin::{
         bip32::{DerivationPath, Xpriv},
@@ -19,13 +20,14 @@ use bitcoin::{
 };
 use dlc_manager::{error::Error as ManagerError, SimpleSigner};
 use lightning::chain::chaininterface::{ConfirmationTarget, FeeEstimator};
+use std::collections::HashMap;
+use std::ops::Deref;
 use std::sync::RwLock;
 use std::{
     collections::BTreeMap,
     io::Write,
     sync::{atomic::Ordering, Arc},
 };
-use std::{collections::HashMap, path::Path};
 use std::{str::FromStr, sync::atomic::AtomicU32};
 
 /// Internal [bdk::Wallet] for ddk.
@@ -33,8 +35,8 @@ use std::{str::FromStr, sync::atomic::AtomicU32};
 /// Currently supports the file-based [bdk_file_store::Store]
 pub struct DlcDevKitWallet<S> {
     // TODO: pass storage
-    pub wallet: Arc<RwLock<PersistedWallet<SledStorage>>>,
-    pub storage: SledStorage,
+    pub wallet: Arc<RwLock<PersistedWallet<S>>>,
+    pub storage: Arc<S>,
     pub blockchain: Arc<EsploraClient>,
     pub network: Network,
     pub xprv: Xpriv,
@@ -47,44 +49,45 @@ pub struct DlcDevKitWallet<S> {
 const MIN_FEERATE: u32 = 253;
 
 impl<S: Storage> DlcDevKitWallet<S> {
-    pub fn new<P>(
+    pub fn new(
         name: &str,
         seed_bytes: &[u8; 32],
         esplora_url: &str,
         network: Network,
-        wallet_storage_path: P,
+        storage: Arc<S>,
         derive_signer: Arc<S>,
-    ) -> anyhow::Result<DlcDevKitWallet<S>>
-    where
-        P: AsRef<Path>,
-    {
+    ) -> Result<DlcDevKitWallet<S>, WalletError> {
         let secp = Secp256k1::new();
-        let wallet_storage_path = wallet_storage_path.as_ref().join("wallet-db");
 
         let xprv = Xpriv::new_master(network, seed_bytes)?;
 
         let external_descriptor = Bip84(xprv, KeychainKind::External);
         let internal_descriptor = Bip84(xprv, KeychainKind::Internal);
         // let file_store = bdk_file_store::Store::<ChangeSet>::open_or_create_new(b"ddk-wallet", wallet_storage_path)?;
-        let mut storage = SledStorage::new(wallet_storage_path.to_str().unwrap())?;
+        // let mut storage = SledStorage::new(wallet_storage_path.to_str().unwrap())?;
 
         let load_wallet = Wallet::load()
             .descriptor(KeychainKind::External, Some(external_descriptor.clone()))
             .descriptor(KeychainKind::Internal, Some(internal_descriptor.clone()))
             .extract_keys()
             .check_network(network)
-            .load_wallet(&mut storage)?;
+            .load_wallet(&mut storage)
+            .map_err(|_| WalletError::WalletPersistanceError)?;
 
         let internal_wallet = match load_wallet {
             Some(w) => w,
             None => Wallet::create(external_descriptor, internal_descriptor)
                 .network(network)
-                .create_wallet(&mut storage)?,
+                .create_wallet(&mut storage)
+                .map_err(|_| WalletError::WalletPersistanceError)?,
         };
 
         let wallet = Arc::new(RwLock::new(internal_wallet));
 
-        let blockchain = Arc::new(EsploraClient::new(esplora_url, network)?);
+        let blockchain = Arc::new(
+            EsploraClient::new(esplora_url, network)
+                .map_err(|_| WalletError::WalletPersistanceError)?,
+        );
 
         // TODO: Actually get fees. I don't think it's used for regular DLCs though
         let mut fees: HashMap<ConfirmationTarget, AtomicU32> = HashMap::new();
@@ -176,7 +179,9 @@ impl<S: Storage> DlcDevKitWallet<S> {
             }
         };
         wallet.apply_update(sync_result)?;
-        wallet.persist(&mut storage)?;
+        wallet
+            .persist(&mut storage)
+            .map_err(|_| WalletError::WalletPersistanceError)?;
         Ok(())
     }
 

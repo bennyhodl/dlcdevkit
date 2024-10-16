@@ -52,6 +52,7 @@ use bitcoin::key::XOnlyPublicKey;
 use bitcoin::secp256k1::PublicKey;
 use dlc_messages::oracle_msgs::OracleAnnouncement;
 use dlc_messages::Message;
+use error::WalletError;
 use kormir::OracleAttestation;
 use signer::DeriveSigner;
 use transport::PeerInformation;
@@ -80,10 +81,10 @@ pub trait Transport: std::marker::Send + std::marker::Sync + 'static {
 pub trait Storage:
     dlc_manager::Storage
     + DeriveSigner
+    + WalletPersister<Error = WalletError>
     + std::marker::Send
     + std::marker::Sync
     + 'static
-    + WalletPersister
 {
     fn list_peers(&self) -> anyhow::Result<Vec<PeerInformation>>;
     fn save_peer(&self, peer: PeerInformation) -> anyhow::Result<()>;
