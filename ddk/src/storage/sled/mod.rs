@@ -5,12 +5,15 @@
 mod contract;
 mod wallet;
 
+use bdk_chain::Merge;
+use bdk_wallet::ChangeSet;
 use dlc_manager::contract::ser::Serializable;
 use dlc_manager::error::Error;
 use dlc_messages::oracle_msgs::OracleAnnouncement;
 use lightning::io::{Cursor, Read};
 use sled::{Db, Tree};
 
+use crate::error::WalletError;
 use crate::transport::PeerInformation;
 use crate::Storage;
 
@@ -24,6 +27,7 @@ const WALLET_TREE: u8 = 7;
 const MARKETPLACE_TREE: u8 = 8;
 
 const MARKETPLACE_KEY: &str = "marketplace";
+const CHANGESET_KEY: &str = "changeset";
 
 /// Implementation of Storage interface using the sled DB backend.
 #[derive(Debug, Clone)]
@@ -92,6 +96,33 @@ impl SledStorage {
 }
 
 impl Storage for SledStorage {
+    fn persist_bdk(&self, changeset: &ChangeSet) -> Result<(), WalletError> {
+        tracing::info!("Presisting changeset to wallet persistance.");
+        let wallet_tree = self.wallet_tree()?;
+        let new_changeset = if let Some(cs) = wallet_tree.get(CHANGESET_KEY)? {
+            let mut stored_changeset = bincode::deserialize::<ChangeSet>(&cs)?;
+            stored_changeset.merge(changeset.clone());
+            stored_changeset
+        } else {
+            changeset.to_owned()
+        };
+        let new_changeset_bytes = bincode::serialize(&new_changeset)?;
+        wallet_tree
+            .insert(CHANGESET_KEY, new_changeset_bytes)
+            .unwrap();
+        Ok(())
+    }
+
+    fn initialize_bdk(&self) -> Result<ChangeSet, WalletError> {
+        tracing::info!("Initializing wallet persistance.");
+        if let Some(cs) = self.wallet_tree()?.get(CHANGESET_KEY)? {
+            let cs = bincode::deserialize::<ChangeSet>(&cs)?;
+            Ok(cs)
+        } else {
+            Ok(ChangeSet::default())
+        }
+    }
+
     fn list_peers(&self) -> anyhow::Result<Vec<PeerInformation>> {
         if let Some(bytes) = self.db.get("peers")? {
             let peers: Vec<PeerInformation> = serde_json::from_slice(&bytes)?;

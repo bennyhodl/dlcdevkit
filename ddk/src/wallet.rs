@@ -1,7 +1,8 @@
 use crate::error::{bdk_err_to_manager_err, WalletError};
-use crate::{chain::EsploraClient, signer::SignerInformation, storage::SledStorage, Storage};
+use crate::{chain::EsploraClient, signer::SignerInformation, Storage};
 use bdk_chain::{spk_client::FullScanRequest, Balance};
 use bdk_esplora::EsploraExt;
+use bdk_wallet::WalletPersister;
 use bdk_wallet::{
     bitcoin::{
         bip32::{DerivationPath, Xpriv},
@@ -19,72 +20,87 @@ use bitcoin::{
 };
 use dlc_manager::{error::Error as ManagerError, SimpleSigner};
 use lightning::chain::chaininterface::{ConfirmationTarget, FeeEstimator};
+use std::collections::HashMap;
 use std::sync::RwLock;
 use std::{
     collections::BTreeMap,
     io::Write,
     sync::{atomic::Ordering, Arc},
 };
-use std::{collections::HashMap, path::Path};
 use std::{str::FromStr, sync::atomic::AtomicU32};
+
+#[derive(Clone)]
+pub struct WalletStorage(Arc<dyn Storage>);
+
+impl WalletPersister for WalletStorage {
+    type Error = WalletError;
+
+    fn persist(persister: &mut Self, changeset: &bdk_wallet::ChangeSet) -> Result<(), Self::Error> {
+        persister.0.as_ref().persist_bdk(changeset)
+    }
+
+    fn initialize(persister: &mut Self) -> Result<bdk_wallet::ChangeSet, Self::Error> {
+        persister.0.as_ref().initialize_bdk()
+    }
+}
 
 /// Internal [bdk::Wallet] for ddk.
 /// Uses eplora blocking for the [ddk::DlcDevKit] being sync only
 /// Currently supports the file-based [bdk_file_store::Store]
-pub struct DlcDevKitWallet<S> {
+pub struct DlcDevKitWallet {
     // TODO: pass storage
-    pub wallet: Arc<RwLock<PersistedWallet<SledStorage>>>,
-    pub storage: SledStorage,
+    pub wallet: Arc<RwLock<PersistedWallet<WalletStorage>>>,
+    pub storage: WalletStorage,
     pub blockchain: Arc<EsploraClient>,
     pub network: Network,
     pub xprv: Xpriv,
     pub name: String,
     pub fees: Arc<HashMap<ConfirmationTarget, AtomicU32>>,
-    derive_signer: Arc<S>,
     secp: Secp256k1<All>,
 }
 
 const MIN_FEERATE: u32 = 253;
 
-impl<S: Storage> DlcDevKitWallet<S> {
-    pub fn new<P>(
+impl DlcDevKitWallet {
+    pub fn new(
         name: &str,
         seed_bytes: &[u8; 32],
         esplora_url: &str,
         network: Network,
-        wallet_storage_path: P,
-        derive_signer: Arc<S>,
-    ) -> anyhow::Result<DlcDevKitWallet<S>>
-    where
-        P: AsRef<Path>,
-    {
+        storage: Arc<dyn Storage>,
+    ) -> Result<DlcDevKitWallet, WalletError> {
         let secp = Secp256k1::new();
-        let wallet_storage_path = wallet_storage_path.as_ref().join("wallet-db");
 
         let xprv = Xpriv::new_master(network, seed_bytes)?;
 
         let external_descriptor = Bip84(xprv, KeychainKind::External);
         let internal_descriptor = Bip84(xprv, KeychainKind::Internal);
         // let file_store = bdk_file_store::Store::<ChangeSet>::open_or_create_new(b"ddk-wallet", wallet_storage_path)?;
-        let mut storage = SledStorage::new(wallet_storage_path.to_str().unwrap())?;
+        // let mut storage = SledStorage::new(wallet_storage_path.to_str().unwrap())?;
+        let mut storage = WalletStorage(storage);
 
         let load_wallet = Wallet::load()
             .descriptor(KeychainKind::External, Some(external_descriptor.clone()))
             .descriptor(KeychainKind::Internal, Some(internal_descriptor.clone()))
             .extract_keys()
             .check_network(network)
-            .load_wallet(&mut storage)?;
+            .load_wallet(&mut storage)
+            .map_err(|_| WalletError::WalletPersistanceError)?;
 
         let internal_wallet = match load_wallet {
             Some(w) => w,
             None => Wallet::create(external_descriptor, internal_descriptor)
                 .network(network)
-                .create_wallet(&mut storage)?,
+                .create_wallet(&mut storage)
+                .map_err(|_| WalletError::WalletPersistanceError)?,
         };
 
         let wallet = Arc::new(RwLock::new(internal_wallet));
 
-        let blockchain = Arc::new(EsploraClient::new(esplora_url, network)?);
+        let blockchain = Arc::new(
+            EsploraClient::new(esplora_url, network)
+                .map_err(|_| WalletError::WalletPersistanceError)?,
+        );
 
         // TODO: Actually get fees. I don't think it's used for regular DLCs though
         let mut fees: HashMap<ConfirmationTarget, AtomicU32> = HashMap::new();
@@ -122,7 +138,6 @@ impl<S: Storage> DlcDevKitWallet<S> {
             network,
             xprv,
             fees,
-            derive_signer,
             secp,
             name: name.to_string(),
         })
@@ -176,7 +191,9 @@ impl<S: Storage> DlcDevKitWallet<S> {
             }
         };
         wallet.apply_update(sync_result)?;
-        wallet.persist(&mut storage)?;
+        wallet
+            .persist(&mut storage)
+            .map_err(|_| WalletError::WalletPersistanceError)?;
         Ok(())
     }
 
@@ -283,7 +300,7 @@ impl<S: Storage> DlcDevKitWallet<S> {
     }
 }
 
-impl<S: Storage> FeeEstimator for DlcDevKitWallet<S> {
+impl FeeEstimator for DlcDevKitWallet {
     fn get_est_sat_per_1000_weight(&self, confirmation_target: ConfirmationTarget) -> u32 {
         self.fees
             .get(&confirmation_target)
@@ -292,7 +309,7 @@ impl<S: Storage> FeeEstimator for DlcDevKitWallet<S> {
     }
 }
 
-impl<S: Storage> dlc_manager::ContractSignerProvider for DlcDevKitWallet<S> {
+impl dlc_manager::ContractSignerProvider for DlcDevKitWallet {
     type Signer = SimpleSigner;
 
     // Using the data deterministically generate a key id. From a child key.
@@ -319,7 +336,8 @@ impl<S: Storage> dlc_manager::ContractSignerProvider for DlcDevKitWallet<S> {
             public_key,
             secret_key: child_key.private_key,
         };
-        self.derive_signer
+        self.storage
+            .0
             .store_derived_key_id(key_id, signer_info)
             .unwrap();
 
@@ -329,7 +347,7 @@ impl<S: Storage> dlc_manager::ContractSignerProvider for DlcDevKitWallet<S> {
     }
 
     fn derive_contract_signer(&self, key_id: [u8; 32]) -> Result<Self::Signer, ManagerError> {
-        let info = self.derive_signer.get_key_information(key_id).unwrap();
+        let info = self.storage.0.get_key_information(key_id).unwrap();
         tracing::info!(
             key_id = hex::encode(key_id),
             "Derived secret key for contract."
@@ -342,7 +360,7 @@ impl<S: Storage> dlc_manager::ContractSignerProvider for DlcDevKitWallet<S> {
             pubkey = pubkey.to_string(),
             "Getting secret key from pubkey"
         );
-        Ok(self.derive_signer.get_secret_key(pubkey).unwrap())
+        Ok(self.storage.0.get_secret_key(pubkey).unwrap())
     }
 
     fn get_new_secret_key(&self) -> Result<SecretKey, ManagerError> {
@@ -359,7 +377,7 @@ impl<S: Storage> dlc_manager::ContractSignerProvider for DlcDevKitWallet<S> {
     }
 }
 
-impl<S: Storage> dlc_manager::Wallet for DlcDevKitWallet<S> {
+impl dlc_manager::Wallet for DlcDevKitWallet {
     fn get_new_address(&self) -> Result<bitcoin::Address, ManagerError> {
         tracing::info!("Retrieving new address for dlc manager");
         Ok(self
@@ -409,10 +427,7 @@ impl<S: Storage> dlc_manager::Wallet for DlcDevKitWallet<S> {
 
     fn import_address(&self, address: &bitcoin::Address) -> Result<(), ManagerError> {
         // might be ok, might not
-        Ok(self
-            .derive_signer
-            .import_address_to_storage(address)
-            .unwrap())
+        Ok(self.storage.0.import_address_to_storage(address).unwrap())
     }
 
     // return all utxos

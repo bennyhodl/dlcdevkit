@@ -20,13 +20,13 @@ use tokio::runtime::Runtime;
 
 /// DlcDevKit type alias for the [dlc_manager::manager::Manager]
 pub type DlcDevKitDlcManager<S, O> = dlc_manager::manager::Manager<
-    Arc<DlcDevKitWallet<S>>,
-    Arc<CachedContractSignerProvider<Arc<DlcDevKitWallet<S>>, SimpleSigner>>,
+    Arc<DlcDevKitWallet>,
+    Arc<CachedContractSignerProvider<Arc<DlcDevKitWallet>, SimpleSigner>>,
     Arc<EsploraClient>,
     Arc<S>,
     Arc<O>,
     Arc<SystemTimeProvider>,
-    Arc<DlcDevKitWallet<S>>,
+    Arc<DlcDevKitWallet>,
     SimpleSigner,
 >;
 
@@ -47,7 +47,7 @@ pub enum DlcManagerMessage {
 
 pub struct DlcDevKit<T: Transport, S: Storage, O: Oracle> {
     pub runtime: Arc<RwLock<Option<Runtime>>>,
-    pub wallet: Arc<DlcDevKitWallet<S>>,
+    pub wallet: Arc<DlcDevKitWallet>,
     pub manager: Arc<DlcDevKitDlcManager<S, O>>,
     pub sender: Arc<Sender<DlcManagerMessage>>,
     pub receiver: Arc<Receiver<DlcManagerMessage>>,
@@ -111,6 +111,7 @@ where
 
         #[cfg(feature = "marketplace")]
         let storage_clone = self.storage.clone();
+        #[cfg(feature = "marketplace")]
         runtime.spawn(async move {
             tracing::info!("Starting marketplace listener.");
             marketplace_listener(&storage_clone, vec!["ws://127.0.0.1:8081"])

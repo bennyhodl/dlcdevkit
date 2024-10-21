@@ -14,6 +14,7 @@ pub mod builder;
 /// IO utilities
 pub mod io;
 /// Nostr related functions.
+#[cfg(any(feature = "nostr", feature = "marketplace"))]
 pub mod nostr;
 /// Oracle clients.
 pub mod oracle;
@@ -27,6 +28,7 @@ pub mod util;
 pub mod wallet;
 use std::sync::Arc;
 
+use bdk_wallet::ChangeSet;
 /// DDK object with all services
 pub use ddk::DlcDevKit;
 /// Type alias for [dlc_manager::manager::Manager]
@@ -47,11 +49,11 @@ pub const ORACLE_HOST: &str = "http://localhost:8080";
 pub const ESPLORA_HOST: &str = "http://localhost:30000";
 
 use async_trait::async_trait;
-use bdk_wallet::WalletPersister;
 use bitcoin::key::XOnlyPublicKey;
 use bitcoin::secp256k1::PublicKey;
 use dlc_messages::oracle_msgs::OracleAnnouncement;
 use dlc_messages::Message;
+use error::WalletError;
 use kormir::OracleAttestation;
 use signer::DeriveSigner;
 use transport::PeerInformation;
@@ -78,13 +80,10 @@ pub trait Transport: std::marker::Send + std::marker::Sync + 'static {
 
 /// Storage for DLC contracts.
 pub trait Storage:
-    dlc_manager::Storage
-    + DeriveSigner
-    + std::marker::Send
-    + std::marker::Sync
-    + 'static
-    + WalletPersister
+    dlc_manager::Storage + DeriveSigner + std::marker::Send + std::marker::Sync + 'static
 {
+    fn initialize_bdk(&self) -> Result<ChangeSet, WalletError>;
+    fn persist_bdk(&self, changeset: &ChangeSet) -> Result<(), WalletError>;
     fn list_peers(&self) -> anyhow::Result<Vec<PeerInformation>>;
     fn save_peer(&self, peer: PeerInformation) -> anyhow::Result<()>;
     // #[cfg(feature = "marketplace")]
