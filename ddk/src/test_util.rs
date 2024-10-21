@@ -16,6 +16,7 @@ use crate::{
 use bitcoincore_rpc::RpcApi;
 
 type TestDlcDevKit = DlcDevKit<LightningTransport, SledStorage, KormirOracleClient>;
+pub struct TestWallet(pub DlcDevKitWallet, String);
 
 #[rstest::fixture]
 pub async fn test_ddk() -> (TestSuite, TestSuite, OracleAnnouncement, ContractInput) {
@@ -226,7 +227,7 @@ impl TestSuite {
         ddk
     }
 
-    pub fn create_wallet(name: &str) -> DlcDevKitWallet {
+    pub fn create_wallet(name: &str) -> TestWallet {
         let path = format!("tests/data/{name}");
         let storage = Arc::new(SledStorage::new(&path).unwrap());
         let mut entropy = [0u8; 64];
@@ -234,14 +235,23 @@ impl TestSuite {
             .try_fill(&mut bitcoin::key::rand::thread_rng())
             .unwrap();
         let xpriv = Xpriv::new_master(Network::Regtest, &entropy).unwrap();
-        DlcDevKitWallet::new(
-            "test".into(),
-            &xpriv.private_key.secret_bytes(),
-            "http://localhost:30000",
-            Network::Regtest,
-            storage.clone(),
+        TestWallet(
+            DlcDevKitWallet::new(
+                "test".into(),
+                &xpriv.private_key.secret_bytes(),
+                "http://localhost:30000",
+                Network::Regtest,
+                storage.clone(),
+            )
+            .unwrap(),
+            path,
         )
-        .unwrap()
+    }
+}
+
+impl Drop for TestWallet {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(self.1.clone()).expect("couldn't remove wallet dir");
     }
 }
 
