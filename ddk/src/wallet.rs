@@ -2,6 +2,7 @@ use crate::error::{bdk_err_to_manager_err, WalletError};
 use crate::{chain::EsploraClient, signer::SignerInformation, Storage};
 use bdk_chain::{spk_client::FullScanRequest, Balance};
 use bdk_esplora::EsploraExt;
+use bdk_wallet::coin_selection::{BranchAndBoundCoinSelection, CoinSelectionAlgorithm};
 use bdk_wallet::WalletPersister;
 use bdk_wallet::{
     bitcoin::{
@@ -12,6 +13,7 @@ use bdk_wallet::{
     template::Bip84,
     AddressInfo, KeychainKind, LocalOutput, PersistedWallet, SignOptions, Update, Wallet,
 };
+use bdk_wallet::{Utxo, WeightedUtxo};
 use bitcoin::hashes::sha256::Hash as Sha256Hash;
 use bitcoin::{
     hashes::{sha256::HashEngine, Hash},
@@ -431,23 +433,41 @@ impl dlc_manager::Wallet for DlcDevKitWallet {
     }
 
     // return all utxos
-    // fixme use coin selector
     fn get_utxos_for_amount(
         &self,
-        _amount: u64,
-        _fee_rate: u64,
+        amount: u64,
+        fee_rate: u64,
         _lock_utxos: bool,
     ) -> Result<Vec<dlc_manager::Utxo>, ManagerError> {
         let local_utxos = self.list_utxos().map_err(bdk_err_to_manager_err)?;
 
-        let dlc_utxos = local_utxos
+        let utxos = local_utxos
+            .iter()
+            .map(|utxo| WeightedUtxo {
+                satisfaction_weight: utxo.txout.weight(),
+                utxo: Utxo::Local(utxo.clone()),
+            })
+            .collect::<Vec<WeightedUtxo>>();
+
+        let selected_utxos = BranchAndBoundCoinSelection::new(Amount::MAX_MONEY.to_sat())
+            .coin_select(
+                vec![],
+                utxos,
+                FeeRate::from_sat_per_vb(fee_rate).unwrap(),
+                amount,
+                ScriptBuf::new().as_script(),
+            )
+            .unwrap();
+
+        let dlc_utxos = selected_utxos
+            .selected
             .iter()
             .map(|utxo| {
                 let address =
-                    Address::from_script(&utxo.txout.script_pubkey, self.network).unwrap();
+                    Address::from_script(&utxo.txout().script_pubkey, self.network).unwrap();
                 dlc_manager::Utxo {
-                    tx_out: utxo.txout.clone(),
-                    outpoint: utxo.outpoint,
+                    tx_out: utxo.txout().clone(),
+                    outpoint: utxo.outpoint(),
                     address,
                     redeem_script: ScriptBuf::new(),
                     reserved: false,
@@ -468,7 +488,7 @@ mod tests {
     #[test]
     fn address_is_p2wpkh() {
         let test = TestSuite::create_wallet("p2wpkh-address");
-        let address = test.new_external_address().unwrap();
+        let address = test.0.new_external_address().unwrap();
         assert_eq!(address.address.address_type().unwrap(), AddressType::P2wpkh)
     }
 
@@ -479,8 +499,8 @@ mod tests {
         temp_key_id
             .try_fill(&mut bitcoin::key::rand::thread_rng())
             .unwrap();
-        let gen_key_id = test.derive_signer_key_id(true, temp_key_id);
-        let key_info = test.derive_contract_signer(gen_key_id);
+        let gen_key_id = test.0.derive_signer_key_id(true, temp_key_id);
+        let key_info = test.0.derive_contract_signer(gen_key_id);
         assert!(key_info.is_ok())
     }
 }
