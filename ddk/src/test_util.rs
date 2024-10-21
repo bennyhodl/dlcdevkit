@@ -145,10 +145,10 @@ pub fn contract_input(announcement: &OracleAnnouncement) -> ContractInput {
 
 type DlcManager = Arc<
     Manager<
-        Arc<DlcDevKitWallet<SledStorage>>,
+        Arc<DlcDevKitWallet>,
         Arc<
             dlc_manager::CachedContractSignerProvider<
-                Arc<DlcDevKitWallet<SledStorage>>,
+                Arc<DlcDevKitWallet>,
                 dlc_manager::SimpleSigner,
             >,
         >,
@@ -156,7 +156,7 @@ type DlcManager = Arc<
         Arc<SledStorage>,
         Arc<KormirOracleClient>,
         Arc<SystemTimeProvider>,
-        Arc<DlcDevKitWallet<SledStorage>>,
+        Arc<DlcDevKitWallet>,
         dlc_manager::SimpleSigner,
     >,
 >;
@@ -226,7 +226,7 @@ impl TestSuite {
         ddk
     }
 
-    pub fn create_wallet(name: &str) -> DlcDevKitWallet<SledStorage> {
+    pub fn create_wallet(name: &str) -> DlcDevKitWallet {
         let path = format!("tests/data/{name}");
         let storage = Arc::new(SledStorage::new(&path).unwrap());
         let mut entropy = [0u8; 64];
@@ -239,7 +239,6 @@ impl TestSuite {
             &xpriv.private_key.secret_bytes(),
             "http://localhost:30000",
             Network::Regtest,
-            &path,
             storage.clone(),
         )
         .unwrap()

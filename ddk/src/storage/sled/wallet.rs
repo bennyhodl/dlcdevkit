@@ -1,48 +1,10 @@
 use super::SledStorage;
 use crate::error::WalletError;
 use crate::signer::{DeriveSigner, SignerInformation};
-use bdk_chain::Merge;
-use bdk_wallet::ChangeSet;
-use bdk_wallet::WalletPersister;
 use bitcoin::secp256k1::{PublicKey, SecretKey};
 
-const CHANGESET_KEY: &str = "changeset";
-
-impl WalletPersister for SledStorage {
-    type Error = WalletError;
-
-    fn persist(persister: &mut Self, changeset: &ChangeSet) -> Result<(), Self::Error> {
-        tracing::info!("Presisting changeset to wallet persistance.");
-        let wallet_tree = persister.wallet_tree()?;
-        let new_changeset = if let Some(cs) = wallet_tree.get(CHANGESET_KEY)? {
-            let mut stored_changeset = bincode::deserialize::<ChangeSet>(&cs)?;
-            stored_changeset.merge(changeset.clone());
-            stored_changeset
-        } else {
-            changeset.to_owned()
-        };
-        let new_changeset_bytes = bincode::serialize(&new_changeset)?;
-        wallet_tree
-            .insert(CHANGESET_KEY, new_changeset_bytes)
-            .unwrap();
-        Ok(())
-    }
-
-    fn initialize(persister: &mut Self) -> Result<ChangeSet, Self::Error> {
-        tracing::info!("Initializing wallet persistance.");
-        if let Some(cs) = persister.wallet_tree()?.get(CHANGESET_KEY)? {
-            let cs = bincode::deserialize::<ChangeSet>(&cs)?;
-            Ok(cs)
-        } else {
-            Ok(ChangeSet::default())
-        }
-    }
-}
-
 impl DeriveSigner for SledStorage {
-    type Error = WalletError;
-
-    fn get_key_information(&self, key_id: [u8; 32]) -> Result<SignerInformation, Self::Error> {
+    fn get_key_information(&self, key_id: [u8; 32]) -> Result<SignerInformation, WalletError> {
         let key = hex::encode(key_id);
         let info = self.signer_tree()?.get(key)?.unwrap();
         Ok(bincode::deserialize::<SignerInformation>(&info)?)

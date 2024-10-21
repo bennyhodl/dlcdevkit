@@ -22,7 +22,6 @@ pub struct Builder<T, S, O> {
     transport: Option<Arc<T>>,
     storage: Option<Arc<S>>,
     oracle: Option<Arc<O>>,
-    wallet_storage: Option<S>,
     esplora_host: String,
     network: Network,
     storage_path: String,
@@ -38,8 +37,6 @@ pub enum BuilderError {
     NoStorage,
     /// An oracle client was not provided.
     NoOracle,
-    /// No wallet storage provided.
-    NoWalletStorage,
 }
 
 impl fmt::Display for BuilderError {
@@ -48,7 +45,6 @@ impl fmt::Display for BuilderError {
             BuilderError::NoTransport => write!(f, "A DLC transport was not provided."),
             BuilderError::NoStorage => write!(f, "A DLC storage implementation was not provided."),
             BuilderError::NoOracle => write!(f, "A DLC oracle client was not provided."),
-            BuilderError::NoWalletStorage => write!(f, "No wallet storage was provided."),
         }
     }
 }
@@ -65,7 +61,6 @@ impl<T: Transport, S: Storage, O: Oracle> Default for Builder<T, S, O> {
             transport: None,
             storage: None,
             oracle: None,
-            wallet_storage: None,
             esplora_host: DEFAULT_ESPLORA_HOST.to_string(),
             network: DEFAULT_NETWORK,
             storage_path: DEFAULT_STORAGE_PATH.to_string(),
@@ -101,15 +96,6 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
     /// delete contracts. MUST implement [crate::Storage]
     pub fn set_storage(&mut self, storage: Arc<S>) -> &mut Self {
         self.storage = Some(storage);
-        self
-    }
-
-    /// DLC wallet storage. Storage is used by the [bdk::wallet::Wallet] to create, update, retrieve, and
-    /// delete wallet information. MUST implement [bdk_chain::PersistBackend<bdk::wallet::ChangeSet>]
-    ///
-    /// TODO: Figure out a way to pass storage wrapped in arc to `Wallet::new_or_load()`..
-    pub fn set_wallet_storage(&mut self, wallet_storage: S) -> &mut Self {
-        self.wallet_storage = Some(wallet_storage);
         self
     }
 
@@ -182,7 +168,6 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
             &self.seed_bytes,
             &self.esplora_host,
             self.network,
-            &self.storage_path,
             storage.clone(),
         )?);
         tracing::info!("Opened BDK wallet. name={}", name);
