@@ -8,12 +8,12 @@ use serde::Serialize;
 use std::str::FromStr;
 use uuid::Uuid;
 
-fn get<T>(host: &str, path: &str) -> anyhow::Result<T>
+async fn get<T>(host: &str, path: &str) -> anyhow::Result<T>
 where
     T: serde::de::DeserializeOwned,
 {
-    let url = format!("{}{}", host, path);
-    let request = reqwest::blocking::get(url)?.json::<T>()?;
+    let url = format!("{}/{}", host, path);
+    let request = reqwest::get(url).await?.json::<T>().await?;
 
     Ok(request)
 }
@@ -139,6 +139,8 @@ impl KormirOracleClient {
         let attestation: OracleAttestation = Readable::read(&mut cursor)
             .map_err(|_| anyhow!("Can't read bytes for attestation."))?;
 
+        tracing::info!("Signed Kormir oracle event.");
+
         Ok(attestation)
     }
 }
@@ -148,21 +150,30 @@ impl dlc_manager::Oracle for KormirOracleClient {
         self.pubkey
     }
 
-    fn get_attestation(
+    async fn get_attestation(
         &self,
         event_id: &str,
     ) -> Result<dlc_messages::oracle_msgs::OracleAttestation, dlc_manager::error::Error> {
-        get::<OracleAttestation>(&self.host, &format!("attestation/{event_id}"))
-            .map_err(|_| dlc_manager::error::Error::OracleError("Could not get attestation".into()))
+        tracing::info!(event_id, "Getting attestation to close contract.");
+        let attestation = get::<OracleAttestation>(&self.host, &format!("attestation/{event_id}"))
+            .await
+            .map_err(|e| {
+                tracing::error!("Attestation: {:?}", e);
+                dlc_manager::error::Error::OracleError("Could not get attestation".into())
+            })?;
+        tracing::info!(event_id, attestation =? attestation, "Attestation");
+        Ok(attestation)
     }
 
-    fn get_announcement(
+    async fn get_announcement(
         &self,
         _event_id: &str,
     ) -> Result<dlc_messages::oracle_msgs::OracleAnnouncement, dlc_manager::error::Error> {
-        get::<OracleAnnouncement>(&self.host, "announcement").map_err(|_| {
-            dlc_manager::error::Error::OracleError("Could not get announcement".into())
-        })
+        get::<OracleAnnouncement>(&self.host, "announcement")
+            .await
+            .map_err(|_| {
+                dlc_manager::error::Error::OracleError("Could not get announcement".into())
+            })
     }
 }
 

@@ -1046,7 +1046,7 @@ dependencies = [
 [[package]]
 name = "dlc"
 version = "0.6.0"
-source = "git+https://github.com/bennyhodl/rust-dlc?branch=better-error-messages#ff3d3144eaa9e7a5877051e7b2198040cfac210f"
+source = "git+https://github.com/bennyhodl/rust-dlc?branch=async#a52460926263717610424a170eef0d25c286059e"
 dependencies = [
  "bitcoin 0.32.2",
  "miniscript",
@@ -1058,13 +1058,14 @@ dependencies = [
 [[package]]
 name = "dlc-manager"
 version = "0.6.0"
-source = "git+https://github.com/bennyhodl/rust-dlc?branch=better-error-messages#ff3d3144eaa9e7a5877051e7b2198040cfac210f"
+source = "git+https://github.com/bennyhodl/rust-dlc?branch=async#a52460926263717610424a170eef0d25c286059e"
 dependencies = [
  "async-trait",
  "bitcoin 0.32.2",
  "dlc",
  "dlc-messages",
  "dlc-trie",
+ "futures",
  "hex-conservative 0.1.1",
  "lightning",
  "log",
@@ -1075,7 +1076,7 @@ dependencies = [
 [[package]]
 name = "dlc-messages"
 version = "0.6.0"
-source = "git+https://github.com/bennyhodl/rust-dlc?branch=better-error-messages#ff3d3144eaa9e7a5877051e7b2198040cfac210f"
+source = "git+https://github.com/bennyhodl/rust-dlc?branch=async#a52460926263717610424a170eef0d25c286059e"
 dependencies = [
  "bitcoin 0.32.2",
  "dlc",
@@ -1087,7 +1088,7 @@ dependencies = [
 [[package]]
 name = "dlc-trie"
 version = "0.6.0"
-source = "git+https://github.com/bennyhodl/rust-dlc?branch=better-error-messages#ff3d3144eaa9e7a5877051e7b2198040cfac210f"
+source = "git+https://github.com/bennyhodl/rust-dlc?branch=async#a52460926263717610424a170eef0d25c286059e"
 dependencies = [
  "bitcoin 0.32.2",
  "dlc",
@@ -1901,7 +1902,7 @@ dependencies = [
 [[package]]
 name = "kormir"
 version = "0.3.0"
-source = "git+https://github.com/bennyhodl/kormir?rev=9c02e83#9c02e83bbd22991b80e58049ae7e314971734113"
+source = "git+https://github.com/bennyhodl/kormir?rev=b395be9935b6d456bb10c289a23b7ee6789a7428#b395be9935b6d456bb10c289a23b7ee6789a7428"
 dependencies = [
  "bitcoin 0.32.2",
  "dlc",

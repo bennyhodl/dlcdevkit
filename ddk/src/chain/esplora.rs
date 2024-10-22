@@ -94,9 +94,7 @@ impl dlc_manager::Blockchain for EsploraClient {
                 None => Ok(0),
             }
         } else {
-            Err(esplora_err_to_manager_err(
-                EsploraError::TransactionNotFound(*tx_id),
-            ))
+            Ok(0)
         }
     }
 }

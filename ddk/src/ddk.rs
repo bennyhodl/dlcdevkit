@@ -166,7 +166,7 @@ where
                     responder.send(accept_dlc).expect("can't send")
                 }
                 DlcManagerMessage::PeriodicCheck => {
-                    manager.periodic_check(false).unwrap();
+                    manager.periodic_check(false).await.unwrap();
                 }
             }
         }
@@ -306,21 +306,44 @@ mod tests {
             .ddk
             .manager
             .periodic_check(false)
+            .await
             .expect("alice check failed");
 
         bob.ddk
             .manager
             .periodic_check(false)
+            .await
             .expect("bob check failed");
 
         let contract = alice.ddk.storage.get_contract(&contract_id);
         assert!(matches!(contract.unwrap().unwrap(), Contract::Confirmed(_)));
 
+        // Used to check that timelock is reached.
+        let locktime = match alice.ddk.storage.get_contract(&contract_id).unwrap() {
+            Some(contract) => match contract {
+                Contract::Confirmed(signed_contract) => {
+                    signed_contract.accepted_contract.dlc_transactions.cets[0]
+                        .lock_time
+                        .to_consensus_u32()
+                }
+                _ => unreachable!("No locktime."),
+            },
+            None => unreachable!("No locktime"),
+        };
+
         let mut time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs() as u32;
-        while time < announcement.oracle_event.event_maturity_epoch {
+
+        let attestation = alice
+            .ddk
+            .oracle
+            .sign_event(announcement.clone(), "rust".to_string())
+            .await;
+
+        while time < announcement.oracle_event.event_maturity_epoch || time < locktime {
+            tracing::warn!("Waiting for time to expire for oracle event and locktime.");
             let checked_time = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
@@ -330,12 +353,16 @@ mod tests {
             sleep(Duration::from_secs(5)).await
         }
 
-        let attestation = alice
-            .ddk
-            .oracle
-            .sign_event(announcement, "rust".to_string())
-            .await;
+        assert!(attestation.is_ok());
 
-        assert!(attestation.is_ok())
+        bob.ddk.manager.periodic_check(false).await.unwrap();
+
+        let contract = alice.ddk.storage.get_contract(&contract_id);
+        assert!(matches!(contract.unwrap().unwrap(), Contract::PreClosed(_)));
+
+        generate_blocks(10);
+
+        let contract = alice.ddk.storage.get_contract(&contract_id);
+        assert!(matches!(contract.unwrap().unwrap(), Contract::Closed(_)));
     }
 }
