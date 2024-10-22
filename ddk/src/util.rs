@@ -7,8 +7,9 @@ use dlc_manager::contract::{
     ClosedContract, Contract, FailedAcceptContract, FailedSignContract, PreClosedContract,
 };
 use dlc_manager::error::Error;
-use kormir::OracleAnnouncement;
-use lightning::io::Read;
+use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
+use lightning::io::{Cursor, Read};
+use lightning::util::ser::Readable;
 
 macro_rules! convertible_enum {
     (enum $name:ident {
@@ -180,6 +181,20 @@ pub fn filter_expired_oracle_announcements(
         .filter(|ann| ann.oracle_event.event_maturity_epoch < now)
         .cloned()
         .collect()
+}
+
+pub fn oracle_announcement_from_str(content: &str) -> anyhow::Result<OracleAnnouncement> {
+    let bytes = base64::decode(content)?;
+    let mut cursor = Cursor::new(bytes);
+    Ok(OracleAnnouncement::read(&mut cursor)
+        .map_err(|_| anyhow::anyhow!("could not get oracle announcement"))?)
+}
+
+pub fn oracle_attestation_from_str(content: &str) -> anyhow::Result<OracleAttestation> {
+    let bytes = base64::decode(content)?;
+    let mut cursor = Cursor::new(bytes);
+    Ok(OracleAttestation::read(&mut cursor)
+        .map_err(|_| anyhow::anyhow!("could not read oracle attestation"))?)
 }
 
 #[cfg(test)]
