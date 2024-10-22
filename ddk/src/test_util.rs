@@ -86,6 +86,7 @@ fn fund_addresses(
 }
 
 pub fn generate_blocks(num: u64) {
+    tracing::warn!("Generating {} blocks.", num);
     let auth = bitcoincore_rpc::Auth::UserPass("ddk".to_string(), "ddk".to_string());
     let client = bitcoincore_rpc::Client::new("http://127.0.0.1:18443", auth).unwrap();
     let previous_height = client.get_block_count().unwrap();
@@ -104,7 +105,7 @@ pub async fn create_oracle_announcement() -> OracleAnnouncement {
         .await
         .unwrap();
 
-    let expiry = TimeDelta::seconds(30);
+    let expiry = TimeDelta::seconds(20);
     let timestamp: u32 = Local::now()
         .checked_add_signed(expiry)
         .unwrap()
