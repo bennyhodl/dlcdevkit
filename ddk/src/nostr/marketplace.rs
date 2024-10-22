@@ -1,7 +1,7 @@
 use std::ops::Deref;
 
 use crate::Storage;
-use nostr_rs::{Filter, Timestamp};
+use nostr_rs::{Event, Filter, Kind, Timestamp};
 use nostr_sdk::{client::builder::ClientBuilder, RelayPoolNotification};
 
 use super::ORACLE_ANNOUNCMENT_KIND;
@@ -26,7 +26,7 @@ where
                         subscription_id: _,
                         event,
                     } => {
-                        crate::nostr::util::handle_dlc_msg_event(storage, *event);
+                        handle_oracle_msg(storage, *event);
                     }
                     RelayPoolNotification::Stop | RelayPoolNotification::Shutdown => {
                         tracing::error!("Relay disconnected.")
@@ -37,5 +37,22 @@ where
             })
             .await
             .unwrap();
+    }
+}
+
+pub fn handle_oracle_msg<S: Deref>(storage: &S, event: Event)
+where
+    S::Target: Storage,
+{
+    match event.kind {
+        Kind::Custom(89) => {
+            tracing::info!("Oracle attestation. Saved to storage.")
+        }
+        Kind::Custom(88) => {
+            let announcement = crate::util::oracle_announcement_from_str(event.content()).unwrap();
+            storage.save_announcement(announcement).unwrap();
+            tracing::info!("Oracle announcement. Saved to storage.")
+        }
+        _ => (),
     }
 }
