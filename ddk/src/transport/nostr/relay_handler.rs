@@ -1,43 +1,36 @@
-use crate::nostr::DLC_MESSAGE_KIND;
+use std::sync::Arc;
+
+use crate::DlcDevKitDlcManager;
+use crate::{Oracle, Storage};
 use bitcoin::bip32::Xpriv;
 use bitcoin::Network;
-use dlc_messages::{message_handler::read_dlc_message, Message, WireMessage};
-use lightning::{
-    ln::wire::Type,
-    util::ser::{Readable, Writeable},
-};
-use nostr_rs::{
-    nips::nip04::{decrypt, encrypt},
-    secp256k1::Secp256k1,
-    Event, EventBuilder, EventId, Keys, Kind, PublicKey, SecretKey, Tag, Timestamp, Url,
-};
-use nostr_sdk::Client;
+use nostr_rs::{secp256k1::Secp256k1, Keys, PublicKey, SecretKey, Timestamp, Url};
+use nostr_sdk::{Client, RelayPoolNotification};
 
 /// Nostr relay host. TODO: nostr feature
 const RELAY_HOST: &str = "ws://localhost:8081";
 
-pub struct NostrDlcRelayHandler {
+pub struct NostrDlc {
     pub keys: Keys,
     pub relay_url: Url,
     pub client: Client,
 }
 
-impl NostrDlcRelayHandler {
+impl NostrDlc {
     pub fn new(
-        seed_bytes: &[u8; 64],
+        seed_bytes: &[u8; 32],
         relay_host: &str,
         network: Network,
-    ) -> anyhow::Result<NostrDlcRelayHandler> {
+    ) -> anyhow::Result<NostrDlc> {
         let secp = Secp256k1::new();
         let seed = Xpriv::new_master(network, seed_bytes)?;
-        // TODO: Seed to bytes is 78 not 64?
         let secret_key = SecretKey::from_slice(&seed.encode())?;
         let keys = Keys::new_with_ctx(&secp, secret_key.into());
 
         let relay_url = relay_host.parse()?;
         let client = Client::new(&keys);
 
-        Ok(NostrDlcRelayHandler {
+        Ok(NostrDlc {
             keys,
             relay_url,
             client,
@@ -48,61 +41,6 @@ impl NostrDlcRelayHandler {
         self.keys.public_key()
     }
 
-    pub fn create_dlc_msg_event(
-        &self,
-        to: PublicKey,
-        event_id: Option<EventId>,
-        msg: Message,
-    ) -> anyhow::Result<Event> {
-        let mut bytes = msg.type_id().encode();
-        bytes.extend(msg.encode());
-
-        let content = encrypt(&self.keys.secret_key().clone(), &to, base64::encode(&bytes))?;
-
-        let p_tags = Tag::public_key(self.public_key());
-
-        let e_tags = event_id.map(|e| Tag::event(e));
-
-        let tags = [Some(p_tags), e_tags]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>();
-
-        let event = EventBuilder::new(DLC_MESSAGE_KIND, content, tags).to_event(&self.keys)?;
-
-        Ok(event)
-    }
-
-    pub fn parse_dlc_msg_event(&self, event: &Event) -> anyhow::Result<Message> {
-        let decrypt = decrypt(&self.keys.secret_key(), &event.pubkey, &event.content)?;
-
-        let bytes = base64::decode(decrypt)?;
-
-        let mut cursor = lightning::io::Cursor::new(bytes);
-
-        let msg_type: u16 = Readable::read(&mut cursor).unwrap();
-
-        let Some(wire) = read_dlc_message(msg_type, &mut cursor).unwrap() else {
-            return Err(anyhow::anyhow!("Couldn't read DLC message."));
-        };
-
-        match wire {
-            WireMessage::Message(msg) => Ok(msg),
-            WireMessage::SegmentStart(_) | WireMessage::SegmentChunk(_) => {
-                Err(anyhow::anyhow!("Blah blah, something with a wire"))
-            }
-        }
-    }
-
-    pub fn handle_dlc_msg_event(&self, event: Event) {
-        match event.kind {
-            Kind::Custom(89) => tracing::info!("Oracle attestation kind."),
-            Kind::Custom(88) => tracing::info!("Oracle announcement kind."),
-            Kind::Custom(8_888) => tracing::info!("DLC message."),
-            _ => tracing::info!("unknown"),
-        }
-    }
-
     pub async fn listen(&self) -> anyhow::Result<Client> {
         let client = Client::new(&self.keys);
 
@@ -110,16 +48,61 @@ impl NostrDlcRelayHandler {
 
         client.add_relay(RELAY_HOST).await?;
 
-        let msg_subscription =
-            crate::nostr::util::create_dlc_message_filter(since, self.public_key());
-        let oracle_subscription = crate::nostr::util::create_oracle_message_filter(since);
+        let msg_subscription = super::messages::create_dlc_message_filter(since, self.public_key());
+        // Removing the oracle messages for right now.
+        // let oracle_subscription = super::messages::create_oracle_message_filter(since);
 
-        client
-            .subscribe(vec![msg_subscription, oracle_subscription], None)
-            .await?;
+        client.subscribe(vec![msg_subscription], None).await?;
 
         client.connect().await;
 
         Ok(client)
+    }
+
+    pub async fn receive_dlc_messages<S: Storage, O: Oracle>(
+        &self,
+        manager: Arc<DlcDevKitDlcManager<S, O>>,
+    ) {
+        while let Ok(notification) = self.client.notifications().recv().await {
+            match notification {
+                RelayPoolNotification::Event {
+                    relay_url: _,
+                    subscription_id: _,
+                    event,
+                } => {
+                    let (pubkey, message, event) = match super::messages::handle_dlc_msg_event(
+                        &event,
+                        &self.keys.secret_key(),
+                    ) {
+                        Ok(msg) => (msg.0, msg.1, msg.2),
+                        Err(_) => {
+                            tracing::error!("Could not parse event {}", event.id);
+                            continue;
+                        }
+                    };
+
+                    match manager.on_dlc_message(&message, pubkey) {
+                        Ok(Some(msg)) => {
+                            let event = super::messages::create_dlc_msg_event(
+                                event.pubkey,
+                                Some(event.id),
+                                msg,
+                                &self.keys,
+                            )
+                            .expect("no message");
+                            self.client
+                                .send_event(event)
+                                .await
+                                .expect("Break out into functions.");
+                        }
+                        Ok(None) => (),
+                        Err(_) => {
+                            // handle the error case and send
+                        }
+                    }
+                }
+                other => println!("Other event: {:?}", other),
+            }
+        }
     }
 }
