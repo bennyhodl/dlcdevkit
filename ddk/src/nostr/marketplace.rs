@@ -1,9 +1,7 @@
-use std::ops::Deref;
-
-use super::util;
 use crate::Storage;
 use nostr_rs::Timestamp;
-use nostr_sdk::{client::builder::ClientBuilder, RelayPoolNotification};
+use nostr_sdk::{client::builder::ClientBuilder, Event, Kind, RelayPoolNotification};
+use std::ops::Deref;
 
 /// NIP-88 compliant oracle announcement listener.
 ///
@@ -23,7 +21,7 @@ where
     }
     client.connect().await;
     let now = Timestamp::now();
-    let oracle_filter = util::create_oracle_message_filter(now);
+    let oracle_filter = super::create_oracle_message_filter(now);
 
     client.subscribe(vec![oracle_filter], None).await?;
 
@@ -33,9 +31,7 @@ where
                 relay_url: _,
                 subscription_id: _,
                 event,
-            } => {
-                util::handle_oracle_event(storage, *event);
-            }
+            } => handle_oracle_event(storage, *event),
             RelayPoolNotification::Shutdown => {
                 tracing::error!("Relay disconnected.")
             }
@@ -44,4 +40,21 @@ where
     }
 
     Ok(())
+}
+
+fn handle_oracle_event<S: Deref>(storage: &S, event: Event)
+where
+    S::Target: Storage,
+{
+    match event.kind {
+        Kind::Custom(89) => {
+            tracing::info!("Oracle attestation. Saved to storage.")
+        }
+        Kind::Custom(88) => {
+            let announcement = crate::util::oracle_announcement_from_str(&event.content).unwrap();
+            storage.save_announcement(announcement).unwrap();
+            tracing::info!("Oracle announcement. Saved to storage.")
+        }
+        _ => (),
+    }
 }
