@@ -34,9 +34,9 @@ kormir = { version = "0.3.0", git = "https://github.com/bennyhodl/kormir", rev =
 # kormir = { version = "0.3.0", path = "../../kormir/kormir" }
 
 bitcoin = { version = "0.32.2", features = ["rand", "serde"] }
-bdk_esplora = { version = "0.17", features = ["blocking", "async"] }
-bdk_wallet = { version = "1.0.0-beta.2", features = ["bdk_file_store"] }
-bdk_chain = "0.18.0"
+bdk_esplora = { version = "0.19", features = ["blocking", "async"] }
+bdk_wallet = { version = "=1.0.0-beta.5", features = ["bdk_file_store"] }
+bdk_chain = "0.20.0"
 anyhow = "1.0.75"
 lightning = { version = "0.0.124", default-features = false, features = ["grind_signatures", "std"] }
 reqwest = { version = "0.11.22", features = ["blocking"] }

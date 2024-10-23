@@ -2,7 +2,9 @@ use crate::error::{bdk_err_to_manager_err, WalletError};
 use crate::{chain::EsploraClient, signer::SignerInformation, Storage};
 use bdk_chain::{spk_client::FullScanRequest, Balance};
 use bdk_esplora::EsploraExt;
-use bdk_wallet::coin_selection::{BranchAndBoundCoinSelection, CoinSelectionAlgorithm};
+use bdk_wallet::coin_selection::{
+    BranchAndBoundCoinSelection, CoinSelectionAlgorithm, LargestFirstCoinSelection,
+};
 use bdk_wallet::WalletPersister;
 use bdk_wallet::{
     bitcoin::{
@@ -15,6 +17,7 @@ use bdk_wallet::{
 };
 use bdk_wallet::{Utxo, WeightedUtxo};
 use bitcoin::hashes::sha256::Hash as Sha256Hash;
+use bitcoin::key::rand::thread_rng;
 use bitcoin::{
     hashes::{sha256::HashEngine, Hash},
     secp256k1::SecretKey,
@@ -449,15 +452,19 @@ impl dlc_manager::Wallet for DlcDevKitWallet {
             })
             .collect::<Vec<WeightedUtxo>>();
 
-        let selected_utxos = BranchAndBoundCoinSelection::new(Amount::MAX_MONEY.to_sat())
-            .coin_select(
-                vec![],
-                utxos,
-                FeeRate::from_sat_per_vb(fee_rate).unwrap(),
-                amount,
-                ScriptBuf::new().as_script(),
-            )
-            .unwrap();
+        let selected_utxos = BranchAndBoundCoinSelection::new(
+            Amount::MAX_MONEY.to_sat(),
+            LargestFirstCoinSelection::default(),
+        )
+        .coin_select(
+            vec![],
+            utxos,
+            FeeRate::from_sat_per_vb(fee_rate).unwrap(),
+            amount,
+            ScriptBuf::new().as_script(),
+            &mut thread_rng(),
+        )
+        .unwrap();
 
         let dlc_utxos = selected_utxos
             .selected
