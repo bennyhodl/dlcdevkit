@@ -1,5 +1,4 @@
 use bitcoin::Network;
-use core::fmt;
 use crossbeam::channel::unbounded;
 use dlc_manager::manager::Manager;
 use dlc_manager::SystemTimeProvider;
@@ -10,12 +9,13 @@ use crate::chain::EsploraClient;
 use crate::ddk::{DlcDevKit, DlcManagerMessage};
 use crate::wallet::DlcDevKitWallet;
 use crate::{Oracle, Storage, Transport};
+use thiserror::Error;
 
-pub const DEFAULT_STORAGE_PATH: &str = "/tmp/ddk";
-pub const DEFAULT_ESPLORA_HOST: &str = "https://mutinynet.com/api";
-pub const DEFAULT_NETWORK: Network = Network::Signet;
+const DEFAULT_STORAGE_PATH: &str = "/tmp/ddk";
+const DEFAULT_ESPLORA_HOST: &str = "https://mutinynet.com/api";
+const DEFAULT_NETWORK: Network = Network::Signet;
 
-/// Builder pattern for creating a [crate::ddk::DlcDevKit] process.
+/// Builder pattern for creating a [`crate::ddk::DlcDevKit`] process.
 #[derive(Clone, Debug)]
 pub struct Builder<T, S, O> {
     name: Option<String>,
@@ -28,32 +28,22 @@ pub struct Builder<T, S, O> {
     seed_bytes: [u8; 32],
 }
 
-/// An error that could be thrown while building [crate::ddk::DlcDevKit]
-#[derive(Debug, Clone, Copy)]
+/// An error that could be thrown while building [`crate::ddk::DlcDevKit`]
+#[derive(Debug, Clone, Copy, Error)]
 pub enum BuilderError {
-    /// A transport was not provided.
+    #[error("A transport was not provided.")]
     NoTransport,
-    /// A storage implementation was not provided.
+    #[error("A storage implementation was not provided.")]
     NoStorage,
-    /// An oracle client was not provided.
+    #[error("An oracle client was not provided.")]
     NoOracle,
 }
-
-impl fmt::Display for BuilderError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match *self {
-            BuilderError::NoTransport => write!(f, "A DLC transport was not provided."),
-            BuilderError::NoStorage => write!(f, "A DLC storage implementation was not provided."),
-            BuilderError::NoOracle => write!(f, "A DLC oracle client was not provided."),
-        }
-    }
-}
-
-impl std::error::Error for BuilderError {}
-
 /// Defaults when creating a DDK application
 /// Transport, storage, and oracle is set to none.
-/// Default [crate::config::DdkConfig] to mutiny net.
+///
+/// esplora_host: <https://mutinynet.com/api>
+/// network: Network::Signet
+/// storage_path: "/tmp/ddk"
 impl<T: Transport, S: Storage, O: Oracle> Default for Builder<T, S, O> {
     fn default() -> Self {
         Self {
@@ -132,16 +122,17 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
 
     /// Builds the `DlcDevKit` instance. Fails if any components are missing.
     pub fn finish(&self) -> anyhow::Result<DlcDevKit<T, S, O>> {
-        tracing::info!("Using network {}", &self.network);
+        tracing::info!(
+            network = self.network.to_string(),
+            esplora = self.esplora_host,
+            "Building DDK."
+        );
 
         // Creates the DDK directory.
         //
-        // TODO: Should have a storage config for no-std builds.
-        // TODO: should be nested with the DDK name.
+        // TODO: Don't need to access filesystem with DDK. Should be for lib consumer.
         std::fs::create_dir_all(&self.storage_path)?;
         tracing::info!(path=?self.storage_path, "Created directory for ddk node.");
-
-        tracing::info!("Loaded private key");
 
         let transport = self
             .transport
@@ -170,14 +161,11 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
             self.network,
             storage.clone(),
         )?);
-        tracing::info!("Opened BDK wallet. name={}", name);
 
         let mut oracles = HashMap::new();
         oracles.insert(oracle.get_public_key(), oracle.clone());
-        tracing::info!(name = oracle.name(), "Connected to oracle.");
 
         let esplora_client = Arc::new(EsploraClient::new(&self.esplora_host, self.network)?);
-        tracing::info!(host = self.esplora_host, "Connected to esplora client.");
 
         let (sender, receiver) = unbounded::<DlcManagerMessage>();
 

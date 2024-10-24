@@ -10,6 +10,7 @@ use dlc_manager::error::Error;
 use kormir::OracleAnnouncement;
 use lightning::io::Read;
 
+/// Helper from rust-dlc to implement types for contracts.
 macro_rules! convertible_enum {
     (enum $name:ident {
         $($vname:ident $(= $val:expr)?,)*;
@@ -91,7 +92,7 @@ pub fn serialize_contract(contract: &Contract) -> Result<Vec<u8>, ::lightning::i
     Ok(res)
 }
 
-pub fn deserialize_contract(buff: &sled::IVec) -> Result<Contract, Error> {
+pub fn deserialize_contract(buff: &Vec<u8>) -> Result<Contract, Error> {
     let mut cursor = ::lightning::io::Cursor::new(buff);
     let mut prefix = [0u8; 1];
     cursor.read_exact(&mut prefix)?;
@@ -131,47 +132,8 @@ pub fn deserialize_contract(buff: &sled::IVec) -> Result<Contract, Error> {
     Ok(contract)
 }
 
-pub fn deserialize_contract_bytes(buff: &Vec<u8>) -> Result<Contract, Error> {
-    let mut cursor = ::lightning::io::Cursor::new(buff);
-    let mut prefix = [0u8; 1];
-    cursor.read_exact(&mut prefix)?;
-    let contract_prefix: ContractPrefix = prefix[0].try_into()?;
-    let contract = match contract_prefix {
-        ContractPrefix::Offered => {
-            Contract::Offered(OfferedContract::deserialize(&mut cursor).map_err(to_storage_error)?)
-        }
-        ContractPrefix::Accepted => Contract::Accepted(
-            AcceptedContract::deserialize(&mut cursor).map_err(to_storage_error)?,
-        ),
-        ContractPrefix::Signed => {
-            Contract::Signed(SignedContract::deserialize(&mut cursor).map_err(to_storage_error)?)
-        }
-        ContractPrefix::Confirmed => {
-            Contract::Confirmed(SignedContract::deserialize(&mut cursor).map_err(to_storage_error)?)
-        }
-        ContractPrefix::PreClosed => Contract::PreClosed(
-            PreClosedContract::deserialize(&mut cursor).map_err(to_storage_error)?,
-        ),
-        ContractPrefix::Closed => {
-            Contract::Closed(ClosedContract::deserialize(&mut cursor).map_err(to_storage_error)?)
-        }
-        ContractPrefix::FailedAccept => Contract::FailedAccept(
-            FailedAcceptContract::deserialize(&mut cursor).map_err(to_storage_error)?,
-        ),
-        ContractPrefix::FailedSign => Contract::FailedSign(
-            FailedSignContract::deserialize(&mut cursor).map_err(to_storage_error)?,
-        ),
-        ContractPrefix::Refunded => {
-            Contract::Refunded(SignedContract::deserialize(&mut cursor).map_err(to_storage_error)?)
-        }
-        ContractPrefix::Rejected => {
-            Contract::Rejected(OfferedContract::deserialize(&mut cursor).map_err(to_storage_error)?)
-        }
-    };
-    Ok(contract)
-}
-
-pub fn filter_expired_oracle_announcements(
+/// Filter stored oracle announcements if the event maturity is expired.
+pub(crate) fn filter_expired_oracle_announcements(
     announcements: Vec<OracleAnnouncement>,
 ) -> Vec<OracleAnnouncement> {
     let now = Utc::now().timestamp() as u32;

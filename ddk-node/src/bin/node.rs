@@ -83,7 +83,7 @@ async fn main() -> anyhow::Result<()> {
     let network = Network::from_str(&args.network)?;
     std::fs::create_dir_all(storage_path.clone())?;
 
-    let seed_bytes = ddk::io::xprv_from_path(storage_path.clone(), network)?;
+    let seed_bytes = ddk_node::util::xprv_from_path(storage_path.clone(), network)?;
 
     tracing::info!("Starting DDK node.");
 

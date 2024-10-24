@@ -5,6 +5,11 @@ use bitcoin::Network;
 use bitcoin::{Transaction, Txid};
 use dlc_manager::error::Error as ManagerError;
 
+/// Esplora client for getting chain information. Holds both a blocking
+/// and an async client.
+///
+/// Used by rust-dlc for getting transactions related to DLC contracts.
+/// Used by bdk to sync the wallet and track transaction.
 pub struct EsploraClient {
     pub blocking_client: BlockingClient,
     pub async_client: AsyncClient,
@@ -24,6 +29,8 @@ impl EsploraClient {
     }
 }
 
+/// Implements the `dlc_manager::Blockchain` interface. Grabs chain related information
+/// regarding DLC transactions.
 impl dlc_manager::Blockchain for EsploraClient {
     fn get_network(&self) -> Result<Network, ManagerError> {
         Ok(self.network)
@@ -45,13 +52,27 @@ impl dlc_manager::Blockchain for EsploraClient {
     }
 
     fn send_transaction(&self, transaction: &bitcoin::Transaction) -> Result<(), ManagerError> {
-        Ok(self
-            .blocking_client
-            .broadcast(transaction)
-            .map_err(esplora_err_to_manager_err)?)
+        tracing::info!(
+            txid = transaction.compute_txid().to_string(),
+            num_inputs = transaction.input.len(),
+            num_outputs = transaction.output.len(),
+            "Broadcasting transaction."
+        );
+
+        if let Err(e) = self.blocking_client.broadcast(transaction) {
+            tracing::error!(
+                error =? e,
+                "Could not broadcast transaction {}",
+                transaction.compute_txid()
+            );
+            return Err(esplora_err_to_manager_err(e));
+        }
+
+        Ok(())
     }
 
     fn get_block_at_height(&self, height: u64) -> Result<bitcoin::Block, ManagerError> {
+        tracing::info!(height, "Getting block at height.");
         let block_hash = self
             .blocking_client
             .get_block_hash(height as u32)
@@ -79,6 +100,10 @@ impl dlc_manager::Blockchain for EsploraClient {
     }
 
     fn get_transaction_confirmations(&self, tx_id: &bitcoin::Txid) -> Result<u32, ManagerError> {
+        tracing::info!(
+            txid = tx_id.to_string(),
+            "Getting transaction confirmations."
+        );
         let txn = self
             .blocking_client
             .get_tx_status(tx_id)

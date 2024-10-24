@@ -1,4 +1,4 @@
-//! p2pderivatives/rust-dlc https://github.com/p2pderivatives/rust-dlc/blob/master/dlc-sled-storage-provider/src/lib.rs (2024)
+//! p2pderivatives/rust-dlc <https://github.com/p2pderivatives/rust-dlc/blob/master/dlc-sled-storage-provider/src/lib.rs> (2024)
 //! # dlc-sled-storage-provider
 //! Storage provider for dlc-manager using sled as underlying storage.
 
@@ -21,13 +21,13 @@ const CONTRACT_TREE: u8 = 1;
 const CHANNEL_TREE: u8 = 2;
 pub const CHAIN_MONITOR_TREE: u8 = 3;
 pub const CHAIN_MONITOR_KEY: u8 = 4;
-const PEER_KEY: u8 = 5;
 const SIGNER_TREE: u8 = 6;
 const WALLET_TREE: u8 = 7;
 const MARKETPLACE_TREE: u8 = 8;
 
 const MARKETPLACE_KEY: &str = "marketplace";
 const CHANGESET_KEY: &str = "changeset";
+const PEERS_KEY: &str = "peers";
 
 /// Implementation of Storage interface using the sled DB backend.
 #[derive(Debug, Clone)]
@@ -97,34 +97,31 @@ impl SledStorage {
 
 impl Storage for SledStorage {
     fn persist_bdk(&self, changeset: &ChangeSet) -> Result<(), WalletError> {
-        tracing::info!("Presisting changeset to wallet persistance.");
         let wallet_tree = self.wallet_tree()?;
-        let new_changeset = if let Some(cs) = wallet_tree.get(CHANGESET_KEY)? {
-            let mut stored_changeset = bincode::deserialize::<ChangeSet>(&cs)?;
-            stored_changeset.merge(changeset.clone());
-            stored_changeset
-        } else {
-            changeset.to_owned()
+        let new_changeset = match wallet_tree.get(CHANGESET_KEY)? {
+            Some(stored_changeset) => {
+                let mut stored_changeset = bincode::deserialize::<ChangeSet>(&stored_changeset)?;
+                stored_changeset.merge(changeset.clone());
+                stored_changeset
+            }
+            None => changeset.to_owned(),
         };
-        let new_changeset_bytes = bincode::serialize(&new_changeset)?;
-        wallet_tree
-            .insert(CHANGESET_KEY, new_changeset_bytes)
-            .unwrap();
+
+        wallet_tree.insert(CHANGESET_KEY, bincode::serialize(&new_changeset)?)?;
         Ok(())
     }
 
     fn initialize_bdk(&self) -> Result<ChangeSet, WalletError> {
         tracing::info!("Initializing wallet persistance.");
-        if let Some(cs) = self.wallet_tree()?.get(CHANGESET_KEY)? {
-            let cs = bincode::deserialize::<ChangeSet>(&cs)?;
-            Ok(cs)
-        } else {
-            Ok(ChangeSet::default())
-        }
+        let changeset = match self.wallet_tree()?.get(CHANGESET_KEY)? {
+            Some(changeset) => bincode::deserialize::<ChangeSet>(&changeset)?,
+            None => ChangeSet::default(),
+        };
+        Ok(changeset)
     }
 
     fn list_peers(&self) -> anyhow::Result<Vec<PeerInformation>> {
-        if let Some(bytes) = self.db.get("peers")? {
+        if let Some(bytes) = self.db.get(PEERS_KEY)? {
             let peers: Vec<PeerInformation> = serde_json::from_slice(&bytes)?;
             Ok(peers)
         } else {

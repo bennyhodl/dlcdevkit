@@ -3,10 +3,10 @@ use async_trait::async_trait;
 use bitcoin::secp256k1::PublicKey;
 use lightning_net_tokio::{connect_outbound, setup_inbound};
 use std::{sync::Arc, time::Duration};
+use tokio::net::TcpListener;
 
 pub(crate) mod peer_manager;
 pub use peer_manager::LightningTransport;
-use tokio::net::TcpListener;
 
 #[async_trait]
 impl Transport for LightningTransport {
@@ -14,6 +14,7 @@ impl Transport for LightningTransport {
         "lightning".into()
     }
 
+    /// Creates a TCP listener and accepts incoming connection spawning a tokio thread.
     async fn listen(&self) {
         let listener = TcpListener::bind(format!("0.0.0.0:{}", self.listening_port))
             .await
@@ -29,10 +30,15 @@ impl Transport for LightningTransport {
         }
     }
 
+    /// Sends a message to a peer.
+    ///
+    /// TODO: Assert that we are connected to the peer before sending.
     fn send_message(&self, counterparty: PublicKey, message: dlc_messages::Message) {
         self.message_handler.send_message(counterparty, message)
     }
 
+    /// Gets and clears the message queue with messages to be processed.
+    /// Takes the manager to process the DLC messages that are received.
     async fn receive_messages<S: Storage, O: Oracle>(
         &self,
         manager: Arc<DlcDevKitDlcManager<S, O>>,
@@ -40,7 +46,6 @@ impl Transport for LightningTransport {
         let mut timer = tokio::time::interval(Duration::from_secs(5));
         loop {
             timer.tick().await;
-            tracing::info!("message tick");
             let messages = self.message_handler.get_and_clear_received_messages();
 
             for (counter_party, message) in messages {

@@ -145,16 +145,14 @@ where
                 DlcManagerMessage::OfferDlc {
                     contract_input,
                     counter_party,
-                    oracle_announcements,
+                    oracle_announcements: _,
                     responder,
                 } => {
                     let offer = manager
-                        .send_offer_with_announcements(
-                            &contract_input,
-                            counter_party,
-                            vec![oracle_announcements],
-                        )
+                        .send_offer(&contract_input, counter_party)
+                        .await
                         .expect("can't create offerdlc");
+
                     responder.send(offer).expect("send offer error")
                 }
                 DlcManagerMessage::AcceptDlc {
@@ -318,10 +316,26 @@ mod tests {
         let contract = alice.ddk.storage.get_contract(&contract_id);
         assert!(matches!(contract.unwrap().unwrap(), Contract::Confirmed(_)));
 
+        bob.ddk.wallet.sync().unwrap();
+        alice.ddk.wallet.sync().unwrap();
+
         // Used to check that timelock is reached.
         let locktime = match alice.ddk.storage.get_contract(&contract_id).unwrap() {
             Some(contract) => match contract {
                 Contract::Confirmed(signed_contract) => {
+                    println!(
+                        "Locktime: {:?}\nFund: {:?}",
+                        signed_contract.accepted_contract.dlc_transactions.cets[0].lock_time,
+                        signed_contract
+                            .accepted_contract
+                            .dlc_transactions
+                            .fund
+                            .lock_time,
+                    );
+                    signed_contract.accepted_contract.dlc_transactions.cets[0]
+                        .input
+                        .iter()
+                        .for_each(|i| println!("Sequence: {:?}", i.sequence));
                     signed_contract.accepted_contract.dlc_transactions.cets[0]
                         .lock_time
                         .to_consensus_u32()
@@ -350,10 +364,14 @@ mod tests {
                 .as_secs() as u32;
 
             time = checked_time;
+            generate_blocks(5);
             sleep(Duration::from_secs(5)).await
         }
 
         assert!(attestation.is_ok());
+
+        bob.ddk.wallet.sync().unwrap();
+        alice.ddk.wallet.sync().unwrap();
 
         bob.ddk.manager.periodic_check(false).await.unwrap();
 

@@ -14,12 +14,14 @@ use std::{sync::Arc, time::SystemTime};
 
 pub struct DlcDevKitLogger;
 
+/// TODO: make a logging struct for the crate.
 impl Logger for DlcDevKitLogger {
     fn log(&self, record: Record) {
         tracing::info!("{}", record.args);
     }
 }
 
+/// Peer manager that only recognizes DLC messages.
 pub type LnPeerManager = LdkPeerManager<
     SocketDescriptor,
     Arc<ErroringMessageHandler>,
@@ -30,10 +32,16 @@ pub type LnPeerManager = LdkPeerManager<
     Arc<KeysManager>,
 >;
 
+/// BOLT-8 LightningTransport to manage TCP connections to communicate
+/// DLC contracts with another party.
 pub struct LightningTransport {
+    /// Manages the connections to other DLC peers.
     pub peer_manager: Arc<LnPeerManager>,
+    /// Handles the message queue.
     pub message_handler: Arc<DlcMessageHandler>,
+    /// Our nodes id.
     pub node_id: PublicKey,
+    /// Listening port for the TCP connection.
     pub listening_port: u16,
 }
 
@@ -44,8 +52,8 @@ impl LightningTransport {
         let node_id = key_signer
             .get_node_id(lightning::sign::Recipient::Node)
             .map_err(|_| anyhow!("Could not get node id."))?;
-        let dlc_message_handler = Arc::new(DlcMessageHandler::new());
 
+        let dlc_message_handler = Arc::new(DlcMessageHandler::new());
         let message_handler = MessageHandler {
             chan_handler: Arc::new(ErroringMessageHandler::new()),
             route_handler: Arc::new(IgnoringMessageHandler {}),

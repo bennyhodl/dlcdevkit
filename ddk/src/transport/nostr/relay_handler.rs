@@ -1,5 +1,4 @@
 use crate::nostr::DLC_MESSAGE_KIND;
-use crate::RELAY_HOST;
 use bitcoin::bip32::Xpriv;
 use bitcoin::Network;
 use dlc_messages::{message_handler::read_dlc_message, Message, WireMessage};
@@ -13,6 +12,9 @@ use nostr_rs::{
     Event, EventBuilder, EventId, Keys, Kind, PublicKey, SecretKey, Tag, Timestamp, Url,
 };
 use nostr_sdk::Client;
+
+/// Nostr relay host. TODO: nostr feature
+const RELAY_HOST: &str = "ws://localhost:8081";
 
 pub struct NostrDlcRelayHandler {
     pub keys: Keys,

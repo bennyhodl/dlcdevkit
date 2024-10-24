@@ -109,16 +109,8 @@ impl P2PDOracleClient {
             host.to_string()
         };
 
-        let public_key = reqwest::get(pubkey_path(&host))
-            .await
-            .map_err(|x| {
-                dlc_manager::error::Error::IOError(
-                    std::io::Error::new(std::io::ErrorKind::Other, x).into(),
-                )
-            })?
-            .json::<PublicKeyResponse>()
-            .await
-            .map_err(|e| dlc_manager::error::Error::OracleError(e.to_string()))?
+        let public_key = get::<PublicKeyResponse>(&pubkey_path(&host))
+            .await?
             .public_key;
 
         Ok(P2PDOracleClient { host, public_key })
@@ -178,72 +170,8 @@ impl dlc_manager::Oracle for P2PDOracleClient {
     }
 }
 
-#[async_trait::async_trait]
 impl Oracle for P2PDOracleClient {
     fn name(&self) -> String {
         "p2pderivatives".into()
-    }
-
-    async fn get_announcement_async(
-        &self,
-        event_id: &str,
-    ) -> Result<OracleAnnouncement, dlc_manager::error::Error> {
-        let (asset_id, date_time) = parse_event_id(event_id)?;
-        let path = announcement_path(&self.host, &asset_id, &date_time);
-        let announcement = reqwest::get(&path)
-            .await
-            .map_err(|x| {
-                dlc_manager::error::Error::IOError(
-                    std::io::Error::new(std::io::ErrorKind::Other, x).into(),
-                )
-            })?
-            .json::<OracleAnnouncement>()
-            .await
-            .map_err(|e| dlc_manager::error::Error::OracleError(e.to_string()))?;
-        Ok(announcement)
-    }
-
-    async fn get_attestation_async(
-        &self,
-        event_id: &str,
-    ) -> Result<OracleAttestation, dlc_manager::error::Error> {
-        let (asset_id, date_time) = parse_event_id(event_id)?;
-        let path = attestation_path(&self.host, &asset_id, &date_time);
-        let AttestationResponse {
-            event_id: _,
-            signatures,
-            values,
-        } = reqwest::get(&path)
-            .await
-            .map_err(|x| {
-                dlc_manager::error::Error::IOError(
-                    std::io::Error::new(std::io::ErrorKind::Other, x).into(),
-                )
-            })?
-            .json()
-            .await
-            .map_err(|e| dlc_manager::error::Error::OracleError(e.to_string()))?;
-
-        Ok(OracleAttestation {
-            oracle_public_key: self.public_key,
-            signatures,
-            outcomes: values,
-        })
-    }
-
-    async fn get_public_key_async(&self) -> Result<XOnlyPublicKey, dlc_manager::error::Error> {
-        let path = pubkey_path(&self.host);
-        let publickey = reqwest::get(path)
-            .await
-            .map_err(|x| {
-                dlc_manager::error::Error::IOError(
-                    std::io::Error::new(std::io::ErrorKind::Other, x).into(),
-                )
-            })?
-            .json::<PublicKeyResponse>()
-            .await
-            .map_err(|e| dlc_manager::error::Error::OracleError(e.to_string()))?
-            .public_key;
-        Ok(publickey)
     }
 }
