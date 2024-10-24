@@ -123,7 +123,7 @@ impl Storage for SledStorage {
             .get(contract_id)
             .map_err(to_storage_error)?
         {
-            Some(res) => Ok(Some(deserialize_contract(&res)?)),
+            Some(res) => Ok(Some(deserialize_contract(&res.to_vec())?)),
             None => Ok(None),
         }
     }
@@ -132,7 +132,7 @@ impl Storage for SledStorage {
         self.contract_tree()?
             .iter()
             .values()
-            .map(|x| deserialize_contract(&x.unwrap()))
+            .map(|x| deserialize_contract(&x.unwrap().to_vec()))
             .collect::<Result<Vec<Contract>, Error>>()
     }
 

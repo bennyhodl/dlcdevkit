@@ -1,5 +1,6 @@
 pub mod convert;
 pub mod ddkrpc;
+pub mod util;
 
 use std::str::FromStr;
 use std::sync::Arc;
@@ -7,6 +8,7 @@ use std::sync::Arc;
 use ddk::bitcoin::secp256k1::PublicKey;
 use ddk::bitcoin::{Address, Amount, FeeRate};
 use ddk::dlc_manager::contract::contract_input::ContractInput;
+use ddk::dlc_manager::Oracle as DlcOracle;
 use ddk::dlc_manager::Storage as DlcStorage;
 use ddk::oracle::KormirOracleClient;
 use ddk::storage::SledStorage;
@@ -77,7 +79,7 @@ impl DdkRpc for DdkNode {
             let announcement = self
                 .inner
                 .oracle
-                .get_announcement_async(&info.oracles.event_id)
+                .get_announcement(&info.oracles.event_id)
                 .await
                 .unwrap();
             oracle_announcements.push(announcement)
@@ -241,13 +243,7 @@ impl DdkRpc for DdkNode {
         &self,
         _request: Request<ListOraclesRequest>,
     ) -> Result<Response<ListOraclesResponse>, Status> {
-        let pubkey = self
-            .inner
-            .oracle
-            .get_public_key_async()
-            .await
-            .unwrap()
-            .to_string();
+        let pubkey = self.inner.oracle.get_pubkey().await.unwrap().to_string();
         let name = self.inner.oracle.name();
         Ok(Response::new(ListOraclesResponse { name, pubkey }))
     }

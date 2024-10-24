@@ -1,6 +1,5 @@
 use anyhow::anyhow;
 use bitcoin::key::XOnlyPublicKey;
-use dlc_manager::error::Error;
 use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
 use kormir::storage::OracleEventData;
 use lightning::{io::Cursor, util::ser::Readable};
@@ -31,6 +30,9 @@ struct SignEnumEvent {
     pub outcome: String,
 }
 
+/// Kormir oracle client.
+///
+/// Allows the creation of enum announcements and signing as well.
 #[derive(Debug)]
 pub struct KormirOracleClient {
     pubkey: XOnlyPublicKey,
@@ -40,11 +42,14 @@ pub struct KormirOracleClient {
 
 impl KormirOracleClient {
     pub async fn new(host: &str) -> anyhow::Result<KormirOracleClient> {
-        tracing::info!(host, "Connecting to Kormir oracle client.");
-        let request: String = reqwest::get(format!("{host}/pubkey")).await?.json().await?;
+        let request: String = get(host, "pubkey").await?;
         let pubkey = XOnlyPublicKey::from_str(&request)?;
         let client = reqwest::Client::new();
-        tracing::info!(pubkey = pubkey.to_string(), "Connected to Kormir client.");
+        tracing::info!(
+            host,
+            pubkey = pubkey.to_string(),
+            "Connected to Kormir client."
+        );
 
         Ok(KormirOracleClient {
             pubkey,
@@ -54,23 +59,20 @@ impl KormirOracleClient {
     }
 
     pub async fn get_pubkey(&self) -> anyhow::Result<XOnlyPublicKey> {
-        let request = reqwest::get(format!("{}/pubkey", self.host))
-            .await?
-            .json::<String>()
-            .await?;
-        Ok(XOnlyPublicKey::from_str(&request)?)
+        Ok(self.pubkey)
     }
 
+    /// List all events stored with the connected Kormir server.
+    ///
+    /// Kormir events includes announcements info, nonce index, signatures
+    /// if announcement has been signed, and nostr information.
     pub async fn list_events(&self) -> anyhow::Result<Vec<OracleEventData>> {
-        let oracle_events: Vec<OracleEventData> =
-            reqwest::get(format!("{}/list-events", self.host))
-                .await?
-                .json()
-                .await?;
-
-        Ok(oracle_events)
+        get(&self.host, "list-events").await
     }
 
+    /// Creates an enum oracle announcament.
+    ///
+    /// Maturity should be the UNIX timestamp of contract maturity.
     pub async fn create_event(
         &self,
         outcomes: Vec<String>,
@@ -103,6 +105,9 @@ impl KormirOracleClient {
         Ok(announcement)
     }
 
+    /// Requests for Kormir to sign an announcement with a given outcome.
+    ///
+    /// TODO: waiting for PR to call for announcement directly.
     pub async fn sign_event(
         &self,
         announcement: OracleAnnouncement,
@@ -158,68 +163,33 @@ impl dlc_manager::Oracle for KormirOracleClient {
         let attestation = get::<OracleAttestation>(&self.host, &format!("attestation/{event_id}"))
             .await
             .map_err(|e| {
-                tracing::error!("Attestation: {:?}", e);
+                tracing::error!(error=?e, "Could not get attestation.");
                 dlc_manager::error::Error::OracleError("Could not get attestation".into())
             })?;
-        tracing::info!(event_id, attestation =? attestation, "Attestation");
+        tracing::info!(event_id, attestation =? attestation, "Kormir attestation.");
         Ok(attestation)
     }
 
     async fn get_announcement(
         &self,
-        _event_id: &str,
+        event_id: &str,
     ) -> Result<dlc_messages::oracle_msgs::OracleAnnouncement, dlc_manager::error::Error> {
-        get::<OracleAnnouncement>(&self.host, "announcement")
-            .await
-            .map_err(|_| {
-                dlc_manager::error::Error::OracleError("Could not get announcement".into())
-            })
+        tracing::info!(event_id, "Getting oracle announcement.");
+        let announcement =
+            get::<OracleAnnouncement>(&self.host, &format!("announcement/{event_id}"))
+                .await
+                .map_err(|e| {
+                    tracing::error!(error =? e, "Could not get announcement.");
+                    dlc_manager::error::Error::OracleError("Could not get announcement".into())
+                })?;
+        tracing::info!(event_id, announcement=?announcement, "Kormir announcement.");
+        Ok(announcement)
     }
 }
 
-#[async_trait::async_trait]
 impl crate::Oracle for KormirOracleClient {
     fn name(&self) -> String {
         "kormir".into()
-    }
-
-    async fn get_public_key_async(&self) -> Result<XOnlyPublicKey, dlc_manager::error::Error> {
-        Ok(self.pubkey)
-    }
-
-    async fn get_announcement_async(
-        &self,
-        event_id: &str,
-    ) -> Result<OracleAnnouncement, dlc_manager::error::Error> {
-        let announcements = reqwest::get(format!("{}/list-events", &self.host))
-            .await
-            .map_err(|_| Error::OracleError("Could not get announcements async.".into()))?
-            .json::<Vec<OracleEventData>>()
-            .await
-            .map_err(|_| Error::OracleError("Could not get announcements async.".into()))?;
-
-        let event = announcements
-            .iter()
-            .find(|event| event.announcement.oracle_event.event_id == event_id);
-
-        match event {
-            Some(event_data) => Ok(event_data.announcement.to_owned()),
-            None => return Err(Error::OracleError("No event found".to_string())),
-        }
-    }
-
-    async fn get_attestation_async(
-        &self,
-        event_id: &str,
-    ) -> Result<OracleAttestation, dlc_manager::error::Error> {
-        let attestation = reqwest::get(format!("{}/attestation/{}", &self.host, event_id))
-            .await
-            .map_err(|_| Error::OracleError("Could not get attestation async.".into()))?
-            .json::<OracleAttestation>()
-            .await
-            .map_err(|_| Error::OracleError("Could not get attestation async.".into()))?;
-
-        Ok(attestation)
     }
 }
 

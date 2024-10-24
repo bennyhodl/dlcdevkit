@@ -10,9 +10,7 @@ pub struct SignerInformation {
     pub public_key: PublicKey,
 }
 
-/// Trait with contract specific information
-/// 1. Storing and retrieving private keys for DLC CETs.
-/// 2. Tracking contract specific addresses for counterparties.
+/// Retrieval of key material for signing DLC transactions
 pub trait DeriveSigner {
     fn get_key_information(&self, key_id: [u8; 32]) -> Result<SignerInformation, WalletError>;
     fn store_derived_key_id(

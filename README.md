@@ -1,4 +1,4 @@
-# DLC Dev Kit
+# Dlc Dev Kit
 
 [![Crate](https://img.shields.io/crates/v/ddk.svg?logo=rust)](https://crates.io/crates/ddk)
 [![Documentation](https://img.shields.io/static/v1?logo=read-the-docs&label=docs.rs&message=ddk&color=informational)](https://docs.rs/ddk)
@@ -12,23 +12,24 @@ Build DLC application by plugging in your own transport, storage, and oracle cli
 
 ## Get Started
 ```
-$ cargo add ddk --features lightning
+$ cargo add ddk
 ```
 
 ```rust
 use ddk::builder::Builder;
 use ddk::storage::SledStorage;
-use ddk::transport::lightning::LightningTransport;
-use ddk::oracle::P2PDOracleClient;
+use ddk::transport::lightning::LightningTransport; // with "lightning" feature
+use ddk::oracle::KormirOracleClient;
 use bitcoin::Network;
 use std::sync::Arc;
 
-type ApplicationDdk = ddk::DlcDevKit<LightningTransport, SledStorage, P2PDOracleClient>;
+type ApplicationDdk = ddk::DlcDevKit<LightningTransport, SledStorage, KormirOracleClient>;
 
+#[tokio::main]
 fn main() {
     let transport = Arc::new(LightningTransport::new([0u8;32], <port>, Network::Regtest));
     let storage = Arc::new(SledStorage::new("<storage path>")?);
-    let oracle_client = Arc::new(P2PDOracleClient::new("<oracle host>")?);
+    let oracle_client = Arc::new(KormirOracleClient::new("<oracle host>").await?);
 
     let ddk: ApplicationDdk = Builder::new()
         .set_seed_bytes([0u8;32])

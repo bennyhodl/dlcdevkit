@@ -1962,9 +1962,9 @@ dependencies = [
 
 [[package]]
 name = "lightning-net-tokio"
-version = "0.0.124"
+version = "0.0.124-rc1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b83c367f1f524754b0fd38ed590bcc7dbe4d1d599607c664b243239bc917da05"
+checksum = "2a9c58a0d82c02d45d5dac5f0aa9e81f8cfe1d521fbc23d0651f7c26e12d9dfd"
 dependencies = [
  "bitcoin 0.32.2",
  "lightning",

@@ -22,7 +22,7 @@ pub fn create_oracle_message_filter(since: Timestamp) -> Filter {
         .since(since)
 }
 
-pub fn handle_dlc_msg_event<S: Deref>(storage: &S, event: Event)
+pub fn handle_oracle_event<S: Deref>(storage: &S, event: Event)
 where
     S::Target: Storage,
 {
@@ -35,8 +35,7 @@ where
             storage.save_announcement(announcement).unwrap();
             tracing::info!("Oracle announcement. Saved to storage.")
         }
-        Kind::Custom(8_888) => tracing::info!("DLC message."),
-        _ => tracing::info!("unknown"),
+        _ => (),
     }
 }
 

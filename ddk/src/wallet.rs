@@ -1,8 +1,9 @@
-use crate::error::{bdk_err_to_manager_err, WalletError};
+use crate::error::{wallet_err_to_manager_err, WalletError};
 use crate::{chain::EsploraClient, signer::SignerInformation, Storage};
 use bdk_chain::{spk_client::FullScanRequest, Balance};
 use bdk_esplora::EsploraExt;
 use bdk_wallet::coin_selection::{BranchAndBoundCoinSelection, CoinSelectionAlgorithm};
+pub use bdk_wallet::LocalOutput;
 use bdk_wallet::WalletPersister;
 use bdk_wallet::{
     bitcoin::{
@@ -11,7 +12,7 @@ use bdk_wallet::{
         Address, Network, Txid,
     },
     template::Bip84,
-    AddressInfo, KeychainKind, LocalOutput, PersistedWallet, SignOptions, Update, Wallet,
+    AddressInfo, KeychainKind, PersistedWallet, SignOptions, Update, Wallet,
 };
 use bdk_wallet::{Utxo, WeightedUtxo};
 use bitcoin::hashes::sha256::Hash as Sha256Hash;
@@ -31,6 +32,7 @@ use std::{
 };
 use std::{str::FromStr, sync::atomic::AtomicU32};
 
+/// Wrapper type to pass `crate::Storage` to a BDK wallet.
 #[derive(Clone)]
 pub struct WalletStorage(Arc<dyn Storage>);
 
@@ -46,18 +48,16 @@ impl WalletPersister for WalletStorage {
     }
 }
 
-/// Internal [bdk::Wallet] for ddk.
-/// Uses eplora blocking for the [ddk::DlcDevKit] being sync only
-/// Currently supports the file-based [bdk_file_store::Store]
+/// Internal [`bdk_wallet::PersistedWallet`] for ddk.
 pub struct DlcDevKitWallet {
-    // TODO: pass storage
+    /// BDK persisted wallet.
     pub wallet: Arc<RwLock<PersistedWallet<WalletStorage>>>,
-    pub storage: WalletStorage,
-    pub blockchain: Arc<EsploraClient>,
-    pub network: Network,
-    pub xprv: Xpriv,
-    pub name: String,
-    pub fees: Arc<HashMap<ConfirmationTarget, AtomicU32>>,
+    storage: WalletStorage,
+    blockchain: Arc<EsploraClient>,
+    network: Network,
+    xprv: Xpriv,
+    name: String,
+    fees: Arc<HashMap<ConfirmationTarget, AtomicU32>>,
     secp: Secp256k1<All>,
 }
 
@@ -230,8 +230,9 @@ impl DlcDevKitWallet {
         };
         let mut storage = self.storage.clone();
         let address = wallet.next_unused_address(KeychainKind::Internal);
-        // TODO: handle error.
-        let _ = wallet.persist(&mut storage);
+        wallet
+            .persist(&mut storage)
+            .map_err(|_| WalletError::WalletPersistanceError)?;
         Ok(address)
     }
 
@@ -384,7 +385,7 @@ impl dlc_manager::Wallet for DlcDevKitWallet {
         tracing::info!("Retrieving new address for dlc manager");
         Ok(self
             .new_external_address()
-            .map_err(bdk_err_to_manager_err)?
+            .map_err(wallet_err_to_manager_err)?
             .address)
     }
 
@@ -392,7 +393,7 @@ impl dlc_manager::Wallet for DlcDevKitWallet {
         tracing::info!("Retrieving new change address for dlc manager");
         Ok(self
             .new_change_address()
-            .map_err(bdk_err_to_manager_err)?
+            .map_err(wallet_err_to_manager_err)?
             .address)
     }
 
@@ -401,7 +402,12 @@ impl dlc_manager::Wallet for DlcDevKitWallet {
         psbt: &mut bitcoin::psbt::Psbt,
         input_index: usize,
     ) -> Result<(), ManagerError> {
-        tracing::info!("Signing psbt input for dlc manager.");
+        tracing::info!(
+            input_index,
+            inputs = psbt.inputs.len(),
+            outputs = psbt.outputs.len(),
+            "Signing psbt input for dlc manager."
+        );
         let Ok(wallet) = self.wallet.try_read() else {
             tracing::error!("Could not get lock to sync wallet.");
             return Err(ManagerError::WalletError(WalletError::Lock.into()));
@@ -416,6 +422,14 @@ impl dlc_manager::Wallet for DlcDevKitWallet {
             tracing::error!("Could not sign PSBT: {:?}", e);
             return Err(ManagerError::WalletError(WalletError::Signing(e).into()));
         };
+        print!(
+            "{}",
+            serde_json::to_string_pretty(&psbt.inputs[input_index]).unwrap()
+        );
+        print!(
+            "{}",
+            serde_json::to_string_pretty(&signed_psbt.inputs[input_index]).unwrap()
+        );
 
         psbt.inputs[input_index] = signed_psbt.inputs[input_index].clone();
 
@@ -439,7 +453,7 @@ impl dlc_manager::Wallet for DlcDevKitWallet {
         fee_rate: u64,
         _lock_utxos: bool,
     ) -> Result<Vec<dlc_manager::Utxo>, ManagerError> {
-        let local_utxos = self.list_utxos().map_err(bdk_err_to_manager_err)?;
+        let local_utxos = self.list_utxos().map_err(wallet_err_to_manager_err)?;
 
         let utxos = local_utxos
             .iter()

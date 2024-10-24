@@ -9,8 +9,8 @@ use ddk::dlc_manager::contract::offered_contract::OfferedContract;
 use ddk::dlc_manager::contract::Contract;
 use ddk::dlc_messages::oracle_msgs::{EventDescriptor, OracleAnnouncement};
 use ddk::dlc_messages::{AcceptDlc, OfferDlc};
-use ddk::util::deserialize_contract_bytes;
-use ddk::LocalOutput;
+use ddk::util;
+use ddk::wallet::LocalOutput;
 use ddk_node::convert::*;
 use ddk_node::ddkrpc::ddk_rpc_client::DdkRpcClient;
 use ddk_node::ddkrpc::{
@@ -299,7 +299,7 @@ async fn main() -> anyhow::Result<()> {
             let contract_values = contracts
                 .iter()
                 .map(|c| {
-                    let contract: Contract = deserialize_contract_bytes(&c).unwrap();
+                    let contract: Contract = util::deserialize_contract(&c).unwrap();
                     contract_to_value(&contract)
                 })
                 .collect::<Vec<Value>>();

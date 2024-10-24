@@ -7,7 +7,15 @@ use dlc_manager::{
     SystemTimeProvider,
 };
 use kormir::OracleAnnouncement;
-use std::{path::PathBuf, str::FromStr, sync::Arc, thread::sleep, time::Duration};
+use std::{
+    fs::File,
+    io::Write,
+    path::{Path, PathBuf},
+    str::FromStr,
+    sync::Arc,
+    thread::sleep,
+    time::Duration,
+};
 
 use crate::{
     builder::Builder, chain::EsploraClient, oracle::KormirOracleClient, storage::SledStorage,
@@ -173,8 +181,7 @@ impl TestSuite {
         let storage_path = format!("tests/data/{name}");
         std::fs::create_dir_all(storage_path.clone()).expect("couldn't create file");
         let seed =
-            crate::io::xprv_from_path(PathBuf::from_str(&storage_path).unwrap(), Network::Regtest)
-                .unwrap();
+            xprv_from_path(PathBuf::from_str(&storage_path).unwrap(), Network::Regtest).unwrap();
         let esplora_host = "http://127.0.0.1:30000".to_string();
         let transport =
             Arc::new(LightningTransport::new(&seed.private_key.secret_bytes(), port).unwrap());
@@ -278,4 +285,27 @@ pub fn wait_for_offer_is_stored(contract_id: ContractId, storage: Arc<SledStorag
         time = time + Duration::from_secs(5);
         tries = tries + 1;
     }
+}
+
+/// Helper function that reads `[bitcoin::bip32::Xpriv]` bytes from a file.
+/// If the file does not exist then it will create a file `seed.ddk` in the specified path.
+pub fn xprv_from_path(path: PathBuf, network: Network) -> anyhow::Result<Xpriv> {
+    let seed_path = path.join("seed.ddk");
+    let seed = if Path::new(&seed_path).exists() {
+        let seed = std::fs::read(&seed_path)?;
+        let mut key = [0; 32];
+        key.copy_from_slice(&seed);
+        let xprv = Xpriv::new_master(network, &seed)?;
+        xprv
+    } else {
+        let mut file = File::create(&seed_path)?;
+        let mut entropy = [0u8; 32];
+        entropy.try_fill(&mut bitcoin::key::rand::thread_rng())?;
+        // let _mnemonic = Mnemonic::from_entropy(&entropy)?;
+        let xprv = Xpriv::new_master(network, &entropy)?;
+        file.write_all(&entropy)?;
+        xprv
+    };
+
+    Ok(seed)
 }
