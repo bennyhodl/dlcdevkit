@@ -1,4 +1,11 @@
-use bitcoin::{address::NetworkChecked, bip32::Xpriv, key::rand::Fill, Address, Amount, Network};
+pub mod oracle;
+
+use bitcoin::{
+    address::NetworkChecked,
+    bip32::Xpriv,
+    key::rand::{Fill, Rng},
+    Address, Amount, Network,
+};
 use chrono::{Local, TimeDelta};
 use ddk_payouts::enumeration::create_contract_input;
 use dlc::EnumerationPayout;
@@ -6,7 +13,8 @@ use dlc_manager::{
     contract::contract_input::ContractInput, manager::Manager, ContractId, Storage,
     SystemTimeProvider,
 };
-use kormir::OracleAnnouncement;
+use kormir::{Oracle, OracleAnnouncement};
+use oracle::MemoryOracle;
 use std::{
     fs::File,
     io::Write,
@@ -22,32 +30,25 @@ use crate::{
     transport::lightning::LightningTransport, wallet::DlcDevKitWallet, DlcDevKit,
 };
 use bitcoincore_rpc::RpcApi;
+use kormir::storage::MemoryStorage;
 
-type TestDlcDevKit = DlcDevKit<LightningTransport, SledStorage, KormirOracleClient>;
+type TestDlcDevKit = DlcDevKit<LightningTransport, SledStorage, MemoryOracle>;
 pub struct TestWallet(pub DlcDevKitWallet, String);
 
 #[rstest::fixture]
-pub async fn test_ddk() -> (TestSuite, TestSuite, OracleAnnouncement, ContractInput) {
-    let test = TestSuite::new("send_offer", 1778).await;
-    let test_two = TestSuite::new("sender_offer_two", 1779).await;
-    // test.ddk.start().unwrap();
-    // test_two.ddk.start().unwrap();
+pub async fn test_ddk() -> (
+    TestSuite,
+    TestSuite,
+    (u32, OracleAnnouncement),
+    ContractInput,
+) {
+    let oracle = Arc::new(MemoryOracle::new());
 
-    // let test_two_transport = test_two.ddk.transport.clone();
-    // let test_transport = test.ddk.transport.clone();
-    //
-    // let pubkey_one = test.ddk.transport.node_id;
-    // test_two_transport
-    //     .connect_outbound(pubkey_one, "127.0.0.1:1778")
-    //     .await;
+    let test = TestSuite::new("send_offer", 1778, oracle.clone()).await;
+    let test_two = TestSuite::new("sender_offer_two", 1779, oracle.clone()).await;
 
-    // tokio::time::sleep(Duration::from_millis(200)).await;
-
-    // let peers = test_transport.ln_peer_manager().list_peers();
-    // assert!(peers.len() > 0);
-
-    let announcement = create_oracle_announcement().await;
-    let contract_input = contract_input(&announcement);
+    let announcement = create_oracle_announcement(oracle.clone()).await;
+    let contract_input = contract_input(&announcement.1);
 
     let node_one_address = test.ddk.wallet.new_external_address().unwrap().address;
     let node_two_address = test_two.ddk.wallet.new_external_address().unwrap().address;
@@ -108,12 +109,8 @@ pub fn generate_blocks(num: u64) {
     }
 }
 
-pub async fn create_oracle_announcement() -> OracleAnnouncement {
-    let kormir = KormirOracleClient::new("http://127.0.0.1:8082")
-        .await
-        .unwrap();
-
-    let expiry = TimeDelta::seconds(20);
+pub async fn create_oracle_announcement(oracle: Arc<MemoryOracle>) -> (u32, OracleAnnouncement) {
+    let expiry = TimeDelta::seconds(15);
     let timestamp: u32 = Local::now()
         .checked_add_signed(expiry)
         .unwrap()
@@ -121,8 +118,13 @@ pub async fn create_oracle_announcement() -> OracleAnnouncement {
         .try_into()
         .unwrap();
 
-    kormir
-        .create_event(vec!["rust".to_string(), "go".to_string()], timestamp)
+    oracle
+        .oracle
+        .create_enum_event(
+            "test".into(),
+            vec!["rust".to_string(), "go".to_string()],
+            timestamp,
+        )
         .await
         .unwrap()
 }
@@ -177,7 +179,7 @@ pub struct TestSuite {
 }
 
 impl TestSuite {
-    pub async fn new(name: &str, port: u16) -> TestSuite {
+    pub async fn new(name: &str, port: u16, oracle: Arc<MemoryOracle>) -> TestSuite {
         let storage_path = format!("tests/data/{name}");
         std::fs::create_dir_all(storage_path.clone()).expect("couldn't create file");
         let seed =
@@ -186,11 +188,6 @@ impl TestSuite {
         let transport =
             Arc::new(LightningTransport::new(&seed.private_key.secret_bytes(), port).unwrap());
         let storage = Arc::new(SledStorage::new(&format!("{storage_path}/sleddb")).unwrap());
-        let oracle = Arc::new(
-            KormirOracleClient::new("http://127.0.0.1:8082")
-                .await
-                .unwrap(),
-        );
 
         let ddk = Self::create_ddk(
             name,
@@ -214,7 +211,7 @@ impl TestSuite {
         name: &str,
         transport: Arc<LightningTransport>,
         storage: Arc<SledStorage>,
-        oracle: Arc<KormirOracleClient>,
+        oracle: Arc<MemoryOracle>,
         seed_bytes: [u8; 32],
         esplora_host: String,
         network: Network,
@@ -308,4 +305,11 @@ pub fn xprv_from_path(path: PathBuf, network: Network) -> anyhow::Result<Xpriv> 
     };
 
     Ok(seed)
+}
+
+pub fn memory_oracle() -> Oracle<MemoryStorage> {
+    let mut seed: [u8; 64] = [0; 64];
+    bitcoin::key::rand::thread_rng().fill(&mut seed);
+    let xpriv = Xpriv::new_master(Network::Regtest, &seed).unwrap();
+    Oracle::from_xpriv(MemoryStorage::default(), xpriv).unwrap()
 }

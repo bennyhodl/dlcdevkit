@@ -1,8 +1,9 @@
 use crate::error::{wallet_err_to_manager_err, WalletError};
-use crate::{chain::EsploraClient, signer::SignerInformation, Storage};
+use crate::{chain::EsploraClient, Storage};
 use bdk_chain::{spk_client::FullScanRequest, Balance};
 use bdk_esplora::EsploraExt;
 use bdk_wallet::coin_selection::{BranchAndBoundCoinSelection, CoinSelectionAlgorithm};
+use bdk_wallet::descriptor::IntoWalletDescriptor;
 pub use bdk_wallet::LocalOutput;
 use bdk_wallet::WalletPersister;
 use bdk_wallet::{
@@ -15,19 +16,13 @@ use bdk_wallet::{
     AddressInfo, KeychainKind, PersistedWallet, SignOptions, Update, Wallet,
 };
 use bdk_wallet::{Utxo, WeightedUtxo};
-use bitcoin::hashes::sha256::Hash as Sha256Hash;
-use bitcoin::{
-    hashes::{sha256::HashEngine, Hash},
-    secp256k1::SecretKey,
-    Amount, FeeRate, ScriptBuf, Transaction,
-};
+use bitcoin::{secp256k1::SecretKey, Amount, FeeRate, ScriptBuf, Transaction};
 use dlc_manager::{error::Error as ManagerError, SimpleSigner};
 use lightning::chain::chaininterface::{ConfirmationTarget, FeeEstimator};
 use std::collections::HashMap;
 use std::sync::RwLock;
 use std::{
     collections::BTreeMap,
-    io::Write,
     sync::{atomic::Ordering, Arc},
 };
 use std::{str::FromStr, sync::atomic::AtomicU32};
@@ -75,8 +70,12 @@ impl DlcDevKitWallet {
 
         let xprv = Xpriv::new_master(network, seed_bytes)?;
 
-        let external_descriptor = Bip84(xprv, KeychainKind::External);
-        let internal_descriptor = Bip84(xprv, KeychainKind::Internal);
+        let external_descriptor = Bip84(xprv, KeychainKind::External)
+            .into_wallet_descriptor(&secp, network)
+            .unwrap();
+        let internal_descriptor = Bip84(xprv, KeychainKind::Internal)
+            .into_wallet_descriptor(&secp, network)
+            .unwrap();
         // let file_store = bdk_file_store::Store::<ChangeSet>::open_or_create_new(b"ddk-wallet", wallet_storage_path)?;
         // let mut storage = SledStorage::new(wallet_storage_path.to_str().unwrap())?;
         let mut storage = WalletStorage(storage);
@@ -317,45 +316,49 @@ impl dlc_manager::ContractSignerProvider for DlcDevKitWallet {
 
     // Using the data deterministically generate a key id. From a child key.
     fn derive_signer_key_id(&self, _is_offer_party: bool, temp_id: [u8; 32]) -> [u8; 32] {
-        let newest_index = self.next_derivation_index().unwrap_or(1);
-        let derivation_path = format!("m/84'/0'/0'/0'/{}", newest_index);
-        let child_path = DerivationPath::from_str(&derivation_path)
-            .expect("Not a valid derivation path to derive signer key.");
-        let child_key = self
-            .xprv
-            .derive_priv(&self.secp, &child_path)
-            .expect("Could not get child key for derivation path.");
+        // let newest_index = self.next_derivation_index().unwrap_or(1);
+        // let derivation_path = format!("m/84'/0'/0'/0'/{}", newest_index);
+        //  let child_path = DerivationPath::from_str(&derivation_path)
+        //      .expect("Not a valid derivation path to derive signer key.");
+        //let child_key = self
+        //     .xprv
+        //     .derive_priv(&self.secp, &child_path)
+        //     .expect("Could not get child key for derivation path.");
 
-        let mut hasher = HashEngine::default();
-        hasher.write_all(&temp_id).unwrap();
-        hasher.write_all(&child_key.encode()).unwrap();
-        let hash: Sha256Hash = Hash::from_engine(hasher);
+        // let mut hasher = HashEngine::default();
+        // hasher.write_all(&temp_id).unwrap();
+        // hasher.write_all(&child_key.encode()).unwrap();
+        // let hash: Sha256Hash = Hash::from_engine(hasher);
 
-        let mut key_id = [0u8; 32];
-        key_id.copy_from_slice(hash.as_byte_array());
-        let public_key = PublicKey::from_secret_key(&self.secp, &child_key.private_key);
-        let signer_info = SignerInformation {
-            index: newest_index,
-            public_key,
-            secret_key: child_key.private_key,
-        };
-        self.storage
-            .0
-            .store_derived_key_id(key_id, signer_info)
-            .unwrap();
+        // let child_key = SecretKey::from_slice(&temp_id).expect("correct size");
 
-        let key_id_string = hex::encode(&key_id);
-        tracing::info!(key_id = key_id_string, "Derived new key id for signer.");
-        key_id
+        // let mut key_id = [0u8; 32];
+        // key_id.copy_from_slice(temp_id.as_slice());
+        // let public_key = PublicKey::from_secret_key(&self.secp, &child_key);
+        // let signer_info = SignerInformation {
+        //     index: 0,
+        //     public_key,
+        //     secret_key: child_key,
+        // };
+        // self.storage
+        //     .0
+        //     .store_derived_key_id(key_id, signer_info)
+        //     .unwrap();
+
+        // let key_id_string = hex::encode(&key_id);
+        // tracing::info!(key_id = key_id_string, "Derived new key id for signer.");
+        // temp_id
+        temp_id
     }
 
     fn derive_contract_signer(&self, key_id: [u8; 32]) -> Result<Self::Signer, ManagerError> {
-        let info = self.storage.0.get_key_information(key_id).unwrap();
+        // let info = self.storage.0.get_key_information(key_id).unwrap();
+        let child_key = SecretKey::from_slice(&key_id).expect("correct size");
         tracing::info!(
             key_id = hex::encode(key_id),
             "Derived secret key for contract."
         );
-        Ok(SimpleSigner::new(info.secret_key))
+        Ok(SimpleSigner::new(child_key))
     }
 
     fn get_secret_key_for_pubkey(&self, pubkey: &PublicKey) -> Result<SecretKey, ManagerError> {
@@ -422,14 +425,6 @@ impl dlc_manager::Wallet for DlcDevKitWallet {
             tracing::error!("Could not sign PSBT: {:?}", e);
             return Err(ManagerError::WalletError(WalletError::Signing(e).into()));
         };
-        print!(
-            "{}",
-            serde_json::to_string_pretty(&psbt.inputs[input_index]).unwrap()
-        );
-        print!(
-            "{}",
-            serde_json::to_string_pretty(&signed_psbt.inputs[input_index]).unwrap()
-        );
 
         psbt.inputs[input_index] = signed_psbt.inputs[input_index].clone();
 
@@ -463,15 +458,19 @@ impl dlc_manager::Wallet for DlcDevKitWallet {
             })
             .collect::<Vec<WeightedUtxo>>();
 
-        let selected_utxos = BranchAndBoundCoinSelection::new(Amount::MAX_MONEY.to_sat())
-            .coin_select(
-                vec![],
-                utxos,
-                FeeRate::from_sat_per_vb(fee_rate).unwrap(),
-                amount,
-                ScriptBuf::new().as_script(),
-            )
-            .unwrap();
+        let selected_utxos = BranchAndBoundCoinSelection::new(
+            Amount::MAX_MONEY.to_sat(),
+            bdk_wallet::coin_selection::SingleRandomDraw::default(),
+        )
+        .coin_select(
+            vec![],
+            utxos,
+            FeeRate::from_sat_per_vb(fee_rate).unwrap(),
+            amount,
+            ScriptBuf::new().as_script(),
+            &mut bitcoin::key::rand::thread_rng(),
+        )
+        .unwrap();
 
         let dlc_utxos = selected_utxos
             .selected

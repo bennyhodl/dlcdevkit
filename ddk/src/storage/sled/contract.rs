@@ -152,6 +152,7 @@ impl Storage for SledStorage {
     }
 
     fn update_contract(&self, contract: &Contract) -> Result<(), Error> {
+        tracing::info!("Updating contract. {:?}", contract);
         let serialized = serialize_contract(contract)?;
         self.contract_tree()?
             .transaction::<_, _, UnabortableTransactionError>(|db| {
@@ -165,7 +166,10 @@ impl Storage for SledStorage {
                 db.insert(&contract.get_id(), serialized.clone())?;
                 Ok(())
             })
-            .map_err(to_storage_error)?;
+            .map_err(|e| {
+                tracing::error!("Could not update contract: {:?}", e);
+                to_storage_error(e)
+            })?;
         Ok(())
     }
 

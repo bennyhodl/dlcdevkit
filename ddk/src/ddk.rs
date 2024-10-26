@@ -253,9 +253,16 @@ mod tests {
     #[rstest]
     #[test_log::test(tokio::test)]
     async fn contract_execution(
-        #[future] test_ddk: (TestSuite, TestSuite, OracleAnnouncement, ContractInput),
+        #[future] test_ddk: (
+            TestSuite,
+            TestSuite,
+            (u32, OracleAnnouncement),
+            ContractInput,
+        ),
     ) {
         let (alice, bob, announcement, contract_input) = test_ddk.await;
+        let (id, announcement) = announcement;
+
         let alice_makes_offer = alice.ddk.manager.send_offer_with_announcements(
             &contract_input,
             bob.ddk.transport.node_id,
@@ -323,19 +330,6 @@ mod tests {
         let locktime = match alice.ddk.storage.get_contract(&contract_id).unwrap() {
             Some(contract) => match contract {
                 Contract::Confirmed(signed_contract) => {
-                    println!(
-                        "Locktime: {:?}\nFund: {:?}",
-                        signed_contract.accepted_contract.dlc_transactions.cets[0].lock_time,
-                        signed_contract
-                            .accepted_contract
-                            .dlc_transactions
-                            .fund
-                            .lock_time,
-                    );
-                    signed_contract.accepted_contract.dlc_transactions.cets[0]
-                        .input
-                        .iter()
-                        .for_each(|i| println!("Sequence: {:?}", i.sequence));
                     signed_contract.accepted_contract.dlc_transactions.cets[0]
                         .lock_time
                         .to_consensus_u32()
@@ -353,7 +347,8 @@ mod tests {
         let attestation = alice
             .ddk
             .oracle
-            .sign_event(announcement.clone(), "rust".to_string())
+            .oracle
+            .sign_enum_event(id, "rust".to_string())
             .await;
 
         while time < announcement.oracle_event.event_maturity_epoch || time < locktime {
@@ -365,7 +360,6 @@ mod tests {
 
             time = checked_time;
             generate_blocks(5);
-            sleep(Duration::from_secs(5)).await
         }
 
         assert!(attestation.is_ok());
@@ -373,14 +367,23 @@ mod tests {
         bob.ddk.wallet.sync().unwrap();
         alice.ddk.wallet.sync().unwrap();
 
+        bob.ddk
+            .manager
+            .close_confirmed_contract(&contract_id, vec![(0, attestation.unwrap())])
+            .unwrap();
+
+        sleep(Duration::from_secs(10)).await;
+
         bob.ddk.manager.periodic_check(false).await.unwrap();
 
-        let contract = alice.ddk.storage.get_contract(&contract_id);
-        assert!(matches!(contract.unwrap().unwrap(), Contract::PreClosed(_)));
+        let contract = bob.ddk.storage.get_contract(&contract_id).unwrap().unwrap();
+        assert!(matches!(contract, Contract::PreClosed(_)));
 
         generate_blocks(10);
 
-        let contract = alice.ddk.storage.get_contract(&contract_id);
+        bob.ddk.manager.periodic_check(false).await.unwrap();
+
+        let contract = bob.ddk.storage.get_contract(&contract_id);
         assert!(matches!(contract.unwrap().unwrap(), Contract::Closed(_)));
     }
 }
