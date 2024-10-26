@@ -198,7 +198,6 @@ mod tests {
     use chrono::{Local, TimeDelta};
 
     use super::*;
-    use crate::test_util::create_oracle_announcement;
 
     async fn create_kormir() -> KormirOracleClient {
         KormirOracleClient::new("http://127.0.0.1:8082")
@@ -207,7 +206,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_announcement() {
+    async fn kormir() {
         let kormir = create_kormir().await;
 
         let expiry = TimeDelta::seconds(30);
@@ -222,16 +221,11 @@ mod tests {
             .create_event(vec!["rust".to_string(), "go".to_string()], timestamp)
             .await;
 
-        assert!(announcement.is_ok())
-    }
+        assert!(announcement.is_ok());
 
-    #[tokio::test]
-    async fn sign_enum() {
-        let kormir = create_kormir().await;
-
-        let announcement = create_oracle_announcement().await;
-
-        let sign_enum = kormir.sign_event(announcement, "rust".to_string()).await;
+        let sign_enum = kormir
+            .sign_event(announcement.unwrap(), "rust".to_string())
+            .await;
 
         assert!(sign_enum.is_ok())
     }
