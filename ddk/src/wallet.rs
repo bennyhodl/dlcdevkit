@@ -8,7 +8,7 @@ pub use bdk_wallet::LocalOutput;
 use bdk_wallet::WalletPersister;
 use bdk_wallet::{
     bitcoin::{
-        bip32::{DerivationPath, Xpriv},
+        bip32::Xpriv,
         secp256k1::{All, PublicKey, Secp256k1},
         Address, Network, Txid,
     },
@@ -16,16 +16,21 @@ use bdk_wallet::{
     AddressInfo, KeychainKind, PersistedWallet, SignOptions, Update, Wallet,
 };
 use bdk_wallet::{Utxo, WeightedUtxo};
+use bitcoin::hashes::sha256::Hash as Sha256Hash;
+use bitcoin::hashes::sha256::HashEngine;
+use bitcoin::hashes::Hash;
+use bitcoin::key::rand::{thread_rng, Fill};
 use bitcoin::{secp256k1::SecretKey, Amount, FeeRate, ScriptBuf, Transaction};
 use dlc_manager::{error::Error as ManagerError, SimpleSigner};
 use lightning::chain::chaininterface::{ConfirmationTarget, FeeEstimator};
 use std::collections::HashMap;
+use std::io::Write;
+use std::sync::atomic::AtomicU32;
 use std::sync::RwLock;
 use std::{
     collections::BTreeMap,
     sync::{atomic::Ordering, Arc},
 };
-use std::{str::FromStr, sync::atomic::AtomicU32};
 
 /// Wrapper type to pass `crate::Storage` to a BDK wallet.
 #[derive(Clone)]
@@ -316,43 +321,23 @@ impl dlc_manager::ContractSignerProvider for DlcDevKitWallet {
 
     // Using the data deterministically generate a key id. From a child key.
     fn derive_signer_key_id(&self, _is_offer_party: bool, temp_id: [u8; 32]) -> [u8; 32] {
-        // let newest_index = self.next_derivation_index().unwrap_or(1);
-        // let derivation_path = format!("m/84'/0'/0'/0'/{}", newest_index);
-        //  let child_path = DerivationPath::from_str(&derivation_path)
-        //      .expect("Not a valid derivation path to derive signer key.");
-        //let child_key = self
-        //     .xprv
-        //     .derive_priv(&self.secp, &child_path)
-        //     .expect("Could not get child key for derivation path.");
+        let mut random_bytes = [0u8; 32];
+        let _ = random_bytes.try_fill(&mut thread_rng()).map_err(|e| {
+            tracing::error!(
+                "Did not create random bytes while generating key id. {:?}",
+                e
+            );
+        });
+        let mut hasher = HashEngine::default();
+        hasher.write_all(&temp_id).unwrap();
+        hasher.write_all(&random_bytes).unwrap();
+        let hash: Sha256Hash = Hash::from_engine(hasher);
 
-        // let mut hasher = HashEngine::default();
-        // hasher.write_all(&temp_id).unwrap();
-        // hasher.write_all(&child_key.encode()).unwrap();
-        // let hash: Sha256Hash = Hash::from_engine(hasher);
-
-        // let child_key = SecretKey::from_slice(&temp_id).expect("correct size");
-
-        // let mut key_id = [0u8; 32];
-        // key_id.copy_from_slice(temp_id.as_slice());
-        // let public_key = PublicKey::from_secret_key(&self.secp, &child_key);
-        // let signer_info = SignerInformation {
-        //     index: 0,
-        //     public_key,
-        //     secret_key: child_key,
-        // };
-        // self.storage
-        //     .0
-        //     .store_derived_key_id(key_id, signer_info)
-        //     .unwrap();
-
-        // let key_id_string = hex::encode(&key_id);
-        // tracing::info!(key_id = key_id_string, "Derived new key id for signer.");
-        // temp_id
-        temp_id
+        // Might want to store this for safe backups.
+        hash.to_byte_array()
     }
 
     fn derive_contract_signer(&self, key_id: [u8; 32]) -> Result<Self::Signer, ManagerError> {
-        // let info = self.storage.0.get_key_information(key_id).unwrap();
         let child_key = SecretKey::from_slice(&key_id).expect("correct size");
         tracing::info!(
             key_id = hex::encode(key_id),
@@ -361,43 +346,36 @@ impl dlc_manager::ContractSignerProvider for DlcDevKitWallet {
         Ok(SimpleSigner::new(child_key))
     }
 
-    fn get_secret_key_for_pubkey(&self, pubkey: &PublicKey) -> Result<SecretKey, ManagerError> {
-        tracing::info!(
-            pubkey = pubkey.to_string(),
-            "Getting secret key from pubkey"
-        );
-        Ok(self.storage.0.get_secret_key(pubkey).unwrap())
+    fn get_secret_key_for_pubkey(&self, _pubkey: &PublicKey) -> Result<SecretKey, ManagerError> {
+        unreachable!("get_secret_key_for_pubkey is only used in channels.")
     }
 
     fn get_new_secret_key(&self) -> Result<SecretKey, ManagerError> {
-        let newest_index = self.next_derivation_index().unwrap();
-        let derivation_path = format!("m/86'/0'/0'/0'/{}", newest_index);
-        let child_path = DerivationPath::from_str(&derivation_path)
-            .expect("Not a valid derivation path to derive signer key.");
-        let child_key = self
-            .xprv
-            .derive_priv(&self.secp, &child_path)
-            .expect("Could not get child key for derivation path.");
-        tracing::info!("Retrieved new secret key.");
-        Ok(child_key.private_key)
+        unreachable!("get_new_secret_key is only used for channels")
     }
 }
 
 impl dlc_manager::Wallet for DlcDevKitWallet {
     fn get_new_address(&self) -> Result<bitcoin::Address, ManagerError> {
-        tracing::info!("Retrieving new address for dlc manager");
-        Ok(self
+        let address = self
             .new_external_address()
-            .map_err(wallet_err_to_manager_err)?
-            .address)
+            .map_err(wallet_err_to_manager_err)?;
+        tracing::info!(
+            address = address.address.to_string(),
+            "Revealed new address for contract."
+        );
+        Ok(address.address)
     }
 
     fn get_new_change_address(&self) -> Result<bitcoin::Address, ManagerError> {
-        tracing::info!("Retrieving new change address for dlc manager");
-        Ok(self
+        let address = self
             .new_change_address()
-            .map_err(wallet_err_to_manager_err)?
-            .address)
+            .map_err(wallet_err_to_manager_err)?;
+        tracing::info!(
+            address = address.address.to_string(),
+            "Revealed new change address for contract."
+        );
+        Ok(address.address)
     }
 
     fn sign_psbt_input(
@@ -431,12 +409,13 @@ impl dlc_manager::Wallet for DlcDevKitWallet {
         Ok(())
     }
 
-    // TODO: Does BDK have reserved UTXOs?
+    // BDK does not have reserving UTXOs nor need it.
     fn unreserve_utxos(&self, _outpoints: &[bitcoin::OutPoint]) -> Result<(), ManagerError> {
         Ok(())
     }
 
     fn import_address(&self, address: &bitcoin::Address) -> Result<(), ManagerError> {
+        tracing::warn!(address = address.to_string(), "Importing address.");
         // might be ok, might not
         Ok(self.storage.0.import_address_to_storage(address).unwrap())
     }
@@ -468,7 +447,7 @@ impl dlc_manager::Wallet for DlcDevKitWallet {
             FeeRate::from_sat_per_vb(fee_rate).unwrap(),
             amount,
             ScriptBuf::new().as_script(),
-            &mut bitcoin::key::rand::thread_rng(),
+            &mut thread_rng(),
         )
         .unwrap();
 
