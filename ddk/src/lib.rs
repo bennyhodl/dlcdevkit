@@ -4,7 +4,6 @@
 // #![allow(unused_imports)]
 mod ddk;
 mod error;
-mod signer;
 #[cfg(test)]
 mod test_util;
 
@@ -39,12 +38,11 @@ pub use dlc_manager;
 pub use dlc_messages;
 
 use async_trait::async_trait;
-use bitcoin::secp256k1::PublicKey;
+use bitcoin::secp256k1::{PublicKey, SecretKey};
 use ddk::DlcDevKitDlcManager;
 use dlc_messages::oracle_msgs::OracleAnnouncement;
 use dlc_messages::Message;
 use error::WalletError;
-use signer::DeriveSigner;
 use transport::PeerInformation;
 
 #[async_trait]
@@ -66,7 +64,7 @@ pub trait Transport: Send + Sync + 'static {
 }
 
 /// Storage for DLC contracts.
-pub trait Storage: dlc_manager::Storage + DeriveSigner + Send + Sync + 'static {
+pub trait Storage: dlc_manager::Storage + Send + Sync + 'static {
     ///// Instantiate the storage for the BDK wallet.
     fn initialize_bdk(&self) -> Result<ChangeSet, WalletError>;
     /// Save changeset to the wallet storage.
@@ -79,6 +77,12 @@ pub trait Storage: dlc_manager::Storage + DeriveSigner + Send + Sync + 'static {
     fn save_announcement(&self, announcement: OracleAnnouncement) -> anyhow::Result<()>;
     // #[cfg(feature = "marketplace")]
     fn get_marketplace_announcements(&self) -> anyhow::Result<Vec<OracleAnnouncement>>;
+}
+
+/// Retrieval of key material for signing DLC transactions
+pub trait KeyStorage {
+    fn get_secret_key(&self, key_id: [u8; 32]) -> Result<SecretKey, WalletError>;
+    fn store_secret_key(&self, key_id: [u8; 32], secret_key: SecretKey) -> Result<(), WalletError>;
 }
 
 /// Oracle client
