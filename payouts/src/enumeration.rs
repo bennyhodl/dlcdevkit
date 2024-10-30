@@ -19,8 +19,7 @@ pub fn create_contract_input(
     let contract_descriptor = ContractDescriptor::Enum(EnumDescriptor { outcome_payouts });
 
     let oracles = OracleInput {
-        public_keys: vec![XOnlyPublicKey::from_str(&oracle_pubkey)
-        .unwrap()],
+        public_keys: vec![XOnlyPublicKey::from_str(&oracle_pubkey).unwrap()],
         event_id,
         threshold: 1,
     };
