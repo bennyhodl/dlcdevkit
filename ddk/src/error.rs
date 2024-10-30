@@ -40,4 +40,6 @@ pub enum WalletError {
     SendMessage(String),
     #[error("Bincode error")]
     Bincode(#[from] bincode::Error),
+    #[error("Error converting to descriptor.")]
+    Descriptor(#[from] bdk_wallet::descriptor::DescriptorError),
 }

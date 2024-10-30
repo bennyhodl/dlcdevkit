@@ -31,7 +31,7 @@ where
             tracing::info!("Oracle attestation. Saved to storage.")
         }
         Kind::Custom(88) => {
-            let announcement = oracle_announcement_from_str(event.content()).unwrap();
+            let announcement = oracle_announcement_from_str(&event.content).unwrap();
             storage.save_announcement(announcement).unwrap();
             tracing::info!("Oracle announcement. Saved to storage.")
         }

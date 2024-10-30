@@ -75,14 +75,11 @@ impl DlcDevKitWallet {
 
         let xprv = Xpriv::new_master(network, seed_bytes)?;
 
-        let external_descriptor = Bip84(xprv, KeychainKind::External)
-            .into_wallet_descriptor(&secp, network)
-            .unwrap();
-        let internal_descriptor = Bip84(xprv, KeychainKind::Internal)
-            .into_wallet_descriptor(&secp, network)
-            .unwrap();
-        // let file_store = bdk_file_store::Store::<ChangeSet>::open_or_create_new(b"ddk-wallet", wallet_storage_path)?;
-        // let mut storage = SledStorage::new(wallet_storage_path.to_str().unwrap())?;
+        let external_descriptor =
+            Bip84(xprv, KeychainKind::External).into_wallet_descriptor(&secp, network)?;
+        let internal_descriptor =
+            Bip84(xprv, KeychainKind::Internal).into_wallet_descriptor(&secp, network)?;
+
         let mut storage = WalletStorage(storage);
 
         let load_wallet = Wallet::load()
