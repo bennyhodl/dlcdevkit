@@ -57,24 +57,11 @@ impl NostrDlcRelayHandler {
         let mut bytes = msg.type_id().encode();
         bytes.extend(msg.encode());
 
-        let content = encrypt(
-            &self.keys.secret_key()?.clone(),
-            &to,
-            base64::encode(&bytes),
-        )?;
+        let content = encrypt(&self.keys.secret_key().clone(), &to, base64::encode(&bytes))?;
 
-        let p_tags = Tag::PublicKey {
-            public_key: self.public_key(),
-            relay_url: None,
-            alias: None,
-            uppercase: false,
-        };
+        let p_tags = Tag::public_key(self.public_key());
 
-        let e_tags = event_id.map(|e| Tag::Event {
-            event_id: e,
-            relay_url: None,
-            marker: None,
-        });
+        let e_tags = event_id.map(|e| Tag::event(e));
 
         let tags = [Some(p_tags), e_tags]
             .into_iter()
@@ -87,11 +74,7 @@ impl NostrDlcRelayHandler {
     }
 
     pub fn parse_dlc_msg_event(&self, event: &Event) -> anyhow::Result<Message> {
-        let decrypt = decrypt(
-            &self.keys.secret_key().unwrap(),
-            &event.pubkey,
-            &event.content,
-        )?;
+        let decrypt = decrypt(&self.keys.secret_key(), &event.pubkey, &event.content)?;
 
         let bytes = base64::decode(decrypt)?;
 
@@ -133,7 +116,7 @@ impl NostrDlcRelayHandler {
 
         client
             .subscribe(vec![msg_subscription, oracle_subscription], None)
-            .await;
+            .await?;
 
         client.connect().await;
 

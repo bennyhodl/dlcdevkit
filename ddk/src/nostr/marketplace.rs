@@ -18,12 +18,14 @@ where
     S::Target: Storage,
 {
     let client = ClientBuilder::new().build();
-    client.add_relays(relays).await?;
+    for relay in relays {
+        client.add_relay(relay).await?;
+    }
     client.connect().await;
     let now = Timestamp::now();
     let oracle_filter = util::create_oracle_message_filter(now);
 
-    client.subscribe(vec![oracle_filter], None).await;
+    client.subscribe(vec![oracle_filter], None).await?;
 
     while let Ok(notification) = client.notifications().recv().await {
         match notification {
@@ -34,7 +36,7 @@ where
             } => {
                 util::handle_oracle_event(storage, *event);
             }
-            RelayPoolNotification::Stop | RelayPoolNotification::Shutdown => {
+            RelayPoolNotification::Shutdown => {
                 tracing::error!("Relay disconnected.")
             }
             _ => (),
