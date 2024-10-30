@@ -11,7 +11,6 @@ use crate::wallet::DlcDevKitWallet;
 use crate::{Oracle, Storage, Transport};
 use thiserror::Error;
 
-const DEFAULT_STORAGE_PATH: &str = "/tmp/ddk";
 const DEFAULT_ESPLORA_HOST: &str = "https://mutinynet.com/api";
 const DEFAULT_NETWORK: Network = Network::Signet;
 
@@ -24,7 +23,6 @@ pub struct Builder<T, S, O> {
     oracle: Option<Arc<O>>,
     esplora_host: String,
     network: Network,
-    storage_path: String,
     seed_bytes: [u8; 32],
 }
 
@@ -43,7 +41,6 @@ pub enum BuilderError {
 ///
 /// esplora_host: <https://mutinynet.com/api>
 /// network: Network::Signet
-/// storage_path: "/tmp/ddk"
 impl<T: Transport, S: Storage, O: Oracle> Default for Builder<T, S, O> {
     fn default() -> Self {
         Self {
@@ -53,7 +50,6 @@ impl<T: Transport, S: Storage, O: Oracle> Default for Builder<T, S, O> {
             oracle: None,
             esplora_host: DEFAULT_ESPLORA_HOST.to_string(),
             network: DEFAULT_NETWORK,
-            storage_path: DEFAULT_STORAGE_PATH.to_string(),
             seed_bytes: [0u8; 32],
         }
     }
@@ -108,12 +104,6 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
         self
     }
 
-    /// Storage path to store DDK related data.
-    pub fn set_storage_path(&mut self, path: String) -> &mut Self {
-        self.storage_path = path;
-        self
-    }
-
     /// Set the seed bytes for the wallet.
     pub fn set_seed_bytes(&mut self, bytes: [u8; 32]) -> &mut Self {
         self.seed_bytes = bytes;
@@ -127,12 +117,6 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
             esplora = self.esplora_host,
             "Building DDK."
         );
-
-        // Creates the DDK directory.
-        //
-        // TODO: Don't need to access filesystem with DDK. Should be for lib consumer.
-        std::fs::create_dir_all(&self.storage_path)?;
-        tracing::info!(path=?self.storage_path, "Created directory for ddk node.");
 
         let transport = self
             .transport

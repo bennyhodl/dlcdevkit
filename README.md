@@ -34,7 +34,6 @@ fn main() {
     let ddk: ApplicationDdk = Builder::new()
         .set_seed_bytes([0u8;32])
         .set_network(Network::Regtest)
-        .set_storage_path("<storage path>")
         .set_esplora_path("http://127.0.0.1:3000")
         .set_transport(transport.clone())
         .set_storage(storage.clone())
