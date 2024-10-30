@@ -38,8 +38,8 @@ pub enum WalletError {
     ReceiveMessage(#[from] crossbeam::channel::RecvError),
     #[error("Sending error from wallet channel: {0}")]
     SendMessage(String),
-    #[error("Bincode error")]
-    Bincode(#[from] bincode::Error),
+    #[error("Serde error: {0}")]
+    Serde(#[from] serde_json::Error),
     #[error("Error converting to descriptor.")]
     Descriptor(#[from] bdk_wallet::descriptor::DescriptorError),
 }
