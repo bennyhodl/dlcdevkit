@@ -66,6 +66,7 @@ pub fn generate_payout_curve(
     ])?)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn create_contract_input(
     min_price: u64,
     max_price: u64,

@@ -132,7 +132,7 @@ where
             rt.shutdown_background();
             Ok(())
         } else {
-            return Err(anyhow!("Runtime is not running."));
+            Err(anyhow!("Runtime is not running."))
         }
     }
 
@@ -199,7 +199,7 @@ where
             .expect("sending offer message");
         let offer = receiver.recv().expect("no offer dlc");
 
-        let contract_id = hex::encode(&offer.temporary_contract_id);
+        let contract_id = hex::encode(offer.temporary_contract_id);
         self.transport
             .send_message(counter_party, Message::Offer(offer.clone()));
         tracing::info!(
@@ -229,7 +229,7 @@ where
         self.transport
             .send_message(public_key, Message::Accept(accept_dlc.clone()));
 
-        let contract_id = hex::encode(&contract_id);
+        let contract_id = hex::encode(contract_id);
         let counter_party = public_key.to_string();
         tracing::info!(counter_party, contract_id, "Accepted DLC contract.");
 

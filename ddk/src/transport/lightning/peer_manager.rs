@@ -48,7 +48,7 @@ pub struct LightningTransport {
 impl LightningTransport {
     pub fn new(seed_bytes: &[u8; 32], listening_port: u16) -> anyhow::Result<LightningTransport> {
         let time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?;
-        let key_signer = KeysManager::new(&seed_bytes, time.as_secs(), time.as_nanos() as u32);
+        let key_signer = KeysManager::new(seed_bytes, time.as_secs(), time.as_nanos() as u32);
         let node_id = key_signer
             .get_node_id(lightning::sign::Recipient::Node)
             .map_err(|_| anyhow!("Could not get node id."))?;

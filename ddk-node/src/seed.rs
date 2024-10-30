@@ -16,8 +16,7 @@ pub fn xprv_from_path(path: PathBuf, network: Network) -> anyhow::Result<Xpriv> 
         let seed = std::fs::read(&seed_path)?;
         let mut key = [0; 32];
         key.copy_from_slice(&seed);
-        let xprv = Xpriv::new_master(network, &seed)?;
-        xprv
+        Xpriv::new_master(network, &seed)?
     } else {
         let mut file = File::create(&seed_path)?;
         let mut entropy = [0u8; 32];
