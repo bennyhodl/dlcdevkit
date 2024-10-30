@@ -100,21 +100,21 @@ impl Storage for SledStorage {
         let wallet_tree = self.wallet_tree()?;
         let new_changeset = match wallet_tree.get(CHANGESET_KEY)? {
             Some(stored_changeset) => {
-                let mut stored_changeset = bincode::deserialize::<ChangeSet>(&stored_changeset)?;
+                let mut stored_changeset = serde_json::from_slice::<ChangeSet>(&stored_changeset)?;
                 stored_changeset.merge(changeset.clone());
                 stored_changeset
             }
             None => changeset.to_owned(),
         };
 
-        wallet_tree.insert(CHANGESET_KEY, bincode::serialize(&new_changeset)?)?;
+        wallet_tree.insert(CHANGESET_KEY, serde_json::to_vec(&new_changeset)?)?;
         Ok(())
     }
 
     fn initialize_bdk(&self) -> Result<ChangeSet, WalletError> {
         tracing::info!("Initializing wallet persistance.");
         let changeset = match self.wallet_tree()?.get(CHANGESET_KEY)? {
-            Some(changeset) => bincode::deserialize::<ChangeSet>(&changeset)?,
+            Some(changeset) => serde_json::from_slice(&changeset)?,
             None => ChangeSet::default(),
         };
         Ok(changeset)
@@ -122,7 +122,7 @@ impl Storage for SledStorage {
 
     fn list_peers(&self) -> anyhow::Result<Vec<PeerInformation>> {
         if let Some(bytes) = self.db.get(PEERS_KEY)? {
-            let peers: Vec<PeerInformation> = serde_json::from_slice(&bytes)?;
+            let peers: Vec<_> = serde_json::from_slice(&bytes)?;
             Ok(peers)
         } else {
             Ok(vec![])
@@ -148,14 +148,14 @@ impl Storage for SledStorage {
         let marketplace = self.marketplace_tree()?;
         let stored_announcements: Vec<OracleAnnouncement> =
             match marketplace.get(MARKETPLACE_KEY)? {
-                Some(o) => bincode::deserialize(&o)?,
+                Some(o) => serde_json::from_slice(&o)?,
                 None => vec![],
             };
         let mut announcements =
             crate::util::filter_expired_oracle_announcements(stored_announcements);
         announcements.push(announcement);
 
-        let serialize_announcements = bincode::serialize(&announcements)?;
+        let serialize_announcements = serde_json::to_vec(&announcements)?;
         marketplace.insert(MARKETPLACE_KEY, serialize_announcements)?;
 
         Ok(())
@@ -167,7 +167,7 @@ impl Storage for SledStorage {
             Some(o) => o.to_vec(),
             None => vec![],
         };
-        let announcements: Vec<OracleAnnouncement> = bincode::deserialize(&prev_announcements)?;
+        let announcements: Vec<OracleAnnouncement> = serde_json::from_slice(&prev_announcements)?;
         Ok(announcements)
     }
 }

@@ -453,7 +453,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3bee1fe68ec0015bce2e4c1754ebbf18d70750a1f0103e3785d34e8959fe8fd7"
 dependencies = [
  "bdk_core",
- "bitcoin 0.32.4",
+ "bitcoin",
  "miniscript",
  "serde",
 ]
@@ -464,7 +464,7 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be5e187ee33d5f99f1997a700cc1dfa0524fd1de31e6414c612c9e89ccdaa133"
 dependencies = [
- "bitcoin 0.32.4",
+ "bitcoin",
  "hashbrown 0.9.1",
  "serde",
 ]
@@ -501,7 +501,7 @@ checksum = "627ad309b5dc5adec0491141d40fcb8d032209c373dd47a870c702e9e5eba36a"
 dependencies = [
  "bdk_chain",
  "bdk_file_store",
- "bitcoin 0.32.4",
+ "bitcoin",
  "miniscript",
  "rand_core",
  "serde",
@@ -542,18 +542,6 @@ dependencies = [
 
 [[package]]
 name = "bitcoin"
-version = "0.29.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0694ea59225b0c5f3cb405ff3f670e4828358ed26aec49dc352f730f0cb1a8a3"
-dependencies = [
- "bech32 0.9.1",
- "bitcoin_hashes 0.11.0",
- "secp256k1 0.24.3",
- "serde",
-]
-
-[[package]]
-name = "bitcoin"
 version = "0.32.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "788902099d47c8682efe6a7afb01c8d58b9794ba66c06affd81c3d6b560743eb"
@@ -567,7 +555,7 @@ dependencies = [
  "bitcoin_hashes 0.14.0",
  "hex-conservative 0.2.1",
  "hex_lit",
- "secp256k1 0.29.1",
+ "secp256k1",
  "serde",
 ]
 
@@ -605,15 +593,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5285c8bcaa25876d07f37e3d30c303f2609179716e11d688f51e8f1fe70063e2"
 dependencies = [
  "bitcoin-internals 0.3.0",
- "serde",
-]
-
-[[package]]
-name = "bitcoin_hashes"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90064b8dee6815a6470d60bad07bbbaee885c0e12d04177138fa3291a01b7bc4"
-dependencies = [
  "serde",
 ]
 
@@ -657,7 +636,7 @@ version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8909583c5fab98508e80ef73e5592a651c954993dc6b7739963257d19f0e71a"
 dependencies = [
- "bitcoin 0.32.4",
+ "bitcoin",
  "serde",
  "serde_json",
 ]
@@ -1000,9 +979,7 @@ dependencies = [
  "bdk_chain",
  "bdk_esplora",
  "bdk_wallet",
- "bincode",
- "bip39",
- "bitcoin 0.32.4",
+ "bitcoin",
  "bitcoincore-rpc",
  "chrono",
  "crossbeam",
@@ -1011,8 +988,6 @@ dependencies = [
  "dlc-manager",
  "dlc-messages",
  "dlc-trie",
- "electrum-client",
- "futures",
  "hex",
  "kormir",
  "lightning",
@@ -1059,10 +1034,9 @@ name = "ddk-payouts"
 version = "0.0.12"
 dependencies = [
  "anyhow",
- "bitcoin 0.32.4",
+ "bitcoin",
  "dlc",
  "dlc-manager",
- "dlc-messages",
  "dlc-trie",
  "serde",
  "serde_json",
@@ -1084,9 +1058,9 @@ name = "dlc"
 version = "0.7.0"
 source = "git+https://github.com/bennyhodl/rust-dlc?branch=async#1b979ccab1a4823747f358c04ed0ba66d9eb5019"
 dependencies = [
- "bitcoin 0.32.4",
+ "bitcoin",
  "miniscript",
- "secp256k1-sys 0.10.1",
+ "secp256k1-sys",
  "secp256k1-zkp",
  "serde",
 ]
@@ -1097,7 +1071,7 @@ version = "0.7.0"
 source = "git+https://github.com/bennyhodl/rust-dlc?branch=async#1b979ccab1a4823747f358c04ed0ba66d9eb5019"
 dependencies = [
  "async-trait",
- "bitcoin 0.32.4",
+ "bitcoin",
  "dlc",
  "dlc-messages",
  "dlc-trie",
@@ -1114,7 +1088,7 @@ name = "dlc-messages"
 version = "0.7.0"
 source = "git+https://github.com/bennyhodl/rust-dlc?branch=async#1b979ccab1a4823747f358c04ed0ba66d9eb5019"
 dependencies = [
- "bitcoin 0.32.4",
+ "bitcoin",
  "dlc",
  "lightning",
  "secp256k1-zkp",
@@ -1126,7 +1100,7 @@ name = "dlc-trie"
 version = "0.7.0"
 source = "git+https://github.com/bennyhodl/rust-dlc?branch=async#1b979ccab1a4823747f358c04ed0ba66d9eb5019"
 dependencies = [
- "bitcoin 0.32.4",
+ "bitcoin",
  "dlc",
  "secp256k1-zkp",
  "serde",
@@ -1143,24 +1117,6 @@ name = "either"
 version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "60b1af1c220855b6ceac025d3f6ecdd2b7c4894bfe9cd9bda4fbb4bc7c0d4cf0"
-
-[[package]]
-name = "electrum-client"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8e1e1e452aef3ee772d19cc6272ef642f22ce0f4a9fb715ffe98010934e2ae1"
-dependencies = [
- "bitcoin 0.29.2",
- "byteorder",
- "libc",
- "log",
- "rustls 0.20.9",
- "serde",
- "serde_json",
- "webpki",
- "webpki-roots 0.22.6",
- "winapi",
-]
 
 [[package]]
 name = "encoding_rs"
@@ -1215,7 +1171,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23be31c97b2e505ac6af0d72a201caead71298a957639061a10314f6d4860cd7"
 dependencies = [
  "async-std",
- "bitcoin 0.32.4",
+ "bitcoin",
  "hex-conservative 0.2.1",
  "log",
  "minreq",
@@ -1999,7 +1955,7 @@ name = "kormir"
 version = "0.3.0"
 source = "git+https://github.com/bennyhodl/kormir?branch=rust-dlc-async#35cbe3afcfb7bc4991d732a85c311b374a8632b3"
 dependencies = [
- "bitcoin 0.32.4",
+ "bitcoin",
  "dlc",
  "dlc-messages",
  "hex",
@@ -2048,7 +2004,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "767f388e50251da71f95a3737d6db32c9729f9de6427a54fa92bb994d04d793f"
 dependencies = [
  "bech32 0.9.1",
- "bitcoin 0.32.4",
+ "bitcoin",
  "lightning-invoice",
  "lightning-types",
 ]
@@ -2060,7 +2016,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "90ab9f6ea77e20e3129235e62a2e6bd64ed932363df104e864ee65ccffb54a8f"
 dependencies = [
  "bech32 0.9.1",
- "bitcoin 0.32.4",
+ "bitcoin",
  "lightning-types",
 ]
 
@@ -2070,7 +2026,7 @@ version = "0.0.125"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "af2847a19f892f32b9ab5075af25c70370b4cc5842b4f5b53c57092e52a49498"
 dependencies = [
- "bitcoin 0.32.4",
+ "bitcoin",
  "lightning",
  "tokio",
 ]
@@ -2082,7 +2038,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1083b8d9137000edf3bfcb1ff011c0d25e0cdd2feb98cc21d6765e64a494148f"
 dependencies = [
  "bech32 0.9.1",
- "bitcoin 0.32.4",
+ "bitcoin",
  "hex-conservative 0.2.1",
 ]
 
@@ -2166,7 +2122,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "add2d4aee30e4291ce5cffa3a322e441ff4d4bc57b38c8d9bf0e94faa50ab626"
 dependencies = [
  "bech32 0.11.0",
- "bitcoin 0.32.4",
+ "bitcoin",
  "serde",
 ]
 
@@ -2285,7 +2241,7 @@ dependencies = [
  "base64 0.22.1",
  "bech32 0.11.0",
  "bip39",
- "bitcoin 0.32.4",
+ "bitcoin",
  "cbc",
  "chacha20",
  "chacha20poly1305",
@@ -2786,7 +2742,7 @@ checksum = "fadfaed2cd7f389d0161bb73eeb07b7b78f8691047a6f3e73caaeae55310a4a6"
 dependencies = [
  "bytes",
  "rand",
- "ring 0.17.8",
+ "ring",
  "rustc-hash",
  "rustls 0.23.16",
  "slab",
@@ -3009,21 +2965,6 @@ dependencies = [
 
 [[package]]
 name = "ring"
-version = "0.16.20"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3053cf52e236a3ed746dfc745aa9cacf1b791d846bdaf412f60a8d7d6e17c8fc"
-dependencies = [
- "cc",
- "libc",
- "once_cell",
- "spin 0.5.2",
- "untrusted 0.7.1",
- "web-sys",
- "winapi",
-]
-
-[[package]]
-name = "ring"
 version = "0.17.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c17fa4cb658e3583423e915b9f3acc01cceaee1860e33d59ebae66adc3a2dc0d"
@@ -3032,8 +2973,8 @@ dependencies = [
  "cfg-if",
  "getrandom",
  "libc",
- "spin 0.9.8",
- "untrusted 0.9.0",
+ "spin",
+ "untrusted",
  "windows-sys 0.52.0",
 ]
 
@@ -3117,24 +3058,12 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.20.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b80e3dec595989ea8510028f30c408a4630db12c9cbb8de34203b89d6577e99"
-dependencies = [
- "log",
- "ring 0.16.20",
- "sct",
- "webpki",
-]
-
-[[package]]
-name = "rustls"
 version = "0.21.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f56a14d1f48b391359b22f731fd4bd7e43c97f3c50eee276f3aa09c94784d3e"
 dependencies = [
  "log",
- "ring 0.17.8",
+ "ring",
  "rustls-webpki 0.101.7",
  "sct",
 ]
@@ -3146,7 +3075,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eee87ff5d9b36712a58574e12e9f0ea80f915a5b0ac518d322b24a465617925e"
 dependencies = [
  "once_cell",
- "ring 0.17.8",
+ "ring",
  "rustls-pki-types",
  "rustls-webpki 0.102.8",
  "subtle",
@@ -3183,8 +3112,8 @@ version = "0.101.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b6275d1ee7a1cd780b64aca7726599a1dbc893b1e64144529e55c3c2f745765"
 dependencies = [
- "ring 0.17.8",
- "untrusted 0.9.0",
+ "ring",
+ "untrusted",
 ]
 
 [[package]]
@@ -3193,9 +3122,9 @@ version = "0.102.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "64ca1bc8749bd4cf37b5ce386cc146580777b4e8572c7b97baf22c83f444bee9"
 dependencies = [
- "ring 0.17.8",
+ "ring",
  "rustls-pki-types",
- "untrusted 0.9.0",
+ "untrusted",
 ]
 
 [[package]]
@@ -3252,19 +3181,8 @@ version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "da046153aa2352493d6cb7da4b6e5c0c057d8a1d0a9aa8560baffdd945acd414"
 dependencies = [
- "ring 0.17.8",
- "untrusted 0.9.0",
-]
-
-[[package]]
-name = "secp256k1"
-version = "0.24.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b1629c9c557ef9b293568b338dddfc8208c98a18c59d722a9d53f859d9c9b62"
-dependencies = [
- "bitcoin_hashes 0.11.0",
- "secp256k1-sys 0.6.1",
- "serde",
+ "ring",
+ "untrusted",
 ]
 
 [[package]]
@@ -3275,17 +3193,8 @@ checksum = "9465315bc9d4566e1724f0fffcbcc446268cb522e60f9a27bcded6b19c108113"
 dependencies = [
  "bitcoin_hashes 0.14.0",
  "rand",
- "secp256k1-sys 0.10.1",
+ "secp256k1-sys",
  "serde",
-]
-
-[[package]]
-name = "secp256k1-sys"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83080e2c2fc1006e625be82e5d1eb6a43b7fd9578b617fcc55814daf286bba4b"
-dependencies = [
- "cc",
 ]
 
 [[package]]
@@ -3305,7 +3214,7 @@ checksum = "52a44aed3002b5ae975f8624c5df3a949cfbf00479e18778b6058fcd213b76e3"
 dependencies = [
  "bitcoin-private",
  "rand",
- "secp256k1 0.29.1",
+ "secp256k1",
  "secp256k1-zkp-sys",
  "serde",
 ]
@@ -3317,7 +3226,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57f08b2d0b143a22e07f798ae4f0ab20d5590d7c68e0d090f2088a48a21d1654"
 dependencies = [
  "cc",
- "secp256k1-sys 0.10.1",
+ "secp256k1-sys",
 ]
 
 [[package]]
@@ -3501,12 +3410,6 @@ dependencies = [
  "libc",
  "windows-sys 0.52.0",
 ]
-
-[[package]]
-name = "spin"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e63cff320ae2c57904679ba7cb63280a3dc4613885beafb148ee7bf9aa9042d"
 
 [[package]]
 name = "spin"
@@ -4013,12 +3916,6 @@ dependencies = [
 
 [[package]]
 name = "untrusted"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a156c684c91ea7d62626509bce3cb4e1d9ed5c4d978f7b4352658f96a4c26b4a"
-
-[[package]]
-name = "untrusted"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
@@ -4170,25 +4067,6 @@ checksum = "f6488b90108c040df0fe62fa815cbdee25124641df01814dd7282749234c6112"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "webpki"
-version = "0.22.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed63aea5ce73d0ff405984102c42de94fc55a6b75765d621c65262469b3c9b53"
-dependencies = [
- "ring 0.17.8",
- "untrusted 0.9.0",
-]
-
-[[package]]
-name = "webpki-roots"
-version = "0.22.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6c71e40d7d2c34a5106301fb632274ca37242cd0c9d3e64dbece371a40a2d87"
-dependencies = [
- "webpki",
 ]
 
 [[package]]
