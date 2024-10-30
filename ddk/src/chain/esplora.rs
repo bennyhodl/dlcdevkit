@@ -40,7 +40,7 @@ impl dlc_manager::Blockchain for EsploraClient {
         tracing::info!(txid = tx_id.to_string(), "Broadcasting transaction.");
         let txn = self
             .blocking_client
-            .get_tx(&tx_id)
+            .get_tx(tx_id)
             .map_err(esplora_err_to_manager_err)?;
 
         match txn {

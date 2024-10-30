@@ -3,13 +3,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let protos = ["ddkrpc.proto"];
 
-    let proto_paths: Vec<_> = protos
-        .iter()
-        .map(|proto| {
-            let path = dir.join(proto);
-            path
-        })
-        .collect();
+    let proto_paths: Vec<_> = protos.iter().map(|proto| dir.join(proto)).collect();
 
     tonic_build::configure()
         .build_client(true)

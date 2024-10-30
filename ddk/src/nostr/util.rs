@@ -42,13 +42,13 @@ where
 pub fn oracle_announcement_from_str(content: &str) -> anyhow::Result<OracleAnnouncement> {
     let bytes = base64::decode(content)?;
     let mut cursor = Cursor::new(bytes);
-    Ok(OracleAnnouncement::read(&mut cursor)
-        .map_err(|_| anyhow::anyhow!("could not get oracle announcement"))?)
+    OracleAnnouncement::read(&mut cursor)
+        .map_err(|_| anyhow::anyhow!("could not get oracle announcement"))
 }
 
 pub fn oracle_attestation_from_str(content: &str) -> anyhow::Result<OracleAttestation> {
     let bytes = base64::decode(content)?;
     let mut cursor = Cursor::new(bytes);
-    Ok(OracleAttestation::read(&mut cursor)
-        .map_err(|_| anyhow::anyhow!("could not read oracle attestation"))?)
+    OracleAttestation::read(&mut cursor)
+        .map_err(|_| anyhow::anyhow!("could not read oracle attestation"))
 }

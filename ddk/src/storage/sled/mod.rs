@@ -83,15 +83,15 @@ impl SledStorage {
     }
 
     fn signer_tree(&self) -> Result<Tree, sled::Error> {
-        self.db.open_tree(&[SIGNER_TREE])
+        self.db.open_tree([SIGNER_TREE])
     }
 
     pub fn wallet_tree(&self) -> Result<Tree, sled::Error> {
-        self.db.open_tree(&[WALLET_TREE])
+        self.db.open_tree([WALLET_TREE])
     }
 
     pub fn marketplace_tree(&self) -> Result<Tree, sled::Error> {
-        self.db.open_tree(&[MARKETPLACE_TREE])
+        self.db.open_tree([MARKETPLACE_TREE])
     }
 }
 

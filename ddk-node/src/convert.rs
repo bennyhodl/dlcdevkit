@@ -12,7 +12,7 @@ pub fn offered_contract_to_string_pretty(
     let offers = offered_contracts
         .iter()
         .map(|offered_contract| {
-            let contract_id = hex::encode(&offered_contract.id);
+            let contract_id = hex::encode(offered_contract.id);
             let mut event_ids = HashSet::new();
             for contract_input in &offered_contract.contract_info {
                 for announcement in &contract_input.oracle_announcements {
@@ -34,7 +34,7 @@ pub fn offered_contract_to_string_pretty(
 }
 
 fn offered_contract_to_value(offered_contract: &OfferedContract, state: &str) -> Value {
-    let contract_id = hex::encode(&offered_contract.id);
+    let contract_id = hex::encode(offered_contract.id);
     let mut event_ids = HashSet::new();
     for contract_input in &offered_contract.contract_info {
         for announcement in &contract_input.oracle_announcements {

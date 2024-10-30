@@ -2,7 +2,9 @@ use crate::error::{wallet_err_to_manager_err, WalletError};
 use crate::{chain::EsploraClient, Storage};
 use bdk_chain::{spk_client::FullScanRequest, Balance};
 use bdk_esplora::EsploraExt;
-use bdk_wallet::coin_selection::{BranchAndBoundCoinSelection, CoinSelectionAlgorithm};
+use bdk_wallet::coin_selection::{
+    BranchAndBoundCoinSelection, CoinSelectionAlgorithm, SingleRandomDraw,
+};
 use bdk_wallet::descriptor::IntoWalletDescriptor;
 pub use bdk_wallet::LocalOutput;
 use bdk_wallet::WalletPersister;
@@ -277,7 +279,6 @@ impl DlcDevKitWallet {
         };
         Ok(wallet
             .transactions()
-            .into_iter()
             .map(|t| t.tx_node.tx)
             .collect::<Vec<Arc<Transaction>>>())
     }
@@ -287,11 +288,7 @@ impl DlcDevKitWallet {
             tracing::error!("Could not get lock to sync wallet.");
             return Err(WalletError::Lock);
         };
-        Ok(wallet
-            .list_unspent()
-            .into_iter()
-            .map(|utxo| utxo.to_owned())
-            .collect())
+        Ok(wallet.list_unspent().map(|utxo| utxo.to_owned()).collect())
     }
 
     fn next_derivation_index(&self) -> Result<u32, WalletError> {
@@ -432,19 +429,17 @@ impl dlc_manager::Wallet for DlcDevKitWallet {
             })
             .collect::<Vec<WeightedUtxo>>();
 
-        let selected_utxos = BranchAndBoundCoinSelection::new(
-            Amount::MAX_MONEY.to_sat(),
-            bdk_wallet::coin_selection::SingleRandomDraw::default(),
-        )
-        .coin_select(
-            vec![],
-            utxos,
-            FeeRate::from_sat_per_vb(fee_rate).unwrap(),
-            amount,
-            ScriptBuf::new().as_script(),
-            &mut thread_rng(),
-        )
-        .unwrap();
+        let selected_utxos =
+            BranchAndBoundCoinSelection::new(Amount::MAX_MONEY.to_sat(), SingleRandomDraw)
+                .coin_select(
+                    vec![],
+                    utxos,
+                    FeeRate::from_sat_per_vb(fee_rate).unwrap(),
+                    amount,
+                    ScriptBuf::new().as_script(),
+                    &mut thread_rng(),
+                )
+                .unwrap();
 
         let dlc_utxos = selected_utxos
             .selected
