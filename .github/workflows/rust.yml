@@ -1,0 +1,63 @@
+name: Format, clippy, and test dlcdevkit 
+#
+on: [push, pull_request]
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  clippy_check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+            toolchain: nightly
+            components: clippy
+            override: true
+      - name: Check clippy
+        run: cargo clippy -- -D warnings
+  fmt_check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+            toolchain: nightly
+            components: rustfmt
+            override: true
+      - name: Check format
+        run: cargo fmt --check
+
+  # test:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v2
+  #     
+  #     - name: Install just
+  #       uses: extractions/setup-just@v1
+  #
+  #     - name: Install Protoc
+  #       run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+  #
+  #     - uses: actions-rs/toolchain@v1
+  #       with:
+  #         toolchain: stable
+  #       
+  #     - name: Start dependencies
+  #       run: just ci-deps
+  #       
+  #     - name: Setup Bitcoin Node
+  #       run: |
+  #         docker logs bitcoin
+  #         chmod +x ./testconfig/scripts/setup-bitcoind.sh
+  #         ./testconfig/scripts/setup-bitcoind.sh
+  #       
+  #     - name: Run tests
+  #       run: cargo test --all-features --verbose
+  #       
+  #     - name: Stop dependencies
+  #       run: just deps-down

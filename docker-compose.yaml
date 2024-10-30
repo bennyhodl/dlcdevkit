@@ -4,15 +4,24 @@ services:
     image: kylemanna/bitcoind:latest
     container_name: bitcoin
     command: |
-      -conf=/config/bitcoin.conf
+      -regtest=1
+      -rpcuser=ddk
+      -rpcpassword=ddk
+      -rpcallowip=0.0.0.0/0
+      -rpcbind=0.0.0.0
+      -server=1
+      -addresstype=bech32
+      -fallbackfee=0.0002
+      -txindex=1
+      -zmqpubrawblock=tcp://0.0.0.0:28332
+      -zmqpubrawtx=tcp://0.0.0.0:28333
       -printtoconsole
       -regtest
     ports:
       # regtest ports
       - 18443:18443
     volumes:
-      - ddk-bitcoin:/home/bitcoin/.bitcoin
-      - ./testconfig/bitcoin.conf:/config/bitcoin.conf
+      - ddk-bitcoin:/bitcoin/.bitcoin
   electrs:
     image: ghcr.io/vulpemventures/electrs:latest
     container_name: electrs
