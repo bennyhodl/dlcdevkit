@@ -82,7 +82,11 @@ pub fn create_contract_input(
     };
 
     // Check the max value given the base and nb digits.
-    let max_value = oracle_numeric_infos.base.checked_pow(oracle_numeric_infos.nb_digits[0] as u32).unwrap() as u64 - 1;
+    let max_value = oracle_numeric_infos
+        .base
+        .checked_pow(oracle_numeric_infos.nb_digits[0] as u32)
+        .unwrap() as u64
+        - 1;
 
     let payout_curve = generate_payout_curve(
         min_price,
@@ -99,7 +103,7 @@ pub fn create_contract_input(
             rounding_mod: 1,
         }],
     };
-    
+
     let contract_descriptor = ContractDescriptor::Numerical(NumericalDescriptor {
         payout_function: payout_curve,
         rounding_intervals,
@@ -108,8 +112,7 @@ pub fn create_contract_input(
     });
 
     let oracles = OracleInput {
-        public_keys: vec![XOnlyPublicKey::from_str(&oracle_pubkey)
-        .unwrap()],
+        public_keys: vec![XOnlyPublicKey::from_str(&oracle_pubkey).unwrap()],
         event_id,
         threshold: 1,
     };
@@ -137,7 +140,8 @@ mod tests {
 
     #[test]
     fn create_contract_input_test() {
-        let oracle_pk = "0d829c1cc556aa59060df5a9543c5357199ace5db9bcd5a8ddd6ee2fc7b6d174".to_string();
+        let oracle_pk =
+            "0d829c1cc556aa59060df5a9543c5357199ace5db9bcd5a8ddd6ee2fc7b6d174".to_string();
         let event_id = "event".to_string();
         let contract = create_contract_input(0, 100_000, 3, 50_000, 50_000, 2, oracle_pk, event_id);
 
