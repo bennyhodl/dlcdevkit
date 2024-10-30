@@ -1007,9 +1007,9 @@ dependencies = [
  "chrono",
  "crossbeam",
  "ddk-payouts",
- "dlc 0.7.0",
+ "dlc",
  "dlc-manager",
- "dlc-messages 0.7.0",
+ "dlc-messages",
  "dlc-trie",
  "electrum-client",
  "futures",
@@ -1060,9 +1060,9 @@ version = "0.0.12"
 dependencies = [
  "anyhow",
  "bitcoin 0.32.4",
- "dlc 0.7.0",
+ "dlc",
  "dlc-manager",
- "dlc-messages 0.7.0",
+ "dlc-messages",
  "dlc-trie",
  "serde",
  "serde_json",
@@ -1077,18 +1077,6 @@ dependencies = [
  "block-buffer",
  "crypto-common",
  "subtle",
-]
-
-[[package]]
-name = "dlc"
-version = "0.6.0"
-source = "git+https://github.com/bennyhodl/rust-dlc?rev=e712238d573a44a6f37082b73fbdc1a3cb2918ad#e712238d573a44a6f37082b73fbdc1a3cb2918ad"
-dependencies = [
- "bitcoin 0.32.4",
- "miniscript",
- "secp256k1-sys 0.10.1",
- "secp256k1-zkp",
- "serde",
 ]
 
 [[package]]
@@ -1110,8 +1098,8 @@ source = "git+https://github.com/bennyhodl/rust-dlc?branch=async#1b979ccab1a4823
 dependencies = [
  "async-trait",
  "bitcoin 0.32.4",
- "dlc 0.7.0",
- "dlc-messages 0.7.0",
+ "dlc",
+ "dlc-messages",
  "dlc-trie",
  "futures",
  "hex-conservative 0.1.2",
@@ -1123,23 +1111,11 @@ dependencies = [
 
 [[package]]
 name = "dlc-messages"
-version = "0.6.0"
-source = "git+https://github.com/bennyhodl/rust-dlc?rev=e712238d573a44a6f37082b73fbdc1a3cb2918ad#e712238d573a44a6f37082b73fbdc1a3cb2918ad"
-dependencies = [
- "bitcoin 0.32.4",
- "dlc 0.6.0",
- "lightning",
- "secp256k1-zkp",
- "serde",
-]
-
-[[package]]
-name = "dlc-messages"
 version = "0.7.0"
 source = "git+https://github.com/bennyhodl/rust-dlc?branch=async#1b979ccab1a4823747f358c04ed0ba66d9eb5019"
 dependencies = [
  "bitcoin 0.32.4",
- "dlc 0.7.0",
+ "dlc",
  "lightning",
  "secp256k1-zkp",
  "serde",
@@ -1151,7 +1127,7 @@ version = "0.7.0"
 source = "git+https://github.com/bennyhodl/rust-dlc?branch=async#1b979ccab1a4823747f358c04ed0ba66d9eb5019"
 dependencies = [
  "bitcoin 0.32.4",
- "dlc 0.7.0",
+ "dlc",
  "secp256k1-zkp",
  "serde",
 ]
@@ -2021,11 +1997,11 @@ dependencies = [
 [[package]]
 name = "kormir"
 version = "0.3.0"
-source = "git+https://github.com/bennyhodl/kormir?rev=cd3b7ff7f9adc0b77b84280ff2edfdfc91f16067#cd3b7ff7f9adc0b77b84280ff2edfdfc91f16067"
+source = "git+https://github.com/bennyhodl/kormir?branch=rust-dlc-async#35cbe3afcfb7bc4991d732a85c311b374a8632b3"
 dependencies = [
  "bitcoin 0.32.4",
- "dlc 0.6.0",
- "dlc-messages 0.6.0",
+ "dlc",
+ "dlc-messages",
  "hex",
  "lightning",
  "log",

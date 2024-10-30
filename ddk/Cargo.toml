@@ -30,7 +30,7 @@ dlc-trie = { version = "0.7.0", git = "https://github.com/bennyhodl/rust-dlc", b
 
 
 # kormir = "0.3.0"
-kormir = { version = "0.3.0", git = "https://github.com/bennyhodl/kormir", rev = "cd3b7ff7f9adc0b77b84280ff2edfdfc91f16067"}
+kormir = { version = "0.3.0", git = "https://github.com/bennyhodl/kormir", branch = "rust-dlc-async"}
 # kormir = { version = "0.3.0", path = "../../kormir/kormir" }
 
 bitcoin = { version = "0.32.2", features = ["rand", "serde"] }

@@ -411,10 +411,8 @@ impl dlc_manager::Wallet for DlcDevKitWallet {
         Ok(())
     }
 
-    fn import_address(&self, address: &bitcoin::Address) -> Result<(), ManagerError> {
-        tracing::warn!(address = address.to_string(), "Importing address.");
-        // might be ok, might not
-        Ok(self.storage.0.import_address_to_storage(address).unwrap())
+    fn import_address(&self, _address: &bitcoin::Address) -> Result<(), ManagerError> {
+        Ok(())
     }
 
     // return all utxos
