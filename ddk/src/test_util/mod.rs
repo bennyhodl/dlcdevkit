@@ -197,7 +197,6 @@ impl TestSuite {
             seed.private_key.secret_bytes(),
             esplora_host,
             Network::Regtest,
-            storage_path.clone(),
         )
         .await;
 
@@ -215,13 +214,11 @@ impl TestSuite {
         seed_bytes: [u8; 32],
         esplora_host: String,
         network: Network,
-        storage_path: String,
     ) -> TestDlcDevKit {
         let ddk: TestDlcDevKit = Builder::new()
             .set_network(network)
             .set_seed_bytes(seed_bytes)
             .set_esplora_host(esplora_host)
-            .set_storage_path(storage_path)
             .set_name(name)
             .set_oracle(oracle)
             .set_transport(transport)

@@ -7,7 +7,7 @@ use dlc_manager::contract::{
     ClosedContract, Contract, FailedAcceptContract, FailedSignContract, PreClosedContract,
 };
 use dlc_manager::error::Error;
-use kormir::OracleAnnouncement;
+use dlc_messages::oracle_msgs::OracleAnnouncement;
 use lightning::io::Read;
 
 /// Helper from rust-dlc to implement types for contracts.
