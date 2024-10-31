@@ -61,14 +61,13 @@ If you are testing local changes to [`ddk`](../ddk/) or running `ddk-node` local
 # Start bitcoin and esplora
 $ just deps
 
-# Start kormir server that ddk-node runs
-$ just kormir
-
 $ just node-one # Start node one 
 $ just node-two # Start node two in a different terminal
 
 $ just bc ...ARGS # Interface with the Bitcoin node.
 ```
+
+An oracle is hosted at `https://kormir.dlcdevkit.com`
 
 To interface the nodes with the CLI, you can use `just cli-one` and `just cli-two`.
 
