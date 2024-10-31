@@ -16,7 +16,7 @@ pub struct NodeOpts {
     pub log: String,
     #[arg(short, long)]
     #[arg(help = "Set the Bitcoin network for DDK")]
-    #[arg(default_value = "regtest")]
+    #[arg(default_value = "signet")]
     #[arg(value_parser = ["regtest", "mainnet", "signet"])]
     pub network: String,
     #[arg(short, long)]
@@ -34,11 +34,11 @@ pub struct NodeOpts {
     #[arg(help = "Host and port the gRPC server will run on.")]
     pub grpc_host: String,
     #[arg(long = "esplora")]
-    #[arg(default_value = "http://127.0.0.1:30000")]
+    #[arg(default_value = "https://mutinynet.com/api")]
     #[arg(help = "Esplora server to connect to.")]
     pub esplora_host: String,
     #[arg(long = "oracle")]
-    #[arg(default_value = "http://127.0.0.1:8082")]
+    #[arg(default_value = "https://kormir.dlcdevkit.com")]
     #[arg(help = "Kormir oracle to connect to.")]
     pub oracle_host: String,
     #[arg(long)]
