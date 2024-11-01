@@ -7,9 +7,6 @@ use bitcoin::Network;
 use nostr_rs::{secp256k1::Secp256k1, Keys, PublicKey, SecretKey, Timestamp, Url};
 use nostr_sdk::{Client, RelayPoolNotification};
 
-/// Nostr relay host. TODO: nostr feature
-const RELAY_HOST: &str = "ws://localhost:8081";
-
 pub struct NostrDlc {
     pub keys: Keys,
     pub relay_url: Url,
@@ -46,7 +43,7 @@ impl NostrDlc {
 
         let since = Timestamp::now();
 
-        client.add_relay(RELAY_HOST).await?;
+        client.add_relay(&self.relay_url).await?;
 
         let msg_subscription = super::messages::create_dlc_message_filter(since, self.public_key());
         // Removing the oracle messages for right now.

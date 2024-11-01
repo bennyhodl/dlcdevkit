@@ -145,6 +145,7 @@ pub(crate) fn filter_expired_oracle_announcements(
         .collect()
 }
 
+#[cfg(any(feature = "nostr", feature = "marketplace"))]
 pub fn oracle_announcement_from_str(content: &str) -> anyhow::Result<OracleAnnouncement> {
     let bytes = base64::decode(content)?;
     let mut cursor = Cursor::new(bytes);
@@ -152,6 +153,7 @@ pub fn oracle_announcement_from_str(content: &str) -> anyhow::Result<OracleAnnou
         .map_err(|_| anyhow::anyhow!("could not get oracle announcement"))
 }
 
+#[cfg(any(feature = "nostr", feature = "marketplace"))]
 pub fn oracle_attestation_from_str(content: &str) -> anyhow::Result<OracleAttestation> {
     let bytes = base64::decode(content)?;
     let mut cursor = Cursor::new(bytes);
