@@ -1,7 +1,7 @@
 use crate::chain::EsploraClient;
-#[cfg(feature = "marketplace")]
-use crate::nostr::marketplace::*;
 use crate::wallet::DlcDevKitWallet;
+#[cfg(feature = "marketplace")]
+use crate::{nostr::marketplace::*, DEFAULT_NOSTR_RELAY};
 use crate::{Oracle, Storage, Transport};
 use anyhow::anyhow;
 use bitcoin::secp256k1::PublicKey;
@@ -64,15 +64,19 @@ where
     O: Oracle,
 {
     pub fn start(&self) -> anyhow::Result<()> {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        self.start_with_runtime(runtime)
+    }
+
+    pub fn start_with_runtime(&self, runtime: Runtime) -> anyhow::Result<()> {
         let mut runtime_lock = self.runtime.write().unwrap();
 
         if runtime_lock.is_some() {
             return Err(anyhow!("DDK is still running."));
         }
-
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()?;
 
         let manager_clone = self.manager.clone();
         let receiver_clone = self.receiver.clone();
@@ -91,10 +95,12 @@ where
 
         let wallet_clone = self.wallet.clone();
         runtime.spawn(async move {
-            let mut timer = tokio::time::interval(Duration::from_secs(10));
+            let mut timer = tokio::time::interval(Duration::from_secs(60));
             loop {
                 timer.tick().await;
-                wallet_clone.sync().unwrap();
+                if let Err(e) = wallet_clone.sync() {
+                    tracing::warn!(error=?e, "Did not sync wallet.");
+                };
             }
         });
 
@@ -110,19 +116,19 @@ where
         });
 
         #[cfg(feature = "marketplace")]
-        let storage_clone = self.storage.clone();
-        #[cfg(feature = "marketplace")]
-        runtime.spawn(async move {
-            tracing::info!("Starting marketplace listener.");
-            marketplace_listener(&storage_clone, vec!["ws://127.0.0.1:8081"])
-                .await
-                .unwrap();
-        });
+        {
+            let storage_clone = self.storage.clone();
+            runtime.spawn(async move {
+                tracing::info!("Starting marketplace listener.");
+                marketplace_listener(&storage_clone, vec![DEFAULT_NOSTR_RELAY])
+                    .await
+                    .unwrap();
+            });
+        }
 
         // TODO: connect stored peers.
 
         *runtime_lock = Some(runtime);
-
         Ok(())
     }
 
