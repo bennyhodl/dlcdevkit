@@ -37,6 +37,9 @@ pub use dlc;
 pub use dlc_manager;
 pub use dlc_messages;
 
+/// Default nostr relay.
+pub const DEFAULT_NOSTR_RELAY: &str = "wss://nostr.dlcdevkit.com";
+
 use async_trait::async_trait;
 use bitcoin::secp256k1::{PublicKey, SecretKey};
 use ddk::DlcDevKitDlcManager;

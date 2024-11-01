@@ -149,9 +149,12 @@ impl DlcDevKitWallet {
     }
 
     pub fn sync(&self) -> Result<(), WalletError> {
-        let Ok(mut wallet) = self.wallet.try_write() else {
-            tracing::error!("Could not get lock to sync wallet.");
-            return Err(WalletError::Lock);
+        let mut wallet = match self.wallet.try_write() {
+            Ok(w) => w,
+            Err(e) => {
+                tracing::error!(error =? e, "Could not get lock to sync wallet.");
+                return Err(WalletError::Lock);
+            }
         };
 
         let mut storage = self.storage.clone();

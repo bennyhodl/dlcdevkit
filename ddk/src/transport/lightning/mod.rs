@@ -54,14 +54,20 @@ impl Transport for LightningTransport {
                     "Processing DLC message"
                 );
 
-                let message_response = manager
-                    .on_dlc_message(&message, counter_party)
-                    .expect("no on dlc message");
-                if let Some(msg) = message_response {
+                match manager
+                    .on_dlc_message(&message, counter_party) {
+                    Err(e) => {
+                        tracing::error!(error =? e, "On message error.")
+                    },
+                    Ok(contract) => {
+                        if let Some(msg) = contract {
                     tracing::info!("Responding to message received.");
                     tracing::debug!(message=?msg);
                     self.message_handler.send_message(counter_party, msg);
-                }
+
+                        }
+                    }
+                };
             }
 
             if self.message_handler.has_pending_messages() {
