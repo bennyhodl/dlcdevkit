@@ -20,8 +20,8 @@ pub enum WalletError {
     Lock,
     #[error("Error syncing the internal BDK wallet.")]
     SyncError,
-    #[error("Storage error.")]
-    StorageError(#[from] sled::Error),
+    #[error("Storage error. {0}")]
+    StorageError(String),
     #[error("Error with deriving signer: {0}")]
     SignerError(String),
     #[error("Wallet call to esplora: {0}")]

@@ -1,13 +1,22 @@
 use bitcoin::{
-    address::NetworkChecked, bip32::Xpriv, key::{rand::{Fill, Rng}, Secp256k1}, secp256k1::All, Address, Amount, Network
+    address::NetworkChecked,
+    bip32::Xpriv,
+    key::{
+        rand::{Fill, Rng},
+        Secp256k1,
+    },
+    secp256k1::All,
+    Address, Amount, Network,
 };
 use chrono::{Local, TimeDelta};
 use ddk_payouts::enumeration::create_contract_input;
 use dlc::EnumerationPayout;
 use dlc_manager::{
-    contract::contract_input::ContractInput, manager::Manager, ContractId, SystemTimeProvider, Storage
+    contract::contract_input::ContractInput, manager::Manager, ContractId, Storage,
+    SystemTimeProvider,
 };
-use kormir::{Oracle, OracleAnnouncement, storage::MemoryStorage as KormirMemoryStorage};
+use dlc_messages::oracle_msgs::OracleAnnouncement;
+use kormir::{storage::MemoryStorage as KormirMemoryStorage, Oracle};
 use std::{
     fs::File,
     io::Write,
@@ -19,8 +28,9 @@ use std::{
 };
 
 use crate::{
-    builder::Builder, chain::EsploraClient, 
-    wallet::DlcDevKitWallet, DlcDevKit, storage::memory::MemoryStorage, transport::memory::MemoryTransport, oracle::memory::MemoryOracle,
+    builder::Builder, chain::EsploraClient, oracle::memory::MemoryOracle,
+    storage::memory::MemoryStorage, transport::memory::MemoryTransport, wallet::DlcDevKitWallet,
+    DlcDevKit,
 };
 use bitcoincore_rpc::RpcApi;
 
@@ -35,7 +45,7 @@ pub async fn test_ddk() -> (
     ContractInput,
 ) {
     let secp = Secp256k1::new();
-    let oracle = Arc::new(MemoryOracle::new());
+    let oracle = Arc::new(MemoryOracle::default());
 
     let test = TestSuite::new(&secp, "send_offer", oracle.clone()).await;
     let test_two = TestSuite::new(&secp, "sender_offer_two", oracle.clone()).await;

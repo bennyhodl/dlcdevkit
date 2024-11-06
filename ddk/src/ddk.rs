@@ -247,7 +247,10 @@ where
 mod tests {
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-    use crate::{test_util::{generate_blocks, test_ddk, TestSuite}, Transport};
+    use crate::{
+        test_util::{generate_blocks, test_ddk, TestSuite},
+        Transport,
+    };
     use dlc_manager::{
         contract::{contract_input::ContractInput, Contract},
         Storage,

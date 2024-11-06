@@ -1,8 +1,8 @@
 use crate::transport::PeerInformation;
 use crate::Storage;
 use bdk_chain::Merge;
-use bdk_wallet::ChangeSet;
 use dlc_manager::{channel::Channel, contract::Contract, ChannelId, ContractId};
+use dlc_messages::oracle_msgs::OracleAnnouncement;
 use std::collections::HashMap;
 use std::sync::RwLock;
 
@@ -10,7 +10,7 @@ use std::sync::RwLock;
 pub struct MemoryStorage {
     peers: RwLock<HashMap<String, PeerInformation>>,
     bdk_data: RwLock<Option<bdk_wallet::ChangeSet>>,
-    announcements: RwLock<Vec<kormir::OracleAnnouncement>>,
+    announcements: RwLock<Vec<OracleAnnouncement>>,
     contracts: RwLock<HashMap<ContractId, Contract>>,
     channels: RwLock<HashMap<ChannelId, Channel>>,
     chain_monitor: RwLock<Option<dlc_manager::chain_monitor::ChainMonitor>>,
@@ -47,12 +47,7 @@ impl Storage for MemoryStorage {
         &self,
         changeset: &bdk_wallet::ChangeSet,
     ) -> Result<(), crate::error::WalletError> {
-        let mut persisted_changeset = self
-            .bdk_data
-            .read()
-            .unwrap()
-            .clone()
-            .unwrap_or(ChangeSet::default());
+        let mut persisted_changeset = self.bdk_data.read().unwrap().clone().unwrap_or_default();
         persisted_changeset.merge(changeset.clone());
         *self.bdk_data.write().unwrap() = Some(persisted_changeset);
         Ok(())

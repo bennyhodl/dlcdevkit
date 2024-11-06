@@ -9,8 +9,8 @@ pub struct MemoryOracle {
     pub oracle: Kormir<MemoryStorage>,
 }
 
-impl MemoryOracle {
-    pub fn new() -> Self {
+impl Default for MemoryOracle {
+    fn default() -> Self {
         let mut seed: [u8; 64] = [0; 64];
         bitcoin::key::rand::thread_rng().fill(&mut seed);
         let xpriv = Xpriv::new_master(bitcoin::Network::Regtest, &seed).unwrap();
@@ -74,7 +74,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_and_sign() {
-        let oracle = MemoryOracle::new();
+        let oracle = MemoryOracle::default();
         let expiry = TimeDelta::seconds(15);
         let timestamp: u32 = Local::now()
             .checked_add_signed(expiry)
