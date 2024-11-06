@@ -1,5 +1,6 @@
 pub mod oracle;
 pub mod transport;
+pub mod storage;
 
 use bitcoin::{
     address::NetworkChecked, bip32::Xpriv, key::{rand::{Fill, Rng}, Secp256k1}, secp256k1::All, Address, Amount, Network
@@ -8,10 +9,9 @@ use chrono::{Local, TimeDelta};
 use ddk_payouts::enumeration::create_contract_input;
 use dlc::EnumerationPayout;
 use dlc_manager::{
-    contract::contract_input::ContractInput, manager::Manager, ContractId, Storage,
-    SystemTimeProvider,
+    contract::contract_input::ContractInput, manager::Manager, ContractId, SystemTimeProvider, Storage
 };
-use kormir::{Oracle, OracleAnnouncement};
+use kormir::{Oracle, OracleAnnouncement, storage::MemoryStorage as KormirMemoryStorage};
 use oracle::MemoryOracle;
 use transport::MemoryTransport;
 use std::{
@@ -25,13 +25,12 @@ use std::{
 };
 
 use crate::{
-    builder::Builder, chain::EsploraClient, oracle::KormirOracleClient, storage::SledStorage,
-    wallet::DlcDevKitWallet, DlcDevKit,
+    builder::Builder, chain::EsploraClient, oracle::KormirOracleClient,
+    wallet::DlcDevKitWallet, DlcDevKit, test_util::storage::MemoryStorage,
 };
 use bitcoincore_rpc::RpcApi;
-use kormir::storage::MemoryStorage;
 
-type TestDlcDevKit = DlcDevKit<MemoryTransport, SledStorage, MemoryOracle>;
+type TestDlcDevKit = DlcDevKit<MemoryTransport, MemoryStorage, MemoryOracle>;
 pub struct TestWallet(pub DlcDevKitWallet, String);
 
 #[rstest::fixture]
@@ -165,7 +164,7 @@ type DlcManager = Arc<
             >,
         >,
         Arc<EsploraClient>,
-        Arc<SledStorage>,
+        Arc<MemoryStorage>,
         Arc<KormirOracleClient>,
         Arc<SystemTimeProvider>,
         Arc<DlcDevKitWallet>,
@@ -185,8 +184,9 @@ impl TestSuite {
         let seed =
             xprv_from_path(PathBuf::from_str(&storage_path).unwrap(), Network::Regtest).unwrap();
         let esplora_host = "http://127.0.0.1:30000".to_string();
+
         let transport = Arc::new(MemoryTransport::new(secp));
-        let storage = Arc::new(SledStorage::new(&format!("{storage_path}/sleddb")).unwrap());
+        let storage = Arc::new(MemoryStorage::new());
 
         let ddk = Self::create_ddk(
             name,
@@ -208,7 +208,7 @@ impl TestSuite {
     async fn create_ddk(
         name: &str,
         transport: Arc<MemoryTransport>,
-        storage: Arc<SledStorage>,
+        storage: Arc<MemoryStorage>,
         oracle: Arc<MemoryOracle>,
         seed_bytes: [u8; 32],
         esplora_host: String,
@@ -230,7 +230,7 @@ impl TestSuite {
 
     pub fn create_wallet(name: &str) -> TestWallet {
         let path = format!("tests/data/{name}");
-        let storage = Arc::new(SledStorage::new(&path).unwrap());
+        let storage = Arc::new(MemoryStorage::new());
         let mut entropy = [0u8; 64];
         entropy
             .try_fill(&mut bitcoin::key::rand::thread_rng())
@@ -262,7 +262,7 @@ impl Drop for TestSuite {
     }
 }
 
-pub fn wait_for_offer_is_stored(contract_id: ContractId, storage: Arc<SledStorage>) {
+pub fn wait_for_offer_is_stored(contract_id: ContractId, storage: Arc<MemoryStorage>) {
     let mut tries = 0;
     let mut time = Duration::from_secs(1);
     loop {
@@ -303,9 +303,9 @@ pub fn xprv_from_path(path: PathBuf, network: Network) -> anyhow::Result<Xpriv> 
     Ok(seed)
 }
 
-pub fn memory_oracle() -> Oracle<MemoryStorage> {
+pub fn memory_oracle() -> Oracle<KormirMemoryStorage> {
     let mut seed: [u8; 64] = [0; 64];
     bitcoin::key::rand::thread_rng().fill(&mut seed);
     let xpriv = Xpriv::new_master(Network::Regtest, &seed).unwrap();
-    Oracle::from_xpriv(MemoryStorage::default(), xpriv).unwrap()
+    Oracle::from_xpriv(KormirMemoryStorage::default(), xpriv).unwrap()
 }
