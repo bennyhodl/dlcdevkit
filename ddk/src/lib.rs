@@ -53,6 +53,8 @@ use transport::PeerInformation;
 pub trait Transport: Send + Sync + 'static {
     /// Name for the transport service.
     fn name(&self) -> String;
+    /// Get the public key of the transport.
+    fn public_key(&self) -> PublicKey;
     /// Open an incoming listener for DLC messages from peers.
     async fn listen(&self);
     /// Get messages that have not been processed yet.

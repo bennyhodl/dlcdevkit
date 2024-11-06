@@ -247,7 +247,7 @@ where
 mod tests {
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-    use crate::test_util::{generate_blocks, test_ddk, TestSuite};
+    use crate::{test_util::{generate_blocks, test_ddk, TestSuite}, Transport};
     use dlc_manager::{
         contract::{contract_input::ContractInput, Contract},
         Storage,
@@ -278,9 +278,8 @@ mod tests {
         let alice_makes_offer = alice_makes_offer.expect("alice did not create an offer");
 
         let contract_id = alice_makes_offer.temporary_contract_id.clone();
-        // TODO: get pubkey method
-        let alice_pubkey = alice.ddk.transport.keypair.public_key();
-        let bob_pubkey = bob.ddk.transport.keypair.public_key();
+        let alice_pubkey = alice.ddk.transport.public_key();
+        let bob_pubkey = bob.ddk.transport.public_key();
 
         let bob_receives_offer = bob
             .ddk

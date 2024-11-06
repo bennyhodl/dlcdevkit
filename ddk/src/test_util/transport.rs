@@ -35,6 +35,10 @@ impl Transport for MemoryTransport {
         "memory transport".to_string()
     }
 
+    fn public_key(&self) -> PublicKey {
+        self.keypair.public_key()
+    }
+
     fn send_message(&self, counterparty: PublicKey, message: Message) {
         let connected_counterparty = self.counterparty_transport.get(&counterparty);
         if let Some(counterparty) = connected_counterparty { 

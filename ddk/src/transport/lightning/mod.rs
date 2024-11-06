@@ -14,6 +14,10 @@ impl Transport for LightningTransport {
         "lightning".into()
     }
 
+    fn public_key(&self) -> PublicKey {
+        self.node_id
+    }
+
     /// Creates a TCP listener and accepts incoming connection spawning a tokio thread.
     async fn listen(&self) {
         let listener = TcpListener::bind(format!("0.0.0.0:{}", self.listening_port))
