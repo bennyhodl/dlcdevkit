@@ -1,3 +1,6 @@
+use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
+use lightning::io::Cursor;
+use lightning::util::ser::Readable;
 use nostr_rs::{Filter, Kind, PublicKey as NostrPublicKey, Timestamp};
 
 /// Nostr [dlc_messages::oracle_msgs::OracleAnnouncement] marketplace.
@@ -19,4 +22,18 @@ pub fn create_oracle_message_filter(since: Timestamp) -> Filter {
     Filter::new()
         .kinds([ORACLE_ANNOUNCMENT_KIND, ORACLE_ATTESTATION_KIND])
         .since(since)
+}
+
+pub fn oracle_announcement_from_str(content: &str) -> anyhow::Result<OracleAnnouncement> {
+    let bytes = base64::decode(content)?;
+    let mut cursor = Cursor::new(bytes);
+    OracleAnnouncement::read(&mut cursor)
+        .map_err(|_| anyhow::anyhow!("could not get oracle announcement"))
+}
+
+pub fn oracle_attestation_from_str(content: &str) -> anyhow::Result<OracleAttestation> {
+    let bytes = base64::decode(content)?;
+    let mut cursor = Cursor::new(bytes);
+    OracleAttestation::read(&mut cursor)
+        .map_err(|_| anyhow::anyhow!("could not read oracle attestation"))
 }

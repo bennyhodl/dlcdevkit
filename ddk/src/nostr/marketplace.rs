@@ -51,7 +51,7 @@ where
             tracing::info!("Oracle attestation. Saved to storage.")
         }
         Kind::Custom(88) => {
-            let announcement = crate::util::oracle_announcement_from_str(&event.content).unwrap();
+            let announcement = super::oracle_announcement_from_str(&event.content).unwrap();
             storage.save_announcement(announcement).unwrap();
             tracing::info!("Oracle announcement. Saved to storage.")
         }

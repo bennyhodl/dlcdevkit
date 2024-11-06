@@ -97,8 +97,11 @@ impl SledStorage {
 
 impl Storage for SledStorage {
     fn persist_bdk(&self, changeset: &ChangeSet) -> Result<(), WalletError> {
-        let wallet_tree = self.wallet_tree()?;
-        let new_changeset = match wallet_tree.get(CHANGESET_KEY)? {
+        let wallet_tree = self.wallet_tree().map_err(sled_to_wallet_error)?;
+        let new_changeset = match wallet_tree
+            .get(CHANGESET_KEY)
+            .map_err(sled_to_wallet_error)?
+        {
             Some(stored_changeset) => {
                 let mut stored_changeset = serde_json::from_slice::<ChangeSet>(&stored_changeset)?;
                 stored_changeset.merge(changeset.clone());
@@ -107,13 +110,20 @@ impl Storage for SledStorage {
             None => changeset.to_owned(),
         };
 
-        wallet_tree.insert(CHANGESET_KEY, serde_json::to_vec(&new_changeset)?)?;
+        wallet_tree
+            .insert(CHANGESET_KEY, serde_json::to_vec(&new_changeset)?)
+            .map_err(sled_to_wallet_error)?;
         Ok(())
     }
 
     fn initialize_bdk(&self) -> Result<ChangeSet, WalletError> {
         tracing::info!("Initializing wallet persistance.");
-        let changeset = match self.wallet_tree()?.get(CHANGESET_KEY)? {
+        let changeset = match self
+            .wallet_tree()
+            .map_err(sled_to_wallet_error)?
+            .get(CHANGESET_KEY)
+            .map_err(sled_to_wallet_error)?
+        {
             Some(changeset) => serde_json::from_slice(&changeset)?,
             None => ChangeSet::default(),
         };
@@ -145,7 +155,7 @@ impl Storage for SledStorage {
     }
 
     fn save_announcement(&self, announcement: OracleAnnouncement) -> anyhow::Result<()> {
-        let marketplace = self.marketplace_tree()?;
+        let marketplace = self.marketplace_tree().map_err(sled_to_wallet_error)?;
         let stored_announcements: Vec<OracleAnnouncement> =
             match marketplace.get(MARKETPLACE_KEY)? {
                 Some(o) => serde_json::from_slice(&o)?,
@@ -162,7 +172,7 @@ impl Storage for SledStorage {
     }
 
     fn get_marketplace_announcements(&self) -> anyhow::Result<Vec<OracleAnnouncement>> {
-        let marketplace = self.marketplace_tree()?;
+        let marketplace = self.marketplace_tree().map_err(sled_to_wallet_error)?;
         let prev_announcements = match marketplace.get(MARKETPLACE_KEY)? {
             Some(o) => o.to_vec(),
             None => vec![],
@@ -170,4 +180,8 @@ impl Storage for SledStorage {
         let announcements: Vec<OracleAnnouncement> = serde_json::from_slice(&prev_announcements)?;
         Ok(announcements)
     }
+}
+
+fn sled_to_wallet_error(error: sled::Error) -> WalletError {
+    WalletError::StorageError(error.to_string())
 }
