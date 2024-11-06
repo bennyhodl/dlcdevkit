@@ -1,3 +1,4 @@
+use super::sled_to_wallet_error;
 use super::SledStorage;
 use crate::error::WalletError;
 use crate::KeyStorage;
@@ -6,7 +7,12 @@ use bitcoin::secp256k1::SecretKey;
 impl KeyStorage for SledStorage {
     fn get_secret_key(&self, key_id: [u8; 32]) -> Result<SecretKey, WalletError> {
         let key = hex::encode(key_id);
-        let info = self.signer_tree()?.get(key)?.unwrap();
+        let info = self
+            .signer_tree()
+            .map_err(sled_to_wallet_error)?
+            .get(key)
+            .map_err(sled_to_wallet_error)?
+            .unwrap();
         Ok(serde_json::from_slice::<SecretKey>(&info)?)
     }
 
@@ -17,7 +23,10 @@ impl KeyStorage for SledStorage {
         // Store the key id string instead of bytes.
         let key_id = hex::encode(key_id);
 
-        self.signer_tree()?.insert(key_id, serialized_signer_info)?;
+        self.signer_tree()
+            .map_err(sled_to_wallet_error)?
+            .insert(key_id, serialized_signer_info)
+            .map_err(sled_to_wallet_error)?;
         Ok(())
     }
 }

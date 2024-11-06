@@ -1,4 +1,3 @@
 pub mod memory;
-mod sled;
-
-pub use sled::SledStorage;
+#[cfg(feature = "sled")]
+pub mod sled;

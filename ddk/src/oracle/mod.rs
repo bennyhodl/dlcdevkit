@@ -1,6 +1,5 @@
-mod kormir;
+#[cfg(feature = "kormir")]
+pub mod kormir;
 pub mod memory;
-mod p2p_derivatives;
-
-pub use kormir::KormirOracleClient;
-pub use p2p_derivatives::P2PDOracleClient;
+#[cfg(feature = "p2pderivatives")]
+pub mod p2p_derivatives;

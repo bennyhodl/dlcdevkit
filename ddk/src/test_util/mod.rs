@@ -7,7 +7,8 @@ use dlc::EnumerationPayout;
 use dlc_manager::{
     contract::contract_input::ContractInput, manager::Manager, ContractId, SystemTimeProvider, Storage
 };
-use kormir::{Oracle, OracleAnnouncement, storage::MemoryStorage as KormirMemoryStorage};
+use dlc_messages::oracle_msgs::OracleAnnouncement;
+use kormir::{Oracle, storage::MemoryStorage as KormirMemoryStorage};
 use std::{
     fs::File,
     io::Write,

@@ -7,9 +7,8 @@ use dlc_manager::contract::{
     ClosedContract, Contract, FailedAcceptContract, FailedSignContract, PreClosedContract,
 };
 use dlc_manager::error::Error;
-use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
-use lightning::io::{Cursor, Read};
-use lightning::util::ser::Readable;
+use dlc_messages::oracle_msgs::OracleAnnouncement;
+use lightning::io::Read;
 
 /// Helper from rust-dlc to implement types for contracts.
 macro_rules! convertible_enum {
@@ -143,22 +142,6 @@ pub(crate) fn filter_expired_oracle_announcements(
         .filter(|ann| ann.oracle_event.event_maturity_epoch < now)
         .cloned()
         .collect()
-}
-
-#[cfg(any(feature = "nostr", feature = "marketplace"))]
-pub fn oracle_announcement_from_str(content: &str) -> anyhow::Result<OracleAnnouncement> {
-    let bytes = base64::decode(content)?;
-    let mut cursor = Cursor::new(bytes);
-    OracleAnnouncement::read(&mut cursor)
-        .map_err(|_| anyhow::anyhow!("could not get oracle announcement"))
-}
-
-#[cfg(any(feature = "nostr", feature = "marketplace"))]
-pub fn oracle_attestation_from_str(content: &str) -> anyhow::Result<OracleAttestation> {
-    let bytes = base64::decode(content)?;
-    let mut cursor = Cursor::new(bytes);
-    OracleAttestation::read(&mut cursor)
-        .map_err(|_| anyhow::anyhow!("could not read oracle attestation"))
 }
 
 #[cfg(test)]

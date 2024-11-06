@@ -3,6 +3,7 @@ use crate::Storage;
 use bdk_chain::Merge;
 use bdk_wallet::ChangeSet;
 use dlc_manager::{channel::Channel, contract::Contract, ChannelId, ContractId};
+use dlc_messages::oracle_msgs::OracleAnnouncement;
 use std::collections::HashMap;
 use std::sync::RwLock;
 
@@ -10,7 +11,7 @@ use std::sync::RwLock;
 pub struct MemoryStorage {
     peers: RwLock<HashMap<String, PeerInformation>>,
     bdk_data: RwLock<Option<bdk_wallet::ChangeSet>>,
-    announcements: RwLock<Vec<kormir::OracleAnnouncement>>,
+    announcements: RwLock<Vec<OracleAnnouncement>>,
     contracts: RwLock<HashMap<ContractId, Contract>>,
     channels: RwLock<HashMap<ChannelId, Channel>>,
     chain_monitor: RwLock<Option<dlc_manager::chain_monitor::ChainMonitor>>,
