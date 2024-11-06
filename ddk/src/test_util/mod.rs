@@ -1,10 +1,8 @@
 pub mod oracle;
+pub mod transport;
 
 use bitcoin::{
-    address::NetworkChecked,
-    bip32::Xpriv,
-    key::rand::{Fill, Rng},
-    Address, Amount, Network,
+    address::NetworkChecked, bip32::Xpriv, key::{rand::{Fill, Rng}, Secp256k1}, secp256k1::All, Address, Amount, Network
 };
 use chrono::{Local, TimeDelta};
 use ddk_payouts::enumeration::create_contract_input;
@@ -15,6 +13,7 @@ use dlc_manager::{
 };
 use kormir::{Oracle, OracleAnnouncement};
 use oracle::MemoryOracle;
+use transport::MemoryTransport;
 use std::{
     fs::File,
     io::Write,
@@ -27,12 +26,12 @@ use std::{
 
 use crate::{
     builder::Builder, chain::EsploraClient, oracle::KormirOracleClient, storage::SledStorage,
-    transport::lightning::LightningTransport, wallet::DlcDevKitWallet, DlcDevKit,
+    wallet::DlcDevKitWallet, DlcDevKit,
 };
 use bitcoincore_rpc::RpcApi;
 use kormir::storage::MemoryStorage;
 
-type TestDlcDevKit = DlcDevKit<LightningTransport, SledStorage, MemoryOracle>;
+type TestDlcDevKit = DlcDevKit<MemoryTransport, SledStorage, MemoryOracle>;
 pub struct TestWallet(pub DlcDevKitWallet, String);
 
 #[rstest::fixture]
@@ -42,10 +41,11 @@ pub async fn test_ddk() -> (
     (u32, OracleAnnouncement),
     ContractInput,
 ) {
+    let secp = Secp256k1::new();
     let oracle = Arc::new(MemoryOracle::new());
 
-    let test = TestSuite::new("send_offer", 1778, oracle.clone()).await;
-    let test_two = TestSuite::new("sender_offer_two", 1779, oracle.clone()).await;
+    let test = TestSuite::new(&secp, "send_offer", oracle.clone()).await;
+    let test_two = TestSuite::new(&secp, "sender_offer_two", oracle.clone()).await;
 
     let announcement = create_oracle_announcement(oracle.clone()).await;
     let contract_input = contract_input(&announcement.1);
@@ -179,14 +179,13 @@ pub struct TestSuite {
 }
 
 impl TestSuite {
-    pub async fn new(name: &str, port: u16, oracle: Arc<MemoryOracle>) -> TestSuite {
+    pub async fn new(secp: &Secp256k1<All>, name: &str, oracle: Arc<MemoryOracle>) -> TestSuite {
         let storage_path = format!("tests/data/{name}");
         std::fs::create_dir_all(storage_path.clone()).expect("couldn't create file");
         let seed =
             xprv_from_path(PathBuf::from_str(&storage_path).unwrap(), Network::Regtest).unwrap();
         let esplora_host = "http://127.0.0.1:30000".to_string();
-        let transport =
-            Arc::new(LightningTransport::new(&seed.private_key.secret_bytes(), port).unwrap());
+        let transport = Arc::new(MemoryTransport::new(secp));
         let storage = Arc::new(SledStorage::new(&format!("{storage_path}/sleddb")).unwrap());
 
         let ddk = Self::create_ddk(
@@ -208,7 +207,7 @@ impl TestSuite {
 
     async fn create_ddk(
         name: &str,
-        transport: Arc<LightningTransport>,
+        transport: Arc<MemoryTransport>,
         storage: Arc<SledStorage>,
         oracle: Arc<MemoryOracle>,
         seed_bytes: [u8; 32],

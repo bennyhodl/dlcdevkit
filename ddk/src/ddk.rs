@@ -271,15 +271,16 @@ mod tests {
 
         let alice_makes_offer = alice.ddk.manager.send_offer_with_announcements(
             &contract_input,
-            bob.ddk.transport.node_id,
+            bob.ddk.transport.keypair.public_key(),
             vec![vec![announcement.clone()]],
         );
 
         let alice_makes_offer = alice_makes_offer.expect("alice did not create an offer");
 
         let contract_id = alice_makes_offer.temporary_contract_id.clone();
-        let alice_pubkey = alice.ddk.transport.node_id;
-        let bob_pubkey = bob.ddk.transport.node_id;
+        // TODO: get pubkey method
+        let alice_pubkey = alice.ddk.transport.keypair.public_key();
+        let bob_pubkey = bob.ddk.transport.keypair.public_key();
 
         let bob_receives_offer = bob
             .ddk
