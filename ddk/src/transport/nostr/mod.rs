@@ -15,6 +15,11 @@ impl Transport for NostrDlc {
         "nostr".to_string()
     }
 
+    fn public_key(&self) -> BitcoinPublicKey {
+        BitcoinPublicKey::from_slice(&self.keys.public_key.serialize())
+            .expect("Should not fail converting nostr key to bitcoin key.")
+    }
+
     async fn listen(&self) {
         self.listen().await.expect("Did not start nostr listener.");
     }
