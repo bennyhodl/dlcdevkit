@@ -1,7 +1,3 @@
-pub mod oracle;
-pub mod transport;
-pub mod storage;
-
 use bitcoin::{
     address::NetworkChecked, bip32::Xpriv, key::{rand::{Fill, Rng}, Secp256k1}, secp256k1::All, Address, Amount, Network
 };
@@ -12,8 +8,6 @@ use dlc_manager::{
     contract::contract_input::ContractInput, manager::Manager, ContractId, SystemTimeProvider, Storage
 };
 use kormir::{Oracle, OracleAnnouncement, storage::MemoryStorage as KormirMemoryStorage};
-use oracle::MemoryOracle;
-use transport::MemoryTransport;
 use std::{
     fs::File,
     io::Write,
@@ -25,8 +19,8 @@ use std::{
 };
 
 use crate::{
-    builder::Builder, chain::EsploraClient, oracle::KormirOracleClient,
-    wallet::DlcDevKitWallet, DlcDevKit, test_util::storage::MemoryStorage,
+    builder::Builder, chain::EsploraClient, 
+    wallet::DlcDevKitWallet, DlcDevKit, storage::memory::MemoryStorage, transport::memory::MemoryTransport, oracle::memory::MemoryOracle,
 };
 use bitcoincore_rpc::RpcApi;
 
@@ -165,7 +159,7 @@ type DlcManager = Arc<
         >,
         Arc<EsploraClient>,
         Arc<MemoryStorage>,
-        Arc<KormirOracleClient>,
+        Arc<MemoryOracle>,
         Arc<SystemTimeProvider>,
         Arc<DlcDevKitWallet>,
         dlc_manager::SimpleSigner,

@@ -1,4 +1,5 @@
 mod kormir;
+pub mod memory;
 mod p2p_derivatives;
 
 pub use kormir::KormirOracleClient;
