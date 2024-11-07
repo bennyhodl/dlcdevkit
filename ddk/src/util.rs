@@ -9,6 +9,7 @@ use dlc_manager::contract::{
 use dlc_manager::error::Error;
 use dlc_messages::oracle_msgs::OracleAnnouncement;
 use lightning::io::Read;
+use tokio::runtime::Runtime;
 
 /// Helper from rust-dlc to implement types for contracts.
 macro_rules! convertible_enum {
@@ -142,6 +143,38 @@ pub(crate) fn filter_expired_oracle_announcements(
         .filter(|ann| ann.oracle_event.event_maturity_epoch < now)
         .cloned()
         .collect()
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn new_runtime() -> Runtime {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn new_runtime() -> Runtime {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn spawn<F>(future: F)
+where
+    F: future::Future<Output = ()> + 'static,
+{
+    wasm_bindgen_futures::spawn_local(future);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn spawn<F>(future: F)
+where
+    F: std::future::Future<Output = ()> + Send + 'static,
+{
+    tokio::spawn(future);
 }
 
 #[cfg(test)]

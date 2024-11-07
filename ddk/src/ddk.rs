@@ -17,6 +17,7 @@ use dlc_messages::{AcceptDlc, Message, OfferDlc};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio::runtime::Runtime;
+use crate::util;
 
 /// DlcDevKit type alias for the [dlc_manager::manager::Manager]
 pub type DlcDevKitDlcManager<S, O> = dlc_manager::manager::Manager<
@@ -64,10 +65,7 @@ where
     O: Oracle,
 {
     pub fn start(&self) -> anyhow::Result<()> {
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .unwrap();
+        let runtime = util::new_runtime();
         self.start_with_runtime(runtime)
     }
 
@@ -80,21 +78,21 @@ where
 
         let manager_clone = self.manager.clone();
         let receiver_clone = self.receiver.clone();
-        runtime.spawn(async move { Self::run_manager(manager_clone, receiver_clone).await });
+        self.spawn_task(async move { Self::run_manager(manager_clone, receiver_clone).await });
 
         let transport_clone = self.transport.clone();
-        runtime.spawn(async move {
+        self.spawn_task(async move {
             transport_clone.listen().await;
         });
 
         let transport_clone = self.transport.clone();
         let manager_clone = self.manager.clone();
-        runtime.spawn(async move {
+        self.spawn_task(async move {
             transport_clone.receive_messages(manager_clone).await;
         });
 
         let wallet_clone = self.wallet.clone();
-        runtime.spawn(async move {
+        self.spawn_task(async move {
             let mut timer = tokio::time::interval(Duration::from_secs(60));
             loop {
                 timer.tick().await;
@@ -105,7 +103,7 @@ where
         });
 
         let processor = self.sender.clone();
-        runtime.spawn(async move {
+        self.spawn_task(async move {
             let mut timer = tokio::time::interval(Duration::from_secs(5));
             loop {
                 timer.tick().await;
@@ -118,7 +116,7 @@ where
         #[cfg(feature = "marketplace")]
         {
             let storage_clone = self.storage.clone();
-            runtime.spawn(async move {
+            self.spawn_task(async move {
                 tracing::info!("Starting marketplace listener.");
                 marketplace_listener(&storage_clone, vec![DEFAULT_NOSTR_RELAY])
                     .await
@@ -241,17 +239,34 @@ where
 
         Ok((contract_id, counter_party, accept_dlc))
     }
+
+    // Helper function to spawn tasks appropriately for each platform
+    fn spawn_task<F>(&self, future: F)
+    where
+        F: std::future::Future<Output = ()> + Send + 'static,
+    {
+        #[cfg(target_arch = "wasm32")]
+        {
+            wasm_bindgen_futures::spawn_local(future);
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if let Some(runtime) = self.runtime.read().unwrap().as_ref() {
+                runtime.spawn(future);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-    use crate::{test_util::{generate_blocks, test_ddk, TestSuite}, Transport};
-    use dlc_manager::{
-        contract::{contract_input::ContractInput, Contract},
-        Storage,
-    };
+    use crate::test_util::{generate_blocks, test_ddk, TestSuite};
+    use crate::Transport;
+    use dlc_manager::contract::{contract_input::ContractInput, Contract};
+    use dlc_manager::Storage;
     use dlc_messages::{oracle_msgs::OracleAnnouncement, Message};
     use rstest::rstest;
     use tokio::time::sleep;

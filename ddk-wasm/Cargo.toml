@@ -1,0 +1,29 @@
+[package]
+name = "ddk-wasm"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wasm-bindgen = "0.2.95"
+js-sys = "0.3.72"
+web-sys = { version = "0.3.72", features = [
+    "console",
+    "Window",
+    "Response",
+    "Request",
+    "RequestInit",
+    "RequestMode",
+    "Headers",
+] }
+serde = { version = "1.0.214", features = ["derive"] }
+serde-wasm-bindgen = "0.6.5"
+wasm-bindgen-futures = "0.4.45"
+bitcoin = { version = "0.32.2", features = ["serde"] }
+console_error_panic_hook = "0.1"
+ddk = { path = "../ddk" }
+thiserror = "2.0"
+anyhow = "1.0.93"
+uuid = { version = "1.11.0", features = ["v4", "js"] }
