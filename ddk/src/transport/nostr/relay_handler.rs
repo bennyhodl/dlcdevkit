@@ -78,7 +78,7 @@ impl NostrDlc {
                         }
                     };
 
-                    match manager.on_dlc_message(&message, pubkey) {
+                    match manager.on_dlc_message(&message, pubkey).await {
                         Ok(Some(msg)) => {
                             let event = super::messages::create_dlc_msg_event(
                                 event.pubkey,

@@ -1,6 +1,6 @@
 // include!("./util.rs");
-// use dlc_messages::Message;
-// use dlc_messages::OfferDlc;
+// use ddk_messages::Message;
+// use ddk_messages::OfferDlc;
 // use nostr::{
 //     secp256k1::{Secp256k1, SecretKey},
 //     Keys,

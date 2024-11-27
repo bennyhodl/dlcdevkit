@@ -23,7 +23,7 @@ use bitcoin::hashes::sha256::HashEngine;
 use bitcoin::hashes::Hash;
 use bitcoin::key::rand::{thread_rng, Fill};
 use bitcoin::{secp256k1::SecretKey, Amount, FeeRate, ScriptBuf, Transaction};
-use dlc_manager::{error::Error as ManagerError, SimpleSigner};
+use ddk_manager::{error::Error as ManagerError, SimpleSigner};
 use lightning::chain::chaininterface::{ConfirmationTarget, FeeEstimator};
 use std::collections::HashMap;
 use std::io::Write;
@@ -275,6 +275,29 @@ impl DlcDevKitWallet {
         Ok(tx.compute_txid())
     }
 
+    pub fn send_all(&self, address: Address, fee_rate: FeeRate) -> Result<Txid, WalletError> {
+        let Ok(mut wallet) = self.wallet.try_write() else {
+            tracing::error!("Could not get lock to sync wallet.");
+            return Err(WalletError::Lock);
+        };
+
+        tracing::info!(
+            address = address.to_string(),
+            "Sending all UTXOs to address."
+        );
+
+        let mut tx_builder = wallet.build_tx();
+        tx_builder.fee_rate(fee_rate);
+        tx_builder.drain_wallet();
+        tx_builder.drain_to(address.script_pubkey());
+        let mut psbt = tx_builder.finish().unwrap();
+        wallet.sign(&mut psbt, SignOptions::default()).unwrap();
+        let tx = psbt.extract_tx()?;
+        self.blockchain.blocking_client.broadcast(&tx)?;
+
+        Ok(tx.compute_txid())
+    }
+
     pub fn get_transactions(&self) -> Result<Vec<Arc<Transaction>>, WalletError> {
         let Ok(wallet) = self.wallet.try_read() else {
             tracing::error!("Could not get lock to sync wallet.");
@@ -313,7 +336,7 @@ impl FeeEstimator for DlcDevKitWallet {
     }
 }
 
-impl dlc_manager::ContractSignerProvider for DlcDevKitWallet {
+impl ddk_manager::ContractSignerProvider for DlcDevKitWallet {
     type Signer = SimpleSigner;
 
     // Using the data deterministically generate a key id. From a child key.
@@ -352,7 +375,7 @@ impl dlc_manager::ContractSignerProvider for DlcDevKitWallet {
     }
 }
 
-impl dlc_manager::Wallet for DlcDevKitWallet {
+impl ddk_manager::Wallet for DlcDevKitWallet {
     fn get_new_address(&self) -> Result<bitcoin::Address, ManagerError> {
         let address = self
             .new_external_address()
@@ -421,7 +444,7 @@ impl dlc_manager::Wallet for DlcDevKitWallet {
         amount: u64,
         fee_rate: u64,
         _lock_utxos: bool,
-    ) -> Result<Vec<dlc_manager::Utxo>, ManagerError> {
+    ) -> Result<Vec<ddk_manager::Utxo>, ManagerError> {
         let local_utxos = self.list_utxos().map_err(wallet_err_to_manager_err)?;
 
         let utxos = local_utxos
@@ -442,7 +465,7 @@ impl dlc_manager::Wallet for DlcDevKitWallet {
                     ScriptBuf::new().as_script(),
                     &mut thread_rng(),
                 )
-                .unwrap();
+                .map_err(|e| ManagerError::WalletError(Box::new(e)))?;
 
         let dlc_utxos = selected_utxos
             .selected
@@ -450,7 +473,7 @@ impl dlc_manager::Wallet for DlcDevKitWallet {
             .map(|utxo| {
                 let address =
                     Address::from_script(&utxo.txout().script_pubkey, self.network).unwrap();
-                dlc_manager::Utxo {
+                ddk_manager::Utxo {
                     tx_out: utxo.txout().clone(),
                     outpoint: utxo.outpoint(),
                     address,
@@ -466,9 +489,11 @@ impl dlc_manager::Wallet for DlcDevKitWallet {
 
 #[cfg(test)]
 mod tests {
-    use crate::test_util::TestSuite;
-    use bitcoin::{key::rand::Fill, AddressType};
-    use dlc_manager::ContractSignerProvider;
+    use std::str::FromStr;
+
+    use crate::test_util::{generate_blocks, TestSuite};
+    use bitcoin::{key::rand::Fill, Address, AddressType, Amount, FeeRate, Network};
+    use ddk_manager::{Blockchain, ContractSignerProvider};
 
     #[test]
     fn address_is_p2wpkh() {
@@ -487,5 +512,32 @@ mod tests {
         let gen_key_id = test.0.derive_signer_key_id(true, temp_key_id);
         let key_info = test.0.derive_contract_signer(gen_key_id);
         assert!(key_info.is_ok())
+    }
+
+    #[test]
+    fn send_all() {
+        use crate::test_util::fund_addresses;
+        let wallet = TestSuite::create_wallet("send_all");
+        let network = wallet.0.blockchain.get_network().unwrap();
+        let address = match network {
+            Network::Regtest => "bcrt1qt0yrvs7qx8guvpqsx8u9mypz6t4zr3pxthsjkm",
+            Network::Signet => "bcrt1q7h9uzwvyw29vrpujp69l7kce7e5w98mpn8kwsp",
+            _ => "bcrt1qt0yrvs7qx8guvpqsx8u9mypz6t4zr3pxthsjkm",
+        };
+        let addr_one = wallet.0.new_external_address().unwrap().address;
+        let addr_two = wallet.0.new_external_address().unwrap().address;
+        fund_addresses(&addr_one, &addr_two);
+        wallet.0.sync().unwrap();
+        assert!(wallet.0.get_balance().unwrap().confirmed > Amount::ZERO);
+        wallet
+            .0
+            .send_all(
+                Address::from_str(address).unwrap().assume_checked(),
+                FeeRate::from_sat_per_vb(1).unwrap(),
+            )
+            .unwrap();
+        generate_blocks(5);
+        wallet.0.sync().unwrap();
+        assert!(wallet.0.get_balance().unwrap().confirmed == Amount::ZERO)
     }
 }

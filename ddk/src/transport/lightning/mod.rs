@@ -37,7 +37,7 @@ impl Transport for LightningTransport {
     /// Sends a message to a peer.
     ///
     /// TODO: Assert that we are connected to the peer before sending.
-    fn send_message(&self, counterparty: PublicKey, message: dlc_messages::Message) {
+    fn send_message(&self, counterparty: PublicKey, message: ddk_messages::Message) {
         self.message_handler.send_message(counterparty, message)
     }
 
@@ -58,7 +58,7 @@ impl Transport for LightningTransport {
                     "Processing DLC message"
                 );
 
-                match manager.on_dlc_message(&message, counter_party) {
+                match manager.on_dlc_message(&message, counter_party).await {
                     Err(e) => {
                         tracing::error!(error =? e, "On message error.")
                     }

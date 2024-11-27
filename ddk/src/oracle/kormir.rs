@@ -1,6 +1,6 @@
 use anyhow::anyhow;
 use bitcoin::key::XOnlyPublicKey;
-use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
+use ddk_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
 use kormir::storage::OracleEventData;
 use lightning::{io::Cursor, util::ser::Readable};
 use serde::Serialize;
@@ -67,7 +67,10 @@ impl KormirOracleClient {
     /// Kormir events includes announcements info, nonce index, signatures
     /// if announcement has been signed, and nostr information.
     pub async fn list_events(&self) -> anyhow::Result<Vec<OracleEventData>> {
-        get(&self.host, "list-events").await
+        get(&self.host, "list-events").await.map_err(|e| {
+            println!("Error in list events. {}", e);
+            anyhow!("List events")
+        })
     }
 
     /// Creates an enum oracle announcament.
@@ -113,7 +116,9 @@ impl KormirOracleClient {
         announcement: OracleAnnouncement,
         outcome: String,
     ) -> anyhow::Result<OracleAttestation> {
-        let event_id = match self.list_events().await?.iter().find(|event| {
+        let event_id = self.list_events().await?;
+
+        let event_id = match event_id.iter().find(|event| {
             event.announcement.oracle_event.event_id == announcement.oracle_event.event_id
         }) {
             Some(ann) => ann.id,
@@ -124,6 +129,8 @@ impl KormirOracleClient {
             Some(id) => id,
             None => return Err(anyhow!("No id in kormir oracle event data.")),
         };
+
+        tracing::info!("Signing event. event_id={:?} id={id}", event_id);
 
         let event = SignEnumEvent { id, outcome };
 
@@ -150,7 +157,8 @@ impl KormirOracleClient {
     }
 }
 
-impl dlc_manager::Oracle for KormirOracleClient {
+#[async_trait::async_trait]
+impl ddk_manager::Oracle for KormirOracleClient {
     fn get_public_key(&self) -> bitcoin::key::XOnlyPublicKey {
         self.pubkey
     }
@@ -158,13 +166,13 @@ impl dlc_manager::Oracle for KormirOracleClient {
     async fn get_attestation(
         &self,
         event_id: &str,
-    ) -> Result<dlc_messages::oracle_msgs::OracleAttestation, dlc_manager::error::Error> {
+    ) -> Result<ddk_messages::oracle_msgs::OracleAttestation, ddk_manager::error::Error> {
         tracing::info!(event_id, "Getting attestation to close contract.");
         let attestation = get::<OracleAttestation>(&self.host, &format!("attestation/{event_id}"))
             .await
             .map_err(|e| {
                 tracing::error!(error=?e, "Could not get attestation.");
-                dlc_manager::error::Error::OracleError("Could not get attestation".into())
+                ddk_manager::error::Error::OracleError("Could not get attestation".into())
             })?;
         tracing::info!(event_id, attestation =? attestation, "Kormir attestation.");
         Ok(attestation)
@@ -173,14 +181,14 @@ impl dlc_manager::Oracle for KormirOracleClient {
     async fn get_announcement(
         &self,
         event_id: &str,
-    ) -> Result<dlc_messages::oracle_msgs::OracleAnnouncement, dlc_manager::error::Error> {
+    ) -> Result<ddk_messages::oracle_msgs::OracleAnnouncement, ddk_manager::error::Error> {
         tracing::info!(event_id, "Getting oracle announcement.");
         let announcement =
             get::<OracleAnnouncement>(&self.host, &format!("announcement/{event_id}"))
                 .await
                 .map_err(|e| {
                     tracing::error!(error =? e, "Could not get announcement.");
-                    dlc_manager::error::Error::OracleError("Could not get announcement".into())
+                    ddk_manager::error::Error::OracleError("Could not get announcement".into())
                 })?;
         tracing::info!(event_id, announcement=?announcement, "Kormir announcement.");
         Ok(announcement)
@@ -200,7 +208,7 @@ mod tests {
     use super::*;
 
     async fn create_kormir() -> KormirOracleClient {
-        KormirOracleClient::new("http://127.0.0.1:8082")
+        KormirOracleClient::new("https://kormir.dlcdevkit.com")
             .await
             .unwrap()
     }

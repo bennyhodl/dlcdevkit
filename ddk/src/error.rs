@@ -1,5 +1,5 @@
 use bdk_esplora::esplora_client::Error as EsploraError;
-use dlc_manager::error::Error as ManagerError;
+use ddk_manager::error::Error as ManagerError;
 
 pub fn esplora_err_to_manager_err(e: EsploraError) -> ManagerError {
     ManagerError::BlockchainError(e.to_string())

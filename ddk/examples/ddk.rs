@@ -24,7 +24,7 @@ async fn main() -> Result<()> {
     builder.set_storage(storage.clone());
     builder.set_oracle(oracle_client.clone());
 
-    let ddk: ApplicationDdk = builder.finish()?;
+    let ddk: ApplicationDdk = builder.finish().await?;
 
     ddk.start().expect("couldn't start ddk");
 

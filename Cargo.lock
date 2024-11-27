@@ -983,11 +983,11 @@ dependencies = [
  "bitcoincore-rpc",
  "chrono",
  "crossbeam",
+ "ddk-dlc",
+ "ddk-manager",
+ "ddk-messages",
  "ddk-payouts",
- "dlc",
- "dlc-manager",
- "dlc-messages",
- "dlc-trie",
+ "ddk-trie",
  "hex",
  "kormir",
  "lightning",
@@ -1006,6 +1006,51 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "ddk-dlc"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "89ad5d59b454f683860a3c857fd1b5c873421808b95c8cb12d7aa7285fb02fd4"
+dependencies = [
+ "bitcoin",
+ "miniscript",
+ "secp256k1-sys",
+ "secp256k1-zkp",
+ "serde",
+]
+
+[[package]]
+name = "ddk-manager"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b04cf05f776d5b50be8864d40f60e17e03bdfb20947f4928cfff41e70dc155d4"
+dependencies = [
+ "async-trait",
+ "bitcoin",
+ "ddk-dlc",
+ "ddk-messages",
+ "ddk-trie",
+ "futures",
+ "hex-conservative 0.1.2",
+ "lightning",
+ "log",
+ "secp256k1-zkp",
+ "serde",
+]
+
+[[package]]
+name = "ddk-messages"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ddc7c2985d667a61cd05b552e7608ddb48c42b91225ee88378266bfcb3c0b390"
+dependencies = [
+ "bitcoin",
+ "ddk-dlc",
+ "lightning",
+ "secp256k1-zkp",
+ "serde",
 ]
 
 [[package]]
@@ -1035,11 +1080,23 @@ version = "0.0.12"
 dependencies = [
  "anyhow",
  "bitcoin",
- "dlc",
- "dlc-manager",
- "dlc-trie",
+ "ddk-dlc",
+ "ddk-manager",
+ "ddk-trie",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "ddk-trie"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a49ce43084ead615b5f3409e6b9d3780277bbde5415f31da5873d7aa3077b6c"
+dependencies = [
+ "bitcoin",
+ "ddk-dlc",
+ "secp256k1-zkp",
+ "serde",
 ]
 
 [[package]]
@@ -1051,59 +1108,6 @@ dependencies = [
  "block-buffer",
  "crypto-common",
  "subtle",
-]
-
-[[package]]
-name = "dlc"
-version = "0.7.0"
-source = "git+https://github.com/bennyhodl/rust-dlc?branch=async#1b979ccab1a4823747f358c04ed0ba66d9eb5019"
-dependencies = [
- "bitcoin",
- "miniscript",
- "secp256k1-sys",
- "secp256k1-zkp",
- "serde",
-]
-
-[[package]]
-name = "dlc-manager"
-version = "0.7.0"
-source = "git+https://github.com/bennyhodl/rust-dlc?branch=async#1b979ccab1a4823747f358c04ed0ba66d9eb5019"
-dependencies = [
- "async-trait",
- "bitcoin",
- "dlc",
- "dlc-messages",
- "dlc-trie",
- "futures",
- "hex-conservative 0.1.2",
- "lightning",
- "log",
- "secp256k1-zkp",
- "serde",
-]
-
-[[package]]
-name = "dlc-messages"
-version = "0.7.0"
-source = "git+https://github.com/bennyhodl/rust-dlc?branch=async#1b979ccab1a4823747f358c04ed0ba66d9eb5019"
-dependencies = [
- "bitcoin",
- "dlc",
- "lightning",
- "secp256k1-zkp",
- "serde",
-]
-
-[[package]]
-name = "dlc-trie"
-version = "0.7.0"
-source = "git+https://github.com/bennyhodl/rust-dlc?branch=async#1b979ccab1a4823747f358c04ed0ba66d9eb5019"
-dependencies = [
- "bitcoin",
- "dlc",
- "secp256k1-zkp",
- "serde",
 ]
 
 [[package]]
@@ -1952,12 +1956,13 @@ dependencies = [
 
 [[package]]
 name = "kormir"
-version = "0.3.0"
-source = "git+https://github.com/bennyhodl/kormir?branch=rust-dlc-async#35cbe3afcfb7bc4991d732a85c311b374a8632b3"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d55dddf4f5a3346cc2af25d3cc3c72be835baeb605e09325358f7f90e524901"
 dependencies = [
  "bitcoin",
- "dlc",
- "dlc-messages",
+ "ddk-dlc",
+ "ddk-messages",
  "hex",
  "lightning",
  "log",

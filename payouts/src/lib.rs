@@ -3,8 +3,8 @@ pub mod enumeration;
 use std::str::FromStr;
 
 use bitcoin::key::XOnlyPublicKey;
-use dlc_manager::contract::numerical_descriptor::NumericalDescriptor;
-use dlc_manager::{
+use ddk_manager::contract::numerical_descriptor::NumericalDescriptor;
+use ddk_manager::{
     contract::{
         contract_input::{ContractInput, ContractInputInfo, OracleInput},
         ContractDescriptor,
@@ -14,7 +14,7 @@ use dlc_manager::{
         RoundingInterval, RoundingIntervals,
     },
 };
-use dlc_trie::OracleNumericInfo;
+use ddk_trie::OracleNumericInfo;
 
 pub fn generate_payout_curve(
     min_price: u64,

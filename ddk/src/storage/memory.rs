@@ -1,8 +1,8 @@
 use crate::transport::PeerInformation;
 use crate::Storage;
 use bdk_chain::Merge;
-use dlc_manager::{channel::Channel, contract::Contract, ChannelId, ContractId};
-use dlc_messages::oracle_msgs::OracleAnnouncement;
+use ddk_manager::{channel::Channel, contract::Contract, ChannelId, ContractId};
+use ddk_messages::oracle_msgs::OracleAnnouncement;
 use std::collections::HashMap;
 use std::sync::RwLock;
 
@@ -13,7 +13,7 @@ pub struct MemoryStorage {
     announcements: RwLock<Vec<OracleAnnouncement>>,
     contracts: RwLock<HashMap<ContractId, Contract>>,
     channels: RwLock<HashMap<ChannelId, Channel>>,
-    chain_monitor: RwLock<Option<dlc_manager::chain_monitor::ChainMonitor>>,
+    chain_monitor: RwLock<Option<ddk_manager::chain_monitor::ChainMonitor>>,
 }
 
 impl MemoryStorage {
@@ -67,32 +67,32 @@ impl Storage for MemoryStorage {
     }
 }
 
-impl dlc_manager::Storage for MemoryStorage {
+impl ddk_manager::Storage for MemoryStorage {
     fn get_contract(
         &self,
-        id: &dlc_manager::ContractId,
-    ) -> Result<Option<dlc_manager::contract::Contract>, dlc_manager::error::Error> {
+        id: &ddk_manager::ContractId,
+    ) -> Result<Option<ddk_manager::contract::Contract>, ddk_manager::error::Error> {
         Ok(self.contracts.read().unwrap().get(id).cloned())
     }
 
     fn get_channel(
         &self,
-        channel_id: &dlc_manager::ChannelId,
-    ) -> Result<Option<dlc_manager::channel::Channel>, dlc_manager::error::Error> {
+        channel_id: &ddk_manager::ChannelId,
+    ) -> Result<Option<ddk_manager::channel::Channel>, ddk_manager::error::Error> {
         Ok(self.channels.read().unwrap().get(channel_id).cloned())
     }
 
     fn get_contracts(
         &self,
-    ) -> Result<Vec<dlc_manager::contract::Contract>, dlc_manager::error::Error> {
+    ) -> Result<Vec<ddk_manager::contract::Contract>, ddk_manager::error::Error> {
         Ok(self.contracts.read().unwrap().values().cloned().collect())
     }
 
     fn upsert_channel(
         &self,
-        channel: dlc_manager::channel::Channel,
-        contract: Option<dlc_manager::contract::Contract>,
-    ) -> Result<(), dlc_manager::error::Error> {
+        channel: ddk_manager::channel::Channel,
+        contract: Option<ddk_manager::contract::Contract>,
+    ) -> Result<(), ddk_manager::error::Error> {
         if let Some(contract) = contract {
             self.contracts
                 .write()
@@ -108,16 +108,16 @@ impl dlc_manager::Storage for MemoryStorage {
 
     fn delete_channel(
         &self,
-        channel_id: &dlc_manager::ChannelId,
-    ) -> Result<(), dlc_manager::error::Error> {
+        channel_id: &ddk_manager::ChannelId,
+    ) -> Result<(), ddk_manager::error::Error> {
         self.channels.write().unwrap().remove(channel_id);
         Ok(())
     }
 
     fn create_contract(
         &self,
-        contract: &dlc_manager::contract::offered_contract::OfferedContract,
-    ) -> Result<(), dlc_manager::error::Error> {
+        contract: &ddk_manager::contract::offered_contract::OfferedContract,
+    ) -> Result<(), ddk_manager::error::Error> {
         self.contracts
             .write()
             .unwrap()
@@ -127,16 +127,16 @@ impl dlc_manager::Storage for MemoryStorage {
 
     fn delete_contract(
         &self,
-        id: &dlc_manager::ContractId,
-    ) -> Result<(), dlc_manager::error::Error> {
+        id: &ddk_manager::ContractId,
+    ) -> Result<(), ddk_manager::error::Error> {
         self.contracts.write().unwrap().remove(id);
         Ok(())
     }
 
     fn update_contract(
         &self,
-        contract: &dlc_manager::contract::Contract,
-    ) -> Result<(), dlc_manager::error::Error> {
+        contract: &ddk_manager::contract::Contract,
+    ) -> Result<(), ddk_manager::error::Error> {
         self.contracts
             .write()
             .unwrap()
@@ -146,15 +146,15 @@ impl dlc_manager::Storage for MemoryStorage {
 
     fn get_chain_monitor(
         &self,
-    ) -> Result<Option<dlc_manager::chain_monitor::ChainMonitor>, dlc_manager::error::Error> {
+    ) -> Result<Option<ddk_manager::chain_monitor::ChainMonitor>, ddk_manager::error::Error> {
         Ok(None)
     }
 
     fn get_contract_offers(
         &self,
     ) -> Result<
-        Vec<dlc_manager::contract::offered_contract::OfferedContract>,
-        dlc_manager::error::Error,
+        Vec<ddk_manager::contract::offered_contract::OfferedContract>,
+        ddk_manager::error::Error,
     > {
         let contracts = self.contracts.read().unwrap();
         let offers = contracts
@@ -170,8 +170,8 @@ impl dlc_manager::Storage for MemoryStorage {
 
     fn get_signed_channels(
         &self,
-        _channel_state: Option<dlc_manager::channel::signed_channel::SignedChannelStateType>,
-    ) -> Result<Vec<dlc_manager::channel::signed_channel::SignedChannel>, dlc_manager::error::Error>
+        _channel_state: Option<ddk_manager::channel::signed_channel::SignedChannelStateType>,
+    ) -> Result<Vec<ddk_manager::channel::signed_channel::SignedChannel>, ddk_manager::error::Error>
     {
         let channels = self.channels.read().unwrap();
         Ok(channels
@@ -186,8 +186,8 @@ impl dlc_manager::Storage for MemoryStorage {
     fn get_signed_contracts(
         &self,
     ) -> Result<
-        Vec<dlc_manager::contract::signed_contract::SignedContract>,
-        dlc_manager::error::Error,
+        Vec<ddk_manager::contract::signed_contract::SignedContract>,
+        ddk_manager::error::Error,
     > {
         let contracts = self.contracts.read().unwrap();
         Ok(contracts
@@ -201,7 +201,7 @@ impl dlc_manager::Storage for MemoryStorage {
 
     fn get_offered_channels(
         &self,
-    ) -> Result<Vec<dlc_manager::channel::offered_channel::OfferedChannel>, dlc_manager::error::Error>
+    ) -> Result<Vec<ddk_manager::channel::offered_channel::OfferedChannel>, ddk_manager::error::Error>
     {
         let channels = self.channels.read().unwrap();
         Ok(channels
@@ -215,16 +215,16 @@ impl dlc_manager::Storage for MemoryStorage {
 
     fn persist_chain_monitor(
         &self,
-        _monitor: &dlc_manager::chain_monitor::ChainMonitor,
-    ) -> Result<(), dlc_manager::error::Error> {
+        _monitor: &ddk_manager::chain_monitor::ChainMonitor,
+    ) -> Result<(), ddk_manager::error::Error> {
         Ok(())
     }
 
     fn get_confirmed_contracts(
         &self,
     ) -> Result<
-        Vec<dlc_manager::contract::signed_contract::SignedContract>,
-        dlc_manager::error::Error,
+        Vec<ddk_manager::contract::signed_contract::SignedContract>,
+        ddk_manager::error::Error,
     > {
         let contracts = self.contracts.read().unwrap();
         Ok(contracts
@@ -238,7 +238,7 @@ impl dlc_manager::Storage for MemoryStorage {
 
     fn get_preclosed_contracts(
         &self,
-    ) -> Result<Vec<dlc_manager::contract::PreClosedContract>, dlc_manager::error::Error> {
+    ) -> Result<Vec<ddk_manager::contract::PreClosedContract>, ddk_manager::error::Error> {
         let contracts = self.contracts.read().unwrap();
         Ok(contracts
             .values()

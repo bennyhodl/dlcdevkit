@@ -1,6 +1,7 @@
 use crate::nostr::{DLC_MESSAGE_KIND, ORACLE_ANNOUNCMENT_KIND, ORACLE_ATTESTATION_KIND};
-use dlc_messages::message_handler::read_dlc_message;
-use dlc_messages::{Message, WireMessage};
+use ddk_dlc::secp256k1_zkp::PublicKey as SecpPublicKey;
+use ddk_messages::message_handler::read_dlc_message;
+use ddk_messages::{Message, WireMessage};
 use lightning::ln::wire::Type;
 use lightning::util::ser::{Readable, Writeable};
 use nostr_rs::nips::nip04;
@@ -45,7 +46,7 @@ pub fn parse_dlc_msg_event(event: &Event, secret_key: &SecretKey) -> anyhow::Res
 pub fn handle_dlc_msg_event(
     event: &Event,
     secret_key: &SecretKey,
-) -> anyhow::Result<(dlc::secp256k1_zkp::PublicKey, Message, Event)> {
+) -> anyhow::Result<(SecpPublicKey, Message, Event)> {
     if event.kind != Kind::Custom(8_888) {
         return Err(anyhow::anyhow!("Event reveived was not DLC Message event."));
     }

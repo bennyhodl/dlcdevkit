@@ -9,13 +9,13 @@ use bitcoin::{
     Address, Amount, Network,
 };
 use chrono::{Local, TimeDelta};
-use ddk_payouts::enumeration::create_contract_input;
-use dlc::EnumerationPayout;
-use dlc_manager::{
+use ddk_dlc::EnumerationPayout;
+use ddk_manager::{
     contract::contract_input::ContractInput, manager::Manager, ContractId, Storage,
     SystemTimeProvider,
 };
-use dlc_messages::oracle_msgs::OracleAnnouncement;
+use ddk_messages::oracle_msgs::OracleAnnouncement;
+use ddk_payouts::enumeration::create_contract_input;
 use kormir::{storage::MemoryStorage as KormirMemoryStorage, Oracle};
 use std::{
     fs::File,
@@ -64,7 +64,7 @@ pub async fn test_ddk() -> (
     (test, test_two, announcement, contract_input)
 }
 
-fn fund_addresses(
+pub fn fund_addresses(
     node_one_address: &Address<NetworkChecked>,
     node_two_address: &Address<NetworkChecked>,
 ) {
@@ -137,14 +137,14 @@ pub fn contract_input(announcement: &OracleAnnouncement) -> ContractInput {
         vec![
             EnumerationPayout {
                 outcome: "rust".to_string(),
-                payout: dlc::Payout {
+                payout: ddk_dlc::Payout {
                     offer: 100_000,
                     accept: 0,
                 },
             },
             EnumerationPayout {
                 outcome: "go".to_string(),
-                payout: dlc::Payout {
+                payout: ddk_dlc::Payout {
                     offer: 0,
                     accept: 100_000,
                 },
@@ -162,9 +162,9 @@ type DlcManager = Arc<
     Manager<
         Arc<DlcDevKitWallet>,
         Arc<
-            dlc_manager::CachedContractSignerProvider<
+            ddk_manager::CachedContractSignerProvider<
                 Arc<DlcDevKitWallet>,
-                dlc_manager::SimpleSigner,
+                ddk_manager::SimpleSigner,
             >,
         >,
         Arc<EsploraClient>,
@@ -172,7 +172,7 @@ type DlcManager = Arc<
         Arc<MemoryOracle>,
         Arc<SystemTimeProvider>,
         Arc<DlcDevKitWallet>,
-        dlc_manager::SimpleSigner,
+        ddk_manager::SimpleSigner,
     >,
 >;
 
@@ -227,6 +227,7 @@ impl TestSuite {
             .set_transport(transport)
             .set_storage(storage)
             .finish()
+            .await
             .unwrap();
 
         ddk
@@ -256,7 +257,9 @@ impl TestSuite {
 
 impl Drop for TestWallet {
     fn drop(&mut self) {
-        std::fs::remove_dir_all(self.1.clone()).expect("couldn't remove wallet dir");
+        if let Err(_) = std::fs::remove_dir_all(self.1.clone()) {
+            println!("Couldn't remove wallet dir.")
+        };
     }
 }
 

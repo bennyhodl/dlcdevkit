@@ -1,5 +1,6 @@
 use bitcoin::bip32::Xpriv;
 use bitcoin::key::rand::Rng;
+use bitcoin::secp256k1::schnorr::Signature;
 use kormir::storage::{MemoryStorage, Storage};
 use kormir::{Oracle as Kormir, OracleAttestation};
 
@@ -25,7 +26,8 @@ impl Oracle for MemoryOracle {
     }
 }
 
-impl dlc_manager::Oracle for MemoryOracle {
+#[async_trait::async_trait]
+impl ddk_manager::Oracle for MemoryOracle {
     fn get_public_key(&self) -> bitcoin::XOnlyPublicKey {
         self.oracle.public_key()
     }
@@ -33,7 +35,7 @@ impl dlc_manager::Oracle for MemoryOracle {
     async fn get_announcement(
         &self,
         event_id: &str,
-    ) -> Result<kormir::OracleAnnouncement, dlc_manager::error::Error> {
+    ) -> Result<kormir::OracleAnnouncement, ddk_manager::error::Error> {
         Ok(self
             .oracle
             .storage
@@ -47,20 +49,32 @@ impl dlc_manager::Oracle for MemoryOracle {
     async fn get_attestation(
         &self,
         event_id: &str,
-    ) -> Result<kormir::OracleAttestation, dlc_manager::error::Error> {
-        let signatures = self
+    ) -> Result<kormir::OracleAttestation, ddk_manager::error::Error> {
+        let event = self
             .oracle
             .storage
             .get_event(event_id.parse().unwrap())
             .await
             .unwrap()
-            .unwrap()
-            .signatures;
+            .unwrap();
+
+        let sigs = event
+            .signatures
+            .iter()
+            .map(|sig| sig.1)
+            .collect::<Vec<Signature>>();
+
+        let outcomes = event
+            .signatures
+            .iter()
+            .map(|outcome| outcome.0.clone())
+            .collect::<Vec<String>>();
 
         Ok(OracleAttestation {
+            event_id: event.announcement.oracle_event.event_id,
             oracle_public_key: self.oracle.public_key(),
-            signatures: signatures.values().cloned().collect::<Vec<_>>(),
-            outcomes: signatures.keys().cloned().collect::<Vec<_>>(),
+            signatures: sigs,
+            outcomes,
         })
     }
 }
@@ -68,7 +82,7 @@ impl dlc_manager::Oracle for MemoryOracle {
 #[cfg(test)]
 mod tests {
     use chrono::{Local, TimeDelta};
-    use dlc_manager::Oracle;
+    use ddk_manager::Oracle;
 
     use super::*;
 
@@ -91,8 +105,10 @@ mod tests {
             )
             .await
             .unwrap();
+        println!("create: {}", announcement.oracle_event.event_id);
 
         let ann = oracle.get_announcement(&format!("{id}")).await.unwrap();
+        println!("get_announcement: {}", ann.oracle_event.event_id);
 
         assert_eq!(ann, announcement);
 
@@ -102,7 +118,10 @@ mod tests {
             .await
             .unwrap();
 
+        println!("sign: {:?}", sign.event_id);
+
         let att = oracle.get_attestation(&format!("{id}")).await.unwrap();
+        println!("get_attestation: {}", att.event_id);
 
         assert_eq!(sign, att);
     }

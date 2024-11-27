@@ -33,9 +33,9 @@ pub use ddk::DlcManagerMessage;
 
 /// Re-exports
 pub use bitcoin;
-pub use dlc;
-pub use dlc_manager;
-pub use dlc_messages;
+pub use ddk_dlc;
+pub use ddk_manager;
+pub use ddk_messages;
 
 /// Default nostr relay.
 pub const DEFAULT_NOSTR_RELAY: &str = "wss://nostr.dlcdevkit.com";
@@ -43,8 +43,8 @@ pub const DEFAULT_NOSTR_RELAY: &str = "wss://nostr.dlcdevkit.com";
 use async_trait::async_trait;
 use bitcoin::secp256k1::{PublicKey, SecretKey};
 use ddk::DlcDevKitDlcManager;
-use dlc_messages::oracle_msgs::OracleAnnouncement;
-use dlc_messages::Message;
+use ddk_messages::oracle_msgs::OracleAnnouncement;
+use ddk_messages::Message;
 use error::WalletError;
 use transport::PeerInformation;
 
@@ -69,7 +69,7 @@ pub trait Transport: Send + Sync + 'static {
 }
 
 /// Storage for DLC contracts.
-pub trait Storage: dlc_manager::Storage + Send + Sync + 'static {
+pub trait Storage: ddk_manager::Storage + Send + Sync + 'static {
     ///// Instantiate the storage for the BDK wallet.
     fn initialize_bdk(&self) -> Result<ChangeSet, WalletError>;
     /// Save changeset to the wallet storage.
@@ -91,6 +91,6 @@ pub trait KeyStorage {
 }
 
 /// Oracle client
-pub trait Oracle: dlc_manager::Oracle + Send + Sync + 'static {
+pub trait Oracle: ddk_manager::Oracle + Send + Sync + 'static {
     fn name(&self) -> String;
 }

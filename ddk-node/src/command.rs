@@ -9,12 +9,12 @@ use crate::ddkrpc::{
 };
 use anyhow::anyhow;
 use ddk::bitcoin::Transaction;
-use ddk::dlc::{EnumerationPayout, Payout};
-use ddk::dlc_manager::contract::contract_input::ContractInput;
-use ddk::dlc_manager::contract::offered_contract::OfferedContract;
-use ddk::dlc_manager::contract::Contract;
-use ddk::dlc_messages::oracle_msgs::{EventDescriptor, OracleAnnouncement};
-use ddk::dlc_messages::{AcceptDlc, OfferDlc};
+use ddk::ddk_dlc::{EnumerationPayout, Payout};
+use ddk::ddk_manager::contract::contract_input::ContractInput;
+use ddk::ddk_manager::contract::offered_contract::OfferedContract;
+use ddk::ddk_manager::contract::Contract;
+use ddk::ddk_messages::oracle_msgs::{EventDescriptor, OracleAnnouncement};
+use ddk::ddk_messages::{AcceptDlc, OfferDlc};
 use ddk::util;
 use ddk::wallet::LocalOutput;
 use inquire::{Select, Text};
@@ -172,6 +172,8 @@ pub async fn cli_command(
                 })
                 .await?
                 .into_inner();
+            let offer_hex = hex::encode(&offer.offer_dlc);
+            println!("{}", offer_hex);
             let offer_dlc: OfferDlc = serde_json::from_slice(&offer.offer_dlc)?;
             let offer = serde_json::to_string_pretty(&offer_dlc)?;
             print!("{}", offer);
@@ -193,6 +195,8 @@ pub async fn cli_command(
                 .await?
                 .into_inner();
             let accept_dlc: AcceptDlc = serde_json::from_slice(&accept.accept_dlc)?;
+            let accept_hex = hex::encode(&accept.accept_dlc);
+            println!("{}", accept_hex);
             let accept_dlc = serde_json::to_string_pretty(&accept_dlc)?;
             print!("{}", accept_dlc)
         }

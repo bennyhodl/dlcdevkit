@@ -7,19 +7,19 @@ use anyhow::anyhow;
 use bitcoin::secp256k1::PublicKey;
 use bitcoin::Network;
 use crossbeam::channel::{unbounded, Receiver, Sender};
-use dlc_manager::error::Error;
-use dlc_manager::{
+use ddk_manager::error::Error;
+use ddk_manager::{
     contract::contract_input::ContractInput, CachedContractSignerProvider, ContractId,
     SimpleSigner, SystemTimeProvider,
 };
-use dlc_messages::oracle_msgs::OracleAnnouncement;
-use dlc_messages::{AcceptDlc, Message, OfferDlc};
+use ddk_messages::oracle_msgs::OracleAnnouncement;
+use ddk_messages::{AcceptDlc, Message, OfferDlc};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio::runtime::Runtime;
 
-/// DlcDevKit type alias for the [dlc_manager::manager::Manager]
-pub type DlcDevKitDlcManager<S, O> = dlc_manager::manager::Manager<
+/// DlcDevKit type alias for the [ddk_manager::manager::Manager]
+pub type DlcDevKitDlcManager<S, O> = ddk_manager::manager::Manager<
     Arc<DlcDevKitWallet>,
     Arc<CachedContractSignerProvider<Arc<DlcDevKitWallet>, SimpleSigner>>,
     Arc<EsploraClient>,
@@ -165,7 +165,7 @@ where
                     contract,
                     responder,
                 } => {
-                    let accept_dlc = manager.accept_contract_offer(&contract);
+                    let accept_dlc = manager.accept_contract_offer(&contract).await;
 
                     responder.send(accept_dlc).expect("can't send")
                 }
@@ -251,11 +251,11 @@ mod tests {
         test_util::{generate_blocks, test_ddk, TestSuite},
         Transport,
     };
-    use dlc_manager::{
+    use ddk_manager::{
         contract::{contract_input::ContractInput, Contract},
         Storage,
     };
-    use dlc_messages::{oracle_msgs::OracleAnnouncement, Message};
+    use ddk_messages::{oracle_msgs::OracleAnnouncement, Message};
     use rstest::rstest;
     use tokio::time::sleep;
 
@@ -278,7 +278,9 @@ mod tests {
             vec![vec![announcement.clone()]],
         );
 
-        let alice_makes_offer = alice_makes_offer.expect("alice did not create an offer");
+        let alice_makes_offer = alice_makes_offer
+            .await
+            .expect("alice did not create an offer");
 
         let contract_id = alice_makes_offer.temporary_contract_id.clone();
         let alice_pubkey = alice.ddk.transport.public_key();
@@ -287,7 +289,8 @@ mod tests {
         let bob_receives_offer = bob
             .ddk
             .manager
-            .on_dlc_message(&Message::Offer(alice_makes_offer), alice_pubkey);
+            .on_dlc_message(&Message::Offer(alice_makes_offer), alice_pubkey)
+            .await;
 
         let bob_receive_offer = bob_receives_offer.expect("bob did not receive the offer");
         assert!(bob_receive_offer.is_none());
@@ -296,6 +299,7 @@ mod tests {
             .ddk
             .manager
             .accept_contract_offer(&contract_id)
+            .await
             .expect("bob could not accept offer");
 
         let (contract_id, _counter_party, bob_accept_dlc) = bob_accept_offer;
@@ -304,6 +308,7 @@ mod tests {
             .ddk
             .manager
             .on_dlc_message(&Message::Accept(bob_accept_dlc), bob_pubkey)
+            .await
             .expect("alice did not receive accept");
 
         assert!(alice_receive_accept.is_some());
@@ -312,6 +317,7 @@ mod tests {
         bob.ddk
             .manager
             .on_dlc_message(&alice_sign_message, alice_pubkey)
+            .await
             .expect("bob did not receive sign message");
 
         generate_blocks(10);
@@ -379,6 +385,7 @@ mod tests {
         bob.ddk
             .manager
             .close_confirmed_contract(&contract_id, vec![(0, attestation.unwrap())])
+            .await
             .unwrap();
 
         sleep(Duration::from_secs(10)).await;
