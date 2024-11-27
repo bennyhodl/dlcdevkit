@@ -8,15 +8,12 @@ repository = "https://github.com/bennyhodl/dlcdevkit"
 edition = "2021"
 
 [dependencies]
-# dlc = { version = "0.7.0", features = ["use-serde"] }
-# dlc-manager = { version = "0.7.0", features = ["use-serde"] }
-# dlc-trie = { version = "0.7.0", features = ["use-serde"] }
-dlc = { version = "0.7.0", git = "https://github.com/bennyhodl/rust-dlc", branch = "async", features = ["use-serde"] }
-dlc-manager = { version = "0.7.0", git = "https://github.com/bennyhodl/rust-dlc", branch = "async", features = ["use-serde", "async"] }
-dlc-trie = { version = "0.7.0", git = "https://github.com/bennyhodl/rust-dlc", branch = "async", features = ["use-serde"] }
-# dlc = { version = "0.7.0", path = "../../rust-dlc/dlc", features = ["use-serde"] }
-# dlc-manager = { version = "0.7.0", path = "../../rust-dlc/dlc-manager", features = ["use-serde", "async"] }
-# dlc-trie = { version = "0.7.0", path = "../../rust-dlc/dlc-trie", features = ["use-serde"] }
+ddk-dlc = { version = "0.7.0", features = ["use-serde"] }
+ddk-manager = { version = "0.7.1", features = ["use-serde"] }
+ddk-trie = { version = "0.7.0", features = ["use-serde"] }
+# ddk-dlc = { version = "0.7.0", path = "../../rust-dlc/ddk-dlc", features = ["use-serde"] }
+# ddk-manager = { version = "0.7.1", path = "../../rust-dlc/ddk-manager", features = ["use-serde", "async"] }
+# ddk-trie = { version = "0.7.0", path = "../../rust-dlc/ddk-trie", features = ["use-serde"] }
 
 bitcoin = "0.32.2"
 serde = { version = "1.0.209", features = ["derive"] }

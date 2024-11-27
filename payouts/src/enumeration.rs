@@ -1,9 +1,9 @@
 use std::str::FromStr;
 
 use bitcoin::key::XOnlyPublicKey;
-use dlc::EnumerationPayout;
-use dlc_manager::contract::enum_descriptor::EnumDescriptor;
-use dlc_manager::contract::{
+use ddk_dlc::EnumerationPayout;
+use ddk_manager::contract::enum_descriptor::EnumDescriptor;
+use ddk_manager::contract::{
     contract_input::{ContractInput, ContractInputInfo, OracleInput},
     ContractDescriptor,
 };

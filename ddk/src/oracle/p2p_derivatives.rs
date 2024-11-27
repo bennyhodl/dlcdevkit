@@ -4,9 +4,9 @@
 //! Http client wrapper for the Crypto Garage DLC oracle
 
 use chrono::{DateTime, SecondsFormat, Utc};
-use dlc::secp256k1_zkp::{schnorr::Signature, XOnlyPublicKey};
-use dlc_manager::error::Error as DlcManagerError;
-use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
+use ddk_dlc::secp256k1_zkp::{schnorr::Signature, XOnlyPublicKey};
+use ddk_manager::error::Error as DlcManagerError;
+use ddk_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
 
 use crate::Oracle;
 
@@ -62,13 +62,13 @@ where
     reqwest::get(path)
         .await
         .map_err(|x| {
-            dlc_manager::error::Error::IOError(
+            ddk_manager::error::Error::IOError(
                 std::io::Error::new(std::io::ErrorKind::Other, x).into(),
             )
         })?
         .json::<T>()
         .await
-        .map_err(|e| dlc_manager::error::Error::OracleError(e.to_string()))
+        .map_err(|e| ddk_manager::error::Error::OracleError(e.to_string()))
 }
 
 fn pubkey_path(host: &str) -> String {
@@ -135,7 +135,8 @@ fn parse_event_id(event_id: &str) -> Result<(String, DateTime<Utc>), DlcManagerE
     Ok((asset_id.to_string(), date_time))
 }
 
-impl dlc_manager::Oracle for P2PDOracleClient {
+#[async_trait::async_trait]
+impl ddk_manager::Oracle for P2PDOracleClient {
     fn get_public_key(&self) -> XOnlyPublicKey {
         self.public_key
     }
@@ -153,16 +154,17 @@ impl dlc_manager::Oracle for P2PDOracleClient {
     async fn get_attestation(
         &self,
         event_id: &str,
-    ) -> Result<OracleAttestation, dlc_manager::error::Error> {
+    ) -> Result<OracleAttestation, ddk_manager::error::Error> {
         let (asset_id, date_time) = parse_event_id(event_id)?;
         let path = attestation_path(&self.host, &asset_id, &date_time);
         let AttestationResponse {
-            event_id: _,
+            event_id,
             signatures,
             values,
         } = get::<AttestationResponse>(&path).await?;
 
         Ok(OracleAttestation {
+            event_id,
             oracle_public_key: self.public_key,
             signatures,
             outcomes: values,

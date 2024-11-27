@@ -5,7 +5,7 @@ pub use relay_handler::NostrDlc;
 
 use crate::{DlcDevKitDlcManager, Oracle, Storage, Transport};
 use bitcoin::secp256k1::PublicKey as BitcoinPublicKey;
-use dlc_messages::Message;
+use ddk_messages::Message;
 use nostr_rs::PublicKey;
 use std::sync::Arc;
 

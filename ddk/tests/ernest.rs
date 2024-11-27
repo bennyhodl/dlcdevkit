@@ -5,12 +5,12 @@
 //     secp256k1_zkp::{rand::thread_rng, KeyPair, Message, Secp256k1, ONE_KEY},
 //     EnumerationPayout, Payout,
 // };
-// use dlc_manager::contract::{
+// use ddk_manager::contract::{
 //     contract_input::{ContractInput, ContractInputInfo, OracleInput},
 //     enum_descriptor::EnumDescriptor,
 //     ContractDescriptor,
 // };
-// use dlc_messages::oracle_msgs::{
+// use ddk_messages::oracle_msgs::{
 //     DigitDecompositionEventDescriptor, EnumEventDescriptor, EventDescriptor, OracleAnnouncement,
 //     OracleEvent,
 // };

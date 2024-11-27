@@ -1,7 +1,7 @@
 use bitcoin::Network;
 use crossbeam::channel::unbounded;
-use dlc_manager::manager::Manager;
-use dlc_manager::SystemTimeProvider;
+use ddk_manager::manager::Manager;
+use ddk_manager::SystemTimeProvider;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
@@ -78,14 +78,14 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
         self
     }
 
-    /// DLC contract storage. Storage is used by the [dlc_manager::manager::Manager] to create, update, retrieve, and
+    /// DLC contract storage. Storage is used by the [ddk_manager::manager::Manager] to create, update, retrieve, and
     /// delete contracts. MUST implement [crate::Storage]
     pub fn set_storage(&mut self, storage: Arc<S>) -> &mut Self {
         self.storage = Some(storage);
         self
     }
 
-    /// Oracle implementation for the [dlc_manager::manager::Manager] to retrieve oracle attestations and announcements.
+    /// Oracle implementation for the [ddk_manager::manager::Manager] to retrieve oracle attestations and announcements.
     /// MUST implement [crate::Oracle].
     pub fn set_oracle(&mut self, oracle: Arc<O>) -> &mut Self {
         self.oracle = Some(oracle);
@@ -111,7 +111,7 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
     }
 
     /// Builds the `DlcDevKit` instance. Fails if any components are missing.
-    pub fn finish(&self) -> anyhow::Result<DlcDevKit<T, S, O>> {
+    pub async fn finish(&self) -> anyhow::Result<DlcDevKit<T, S, O>> {
         tracing::info!(
             network = self.network.to_string(),
             esplora = self.esplora_host,
@@ -153,15 +153,18 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
 
         let (sender, receiver) = unbounded::<DlcManagerMessage>();
 
-        let manager = Arc::new(Manager::new(
-            wallet.clone(),
-            wallet.clone(),
-            esplora_client.clone(),
-            storage.clone(),
-            oracles,
-            Arc::new(SystemTimeProvider {}),
-            wallet.clone(),
-        )?);
+        let manager = Arc::new(
+            Manager::new(
+                wallet.clone(),
+                wallet.clone(),
+                esplora_client.clone(),
+                storage.clone(),
+                oracles,
+                Arc::new(SystemTimeProvider {}),
+                wallet.clone(),
+            )
+            .await?,
+        );
         tracing::info!("Created ddk dlc manager.");
 
         Ok(DlcDevKit {

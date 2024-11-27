@@ -1,4 +1,4 @@
-use ddk::dlc_manager::contract::{
+use ddk::ddk_manager::contract::{
     accepted_contract::AcceptedContract, offered_contract::OfferedContract,
     signed_contract::SignedContract, ClosedContract, Contract, FailedAcceptContract,
     FailedSignContract, PreClosedContract,

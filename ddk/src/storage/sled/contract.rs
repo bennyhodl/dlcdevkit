@@ -1,18 +1,18 @@
 use super::{SledStorage, CHAIN_MONITOR_KEY, CHAIN_MONITOR_TREE};
 use crate::util::{deserialize_contract, serialize_contract};
 use bitcoin::consensus::ReadExt;
-use dlc_manager::chain_monitor::ChainMonitor;
-use dlc_manager::channel::accepted_channel::AcceptedChannel;
-use dlc_manager::channel::offered_channel::OfferedChannel;
-use dlc_manager::channel::signed_channel::{SignedChannel, SignedChannelStateType};
-use dlc_manager::channel::{
+use ddk_manager::chain_monitor::ChainMonitor;
+use ddk_manager::channel::accepted_channel::AcceptedChannel;
+use ddk_manager::channel::offered_channel::OfferedChannel;
+use ddk_manager::channel::signed_channel::{SignedChannel, SignedChannelStateType};
+use ddk_manager::channel::{
     Channel, ClosedChannel, ClosedPunishedChannel, ClosingChannel, FailedAccept, FailedSign,
 };
-use dlc_manager::contract::offered_contract::OfferedContract;
-use dlc_manager::contract::ser::Serializable;
-use dlc_manager::contract::signed_contract::SignedContract;
-use dlc_manager::contract::{Contract, PreClosedContract};
-use dlc_manager::{error::Error, ContractId, Storage};
+use ddk_manager::contract::offered_contract::OfferedContract;
+use ddk_manager::contract::ser::Serializable;
+use ddk_manager::contract::signed_contract::SignedContract;
+use ddk_manager::contract::{Contract, PreClosedContract};
+use ddk_manager::{error::Error, ContractId, Storage};
 use sled::transaction::{ConflictableTransactionResult, UnabortableTransactionError};
 use sled::Transactional;
 use std::convert::TryInto;
@@ -241,14 +241,14 @@ impl Storage for SledStorage {
         Ok(())
     }
 
-    fn delete_channel(&self, channel_id: &dlc_manager::ChannelId) -> Result<(), Error> {
+    fn delete_channel(&self, channel_id: &ddk_manager::ChannelId) -> Result<(), Error> {
         self.channel_tree()?
             .remove(channel_id)
             .map_err(to_storage_error)?;
         Ok(())
     }
 
-    fn get_channel(&self, channel_id: &dlc_manager::ChannelId) -> Result<Option<Channel>, Error> {
+    fn get_channel(&self, channel_id: &ddk_manager::ChannelId) -> Result<Option<Channel>, Error> {
         match self
             .channel_tree()?
             .get(channel_id)
@@ -292,7 +292,7 @@ impl Storage for SledStorage {
             .map_err(|e| Error::StorageError(format!("Error writing chain monitor: {}", e)))?;
         Ok(())
     }
-    fn get_chain_monitor(&self) -> Result<Option<ChainMonitor>, dlc_manager::error::Error> {
+    fn get_chain_monitor(&self) -> Result<Option<ChainMonitor>, ddk_manager::error::Error> {
         let serialized = self
             .open_tree(&[CHAIN_MONITOR_TREE])?
             .get([CHAIN_MONITOR_KEY])

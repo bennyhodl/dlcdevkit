@@ -8,9 +8,9 @@ mod seed;
 use ddk::bitcoin::secp256k1::PublicKey;
 use ddk::bitcoin::{Address, Amount, FeeRate, Network};
 use ddk::builder::Builder;
-use ddk::dlc_manager::contract::contract_input::ContractInput;
-use ddk::dlc_manager::Oracle as DlcOracle;
-use ddk::dlc_manager::Storage as DlcStorage;
+use ddk::ddk_manager::contract::contract_input::ContractInput;
+use ddk::ddk_manager::Oracle as DlcOracle;
+use ddk::ddk_manager::Storage as DlcStorage;
 use ddk::oracle::kormir::KormirOracleClient;
 use ddk::storage::sled::SledStorage;
 use ddk::transport::lightning::LightningTransport;
@@ -87,7 +87,7 @@ impl DdkNode {
         builder.set_storage(storage.clone());
         builder.set_oracle(oracle.clone());
 
-        let ddk: Ddk = builder.finish()?;
+        let ddk: Ddk = builder.finish().await?;
 
         ddk.start()?;
 

@@ -6,7 +6,7 @@ use bitcoin::{
     secp256k1::{All, PublicKey, Secp256k1},
 };
 use crossbeam::channel::{unbounded, Receiver, Sender};
-use dlc_messages::Message;
+use ddk_messages::Message;
 
 pub struct MemoryTransport {
     pub receiver: Receiver<(Message, PublicKey)>,
@@ -69,7 +69,7 @@ impl Transport for MemoryTransport {
         loop {
             timer.tick().await;
             if let Ok(msg) = self.receiver.recv() {
-                match manager.on_dlc_message(&msg.0, msg.1) {
+                match manager.on_dlc_message(&msg.0, msg.1).await {
                     Ok(s) => {
                         if let Some(reply) = s {
                             self.send_message(msg.1, reply);
