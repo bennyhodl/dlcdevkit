@@ -17,7 +17,7 @@ nostr = ["dep:nostr-rs", "dep:nostr-sdk", "dep:nostr-sqlite", "dep:nostr-relay-p
 lightning = ["dep:lightning-net-tokio"]
 
 # oracle features
-kormir = ["dep:kormir", "dep:reqwest"]
+kormir = ["dep:reqwest"]
 p2pderivatives = ["dep:reqwest"]
 
 # storage features
@@ -65,8 +65,8 @@ lightning-net-tokio = { version = "0.0.125", optional = true }
 
 # oracle feature
 reqwest = { version = "0.12.9", features = ["blocking"], optional = true }
-kormir = { version = "0.3.2", optional = true }
-# kormir = { version = "0.3.2", path = "../../kormir/kormir", optional = true }
+kormir = "0.3.2"
+# kormir = { version = "0.3.2", path = "../../kormir/kormir" }
 
 [dev-dependencies]
 test-log = { version = "0.2.16", features = ["trace"] }
