@@ -1,4 +1,6 @@
 pub mod enumeration;
+pub mod options;
+pub(crate) mod options_builder;
 
 use std::str::FromStr;
 

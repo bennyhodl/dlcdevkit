@@ -10,9 +10,11 @@ edition = "2021"
 [dependencies]
 ddk-dlc = { version = "0.7.0", features = ["use-serde"] }
 ddk-manager = { version = "0.7.1", features = ["use-serde"] }
+ddk-messages = { version = "0.7.0", features = ["use-serde"] }
 ddk-trie = { version = "0.7.0", features = ["use-serde"] }
 # ddk-dlc = { version = "0.7.0", path = "../../rust-dlc/ddk-dlc", features = ["use-serde"] }
 # ddk-manager = { version = "0.7.1", path = "../../rust-dlc/ddk-manager", features = ["use-serde", "async"] }
+# ddk-messages = { version = "0.7.0", path = "../../rust-dlc/ddk-messages", features = ["use-serde"] }
 # ddk-trie = { version = "0.7.0", path = "../../rust-dlc/ddk-trie", features = ["use-serde"] }
 
 bitcoin = "0.32.2"
