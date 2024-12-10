@@ -65,8 +65,8 @@ lightning-net-tokio = { version = "0.0.125", optional = true }
 
 # oracle feature
 reqwest = { version = "0.12.9", features = ["blocking"], optional = true }
-kormir = "0.3.2"
-# kormir = { version = "0.3.2", path = "../../kormir/kormir" }
+kormir = "0.4.0"
+# kormir = { version = "0.4.0", path = "../../kormir/kormir" }
 
 [dev-dependencies]
 test-log = { version = "0.2.16", features = ["trace"] }

@@ -53,7 +53,7 @@ impl ddk_manager::Oracle for MemoryOracle {
         let event = self
             .oracle
             .storage
-            .get_event(event_id.parse().unwrap())
+            .get_event(event_id.to_string())
             .await
             .unwrap()
             .unwrap();
@@ -96,7 +96,7 @@ mod tests {
             .timestamp()
             .try_into()
             .unwrap();
-        let (id, announcement) = oracle
+        let announcement = oracle
             .oracle
             .create_enum_event(
                 "event_id".into(),
@@ -107,20 +107,29 @@ mod tests {
             .unwrap();
         println!("create: {}", announcement.oracle_event.event_id);
 
-        let ann = oracle.get_announcement(&format!("{id}")).await.unwrap();
+        let ann = oracle
+            .get_announcement(&announcement.oracle_event.event_id)
+            .await
+            .unwrap();
         println!("get_announcement: {}", ann.oracle_event.event_id);
 
         assert_eq!(ann, announcement);
 
         let sign = oracle
             .oracle
-            .sign_enum_event(id, "rust".to_string())
+            .sign_enum_event(
+                announcement.oracle_event.event_id.clone(),
+                "rust".to_string(),
+            )
             .await
             .unwrap();
 
         println!("sign: {:?}", sign.event_id);
 
-        let att = oracle.get_attestation(&format!("{id}")).await.unwrap();
+        let att = oracle
+            .get_attestation(&announcement.oracle_event.event_id)
+            .await
+            .unwrap();
         println!("get_attestation: {}", att.event_id);
 
         assert_eq!(sign, att);

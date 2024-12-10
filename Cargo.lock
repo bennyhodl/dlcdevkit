@@ -1082,6 +1082,7 @@ dependencies = [
  "bitcoin",
  "ddk-dlc",
  "ddk-manager",
+ "ddk-messages",
  "ddk-trie",
  "serde",
  "serde_json",
@@ -1956,9 +1957,9 @@ dependencies = [
 
 [[package]]
 name = "kormir"
-version = "0.3.2"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d55dddf4f5a3346cc2af25d3cc3c72be835baeb605e09325358f7f90e524901"
+checksum = "ae8aa9075fa7348542fd009c363106b8edcd0cd5b5983c5b5dbd429f483fe287"
 dependencies = [
  "bitcoin",
  "ddk-dlc",
