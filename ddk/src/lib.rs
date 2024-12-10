@@ -4,9 +4,6 @@
 // #![allow(unused_imports)]
 mod ddk;
 mod error;
-#[cfg(test)]
-mod test_util;
-
 /// Build a DDK application.
 pub mod builder;
 /// Working with the bitcoin chain.

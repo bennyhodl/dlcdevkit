@@ -489,55 +489,110 @@ impl ddk_manager::Wallet for DlcDevKitWallet {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
+    use std::{str::FromStr, sync::Arc, time::Duration};
 
-    use crate::test_util::{generate_blocks, TestSuite};
-    use bitcoin::{key::rand::Fill, Address, AddressType, Amount, FeeRate, Network};
+    use crate::storage::memory::MemoryStorage;
+    use bitcoin::{
+        address::NetworkChecked, bip32::Xpriv, key::rand::Fill, Address, AddressType, Amount,
+        FeeRate, Network,
+    };
+    use bitcoincore_rpc::RpcApi;
     use ddk_manager::{Blockchain, ContractSignerProvider};
+
+    use super::DlcDevKitWallet;
+
+    fn create_wallet() -> DlcDevKitWallet {
+        let storage = Arc::new(MemoryStorage::new());
+        let mut entropy = [0u8; 64];
+        entropy
+            .try_fill(&mut bitcoin::key::rand::thread_rng())
+            .unwrap();
+        let xpriv = Xpriv::new_master(Network::Regtest, &entropy).unwrap();
+        DlcDevKitWallet::new(
+            "test".into(),
+            &xpriv.private_key.secret_bytes(),
+            "http://localhost:30000",
+            Network::Regtest,
+            storage.clone(),
+        )
+        .unwrap()
+    }
+
+    fn generate_blocks(num: u64) {
+        tracing::warn!("Generating {} blocks.", num);
+        let auth = bitcoincore_rpc::Auth::UserPass("ddk".to_string(), "ddk".to_string());
+        let client = bitcoincore_rpc::Client::new("http://127.0.0.1:18443", auth).unwrap();
+        let previous_height = client.get_block_count().unwrap();
+
+        let address = client.get_new_address(None, None).unwrap().assume_checked();
+        client.generate_to_address(num, &address).unwrap();
+        let mut cur_block_height = previous_height;
+        while cur_block_height < previous_height + num {
+            std::thread::sleep(Duration::from_secs(5));
+            cur_block_height = client.get_block_count().unwrap();
+        }
+    }
+
+    fn fund_address(address: &Address<NetworkChecked>) {
+        let auth = bitcoincore_rpc::Auth::UserPass("ddk".to_string(), "ddk".to_string());
+        let client = bitcoincore_rpc::Client::new("http://127.0.0.1:18443", auth).unwrap();
+        client
+            .send_to_address(
+                address,
+                Amount::from_btc(1.0).unwrap(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        generate_blocks(5)
+    }
 
     #[test]
     fn address_is_p2wpkh() {
-        let test = TestSuite::create_wallet("p2wpkh-address");
-        let address = test.0.new_external_address().unwrap();
+        let test = create_wallet();
+        let address = test.new_external_address().unwrap();
         assert_eq!(address.address.address_type().unwrap(), AddressType::P2wpkh)
     }
 
     #[test]
     fn derive_contract_signer() {
-        let test = TestSuite::create_wallet("derive_contract_signer");
+        let test = create_wallet();
         let mut temp_key_id = [0u8; 32];
         temp_key_id
             .try_fill(&mut bitcoin::key::rand::thread_rng())
             .unwrap();
-        let gen_key_id = test.0.derive_signer_key_id(true, temp_key_id);
-        let key_info = test.0.derive_contract_signer(gen_key_id);
+        let gen_key_id = test.derive_signer_key_id(true, temp_key_id);
+        let key_info = test.derive_contract_signer(gen_key_id);
         assert!(key_info.is_ok())
     }
 
     #[test]
     fn send_all() {
-        use crate::test_util::fund_addresses;
-        let wallet = TestSuite::create_wallet("send_all");
-        let network = wallet.0.blockchain.get_network().unwrap();
+        let wallet = create_wallet();
+        let network = wallet.blockchain.get_network().unwrap();
         let address = match network {
             Network::Regtest => "bcrt1qt0yrvs7qx8guvpqsx8u9mypz6t4zr3pxthsjkm",
             Network::Signet => "bcrt1q7h9uzwvyw29vrpujp69l7kce7e5w98mpn8kwsp",
             _ => "bcrt1qt0yrvs7qx8guvpqsx8u9mypz6t4zr3pxthsjkm",
         };
-        let addr_one = wallet.0.new_external_address().unwrap().address;
-        let addr_two = wallet.0.new_external_address().unwrap().address;
-        fund_addresses(&addr_one, &addr_two);
-        wallet.0.sync().unwrap();
-        assert!(wallet.0.get_balance().unwrap().confirmed > Amount::ZERO);
+        let addr_one = wallet.new_external_address().unwrap().address;
+        let addr_two = wallet.new_external_address().unwrap().address;
+        fund_address(&addr_one);
+        fund_address(&addr_two);
+        wallet.sync().unwrap();
+        assert!(wallet.get_balance().unwrap().confirmed > Amount::ZERO);
         wallet
-            .0
             .send_all(
                 Address::from_str(address).unwrap().assume_checked(),
                 FeeRate::from_sat_per_vb(1).unwrap(),
             )
             .unwrap();
         generate_blocks(5);
-        wallet.0.sync().unwrap();
-        assert!(wallet.0.get_balance().unwrap().confirmed == Amount::ZERO)
+        wallet.sync().unwrap();
+        assert!(wallet.get_balance().unwrap().confirmed == Amount::ZERO)
     }
 }
