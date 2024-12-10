@@ -1,4 +1,8 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use crate::{ddk::DlcDevKitDlcManager, Oracle, Storage, Transport};
 use bitcoin::{
@@ -11,7 +15,7 @@ use ddk_messages::Message;
 pub struct MemoryTransport {
     pub receiver: Receiver<(Message, PublicKey)>,
     pub sender: Sender<(Message, PublicKey)>,
-    pub counterparty_transport: HashMap<PublicKey, Sender<(Message, PublicKey)>>,
+    pub counterparty_transport: Arc<Mutex<HashMap<PublicKey, Sender<(Message, PublicKey)>>>>,
     pub keypair: Keypair,
 }
 
@@ -22,17 +26,15 @@ impl MemoryTransport {
         Self {
             receiver,
             sender,
-            counterparty_transport: HashMap::new(),
+            counterparty_transport: Arc::new(Mutex::new(HashMap::new())),
             keypair,
         }
     }
 
-    pub fn add_counterparty(
-        &mut self,
-        counterparty: PublicKey,
-        sender: Sender<(Message, PublicKey)>,
-    ) {
-        self.counterparty_transport.insert(counterparty, sender);
+    pub fn add_counterparty(&self, counterparty: PublicKey, sender: Sender<(Message, PublicKey)>) {
+        let mut guard = self.counterparty_transport.lock().unwrap();
+        guard.insert(counterparty, sender);
+        drop(guard)
     }
 }
 
@@ -47,7 +49,8 @@ impl Transport for MemoryTransport {
     }
 
     fn send_message(&self, counterparty: PublicKey, message: Message) {
-        let connected_counterparty = self.counterparty_transport.get(&counterparty);
+        let counterparties = self.counterparty_transport.lock().unwrap();
+        let connected_counterparty = counterparties.get(&counterparty);
         if let Some(counterparty) = connected_counterparty {
             counterparty
                 .send((message, self.keypair.public_key()))
