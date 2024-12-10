@@ -60,6 +60,7 @@ fn build_order_offer(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 // Main option builder function
 pub fn build_option_order_offer(
     announcement: &OracleAnnouncement,

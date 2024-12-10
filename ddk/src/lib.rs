@@ -2,12 +2,12 @@
 // #![doc = include_str!("../README.md")]
 #![allow(dead_code)]
 // #![allow(unused_imports)]
-mod ddk;
-mod error;
 /// Build a DDK application.
 pub mod builder;
 /// Working with the bitcoin chain.
 pub mod chain;
+mod ddk;
+mod error;
 /// Nostr related functions.
 #[cfg(any(feature = "nostr", feature = "marketplace"))]
 pub(crate) mod nostr;
