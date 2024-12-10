@@ -12,10 +12,11 @@ use bitcoin::{
 use crossbeam::channel::{unbounded, Receiver, Sender};
 use ddk_messages::Message;
 
+type CounterPartyTransport = Arc<Mutex<HashMap<PublicKey, Sender<(Message, PublicKey)>>>>;
 pub struct MemoryTransport {
     pub receiver: Receiver<(Message, PublicKey)>,
     pub sender: Sender<(Message, PublicKey)>,
-    pub counterparty_transport: Arc<Mutex<HashMap<PublicKey, Sender<(Message, PublicKey)>>>>,
+    pub counterparty_transport: CounterPartyTransport,
     pub keypair: Keypair,
 }
 
