@@ -26,7 +26,7 @@ pub struct CreateEnumEvent {
 
 #[derive(Serialize)]
 struct SignEnumEvent {
-    pub id: u32,
+    pub event_id: String,
     pub outcome: String,
 }
 
@@ -113,26 +113,12 @@ impl KormirOracleClient {
     /// TODO: waiting for PR to call for announcement directly.
     pub async fn sign_event(
         &self,
-        announcement: OracleAnnouncement,
+        event_id: String,
         outcome: String,
     ) -> anyhow::Result<OracleAttestation> {
-        let event_id = self.list_events().await?;
+        tracing::info!("Signing event. event_id={} outcome={}", event_id, outcome);
 
-        let event_id = match event_id.iter().find(|event| {
-            event.announcement.oracle_event.event_id == announcement.oracle_event.event_id
-        }) {
-            Some(ann) => ann.id,
-            None => return Err(anyhow!("Announcement not found.")),
-        };
-
-        let id = match event_id {
-            Some(id) => id,
-            None => return Err(anyhow!("No id in kormir oracle event data.")),
-        };
-
-        tracing::info!("Signing event. event_id={:?} id={id}", event_id);
-
-        let event = SignEnumEvent { id, outcome };
+        let event = SignEnumEvent { event_id, outcome };
 
         let hex = self
             .client
@@ -232,7 +218,10 @@ mod tests {
         assert!(announcement.is_ok());
 
         let sign_enum = kormir
-            .sign_event(announcement.unwrap(), "rust".to_string())
+            .sign_event(
+                announcement.unwrap().oracle_event.event_id,
+                "rust".to_string(),
+            )
             .await;
 
         assert!(sign_enum.is_ok())
