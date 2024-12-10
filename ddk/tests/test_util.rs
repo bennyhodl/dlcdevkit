@@ -1,22 +1,12 @@
+#![allow(dead_code)]
 use bitcoin::{
     address::NetworkChecked,
     bip32::Xpriv,
-    key::{
-        rand::{Fill, Rng},
-        Secp256k1,
-    },
+    key::{rand::Fill, Secp256k1},
     secp256k1::All,
     Address, Amount, Network,
 };
-use chrono::{Local, TimeDelta};
-use ddk_dlc::EnumerationPayout;
-use ddk_manager::{
-    contract::contract_input::ContractInput, manager::Manager, ContractId, Storage,
-    SystemTimeProvider,
-};
-use ddk_messages::oracle_msgs::OracleAnnouncement;
-use ddk_payouts::enumeration::create_contract_input;
-use kormir::{storage::MemoryStorage as KormirMemoryStorage, Oracle};
+use ddk_manager::{ContractId, Storage};
 use std::{
     fs::File,
     io::Write,
@@ -27,31 +17,21 @@ use std::{
     time::Duration,
 };
 
-use crate::{
-    builder::Builder, chain::EsploraClient, oracle::memory::MemoryOracle,
-    storage::memory::MemoryStorage, transport::memory::MemoryTransport, wallet::DlcDevKitWallet,
-    DlcDevKit,
-};
 use bitcoincore_rpc::RpcApi;
+use ddk::{
+    builder::Builder, oracle::memory::MemoryOracle, storage::memory::MemoryStorage,
+    transport::memory::MemoryTransport, DlcDevKit,
+};
 
 type TestDlcDevKit = DlcDevKit<MemoryTransport, MemoryStorage, MemoryOracle>;
-pub struct TestWallet(pub DlcDevKitWallet, String);
 
 #[rstest::fixture]
-pub async fn test_ddk() -> (
-    TestSuite,
-    TestSuite,
-    (u32, OracleAnnouncement),
-    ContractInput,
-) {
+pub async fn test_ddk() -> (TestSuite, TestSuite, Arc<MemoryOracle>) {
     let secp = Secp256k1::new();
     let oracle = Arc::new(MemoryOracle::default());
 
     let test = TestSuite::new(&secp, "send_offer", oracle.clone()).await;
     let test_two = TestSuite::new(&secp, "sender_offer_two", oracle.clone()).await;
-
-    let announcement = create_oracle_announcement(oracle.clone()).await;
-    let contract_input = contract_input(&announcement.1);
 
     let node_one_address = test.ddk.wallet.new_external_address().unwrap().address;
     let node_two_address = test_two.ddk.wallet.new_external_address().unwrap().address;
@@ -61,7 +41,7 @@ pub async fn test_ddk() -> (
     test.ddk.wallet.sync().unwrap();
     test_two.ddk.wallet.sync().unwrap();
 
-    (test, test_two, announcement, contract_input)
+    (test, test_two, oracle)
 }
 
 pub fn fund_addresses(
@@ -73,7 +53,7 @@ pub fn fund_addresses(
     client
         .send_to_address(
             node_one_address,
-            Amount::from_btc(1.0).unwrap(),
+            Amount::from_btc(1.1).unwrap(),
             None,
             None,
             None,
@@ -85,7 +65,7 @@ pub fn fund_addresses(
     client
         .send_to_address(
             node_two_address,
-            Amount::from_btc(1.0).unwrap(),
+            Amount::from_btc(1.1).unwrap(),
             None,
             None,
             None,
@@ -112,70 +92,6 @@ pub fn generate_blocks(num: u64) {
     }
 }
 
-pub async fn create_oracle_announcement(oracle: Arc<MemoryOracle>) -> (u32, OracleAnnouncement) {
-    let expiry = TimeDelta::seconds(15);
-    let timestamp: u32 = Local::now()
-        .checked_add_signed(expiry)
-        .unwrap()
-        .timestamp()
-        .try_into()
-        .unwrap();
-
-    oracle
-        .oracle
-        .create_enum_event(
-            "test".into(),
-            vec!["rust".to_string(), "go".to_string()],
-            timestamp,
-        )
-        .await
-        .unwrap()
-}
-
-pub fn contract_input(announcement: &OracleAnnouncement) -> ContractInput {
-    create_contract_input(
-        vec![
-            EnumerationPayout {
-                outcome: "rust".to_string(),
-                payout: ddk_dlc::Payout {
-                    offer: 100_000,
-                    accept: 0,
-                },
-            },
-            EnumerationPayout {
-                outcome: "go".to_string(),
-                payout: ddk_dlc::Payout {
-                    offer: 0,
-                    accept: 100_000,
-                },
-            },
-        ],
-        50_000,
-        50_000,
-        1,
-        announcement.oracle_public_key.clone().to_string(),
-        announcement.oracle_event.event_id.clone(),
-    )
-}
-
-type DlcManager = Arc<
-    Manager<
-        Arc<DlcDevKitWallet>,
-        Arc<
-            ddk_manager::CachedContractSignerProvider<
-                Arc<DlcDevKitWallet>,
-                ddk_manager::SimpleSigner,
-            >,
-        >,
-        Arc<EsploraClient>,
-        Arc<MemoryStorage>,
-        Arc<MemoryOracle>,
-        Arc<SystemTimeProvider>,
-        Arc<DlcDevKitWallet>,
-        ddk_manager::SimpleSigner,
-    >,
->;
-
 pub struct TestSuite {
     pub ddk: TestDlcDevKit,
     pub path: String,
@@ -192,35 +108,9 @@ impl TestSuite {
         let transport = Arc::new(MemoryTransport::new(secp));
         let storage = Arc::new(MemoryStorage::new());
 
-        let ddk = Self::create_ddk(
-            name,
-            transport.clone(),
-            storage.clone(),
-            oracle.clone(),
-            seed.private_key.secret_bytes(),
-            esplora_host,
-            Network::Regtest,
-        )
-        .await;
-
-        TestSuite {
-            ddk,
-            path: storage_path,
-        }
-    }
-
-    async fn create_ddk(
-        name: &str,
-        transport: Arc<MemoryTransport>,
-        storage: Arc<MemoryStorage>,
-        oracle: Arc<MemoryOracle>,
-        seed_bytes: [u8; 32],
-        esplora_host: String,
-        network: Network,
-    ) -> TestDlcDevKit {
         let ddk: TestDlcDevKit = Builder::new()
-            .set_network(network)
-            .set_seed_bytes(seed_bytes)
+            .set_network(Network::Regtest)
+            .set_seed_bytes(seed.private_key.secret_bytes())
             .set_esplora_host(esplora_host)
             .set_name(name)
             .set_oracle(oracle)
@@ -230,36 +120,10 @@ impl TestSuite {
             .await
             .unwrap();
 
-        ddk
-    }
-
-    pub fn create_wallet(name: &str) -> TestWallet {
-        let path = format!("tests/data/{name}");
-        let storage = Arc::new(MemoryStorage::new());
-        let mut entropy = [0u8; 64];
-        entropy
-            .try_fill(&mut bitcoin::key::rand::thread_rng())
-            .unwrap();
-        let xpriv = Xpriv::new_master(Network::Regtest, &entropy).unwrap();
-        TestWallet(
-            DlcDevKitWallet::new(
-                "test".into(),
-                &xpriv.private_key.secret_bytes(),
-                "http://localhost:30000",
-                Network::Regtest,
-                storage.clone(),
-            )
-            .unwrap(),
-            path,
-        )
-    }
-}
-
-impl Drop for TestWallet {
-    fn drop(&mut self) {
-        if let Err(_) = std::fs::remove_dir_all(self.1.clone()) {
-            println!("Couldn't remove wallet dir.")
-        };
+        TestSuite {
+            ddk,
+            path: storage_path,
+        }
     }
 }
 
@@ -308,11 +172,4 @@ pub fn xprv_from_path(path: PathBuf, network: Network) -> anyhow::Result<Xpriv> 
     };
 
     Ok(seed)
-}
-
-pub fn memory_oracle() -> Oracle<KormirMemoryStorage> {
-    let mut seed: [u8; 64] = [0; 64];
-    bitcoin::key::rand::thread_rng().fill(&mut seed);
-    let xpriv = Xpriv::new_master(Network::Regtest, &seed).unwrap();
-    Oracle::from_xpriv(KormirMemoryStorage::default(), xpriv).unwrap()
 }
