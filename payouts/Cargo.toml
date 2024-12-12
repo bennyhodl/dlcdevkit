@@ -1,6 +1,6 @@
 [package]
 name = "ddk-payouts"
-version = "0.0.12"
+version = "0.0.13"
 authors = ["benny b <ben@bitcoinbay.foundation>"]
 description = "Library to build payout functions for DLC contracts."
 license = "MIT"
@@ -13,9 +13,9 @@ ddk-manager = { path = "../ddk-manager", features = ["use-serde"] }
 dlc = { version = "0.7.1", features = ["use-serde"] }
 dlc-messages = { version = "0.7.1", features = ["use-serde"] }
 dlc-trie = { version = "0.7.1", features = ["use-serde"] }
-# dlc = { version = "0.7.0", path = "../../rust-dlc/dlc", features = ["use-serde"] }
-# dlc-messages = { version = "0.7.0", path = "../../rust-dlc/dlc-messages", features = ["use-serde"] }
-# dlc-trie = { version = "0.7.0", path = "../../rust-dlc/dlc-trie", features = ["use-serde"] }
+# dlc = { path = "../../rust-dlc/dlc", features = ["use-serde"] }
+# dlc-messages = { path = "../../rust-dlc/dlc-messages", features = ["use-serde"] }
+# dlc-trie = { path = "../../rust-dlc/dlc-trie", features = ["use-serde"] }
 
 bitcoin = "0.32.2"
 serde = { version = "1.0.209", features = ["derive"] }

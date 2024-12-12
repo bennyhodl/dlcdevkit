@@ -6,7 +6,7 @@ homepage = "https://github.com/bennyhodl/rust-dlc"
 license-file = "../LICENSE"
 name = "ddk-manager"
 repository = "https://github.com/bennyhodl/rust-dlc/tree/master/dlc-manager"
-version = "0.7.1"
+version = "0.7.2"
 
 [features]
 default= ["std"]
@@ -22,9 +22,9 @@ bitcoin = { version = "0.32.2", default-features = false }
 dlc = { version = "0.7.1", features = ["use-serde"] }
 dlc-messages = { version = "0.7.1", features = [ "use-serde"] }
 dlc-trie = { version = "0.7.1", features = ["use-serde"] }
-# dlc = { version = "0.7.0", path = "../../rust-dlc/dlc", features = ["use-serde"] }
-# dlc-messages = { version = "0.7.0", path = "../../rust-dlc/dlc-messages", features = [ "use-serde"] }
-# dlc-trie = { version = "0.7.0", path = "../../rust-dlc/dlc-trie", features = ["use-serde"] }
+# dlc = { path = "../../rust-dlc/dlc", features = ["use-serde"] }
+# dlc-messages = { path = "../../rust-dlc/dlc-messages", features = [ "use-serde"] }
+# dlc-trie = { path = "../../rust-dlc/dlc-trie", features = ["use-serde"] }
 
 futures = "0.3.31"
 hex = { package = "hex-conservative", version = "0.1" }
@@ -35,7 +35,7 @@ secp256k1-zkp = {version = "0.11.0"}
 serde = {version = "1.0", optional = true}
 
 [dev-dependencies]
-ddk = { version = "0.0.12", path = "../ddk"}
+ddk = { path = "../ddk"}
 bitcoincore-rpc = {version = "0.19"}
 bitcoincore-rpc-json = {version = "0.19"}
 criterion = "0.4.0"
