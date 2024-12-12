@@ -110,6 +110,7 @@ impl EnumDescriptor {
     }
 
     /// Verify the given set adaptor signatures.
+    #[allow(clippy::too_many_arguments)]
     pub fn verify_adaptor_info(
         &self,
         secp: &Secp256k1<All>,
@@ -145,6 +146,7 @@ impl EnumDescriptor {
     }
 
     /// Verify the given set of adaptor signature and generates the adaptor info.
+    #[allow(clippy::too_many_arguments)]
     pub fn verify_and_get_adaptor_info(
         &self,
         secp: &Secp256k1<All>,
@@ -173,6 +175,7 @@ impl EnumDescriptor {
     }
 
     /// Generate the set of adaptor signatures and return the adaptor info.
+    #[allow(clippy::too_many_arguments)]
     pub fn get_adaptor_info(
         &self,
         secp: &Secp256k1<All>,
@@ -197,6 +200,7 @@ impl EnumDescriptor {
     }
 
     /// Generate the set of adaptor signatures.
+    #[allow(clippy::too_many_arguments)]
     pub fn get_adaptor_signatures(
         &self,
         secp: &Secp256k1<All>,

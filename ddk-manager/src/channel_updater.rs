@@ -70,6 +70,7 @@ pub(crate) use get_signed_channel_state;
 
 /// Creates an [`OfferedChannel`] and an associated [`OfferedContract`] using
 /// the given parameter.
+#[allow(clippy::too_many_arguments)]
 pub async fn offer_channel<C: Signing, W: Deref, SP: Deref, B: Deref, T: Deref, X: ContractSigner>(
     secp: &Secp256k1<C>,
     contract: &ContractInput,
@@ -275,6 +276,7 @@ where
 /// to the given [`OfferedChannel`] and [`OfferedContract`], transforming them
 /// to a [`SignedChannel`] and [`SignedContract`], returning them as well as the
 /// [`SignChannel`] to be sent to the counter party.
+#[allow(clippy::too_many_arguments)]
 pub fn verify_and_sign_accepted_channel<W: Deref, SP: Deref, X: ContractSigner>(
     secp: &Secp256k1<All>,
     offered_channel: &OfferedChannel,
@@ -645,6 +647,7 @@ pub fn on_settle_offer(
 /// Creates a [`SettleAccept`] message from the given [`SignedChannel`] and other
 /// parameters, updating the state of the channel at the same time. Expects the
 /// channel to be in [`SignedChannelState::SettledReceived`] state.
+#[allow(clippy::too_many_arguments)]
 pub fn settle_channel_accept<SP: Deref, T: Deref>(
     secp: &Secp256k1<All>,
     channel: &mut SignedChannel,
@@ -751,6 +754,7 @@ where
 /// [`SettleAccept`] message, verifying the content of the message and updating
 /// the state of the channel at the same time.  Expects the channel to be in
 /// [`SignedChannelState::SettledOffered`] state.
+#[allow(clippy::too_many_arguments)]
 pub fn settle_channel_confirm<T: Deref, SP: Deref>(
     secp: &Secp256k1<All>,
     channel: &mut SignedChannel,
@@ -1064,6 +1068,7 @@ pub fn reject_settle_offer(signed_channel: &mut SignedChannel) -> Result<Reject,
 
 /// Creates a [`RenewOffer`] message and [`OfferedContract`] for the given channel
 /// using the provided parameters.
+#[allow(clippy::too_many_arguments)]
 pub fn renew_offer<C: Signing, SP: Deref, T: Deref, X: ContractSigner>(
     secp: &Secp256k1<C>,
     signed_channel: &mut SignedChannel,
@@ -1347,6 +1352,7 @@ where
 /// [`RenewAccept`] message, verifying the message and updating the state of the
 /// channel and associated contract the same time. Expects the channel to be in
 /// [`SignedChannelState::RenewOffered`] state.
+#[allow(clippy::too_many_arguments)]
 pub fn verify_renew_accept_and_confirm<W: Deref, SP: Deref, X: ContractSigner, T: Deref>(
     secp: &Secp256k1<All>,
     renew_accept: &RenewAccept,
@@ -1466,7 +1472,7 @@ where
 /// [`RenewAccept`] message, verifying the message and updating the state of the
 /// channel and associated contract the same time. Expects the channel to be in
 /// [`SignedChannelState::RenewAccepted`] state.
-///
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn verify_renew_confirm_and_finalize<S: Deref, T: Deref, W: Deref>(
     secp: &Secp256k1<All>,
     signed_channel: &mut SignedChannel,
@@ -1945,6 +1951,7 @@ where
     Ok((close_tx, channel))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn get_settle_tx_and_adaptor_sig(
     secp: &Secp256k1<All>,
     own_next_per_update_point: &PublicKey,
@@ -2120,6 +2127,7 @@ where
 }
 
 /// Extract the CET and computes the signature for it, and marks the channel as closed.
+#[allow(clippy::too_many_arguments)]
 pub fn finalize_unilateral_close_settled_channel<S: Deref>(
     secp: &Secp256k1<All>,
     signed_channel: &SignedChannel,
@@ -2228,7 +2236,6 @@ where
 }
 
 /// Sign the settlement transaction and update the state of the channel.
-
 pub(crate) fn close_settled_channel<S: Deref>(
     secp: &Secp256k1<All>,
     signed_channel: &SignedChannel,
