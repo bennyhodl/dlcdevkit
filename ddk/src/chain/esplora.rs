@@ -65,13 +65,28 @@ impl ddk_manager::Blockchain for EsploraClient {
             "Broadcasting transaction."
         );
 
+        if let Ok(status) = self
+            .async_client
+            .get_tx_status(&transaction.compute_txid())
+            .await
+        {
+            tracing::warn!(
+                txid = transaction.compute_txid().to_string(),
+                "Transaction already submitted",
+            );
+            println!("Transaction is already submitted: {:}", status.confirmed);
+            if status.confirmed {
+                return Ok(());
+            }
+        };
+
         if let Err(e) = self.async_client.broadcast(transaction).await {
             tracing::error!(
                 error =? e,
                 "Could not broadcast transaction {}",
                 transaction.compute_txid()
             );
-            // TODO handle already broadcasted.
+
             return Err(esplora_err_to_manager_err(e));
         }
 

@@ -653,33 +653,40 @@ where
         if let Some((contract_info, adaptor_info, attestations)) = closable_contract_info {
             let offer = &contract.accepted_contract.offered_contract;
             let signer = self.signer_provider.derive_contract_signer(offer.keys_id)?;
-            let cet = crate::contract_updater::get_signed_cet(
+
+            //  === WARNING ===
+            // This code could potentiall be problematic. When running refund tests, it would look for a CET
+            // but the CET would be invalid and refund would not pass. By only updating with a valid CET,
+            // we then go to update. This way if it fails we can check for refund instead of bailing and getting locked
+            // funds.
+            if let Ok(cet) = crate::contract_updater::get_signed_cet(
                 &self.secp,
                 contract,
                 contract_info,
                 adaptor_info,
                 &attestations,
                 &signer,
-            )?;
-            match self
-                .close_contract(
-                    contract,
-                    cet,
-                    attestations.iter().map(|x| x.1.clone()).collect(),
-                )
-                .await
-            {
-                Ok(closed_contract) => {
-                    self.store.update_contract(&closed_contract)?;
-                    return Ok(());
-                }
-                Err(e) => {
-                    warn!(
-                        "Failed to close contract {}: {}",
-                        contract.accepted_contract.get_contract_id_string(),
-                        e
-                    );
-                    return Err(e);
+            ) {
+                match self
+                    .close_contract(
+                        contract,
+                        cet,
+                        attestations.iter().map(|x| x.1.clone()).collect(),
+                    )
+                    .await
+                {
+                    Ok(closed_contract) => {
+                        self.store.update_contract(&closed_contract)?;
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        warn!(
+                            "Failed to close contract {}: {}",
+                            contract.accepted_contract.get_contract_id_string(),
+                            e
+                        );
+                        return Err(e);
+                    }
                 }
             }
         }

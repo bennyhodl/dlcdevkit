@@ -1,11 +1,14 @@
-name: Format, clippy, and test dlcdevkit 
-#
-on: [push, pull_request]
+on:
+  push:
+    branches:
+      - master
+  pull_request:
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  clippy_check:
+  clippy:
+    name: clippy
     runs-on: ubuntu-latest
     steps:
       - name: Install Protoc
@@ -13,12 +16,13 @@ jobs:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
         with:
-            toolchain: nightly
-            components: clippy
-            override: true
+          toolchain: nightly
+          components: clippy
+          override: true
       - name: Check clippy
         run: cargo clippy -- -D warnings
-  fmt_check:
+  format:
+    name: format
     runs-on: ubuntu-latest
     steps:
       - name: Install Protoc
@@ -26,38 +30,65 @@ jobs:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
         with:
-            toolchain: nightly
-            components: rustfmt
-            override: true
+          toolchain: nightly
+          components: rustfmt
+          override: true
       - name: Check format
         run: cargo fmt --check
-
-  # test:
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v2
-  #     
-  #     - name: Install just
-  #       uses: extractions/setup-just@v1
-  #
-  #     - name: Install Protoc
-  #       run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-  #
-  #     - uses: actions-rs/toolchain@v1
-  #       with:
-  #         toolchain: stable
-  #       
-  #     - name: Start dependencies
-  #       run: just ci-deps
-  #       
-  #     - name: Setup Bitcoin Node
-  #       run: |
-  #         docker logs bitcoin
-  #         chmod +x ./testconfig/scripts/setup-bitcoind.sh
-  #         ./testconfig/scripts/setup-bitcoind.sh
-  #       
-  #     - name: Run tests
-  #       run: cargo test --all-features --verbose
-  #       
-  #     - name: Stop dependencies
-  #       run: just deps-down
+  integration_tests_prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Install Protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          components: rustfmt
+          override: true
+      - uses: actions/cache@v3
+        env:
+          cache-name: test-cache
+        with:
+          path: target/debug/deps
+          key: test-cache-${{ github.run_id }}-${{ github.run_number }}
+      - uses: actions/checkout@v4
+      - id: set-matrix
+        run: cargo test --no-run && echo "::set-output name=matrix::$(testconfig/scripts/get_test_list.sh manager_execution manager_tests contract_updater)"
+  integration_tests:
+    name: integration tests
+    needs: integration_tests_prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        tests: ${{ fromJson(needs.integration_tests_prepare.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v3
+        env:
+          cache-name: test-cache
+        with:
+          path: target/debug/deps
+          key: test-cache-${{ github.run_id }}-${{ github.run_number }}
+      - name: Debug file location
+        run: |
+          ls -la ./testconfig/scripts/
+          pwd
+      - name: Start bitcoin node
+        run: docker compose up -d
+      - name: Wait for container to run
+        run: |
+          chmod +x ./testconfig/scripts/wait_for_container.sh
+          ./testconfig/scripts/wait_for_container.sh bitcoin
+      - name: Wait for electrs to be ready
+        run: |
+          chmod +x ./testconfig/scripts/wait_for_electrs.sh
+          ./testconfig/scripts/wait_for_electrs.sh
+      - name: Run test
+        run: RUST_BACKTRACE=1 ${{ matrix.tests }} --ignored
+      - name: Stop bitcoin node
+        run: docker compose down -v
