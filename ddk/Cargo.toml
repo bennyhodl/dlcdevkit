@@ -24,14 +24,14 @@ p2pderivatives = ["dep:reqwest"]
 sled = ["dep:sled"]
 
 [dependencies]
-# dlc = { version = "0.7.0", features = ["use-serde"] }
-# ddk-manager = { path = "../ddk-manager", version = "0.7.1", features = ["use-serde"] }
-# dlc-messages = { version = "0.7.0", features = [ "use-serde"] }
-# dlc-trie = { version = "0.7.0", features = ["use-serde"] }
-dlc = { version = "0.7.0", path = "../../rust-dlc/dlc", features = ["use-serde"] }
-ddk-manager = { version = "0.7.1", path = "../ddk-manager", features = ["use-serde"] }
-dlc-messages = { version = "0.7.0", path = "../../rust-dlc/dlc-messages", features = [ "use-serde"] }
-dlc-trie = { version = "0.7.0", path = "../../rust-dlc/dlc-trie", features = ["use-serde"] }
+dlc = { version = "0.7.1", features = ["use-serde"] }
+ddk-manager = { path = "../ddk-manager", version = "0.7.1", features = ["use-serde"] }
+dlc-messages = { version = "0.7.1", features = [ "use-serde"] }
+dlc-trie = { version = "0.7.1", features = ["use-serde"] }
+# dlc = { version = "0.7.0", path = "../../rust-dlc/dlc", features = ["use-serde"] }
+# ddk-manager = { version = "0.7.1", path = "../ddk-manager", features = ["use-serde"] }
+# dlc-messages = { version = "0.7.0", path = "../../rust-dlc/dlc-messages", features = [ "use-serde"] }
+# dlc-trie = { version = "0.7.0", path = "../../rust-dlc/dlc-trie", features = ["use-serde"] }
 
 bitcoin = { version = "0.32.2", features = ["rand", "serde"] }
 bdk_esplora = { version = "0.19", features = ["blocking", "async"] }
@@ -65,8 +65,8 @@ lightning-net-tokio = { version = "0.0.125", optional = true }
 
 # oracle feature
 reqwest = { version = "0.12.9", features = ["blocking"], optional = true }
-# kormir = "0.4.0"
-kormir = { version = "0.4.0", path = "../../kormir/kormir" }
+kormir = "0.4.1"
+# kormir = { version = "0.4.1", path = "../../kormir/kormir" }
 
 [dev-dependencies]
 test-log = { version = "0.2.16", features = ["trace"] }

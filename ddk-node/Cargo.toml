@@ -9,13 +9,14 @@ edition = "2021"
 
 [dependencies]
 ddk = { version = "0.0.12", path = "../ddk", features = ["lightning", "marketplace", "sled", "kormir"] }
-ddk-payouts = { version = "0.0.12", path = "../payouts" }
-# dlc = { version = "0.7.0", features = ["use-serde"] }
-# dlc-messages = { version = "0.7.0", features = [ "use-serde"] }
-# ddk-manager = { version = "0.7.1", features = ["use-serde"] }
 ddk-manager = { path = "../ddk-manager", version = "0.7.1", features = ["use-serde"] }
-dlc = { version = "0.7.0", path = "../../rust-dlc/dlc", features = ["use-serde"] }
-dlc-messages = { version = "0.7.0", path = "../../rust-dlc/dlc-messages", features = [ "use-serde"] }
+ddk-payouts = { version = "0.0.12", path = "../payouts" }
+
+dlc = { version = "0.7.1", features = ["use-serde"] }
+dlc-messages = { version = "0.7.1", features = [ "use-serde"] }
+# dlc = { version = "0.7.0", path = "../../rust-dlc/dlc", features = ["use-serde"] }
+# dlc-messages = { version = "0.7.0", path = "../../rust-dlc/dlc-messages", features = [ "use-serde"] }
+
 bitcoin = { version = "0.32.2", features = ["rand", "serde"] }
 
 anyhow = "1.0.86"

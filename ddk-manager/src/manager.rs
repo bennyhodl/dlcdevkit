@@ -623,15 +623,15 @@ where
                         };
 
                         // Validate the attestation
-                        // if let Err(e) = attestation.validate(&self.secp, announcement) {
-                        //     log::error!(
-                        //         "Oracle attestation is not valid. pubkey={} event_id={}, error={:?}",
-                        //         announcement.oracle_public_key,
-                        //         announcement.oracle_event.event_id,
-                        //         e
-                        //     );g
-                        //     return None;
-                        // }
+                        if let Err(e) = attestation.validate(&self.secp, announcement) {
+                            log::error!(
+                                "Oracle attestation is not valid. pubkey={} event_id={}, error={:?}",
+                                announcement.oracle_public_key,
+                                announcement.oracle_event.event_id,
+                                e
+                            );
+                            return None;
+                        }
 
                         Some((*i, attestation))
                     })
