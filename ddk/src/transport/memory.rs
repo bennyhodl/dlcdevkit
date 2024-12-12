@@ -10,7 +10,7 @@ use bitcoin::{
     secp256k1::{All, PublicKey, Secp256k1},
 };
 use crossbeam::channel::{unbounded, Receiver, Sender};
-use ddk_messages::Message;
+use dlc_messages::Message;
 
 type CounterPartyTransport = Arc<Mutex<HashMap<PublicKey, Sender<(Message, PublicKey)>>>>;
 pub struct MemoryTransport {

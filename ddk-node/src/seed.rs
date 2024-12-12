@@ -1,6 +1,6 @@
-use ddk::bitcoin::bip32::Xpriv;
-use ddk::bitcoin::key::rand;
-use ddk::bitcoin::Network;
+use bitcoin::bip32::Xpriv;
+use bitcoin::key::rand;
+use bitcoin::Network;
 use rand::Fill;
 use std::{
     fs::File,

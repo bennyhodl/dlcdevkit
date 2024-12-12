@@ -6,6 +6,7 @@ use kormir::{Oracle as Kormir, OracleAttestation};
 
 use crate::Oracle;
 
+#[derive(Debug, Clone)]
 pub struct MemoryOracle {
     pub oracle: Kormir<MemoryStorage>,
 }
@@ -105,13 +106,11 @@ mod tests {
             )
             .await
             .unwrap();
-        println!("create: {}", announcement.oracle_event.event_id);
 
         let ann = oracle
             .get_announcement(&announcement.oracle_event.event_id)
             .await
             .unwrap();
-        println!("get_announcement: {}", ann.oracle_event.event_id);
 
         assert_eq!(ann, announcement);
 
@@ -124,13 +123,10 @@ mod tests {
             .await
             .unwrap();
 
-        println!("sign: {:?}", sign.event_id);
-
         let att = oracle
             .get_attestation(&announcement.oracle_event.event_id)
             .await
             .unwrap();
-        println!("get_attestation: {}", att.event_id);
 
         assert_eq!(sign, att);
     }

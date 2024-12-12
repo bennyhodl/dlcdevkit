@@ -1,10 +1,10 @@
 mod test_util;
 use chrono::{Local, TimeDelta};
 use ddk::Transport;
-use ddk_dlc::EnumerationPayout;
 use ddk_manager::contract::Contract;
 use ddk_manager::Storage;
-use ddk_messages::Message;
+use dlc::EnumerationPayout;
+use dlc_messages::Message;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use test_util::{generate_blocks, test_ddk};
 use tokio::time::sleep;
@@ -33,14 +33,14 @@ async fn enumeration_contract() {
         vec![
             EnumerationPayout {
                 outcome: "rust".to_string(),
-                payout: ddk_dlc::Payout {
+                payout: dlc::Payout {
                     offer: 100_000,
                     accept: 0,
                 },
             },
             EnumerationPayout {
                 outcome: "go".to_string(),
-                payout: ddk_dlc::Payout {
+                payout: dlc::Payout {
                     offer: 0,
                     accept: 100_000,
                 },

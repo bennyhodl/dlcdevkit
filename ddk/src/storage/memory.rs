@@ -2,7 +2,7 @@ use crate::transport::PeerInformation;
 use crate::Storage;
 use bdk_chain::Merge;
 use ddk_manager::{channel::Channel, contract::Contract, ChannelId, ContractId};
-use ddk_messages::oracle_msgs::OracleAnnouncement;
+use dlc_messages::oracle_msgs::OracleAnnouncement;
 use std::collections::HashMap;
 use std::sync::RwLock;
 

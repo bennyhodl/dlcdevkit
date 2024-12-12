@@ -11,7 +11,6 @@ use std::{
     fs::File,
     io::Write,
     path::{Path, PathBuf},
-    str::FromStr,
     sync::Arc,
     thread::sleep,
     time::Duration,
@@ -94,15 +93,13 @@ pub fn generate_blocks(num: u64) {
 
 pub struct TestSuite {
     pub ddk: TestDlcDevKit,
-    pub path: String,
 }
 
 impl TestSuite {
     pub async fn new(secp: &Secp256k1<All>, name: &str, oracle: Arc<MemoryOracle>) -> TestSuite {
-        let storage_path = format!("tests/data/{name}");
-        std::fs::create_dir_all(storage_path.clone()).expect("couldn't create file");
-        let seed =
-            xprv_from_path(PathBuf::from_str(&storage_path).unwrap(), Network::Regtest).unwrap();
+        let mut seed = [0u8; 32];
+        seed.try_fill(&mut bitcoin::key::rand::thread_rng())
+            .unwrap();
         let esplora_host = "http://127.0.0.1:30000".to_string();
 
         let transport = Arc::new(MemoryTransport::new(secp));
@@ -110,7 +107,7 @@ impl TestSuite {
 
         let ddk: TestDlcDevKit = Builder::new()
             .set_network(Network::Regtest)
-            .set_seed_bytes(seed.private_key.secret_bytes())
+            .set_seed_bytes(seed)
             .set_esplora_host(esplora_host)
             .set_name(name)
             .set_oracle(oracle)
@@ -120,16 +117,7 @@ impl TestSuite {
             .await
             .unwrap();
 
-        TestSuite {
-            ddk,
-            path: storage_path,
-        }
-    }
-}
-
-impl Drop for TestSuite {
-    fn drop(&mut self) {
-        std::fs::remove_dir_all(&self.path).expect("Couldn't remove wallet dir");
+        TestSuite { ddk }
     }
 }
 

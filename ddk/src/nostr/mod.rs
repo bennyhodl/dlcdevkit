@@ -1,9 +1,9 @@
-use ddk_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
+use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
 use lightning::io::Cursor;
 use lightning::util::ser::Readable;
 use nostr_rs::{Filter, Kind, PublicKey as NostrPublicKey, Timestamp};
 
-/// Nostr [ddk_messages::oracle_msgs::OracleAnnouncement] marketplace.
+/// Nostr [dlc_messages::oracle_msgs::OracleAnnouncement] marketplace.
 #[cfg(feature = "marketplace")]
 pub mod marketplace;
 

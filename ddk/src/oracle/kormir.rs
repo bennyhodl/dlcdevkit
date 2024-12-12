@@ -1,6 +1,6 @@
 use anyhow::anyhow;
 use bitcoin::key::XOnlyPublicKey;
-use ddk_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
+use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
 use kormir::storage::OracleEventData;
 use lightning::{io::Cursor, util::ser::Readable};
 use serde::Serialize;
@@ -68,7 +68,7 @@ impl KormirOracleClient {
     /// if announcement has been signed, and nostr information.
     pub async fn list_events(&self) -> anyhow::Result<Vec<OracleEventData>> {
         get(&self.host, "list-events").await.map_err(|e| {
-            println!("Error in list events. {}", e);
+            tracing::error!(error = e.to_string(), "Error getting all kormir events.");
             anyhow!("List events")
         })
     }
@@ -109,8 +109,6 @@ impl KormirOracleClient {
     }
 
     /// Requests for Kormir to sign an announcement with a given outcome.
-    ///
-    /// TODO: waiting for PR to call for announcement directly.
     pub async fn sign_event(
         &self,
         event_id: String,
@@ -152,7 +150,7 @@ impl ddk_manager::Oracle for KormirOracleClient {
     async fn get_attestation(
         &self,
         event_id: &str,
-    ) -> Result<ddk_messages::oracle_msgs::OracleAttestation, ddk_manager::error::Error> {
+    ) -> Result<dlc_messages::oracle_msgs::OracleAttestation, ddk_manager::error::Error> {
         tracing::info!(event_id, "Getting attestation to close contract.");
         let attestation = get::<OracleAttestation>(&self.host, &format!("attestation/{event_id}"))
             .await
@@ -167,7 +165,7 @@ impl ddk_manager::Oracle for KormirOracleClient {
     async fn get_announcement(
         &self,
         event_id: &str,
-    ) -> Result<ddk_messages::oracle_msgs::OracleAnnouncement, ddk_manager::error::Error> {
+    ) -> Result<dlc_messages::oracle_msgs::OracleAnnouncement, ddk_manager::error::Error> {
         tracing::info!(event_id, "Getting oracle announcement.");
         let announcement =
             get::<OracleAnnouncement>(&self.host, &format!("announcement/{event_id}"))
