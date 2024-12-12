@@ -27,6 +27,7 @@ use crate::{
 
 /// Creates an [`OfferedContract`] and [`OfferDlc`] message from the provided
 /// contract and oracle information.
+#[allow(clippy::too_many_arguments)]
 pub async fn offer_contract<
     W: Deref,
     B: Deref,
@@ -139,6 +140,7 @@ where
     Ok((accepted_contract, accept_msg))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn accept_contract_internal(
     secp: &Secp256k1<All>,
     offered_contract: &OfferedContract,
@@ -325,6 +327,7 @@ fn populate_psbt(psbt: &mut Psbt, all_funding_inputs: &[&FundingInput]) -> Resul
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn verify_accepted_and_sign_contract_internal<W: Deref, X: ContractSigner>(
     secp: &Secp256k1<All>,
     offered_contract: &OfferedContract,
@@ -554,6 +557,7 @@ where
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn verify_signed_contract_internal<W: Deref>(
     secp: &Secp256k1<All>,
     accepted_contract: &AcceptedContract,

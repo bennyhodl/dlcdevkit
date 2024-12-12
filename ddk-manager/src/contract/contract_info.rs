@@ -110,6 +110,7 @@ impl ContractInfo {
 
     /// Generate the AdaptorInfo for the contract while verifying the provided
     /// set of adaptor signatures.
+    #[allow(clippy::too_many_arguments)]
     pub fn verify_and_get_adaptor_info(
         &self,
         secp: &Secp256k1<All>,
@@ -186,6 +187,7 @@ impl ContractInfo {
 
     /// Verifies the given adaptor signatures are valid with respect to the given
     /// adaptor info.
+    #[allow(clippy::too_many_arguments)]
     pub fn verify_adaptor_info(
         &self,
         secp: &Secp256k1<All>,
@@ -235,6 +237,7 @@ impl ContractInfo {
     }
 
     /// Generate the adaptor info and adaptor signatures for the contract.
+    #[allow(clippy::too_many_arguments)]
     pub fn get_adaptor_info(
         &self,
         secp: &Secp256k1<All>,

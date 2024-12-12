@@ -77,6 +77,7 @@ impl OfferedContract {
     }
 
     /// Creates a new [`OfferedContract`] from the given parameters.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: ContractId,
         contract: &ContractInput,

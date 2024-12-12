@@ -78,6 +78,7 @@ impl NumericalDescriptor {
     }
 
     /// Verify the given set of adaptor signatures and generate the adaptor info.
+    #[allow(clippy::too_many_arguments)]
     pub fn verify_and_get_adaptor_info(
         &self,
         secp: &Secp256k1<All>,
@@ -131,6 +132,7 @@ impl NumericalDescriptor {
     }
 
     /// Generate the set of adaptor signatures and the adaptor info.
+    #[allow(clippy::too_many_arguments)]
     pub fn get_adaptor_info(
         &self,
         secp: &Secp256k1<All>,

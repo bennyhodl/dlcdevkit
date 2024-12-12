@@ -422,6 +422,7 @@ pub struct HyperbolaPayoutCurvePiece {
 
 impl HyperbolaPayoutCurvePiece {
     /// Create a new HyperbolaPayoutCurvePiece
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         left_end_point: PayoutPoint,
         right_end_point: PayoutPoint,
