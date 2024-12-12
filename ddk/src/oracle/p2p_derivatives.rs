@@ -4,9 +4,9 @@
 //! Http client wrapper for the Crypto Garage DLC oracle
 
 use chrono::{DateTime, SecondsFormat, Utc};
-use ddk_dlc::secp256k1_zkp::{schnorr::Signature, XOnlyPublicKey};
 use ddk_manager::error::Error as DlcManagerError;
-use ddk_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
+use dlc::secp256k1_zkp::{schnorr::Signature, XOnlyPublicKey};
+use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
 
 use crate::Oracle;
 

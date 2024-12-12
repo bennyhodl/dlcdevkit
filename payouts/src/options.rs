@@ -7,8 +7,8 @@ use ddk_manager::{
     },
     payout_curve::{PayoutFunction, RoundingInterval, RoundingIntervals},
 };
-use ddk_messages::oracle_msgs::OracleAnnouncement;
-use ddk_trie::OracleNumericInfo;
+use dlc_messages::oracle_msgs::OracleAnnouncement;
+use dlc_trie::OracleNumericInfo;
 
 // Helper enums
 #[derive(Copy, Clone)]
@@ -162,7 +162,3 @@ pub fn create_covered_call_rounding_intervals(
         ],
     }
 }
-
-// Example usage and test
-#[cfg(test)]
-mod tests {}

@@ -1,6 +1,6 @@
 use anyhow::anyhow;
 use bitcoin::{key::rand::Fill, secp256k1::PublicKey};
-use ddk_messages::message_handler::MessageHandler as DlcMessageHandler;
+use dlc_messages::message_handler::MessageHandler as DlcMessageHandler;
 use lightning::{
     ln::peer_handler::{
         ErroringMessageHandler, IgnoringMessageHandler, MessageHandler,

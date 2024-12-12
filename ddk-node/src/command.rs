@@ -8,15 +8,15 @@ use crate::ddkrpc::{
     WalletBalanceRequest,
 };
 use anyhow::anyhow;
-use ddk::bitcoin::Transaction;
-use ddk::ddk_dlc::{EnumerationPayout, Payout};
-use ddk::ddk_manager::contract::contract_input::ContractInput;
-use ddk::ddk_manager::contract::offered_contract::OfferedContract;
-use ddk::ddk_manager::contract::Contract;
-use ddk::ddk_messages::oracle_msgs::{EventDescriptor, OracleAnnouncement};
-use ddk::ddk_messages::{AcceptDlc, OfferDlc};
+use bitcoin::Transaction;
 use ddk::util;
 use ddk::wallet::LocalOutput;
+use ddk_manager::contract::contract_input::ContractInput;
+use ddk_manager::contract::offered_contract::OfferedContract;
+use ddk_manager::contract::Contract;
+use dlc::{EnumerationPayout, Payout};
+use dlc_messages::oracle_msgs::{EventDescriptor, OracleAnnouncement};
+use dlc_messages::{AcceptDlc, OfferDlc};
 use inquire::{Select, Text};
 use serde_json::Value;
 use tonic::transport::Channel;

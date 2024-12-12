@@ -28,20 +28,14 @@ use bdk_wallet::ChangeSet;
 pub use ddk::DlcDevKit;
 pub use ddk::DlcManagerMessage;
 
-/// Re-exports
-pub use bitcoin;
-pub use ddk_dlc;
-pub use ddk_manager;
-pub use ddk_messages;
-
 /// Default nostr relay.
 pub const DEFAULT_NOSTR_RELAY: &str = "wss://nostr.dlcdevkit.com";
 
 use async_trait::async_trait;
 use bitcoin::secp256k1::{PublicKey, SecretKey};
 use ddk::DlcDevKitDlcManager;
-use ddk_messages::oracle_msgs::OracleAnnouncement;
-use ddk_messages::Message;
+use dlc_messages::oracle_msgs::OracleAnnouncement;
+use dlc_messages::Message;
 use error::WalletError;
 use transport::PeerInformation;
 

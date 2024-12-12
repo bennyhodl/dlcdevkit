@@ -17,6 +17,7 @@ services:
       -zmqpubrawtx=tcp://0.0.0.0:28333
       -printtoconsole
       -regtest
+      -disablewallet=0
     ports:
       # regtest ports
       - 18443:18443

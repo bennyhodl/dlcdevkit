@@ -4,6 +4,7 @@ use bdk_esplora::esplora_client::{AsyncClient, BlockingClient, Builder};
 use bitcoin::Network;
 use bitcoin::{Transaction, Txid};
 use ddk_manager::error::Error as ManagerError;
+use lightning::chain::chaininterface::{ConfirmationTarget, FeeEstimator};
 
 /// Esplora client for getting chain information. Holds both a blocking
 /// and an async client.
@@ -38,7 +39,7 @@ impl ddk_manager::Blockchain for EsploraClient {
     }
 
     async fn get_transaction(&self, tx_id: &Txid) -> Result<Transaction, ManagerError> {
-        tracing::info!(txid = tx_id.to_string(), "Broadcasting transaction.");
+        tracing::info!(txid = tx_id.to_string(), "Querying for transaction.");
         let txn = self
             .async_client
             .get_tx(tx_id)
@@ -70,6 +71,7 @@ impl ddk_manager::Blockchain for EsploraClient {
                 "Could not broadcast transaction {}",
                 transaction.compute_txid()
             );
+            // TODO handle already broadcasted.
             return Err(esplora_err_to_manager_err(e));
         }
 
@@ -134,5 +136,11 @@ impl ddk_manager::Blockchain for EsploraClient {
         } else {
             Ok(0)
         }
+    }
+}
+
+impl FeeEstimator for EsploraClient {
+    fn get_est_sat_per_1000_weight(&self, _confirmation_target: ConfirmationTarget) -> u32 {
+        1
     }
 }

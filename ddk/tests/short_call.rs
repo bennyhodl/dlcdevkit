@@ -3,8 +3,8 @@ mod test_util;
 use chrono::{Local, TimeDelta};
 use ddk::Transport;
 use ddk_manager::{contract::Contract, Storage};
-use ddk_messages::Message;
 use ddk_payouts::options::{Direction, OptionType};
+use dlc_messages::Message;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use test_util::{generate_blocks, test_ddk};
 use tokio::time::sleep;
@@ -40,10 +40,6 @@ async fn short_call() {
         20,
     )
     .unwrap();
-
-    println!("{:?}", contract_input.accept_collateral);
-    println!("{:?}", contract_input.offer_collateral);
-    println!("{:?}", contract_input.contract_infos);
 
     let offer = alice
         .ddk
@@ -106,7 +102,6 @@ async fn short_call() {
         .expect("bob check failed");
 
     let contract = bob.ddk.storage.get_contract(&contract_id);
-    println!("{:?}", contract);
     assert!(matches!(contract.unwrap().unwrap(), Contract::Confirmed(_)));
 
     bob.ddk.wallet.sync().unwrap();

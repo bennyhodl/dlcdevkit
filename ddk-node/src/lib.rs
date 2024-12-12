@@ -5,18 +5,18 @@ pub mod ddkrpc;
 pub mod opts;
 mod seed;
 
-use ddk::bitcoin::secp256k1::PublicKey;
-use ddk::bitcoin::{Address, Amount, FeeRate, Network};
+use bitcoin::secp256k1::PublicKey;
+use bitcoin::{Address, Amount, FeeRate, Network};
 use ddk::builder::Builder;
-use ddk::ddk_manager::contract::contract_input::ContractInput;
-use ddk::ddk_manager::Oracle as DlcOracle;
-use ddk::ddk_manager::Storage as DlcStorage;
 use ddk::oracle::kormir::KormirOracleClient;
 use ddk::storage::sled::SledStorage;
 use ddk::transport::lightning::LightningTransport;
 use ddk::util::serialize_contract;
 use ddk::DlcDevKit;
 use ddk::{Oracle, Storage, Transport};
+use ddk_manager::contract::contract_input::ContractInput;
+use ddk_manager::Oracle as DlcOracle;
+use ddk_manager::Storage as DlcStorage;
 use ddkrpc::ddk_rpc_server::{DdkRpc, DdkRpcServer};
 use ddkrpc::{
     AcceptOfferRequest, AcceptOfferResponse, ConnectRequest, ConnectResponse,

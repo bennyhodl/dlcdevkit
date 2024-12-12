@@ -9,7 +9,7 @@ use bdk_chain::Merge;
 use bdk_wallet::ChangeSet;
 use ddk_manager::contract::ser::Serializable;
 use ddk_manager::error::Error;
-use ddk_messages::oracle_msgs::OracleAnnouncement;
+use dlc_messages::oracle_msgs::OracleAnnouncement;
 use lightning::io::{Cursor, Read};
 use sled::{Db, Tree};
 

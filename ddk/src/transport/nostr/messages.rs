@@ -1,7 +1,7 @@
 use crate::nostr::{DLC_MESSAGE_KIND, ORACLE_ANNOUNCMENT_KIND, ORACLE_ATTESTATION_KIND};
-use ddk_dlc::secp256k1_zkp::PublicKey as SecpPublicKey;
-use ddk_messages::message_handler::read_dlc_message;
-use ddk_messages::{Message, WireMessage};
+use dlc::secp256k1_zkp::PublicKey as SecpPublicKey;
+use dlc_messages::message_handler::read_dlc_message;
+use dlc_messages::{Message, WireMessage};
 use lightning::ln::wire::Type;
 use lightning::util::ser::{Readable, Writeable};
 use nostr_rs::nips::nip04;

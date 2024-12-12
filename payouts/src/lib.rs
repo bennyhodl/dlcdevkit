@@ -16,7 +16,7 @@ use ddk_manager::{
         RoundingInterval, RoundingIntervals,
     },
 };
-use ddk_trie::OracleNumericInfo;
+use dlc_trie::OracleNumericInfo;
 
 pub fn generate_payout_curve(
     min_price: u64,
