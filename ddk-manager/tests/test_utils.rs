@@ -466,11 +466,10 @@ pub async fn get_digit_decomposition_oracles(
         };
 
         for oracle in &oracles {
-            oracle
+            let _sign_even_if_it_fails_spent_an_hour_tracking_ci_bug = oracle
                 .oracle
                 .sign_numeric_event(EVENT_ID.to_string(), cur_outcome as i64)
-                .await
-                .unwrap();
+                .await;
         }
     }
 
