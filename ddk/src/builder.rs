@@ -152,6 +152,7 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
         let esplora_client = Arc::new(EsploraClient::new(&self.esplora_host, self.network)?);
 
         let (sender, receiver) = unbounded::<DlcManagerMessage>();
+        let (stop_signal_sender, stop_signal) = tokio::sync::watch::channel(false);
 
         let manager = Arc::new(
             Manager::new(
@@ -177,6 +178,8 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
             storage,
             oracle,
             network: self.network,
+            stop_signal,
+            stop_signal_sender,
         })
     }
 }

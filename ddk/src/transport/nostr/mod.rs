@@ -2,14 +2,16 @@ mod messages;
 mod relay_handler;
 
 pub use relay_handler::NostrDlc;
+use tokio::sync::watch;
 
 use crate::{DlcDevKitDlcManager, Oracle, Storage, Transport};
+use async_trait::async_trait;
 use bitcoin::secp256k1::PublicKey as BitcoinPublicKey;
 use dlc_messages::Message;
 use nostr_rs::PublicKey;
 use std::sync::Arc;
 
-#[async_trait::async_trait]
+#[async_trait]
 impl Transport for NostrDlc {
     fn name(&self) -> String {
         "nostr".to_string()
@@ -20,16 +22,19 @@ impl Transport for NostrDlc {
             .expect("Should not fail converting nostr key to bitcoin key.")
     }
 
-    async fn listen(&self) {
-        self.listen().await.expect("Did not start nostr listener.");
-    }
-
     /// Get messages that have not been processed yet.
-    async fn receive_messages<S: Storage, O: Oracle>(
+    async fn start<S: Storage, O: Oracle>(
         &self,
+        mut stop_signal: watch::Receiver<bool>,
         manager: Arc<DlcDevKitDlcManager<S, O>>,
-    ) {
-        self.receive_dlc_messages(manager).await
+    ) -> Result<(), anyhow::Error> {
+        let listen_handle = self.start(stop_signal.clone(), manager);
+
+        // Wait for either task to complete or stop signal
+        tokio::select! {
+            _ = stop_signal.changed() => Ok(()),
+            res = listen_handle => res?,
+        }
     }
     /// Send a message to a specific counterparty.
     fn send_message(&self, counterparty: BitcoinPublicKey, message: Message) {

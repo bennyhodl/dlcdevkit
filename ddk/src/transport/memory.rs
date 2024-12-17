@@ -11,6 +11,7 @@ use bitcoin::{
 };
 use crossbeam::channel::{unbounded, Receiver, Sender};
 use dlc_messages::Message;
+use tokio::sync::watch;
 
 type CounterPartyTransport = Arc<Mutex<HashMap<PublicKey, Sender<(Message, PublicKey)>>>>;
 pub struct MemoryTransport {
@@ -61,33 +62,39 @@ impl Transport for MemoryTransport {
         }
     }
 
-    async fn listen(&self) {
-        tracing::info!("Listening on memory listener")
-    }
-
-    async fn receive_messages<S: Storage, O: Oracle>(
+    async fn start<S: Storage, O: Oracle>(
         &self,
+        mut stop_receiver: watch::Receiver<bool>,
         manager: Arc<DlcDevKitDlcManager<S, O>>,
-    ) {
+    ) -> Result<(), anyhow::Error> {
         let mut timer = tokio::time::interval(Duration::from_secs(1));
         loop {
-            timer.tick().await;
-            if let Ok(msg) = self.receiver.recv() {
-                match manager.on_dlc_message(&msg.0, msg.1).await {
-                    Ok(s) => {
-                        if let Some(reply) = s {
-                            self.send_message(msg.1, reply);
-                        } else {
-                            tracing::info!("Handled on_dlc_message.");
+            tokio::select! {
+                _ = stop_receiver.changed() => {
+                    if *stop_receiver.borrow() {
+                        break;
+                    }
+                },
+                _ = timer.tick() => {
+                    if let Ok(msg) = self.receiver.recv() {
+                        match manager.on_dlc_message(&msg.0, msg.1).await {
+                            Ok(s) => {
+                                if let Some(reply) = s {
+                                    self.send_message(msg.1, reply);
+                                } else {
+                                    tracing::info!("Handled on_dlc_message.");
+                                }
+                            }
+                            Err(e) => tracing::error!(
+                                error = e.to_string(),
+                                "In memory transport error on dlc message."
+                            ),
                         }
                     }
-                    Err(e) => tracing::error!(
-                        error = e.to_string(),
-                        "In memory transport error on dlc message."
-                    ),
                 }
             }
         }
+        Ok(())
     }
 
     async fn connect_outbound(&self, _pubkey: PublicKey, _host: &str) {
