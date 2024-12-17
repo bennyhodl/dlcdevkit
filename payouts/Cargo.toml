@@ -8,7 +8,7 @@ repository = "https://github.com/bennyhodl/dlcdevkit"
 edition = "2021"
 
 [dependencies]
-ddk-manager = { path = "../ddk-manager", features = ["use-serde"] }
+ddk-manager = { version = "0.7.2", path = "../ddk-manager", features = ["use-serde"] }
 
 dlc = { version = "0.7.1", features = ["use-serde"] }
 dlc-messages = { version = "0.7.1", features = ["use-serde"] }
