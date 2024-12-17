@@ -18,6 +18,7 @@ use dlc_messages::{AcceptDlc, Message, OfferDlc};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio::runtime::Runtime;
+use tokio::sync::watch;
 
 /// DlcDevKit type alias for the [ddk_manager::manager::Manager]
 pub type DlcDevKitDlcManager<S, O> = ddk_manager::manager::Manager<
@@ -56,6 +57,8 @@ pub struct DlcDevKit<T: Transport, S: Storage, O: Oracle> {
     pub storage: Arc<S>,
     pub oracle: Arc<O>,
     pub network: Network,
+    pub stop_signal: watch::Receiver<bool>,
+    pub stop_signal_sender: watch::Sender<bool>,
 }
 
 impl<T, S, O> DlcDevKit<T, S, O>
@@ -84,14 +87,12 @@ where
         runtime.spawn(async move { Self::run_manager(manager_clone, receiver_clone).await });
 
         let transport_clone = self.transport.clone();
-        runtime.spawn(async move {
-            transport_clone.listen().await;
-        });
-
-        let transport_clone = self.transport.clone();
         let manager_clone = self.manager.clone();
+        let stop_signal = self.stop_signal.clone();
         runtime.spawn(async move {
-            transport_clone.receive_messages(manager_clone).await;
+            if let Err(e) = transport_clone.start(stop_signal, manager_clone).await {
+                tracing::error!(error = e.to_string(), "Error in transport listeners.");
+            }
         });
 
         let wallet_clone = self.wallet.clone();
@@ -134,6 +135,8 @@ where
     }
 
     pub fn stop(&self) -> anyhow::Result<()> {
+        tracing::warn!("Shutting down DDK runtime and listeners.");
+        self.stop_signal_sender.send(true)?;
         let mut runtime_lock = self.runtime.write().unwrap();
         if let Some(rt) = runtime_lock.take() {
             rt.shutdown_background();
@@ -196,15 +199,13 @@ where
         oracle_announcements: Vec<OracleAnnouncement>,
     ) -> anyhow::Result<OfferDlc> {
         let (responder, receiver) = unbounded();
-        self.sender
-            .send(DlcManagerMessage::OfferDlc {
-                contract_input: contract_input.to_owned(),
-                counter_party,
-                oracle_announcements,
-                responder,
-            })
-            .expect("sending offer message");
-        let offer = receiver.recv().expect("no offer dlc");
+        self.sender.send(DlcManagerMessage::OfferDlc {
+            contract_input: contract_input.to_owned(),
+            counter_party,
+            oracle_announcements,
+            responder,
+        })?;
+        let offer = receiver.recv()?;
 
         let contract_id = hex::encode(offer.temporary_contract_id);
         self.transport

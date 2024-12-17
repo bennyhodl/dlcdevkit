@@ -50,6 +50,11 @@ pub fn handle_dlc_msg_event(
     if event.kind != Kind::Custom(8_888) {
         return Err(anyhow::anyhow!("Event reveived was not DLC Message event."));
     }
+    tracing::info!(
+        kind = 8_888,
+        pubkey = event.pubkey.to_string(),
+        "Received DLC message event."
+    );
 
     let message = parse_dlc_msg_event(&event, secret_key)?;
 
