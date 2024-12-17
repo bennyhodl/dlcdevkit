@@ -25,7 +25,7 @@ use ddkrpc::{
     ListOraclesResponse, ListPeersRequest, ListPeersResponse, ListUtxosRequest, ListUtxosResponse,
     NewAddressRequest, NewAddressResponse, OracleAnnouncementsRequest, OracleAnnouncementsResponse,
     Peer, SendOfferRequest, SendOfferResponse, SendRequest, SendResponse, WalletBalanceRequest,
-    WalletBalanceResponse,
+    WalletBalanceResponse, WalletSyncRequest, WalletSyncResponse,
 };
 use ddkrpc::{InfoRequest, InfoResponse};
 use opts::NodeOpts;
@@ -359,5 +359,16 @@ impl DdkRpc for DdkNode {
             .map(|ann| serde_json::to_vec(ann).unwrap())
             .collect();
         Ok(Response::new(OracleAnnouncementsResponse { announcements }))
+    }
+
+    async fn wallet_sync(
+        &self,
+        _request: Request<WalletSyncRequest>,
+    ) -> Result<Response<WalletSyncResponse>, Status> {
+        self.node
+            .wallet
+            .sync()
+            .map_err(|_| Status::new(Code::Aborted, "Did not sync wallet."))?;
+        Ok(Response::new(WalletSyncResponse {}))
     }
 }

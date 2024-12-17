@@ -5,7 +5,7 @@ use crate::ddkrpc::{
     AcceptOfferRequest, ConnectRequest, GetWalletTransactionsRequest, InfoRequest,
     ListContractsRequest, ListOffersRequest, ListOraclesRequest, ListPeersRequest,
     ListUtxosRequest, NewAddressRequest, OracleAnnouncementsRequest, SendOfferRequest, SendRequest,
-    WalletBalanceRequest,
+    WalletBalanceRequest, WalletSyncRequest,
 };
 use anyhow::anyhow;
 use bitcoin::Transaction;
@@ -172,8 +172,6 @@ pub async fn cli_command(
                 })
                 .await?
                 .into_inner();
-            let offer_hex = hex::encode(&offer.offer_dlc);
-            println!("{}", offer_hex);
             let offer_dlc: OfferDlc = serde_json::from_slice(&offer.offer_dlc)?;
             let offer = serde_json::to_string_pretty(&offer_dlc)?;
             print!("{}", offer);
@@ -195,8 +193,6 @@ pub async fn cli_command(
                 .await?
                 .into_inner();
             let accept_dlc: AcceptDlc = serde_json::from_slice(&accept.accept_dlc)?;
-            let accept_hex = hex::encode(&accept.accept_dlc);
-            println!("{}", accept_hex);
             let accept_dlc = serde_json::to_string_pretty(&accept_dlc)?;
             print!("{}", accept_dlc)
         }
@@ -224,13 +220,21 @@ pub async fn cli_command(
             println!("{}", pretty_string);
         }
         CliCommand::Wallet(wallet) => match wallet {
+            WalletCommand::Balance => {
+                let balance = client
+                    .wallet_balance(WalletBalanceRequest::default())
+                    .await?
+                    .into_inner();
+                let pretty_string = serde_json::to_string_pretty(&balance)?;
+                print!("{}", pretty_string);
+            }
             WalletCommand::NewAddress => {
                 let address = client
                     .new_address(NewAddressRequest::default())
                     .await?
                     .into_inner();
                 let pretty_string = serde_json::to_string_pretty(&address)?;
-                println!("{}", pretty_string);
+                print!("{}", pretty_string);
             }
             WalletCommand::Transactions => {
                 let transactions = client
@@ -273,6 +277,10 @@ pub async fn cli_command(
                     .into_inner();
                 print!("{}", serde_json::to_string_pretty(&txid)?)
             }
+            WalletCommand::Sync => {
+                let _ = client.wallet_sync(WalletSyncRequest {}).await?.into_inner();
+                println!("Wallet synced.")
+            }
         },
         CliCommand::Oracle(command) => match command {
             OracleCommand::Announcements => {
@@ -303,7 +311,7 @@ pub async fn cli_command(
                     host: parts[1].to_string(),
                 })
                 .await?;
-            println!("Connected to {}", parts[0])
+            print!("Connected to {}", parts[0])
         }
     }
 

@@ -55,6 +55,8 @@ pub enum WalletCommand {
         /// Fee rate in sats/vbyte
         fee_rate: u64,
     },
+    #[command(about = "Sync the on-chain wallet.")]
+    Sync,
 }
 
 #[derive(Clone, Debug, Subcommand)]

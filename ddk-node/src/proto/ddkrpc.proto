@@ -8,6 +8,7 @@ service DdkRpc {
   rpc ListOffers (ListOffersRequest) returns (ListOffersResponse);
   rpc NewAddress (NewAddressRequest) returns (NewAddressResponse);
   rpc WalletBalance (WalletBalanceRequest) returns (WalletBalanceResponse);
+  rpc WalletSync (WalletSyncRequest) returns (WalletSyncResponse);
   rpc GetWalletTransactions (GetWalletTransactionsRequest) returns (GetWalletTransactionsResponse);
   rpc ListUtxos (ListUtxosRequest) returns (ListUtxosResponse);
   rpc ListPeers (ListPeersRequest) returns (ListPeersResponse);
@@ -124,3 +125,6 @@ message OracleAnnouncementsRequest {}
 message OracleAnnouncementsResponse {
   repeated bytes announcements = 1;
 }
+
+message WalletSyncRequest {}
+message WalletSyncResponse {}
