@@ -30,6 +30,22 @@ struct SignEnumEvent {
     pub outcome: String,
 }
 
+#[derive(Serialize)]
+pub struct CreateNumericEvent {
+    pub event_id: String,
+    pub num_digits: Option<u16>,
+    pub is_signed: Option<bool>,
+    pub precision: Option<i32>,
+    pub unit: String,
+    pub event_maturity_epoch: u32,
+}
+
+#[derive(Serialize)]
+pub struct SignNumericEvent {
+    pub event_id: String,
+    pub outcome: i64,
+}
+
 /// Kormir oracle client.
 ///
 /// Allows the creation of enum announcements and signing as well.
@@ -73,10 +89,10 @@ impl KormirOracleClient {
         })
     }
 
-    /// Creates an enum oracle announcament.
+    /// Creates an enum oracle announcement.
     ///
     /// Maturity should be the UNIX timestamp of contract maturity.
-    pub async fn create_event(
+    pub async fn create_enum_event(
         &self,
         outcomes: Vec<String>,
         maturity: u32,
@@ -109,7 +125,7 @@ impl KormirOracleClient {
     }
 
     /// Requests for Kormir to sign an announcement with a given outcome.
-    pub async fn sign_event(
+    pub async fn sign_enum_event(
         &self,
         event_id: String,
         outcome: String,
@@ -121,6 +137,81 @@ impl KormirOracleClient {
         let hex = self
             .client
             .post(format!("{}/sign-enum", &self.host))
+            .json(&event)
+            .send()
+            .await?
+            .text()
+            .await?
+            .trim_matches('"')
+            .to_string();
+
+        let attestion_buffer = hex::decode(hex)?;
+
+        let mut cursor = lightning::io::Cursor::new(attestion_buffer);
+        let attestation: OracleAttestation = Readable::read(&mut cursor)
+            .map_err(|_| anyhow!("Can't read bytes for attestation."))?;
+
+        tracing::info!("Signed Kormir oracle event.");
+
+        Ok(attestation)
+    }
+
+    /// Creates a numeric oracle announcement.
+    ///
+    /// Kormir currently supports only numeric event with base 2.
+    ///
+    /// Maturity should be the UNIX timestamp of contract maturity.
+    pub async fn create_numeric_event(
+        &self,
+        num_digits: Option<u16>,
+        is_signed: Option<bool>,
+        precision: Option<i32>,
+        unit: String,
+        maturity: u32,
+    ) -> anyhow::Result<OracleAnnouncement> {
+        let event_id = Uuid::new_v4().to_string();
+
+        let create_event_request = CreateNumericEvent {
+            event_id: event_id.clone(),
+            num_digits,
+            is_signed,
+            precision,
+            unit,
+            event_maturity_epoch: maturity,
+        };
+
+        let announcement = self
+            .client
+            .post(format!("{}/create-numeric", self.host))
+            .json(&create_event_request)
+            .send()
+            .await?
+            .text()
+            .await?
+            .trim_matches('"')
+            .to_string();
+
+        let announcement_bytes = hex::decode(&announcement)?;
+        let mut cursor = Cursor::new(&announcement_bytes);
+        let announcement: OracleAnnouncement = Readable::read(&mut cursor)
+            .map_err(|_| anyhow!("Can't read bytes for attestation."))?;
+
+        Ok(announcement)
+    }
+
+    /// Requests for Kormir to sign an announcement with a given outcome.
+    pub async fn sign_numeric_event(
+        &self,
+        event_id: String,
+        outcome: i64,
+    ) -> anyhow::Result<OracleAttestation> {
+        tracing::info!("Signing event. event_id={} outcome={}", event_id, outcome);
+
+        let event = SignNumericEvent { event_id, outcome };
+
+        let hex = self
+            .client
+            .post(format!("{}/sign-numeric", &self.host))
             .json(&event)
             .send()
             .await?
@@ -198,7 +289,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn kormir() {
+    async fn kormir_enum_events() {
         let kormir = create_kormir().await;
 
         let expiry = TimeDelta::seconds(30);
@@ -210,18 +301,43 @@ mod tests {
             .unwrap();
 
         let announcement = kormir
-            .create_event(vec!["rust".to_string(), "go".to_string()], timestamp)
+            .create_enum_event(vec!["rust".to_string(), "go".to_string()], timestamp)
             .await;
 
         assert!(announcement.is_ok());
 
         let sign_enum = kormir
-            .sign_event(
+            .sign_enum_event(
                 announcement.unwrap().oracle_event.event_id,
                 "rust".to_string(),
             )
             .await;
 
         assert!(sign_enum.is_ok())
+    }
+
+    #[tokio::test]
+    async fn kormir_numeric_events() {
+        let kormir = create_kormir().await;
+
+        let expiry = TimeDelta::seconds(30);
+        let timestamp: u32 = Local::now()
+            .checked_add_signed(expiry)
+            .unwrap()
+            .timestamp()
+            .try_into()
+            .unwrap();
+
+        let announcement = kormir
+            .create_numeric_event(Some(14), Some(true), Some(0), "m/s".to_string(), timestamp)
+            .await;
+
+        assert!(announcement.is_ok());
+
+        let sign_numeric = kormir
+            .sign_numeric_event(announcement.unwrap().oracle_event.event_id, -12345)
+            .await;
+
+        assert!(sign_numeric.is_ok());
     }
 }
