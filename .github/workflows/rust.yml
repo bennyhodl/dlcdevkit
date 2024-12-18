@@ -35,6 +35,19 @@ jobs:
           override: true
       - name: Check format
         run: cargo fmt --check
+  check:
+    name: check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          override: true
+      - name: cargo check
+        run: cargo check --all-features
   integration_tests_prepare:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -57,7 +70,7 @@ jobs:
           key: test-cache-${{ github.run_id }}-${{ github.run_number }}
       - uses: actions/checkout@v4
       - id: set-matrix
-        run: cargo test --no-run && echo "::set-output name=matrix::$(testconfig/scripts/get_test_list.sh manager_execution manager_tests contract_updater)"
+        run: cargo test --no-run --all-features && echo "::set-output name=matrix::$(testconfig/scripts/get_test_list.sh manager_execution manager_tests contract_updater)"
   integration_tests:
     name: integration tests
     needs: integration_tests_prepare
