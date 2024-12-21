@@ -461,7 +461,7 @@ impl ddk_manager::Wallet for DlcDevKitWallet {
                     vec![],
                     utxos,
                     FeeRate::from_sat_per_vb(fee_rate).unwrap(),
-                    amount,
+                    Amount::from_sat(amount),
                     ScriptBuf::new().as_script(),
                     &mut thread_rng(),
                 )
