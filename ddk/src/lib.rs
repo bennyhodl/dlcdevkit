@@ -24,9 +24,12 @@ pub mod wallet;
 use std::sync::Arc;
 
 use bdk_wallet::ChangeSet;
+use bitcoin::Amount;
+use bitcoin::SignedAmount;
 /// DDK object with all services
 pub use ddk::DlcDevKit;
 pub use ddk::DlcManagerMessage;
+pub use ddk_manager;
 
 /// Default nostr relay.
 pub const DEFAULT_NOSTR_RELAY: &str = "wss://nostr.dlcdevkit.com";
@@ -84,4 +87,12 @@ pub trait KeyStorage {
 /// Oracle client
 pub trait Oracle: ddk_manager::Oracle + Send + Sync + 'static {
     fn name(&self) -> String;
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Balance {
+    pub confirmed_onchain: Amount,
+    pub unconfirmed_onchain: Amount,
+    pub contract: Amount,
+    pub contract_pnl: SignedAmount,
 }
