@@ -1,9 +1,12 @@
 use anyhow::anyhow;
 use bitcoin::key::XOnlyPublicKey;
 use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
+use hmac::{Hmac, Mac};
 use kormir::storage::OracleEventData;
 use lightning::{io::Cursor, util::ser::Readable};
+use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
 use serde::Serialize;
+use sha2::Sha256;
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -17,20 +20,20 @@ where
     Ok(request)
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct CreateEnumEvent {
     pub event_id: String,
     pub outcomes: Vec<String>,
     pub event_maturity_epoch: u32,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct SignEnumEvent {
     pub event_id: String,
     pub outcome: String,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct CreateNumericEvent {
     pub event_id: String,
     pub num_digits: Option<u16>,
@@ -40,7 +43,7 @@ pub struct CreateNumericEvent {
     pub event_maturity_epoch: u32,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct SignNumericEvent {
     pub event_id: String,
     pub outcome: i64,
@@ -54,10 +57,14 @@ pub struct KormirOracleClient {
     pubkey: XOnlyPublicKey,
     client: reqwest::Client,
     host: String,
+    hmac_secret: Option<Vec<u8>>,
 }
 
 impl KormirOracleClient {
-    pub async fn new(host: &str) -> anyhow::Result<KormirOracleClient> {
+    pub async fn new(
+        host: &str,
+        hmac_secret: Option<Vec<u8>>,
+    ) -> anyhow::Result<KormirOracleClient> {
         let request: String = get(host, "pubkey").await?;
         let pubkey = XOnlyPublicKey::from_str(&request)?;
         let client = reqwest::Client::new();
@@ -71,6 +78,7 @@ impl KormirOracleClient {
             pubkey,
             client,
             host: host.to_string(),
+            hmac_secret,
         })
     }
 
@@ -105,10 +113,13 @@ impl KormirOracleClient {
             event_maturity_epoch: maturity,
         };
 
+        let (body, headers) = self.body_and_headers(&create_event_request)?;
+
         let announcement = self
             .client
             .post(format!("{}/create-enum", self.host))
-            .json(&create_event_request)
+            .body(body)
+            .headers(headers)
             .send()
             .await?
             .text()
@@ -134,10 +145,13 @@ impl KormirOracleClient {
 
         let event = SignEnumEvent { event_id, outcome };
 
+        let (body, headers) = self.body_and_headers(&event)?;
+
         let hex = self
             .client
             .post(format!("{}/sign-enum", &self.host))
-            .json(&event)
+            .body(body)
+            .headers(headers)
             .send()
             .await?
             .text()
@@ -180,10 +194,13 @@ impl KormirOracleClient {
             event_maturity_epoch: maturity,
         };
 
+        let (body, headers) = self.body_and_headers(&create_event_request)?;
+
         let announcement = self
             .client
             .post(format!("{}/create-numeric", self.host))
-            .json(&create_event_request)
+            .body(body)
+            .headers(headers)
             .send()
             .await?
             .text()
@@ -209,10 +226,13 @@ impl KormirOracleClient {
 
         let event = SignNumericEvent { event_id, outcome };
 
+        let (body, headers) = self.body_and_headers(&event)?;
+
         let hex = self
             .client
             .post(format!("{}/sign-numeric", &self.host))
-            .json(&event)
+            .body(body)
+            .headers(headers)
             .send()
             .await?
             .text()
@@ -229,6 +249,27 @@ impl KormirOracleClient {
         tracing::info!("Signed Kormir oracle event.");
 
         Ok(attestation)
+    }
+
+    fn body_and_headers<T: Serialize + ?Sized>(
+        &self,
+        json: &T,
+    ) -> anyhow::Result<(Vec<u8>, HeaderMap)> {
+        let body = serde_json::to_vec(json)?;
+        let mut headers = HeaderMap::new();
+        headers.append(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        if let Some(secret) = &self.hmac_secret {
+            let hmac = Self::calculate_hmac(&body, secret)?;
+            headers.append("X-Signature", HeaderValue::from_bytes(hmac.as_bytes())?);
+        }
+        Ok((body, headers))
+    }
+
+    fn calculate_hmac(payload: &[u8], secret: &[u8]) -> anyhow::Result<String> {
+        let mut mac = Hmac::<Sha256>::new_from_slice(secret)?;
+        mac.update(payload);
+        let result = mac.finalize().into_bytes();
+        Ok(hex::encode(result))
     }
 }
 
@@ -283,7 +324,7 @@ mod tests {
     use super::*;
 
     async fn create_kormir() -> KormirOracleClient {
-        KormirOracleClient::new("https://kormir.dlcdevkit.com")
+        KormirOracleClient::new("https://kormir.dlcdevkit.com", None)
             .await
             .unwrap()
     }

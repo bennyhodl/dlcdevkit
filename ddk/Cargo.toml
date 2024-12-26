@@ -68,6 +68,8 @@ lightning-net-tokio = { version = "0.0.125", optional = true }
 reqwest = { version = "0.12.9", features = ["blocking"], optional = true }
 kormir = "0.4.1"
 # kormir = { path = "../../kormir/kormir" }
+hmac = "0.12.1"
+sha2 = "0.10"
 
 [dev-dependencies]
 test-log = { version = "0.2.16", features = ["trace"] }

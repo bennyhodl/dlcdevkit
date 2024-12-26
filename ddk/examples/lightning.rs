@@ -13,7 +13,7 @@ type ApplicationDdk = ddk::DlcDevKit<LightningTransport, SledStorage, KormirOrac
 async fn main() -> Result<()> {
     let transport = Arc::new(LightningTransport::new(&[0u8; 32], 1776)?);
     let storage = Arc::new(SledStorage::new(current_dir()?.to_str().unwrap())?);
-    let oracle_client = Arc::new(KormirOracleClient::new("host").await?);
+    let oracle_client = Arc::new(KormirOracleClient::new("host", None).await?);
 
     let mut seed_bytes = [0u8; 32];
     seed_bytes.try_fill(&mut bitcoin::key::rand::thread_rng())?;
