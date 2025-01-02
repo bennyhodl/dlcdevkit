@@ -109,7 +109,7 @@ mod tests {
 
     #[test]
     fn pnl_compute_test() {
-        let buf = include_bytes!("../../../ddk/tests/data/dlc_storage/sled/Accepted");
+        let buf = include_bytes!("../../../ddk/tests/data/dlc_storage/Accepted");
         let accepted_contract: AcceptedContract = Readable::read(&mut Cursor::new(&buf)).unwrap();
         let cets = &accepted_contract.dlc_transactions.cets;
         assert_eq!(accepted_contract.compute_pnl(&cets[0]), 90000000);

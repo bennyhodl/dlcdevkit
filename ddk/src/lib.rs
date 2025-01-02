@@ -23,9 +23,6 @@ pub mod util;
 pub mod wallet;
 use std::sync::Arc;
 
-use bdk_wallet::ChangeSet;
-use bitcoin::Amount;
-use bitcoin::SignedAmount;
 /// DDK object with all services
 pub use ddk::DlcDevKit;
 pub use ddk::DlcManagerMessage;
@@ -35,7 +32,9 @@ pub use ddk_manager;
 pub const DEFAULT_NOSTR_RELAY: &str = "wss://nostr.dlcdevkit.com";
 
 use async_trait::async_trait;
+use bdk_wallet::ChangeSet;
 use bitcoin::secp256k1::{PublicKey, SecretKey};
+use bitcoin::Amount;
 use ddk::DlcDevKitDlcManager;
 use dlc_messages::oracle_msgs::OracleAnnouncement;
 use dlc_messages::Message;
@@ -89,10 +88,16 @@ pub trait Oracle: ddk_manager::Oracle + Send + Sync + 'static {
     fn name(&self) -> String;
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct Balance {
-    pub confirmed_onchain: Amount,
-    pub unconfirmed_onchain: Amount,
+    /// Confirmed in the wallet.
+    pub confirmed: Amount,
+    /// Unconfirmed UTXO that is owned by the wallet. Typically change.
+    pub change_unconfirmed: Amount,
+    /// Unconfirmed UTXO not owned by the wallet.
+    pub foreign_unconfirmed: Amount,
+    /// UTXOs in an active contract.
     pub contract: Amount,
-    pub contract_pnl: SignedAmount,
+    /// Profit and loss in all closed contracts.
+    pub contract_pnl: i64,
 }
