@@ -12,6 +12,8 @@ pub enum CliCommand {
     AcceptOffer(Accept),
     /// List contracts.
     Contracts,
+    #[command(about = "Get the wallet balance.")]
+    Balance,
     /// Wallet commands
     #[clap(subcommand)]
     Wallet(WalletCommand),
@@ -38,8 +40,6 @@ pub struct Offer {
 
 #[derive(Clone, Debug, Subcommand)]
 pub enum WalletCommand {
-    #[command(about = "Get the wallet balance.")]
-    Balance,
     #[command(about = "Generate a new, unused address from the wallet.")]
     NewAddress,
     #[command(about = "Get the wallet transactions.")]

@@ -81,7 +81,11 @@ pub struct WalletBalanceResponse {
     #[prost(uint64, tag = "1")]
     pub confirmed: u64,
     #[prost(uint64, tag = "2")]
-    pub unconfirmed: u64,
+    pub foreign_unconfirmed: u64,
+    #[prost(uint64, tag = "3")]
+    pub change_unconfirmed: u64,
+    #[prost(int64, tag = "4")]
+    pub contract_balance: i64,
 }
 #[derive(serde::Serialize, serde::Deserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
