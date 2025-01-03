@@ -5,8 +5,9 @@ use crate::{nostr::marketplace::*, DEFAULT_NOSTR_RELAY};
 use crate::{Oracle, Storage, Transport};
 use anyhow::anyhow;
 use bitcoin::secp256k1::PublicKey;
-use bitcoin::Network;
+use bitcoin::{Amount, Network};
 use crossbeam::channel::{unbounded, Receiver, Sender};
+use ddk_manager::contract::Contract;
 use ddk_manager::error::Error;
 use ddk_manager::{
     contract::contract_input::ContractInput, CachedContractSignerProvider, ContractId,
@@ -240,5 +241,51 @@ where
         tracing::info!(counter_party, contract_id, "Accepted DLC contract.");
 
         Ok((contract_id, counter_party, accept_dlc))
+    }
+
+    pub fn balance(&self) -> anyhow::Result<crate::Balance> {
+        let wallet_balance = self.wallet.get_balance()?;
+        let contracts = self.storage.get_contracts()?;
+
+        let contract = &contracts
+            .iter()
+            .map(|contract| match contract {
+                Contract::Confirmed(c) => {
+                    let accept_party_collateral = c.accepted_contract.accept_params.collateral;
+                    if c.accepted_contract.offered_contract.is_offer_party {
+                        Amount::from_sat(
+                            c.accepted_contract.offered_contract.total_collateral
+                                - accept_party_collateral,
+                        )
+                    } else {
+                        Amount::from_sat(c.accepted_contract.accept_params.collateral)
+                    }
+                }
+                _ => Amount::ZERO,
+            })
+            .sum::<Amount>();
+
+        let contract_pnl = &contracts
+            .iter()
+            .map(|contract| match contract {
+                Contract::Closed(c) => {
+                    println!("Closed contract: {}", c.pnl);
+                    0_i64
+                }
+                Contract::PreClosed(p) => p
+                    .signed_contract
+                    .accepted_contract
+                    .compute_pnl(&p.signed_cet),
+                _ => 0_i64,
+            })
+            .sum::<i64>();
+
+        Ok(crate::Balance {
+            confirmed: wallet_balance.confirmed,
+            change_unconfirmed: wallet_balance.immature + wallet_balance.trusted_pending,
+            foreign_unconfirmed: wallet_balance.untrusted_pending,
+            contract: contract.to_owned(),
+            contract_pnl: contract_pnl.to_owned(),
+        })
     }
 }

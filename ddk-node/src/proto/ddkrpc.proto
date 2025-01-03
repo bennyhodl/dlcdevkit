@@ -61,7 +61,9 @@ message WalletBalanceRequest {}
 
 message WalletBalanceResponse {
   uint64 confirmed = 1;
-  uint64 unconfirmed = 2;
+  uint64 foreign_unconfirmed = 2;
+  uint64 change_unconfirmed = 3;
+  int64 contract_balance = 4;
 }
 
 message GetWalletTransactionsRequest {}

@@ -217,12 +217,13 @@ impl DdkRpc for DdkNode {
         _request: Request<WalletBalanceRequest>,
     ) -> Result<Response<WalletBalanceResponse>, Status> {
         tracing::info!("Request for wallet balance.");
-        let wallet_balance = self.node.wallet.get_balance().unwrap();
+        let wallet_balance = self.node.balance().unwrap();
 
         let response = WalletBalanceResponse {
             confirmed: wallet_balance.confirmed.to_sat(),
-            unconfirmed: (wallet_balance.trusted_pending + wallet_balance.untrusted_pending)
-                .to_sat(),
+            foreign_unconfirmed: wallet_balance.foreign_unconfirmed.to_sat(),
+            change_unconfirmed: wallet_balance.change_unconfirmed.to_sat(),
+            contract_balance: wallet_balance.contract_pnl,
         };
         Ok(Response::new(response))
     }
