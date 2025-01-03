@@ -220,14 +220,6 @@ pub async fn cli_command(
             println!("{}", pretty_string);
         }
         CliCommand::Wallet(wallet) => match wallet {
-            WalletCommand::Balance => {
-                let balance = client
-                    .wallet_balance(WalletBalanceRequest::default())
-                    .await?
-                    .into_inner();
-                let pretty_string = serde_json::to_string_pretty(&balance)?;
-                print!("{}", pretty_string);
-            }
             WalletCommand::NewAddress => {
                 let address = client
                     .new_address(NewAddressRequest::default())
