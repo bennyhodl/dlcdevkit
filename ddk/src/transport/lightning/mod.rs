@@ -1,9 +1,9 @@
 use crate::{DlcDevKitDlcManager, Oracle, Storage, Transport};
 use async_trait::async_trait;
 use bitcoin::secp256k1::PublicKey;
-use lightning_net_tokio::{connect_outbound, setup_inbound};
-use std::{sync::Arc, time::Duration};
-use tokio::net::TcpListener;
+use lightning_net_tokio::connect_outbound;
+use std::sync::Arc;
+use tokio::sync::watch;
 
 pub(crate) mod peer_manager;
 pub use peer_manager::LightningTransport;
@@ -18,63 +18,39 @@ impl Transport for LightningTransport {
         self.node_id
     }
 
-    /// Creates a TCP listener and accepts incoming connection spawning a tokio thread.
-    async fn listen(&self) {
-        let listener = TcpListener::bind(format!("0.0.0.0:{}", self.listening_port))
-            .await
-            .expect("Coldn't get port.");
-
-        loop {
-            let peer_mgr = self.peer_manager.clone();
-            let (tcp_stream, socket) = listener.accept().await.unwrap();
-            tokio::spawn(async move {
-                tracing::info!(connection = socket.to_string(), "Received connection.");
-                setup_inbound(peer_mgr.clone(), tcp_stream.into_std().unwrap()).await;
-            });
-        }
-    }
-
     /// Sends a message to a peer.
-    ///
-    /// TODO: Assert that we are connected to the peer before sending.
     fn send_message(&self, counterparty: PublicKey, message: dlc_messages::Message) {
-        self.message_handler.send_message(counterparty, message)
+        tracing::info!(message=?message, "Sending message to {}", counterparty.to_string());
+        if self.peer_manager.peer_by_node_id(&counterparty).is_some() {
+            self.message_handler.send_message(counterparty, message)
+        } else {
+            tracing::warn!(
+                pubkey = counterparty.to_string(),
+                "Not connected to counterparty. Message not sent"
+            )
+        }
     }
 
     /// Gets and clears the message queue with messages to be processed.
     /// Takes the manager to process the DLC messages that are received.
-    async fn receive_messages<S: Storage, O: Oracle>(
+    async fn start<S: Storage, O: Oracle>(
         &self,
+        mut stop_signal: watch::Receiver<bool>,
         manager: Arc<DlcDevKitDlcManager<S, O>>,
-    ) {
-        let mut timer = tokio::time::interval(Duration::from_secs(5));
-        loop {
-            timer.tick().await;
-            let messages = self.message_handler.get_and_clear_received_messages();
+    ) -> Result<(), anyhow::Error> {
+        let listen_handle = self.listen(stop_signal.clone());
 
-            for (counter_party, message) in messages {
-                tracing::info!(
-                    counter_party = counter_party.to_string(),
-                    "Processing DLC message"
-                );
+        let process_handle = self.process_messages(
+            stop_signal.clone(),
+            manager.clone(),
+            self.peer_manager.clone(),
+        );
 
-                match manager.on_dlc_message(&message, counter_party).await {
-                    Err(e) => {
-                        tracing::error!(error =? e, "On message error.")
-                    }
-                    Ok(contract) => {
-                        if let Some(msg) = contract {
-                            tracing::info!("Responding to message received.");
-                            tracing::debug!(message=?msg);
-                            self.message_handler.send_message(counter_party, msg);
-                        }
-                    }
-                };
-            }
-
-            if self.message_handler.has_pending_messages() {
-                self.peer_manager.process_events()
-            }
+        // Wait for either task to complete or stop signal
+        tokio::select! {
+            _ = stop_signal.changed() => Ok(()),
+            res = listen_handle => res?,
+            res = process_handle => res?,
         }
     }
 

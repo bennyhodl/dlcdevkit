@@ -25,7 +25,7 @@ use ddkrpc::{
     ListOraclesResponse, ListPeersRequest, ListPeersResponse, ListUtxosRequest, ListUtxosResponse,
     NewAddressRequest, NewAddressResponse, OracleAnnouncementsRequest, OracleAnnouncementsResponse,
     Peer, SendOfferRequest, SendOfferResponse, SendRequest, SendResponse, WalletBalanceRequest,
-    WalletBalanceResponse,
+    WalletBalanceResponse, WalletSyncRequest, WalletSyncResponse,
 };
 use ddkrpc::{InfoRequest, InfoResponse};
 use opts::NodeOpts;
@@ -90,13 +90,18 @@ impl DdkNode {
         let ddk: Ddk = builder.finish().await?;
 
         ddk.start()?;
-
         let node = DdkNode::new(ddk);
-
-        Server::builder()
+        let node_stop = node.node.clone();
+        let server = Server::builder()
             .add_service(DdkRpcServer::new(node))
-            .serve(opts.grpc_host.parse()?)
-            .await?;
+            .serve_with_shutdown(opts.grpc_host.parse()?, async {
+                tokio::signal::ctrl_c()
+                    .await
+                    .expect("Failed to install Ctrl+C signal handler");
+                let _ = node_stop.stop();
+            });
+
+        server.await?;
 
         Ok(())
     }
@@ -354,5 +359,16 @@ impl DdkRpc for DdkNode {
             .map(|ann| serde_json::to_vec(ann).unwrap())
             .collect();
         Ok(Response::new(OracleAnnouncementsResponse { announcements }))
+    }
+
+    async fn wallet_sync(
+        &self,
+        _request: Request<WalletSyncRequest>,
+    ) -> Result<Response<WalletSyncResponse>, Status> {
+        self.node
+            .wallet
+            .sync()
+            .map_err(|_| Status::new(Code::Aborted, "Did not sync wallet."))?;
+        Ok(Response::new(WalletSyncResponse {}))
     }
 }

@@ -77,5 +77,10 @@ bitcoincore-rpc = "0.19.0"
 
 [[example]]
 name = "lighnting"
-path = "examples/ddk.rs"
+path = "examples/lightning.rs"
 required-features = ["lightning", "kormir", "sled"]
+
+[[example]]
+name = "nostr"
+path = "examples/nostr.rs"
+required-features = ["nostr"]
