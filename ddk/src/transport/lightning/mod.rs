@@ -40,11 +40,7 @@ impl Transport for LightningTransport {
     ) -> Result<(), anyhow::Error> {
         let listen_handle = self.listen(stop_signal.clone());
 
-        let process_handle = self.process_messages(
-            stop_signal.clone(),
-            manager.clone(),
-            self.peer_manager.clone(),
-        );
+        let process_handle = self.process_messages(stop_signal.clone(), manager.clone());
 
         // Wait for either task to complete or stop signal
         tokio::select! {

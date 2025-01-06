@@ -135,15 +135,14 @@ impl LightningTransport {
         &self,
         stop_signal: watch::Receiver<bool>,
         manager: Arc<DlcDevKitDlcManager<S, O>>,
-        peer_manager: Arc<LnPeerManager>,
     ) -> JoinHandle<Result<(), anyhow::Error>> {
         let mut message_stop = stop_signal.clone();
         let message_manager = Arc::clone(&manager);
-        // let peer_manager = Arc::clone(&self.peer_manager);
+        let peer_manager = Arc::clone(&self.peer_manager);
         let message_handler = Arc::clone(&self.message_handler);
         tokio::spawn(async move {
             let mut message_interval = interval(Duration::from_secs(5));
-            let mut event_interval = interval(Duration::from_secs(2));
+            // let mut event_interval = interval(Duration::from_secs(2));
             loop {
                 tokio::select! {
                     _ = message_stop.changed() => {
@@ -153,6 +152,7 @@ impl LightningTransport {
                         }
                     },
                     _ = message_interval.tick() => {
+                        peer_manager.process_events();
                         let messages = message_handler.get_and_clear_received_messages();
                         for (counter_party, message) in messages {
                             tracing::info!(
@@ -174,9 +174,6 @@ impl LightningTransport {
                                 }
                             }
                         }
-                    }
-                    _ = event_interval.tick() => {
-                        peer_manager.process_events()
                     }
                 }
             }
