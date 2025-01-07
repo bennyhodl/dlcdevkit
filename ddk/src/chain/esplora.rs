@@ -74,7 +74,6 @@ impl ddk_manager::Blockchain for EsploraClient {
                 txid = transaction.compute_txid().to_string(),
                 "Transaction already submitted",
             );
-            println!("Transaction is already submitted: {:}", status.confirmed);
             if status.confirmed {
                 return Ok(());
             }

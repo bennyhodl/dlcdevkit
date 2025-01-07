@@ -9,7 +9,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use test_util::{generate_blocks, test_ddk};
 use tokio::time::sleep;
 
-#[tokio::test]
+// #[tokio::test]
+#[test_log::test(tokio::test)]
 async fn short_call() {
     let (alice, bob, oracle) = test_ddk().await;
     let expiry = TimeDelta::seconds(15);

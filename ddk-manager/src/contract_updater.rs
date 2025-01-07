@@ -13,6 +13,7 @@ use dlc_messages::{
 use secp256k1_zkp::{
     ecdsa::Signature, All, EcdsaAdaptorSignature, PublicKey, Secp256k1, SecretKey, Signing,
 };
+use std::time::Instant;
 
 use crate::{
     contract::{
@@ -111,6 +112,7 @@ where
     )
     .await?;
 
+    let now = Instant::now();
     let dlc_transactions = dlc::create_dlc_transactions(
         &offered_contract.offer_params,
         &accept_params,
@@ -121,6 +123,11 @@ where
         offered_contract.cet_locktime,
         offered_contract.fund_output_serial_id,
     )?;
+    tracing::info!(
+        "Creted {} CETs in {} milliseconds",
+        dlc_transactions.cets.len(),
+        now.elapsed().as_millis()
+    );
 
     let fund_output_value = dlc_transactions.get_fund_output().value;
 
@@ -273,6 +280,7 @@ where
 
     let total_collateral = offered_contract.total_collateral;
 
+    let now = Instant::now();
     let dlc_transactions = dlc::create_dlc_transactions(
         &offered_contract.offer_params,
         &accept_params,
@@ -283,9 +291,15 @@ where
         offered_contract.cet_locktime,
         offered_contract.fund_output_serial_id,
     )?;
+    tracing::info!(
+        "Created {} CETs in {} milliseconds.",
+        dlc_transactions.cets.len(),
+        now.elapsed().as_millis()
+    );
     let fund_output_value = dlc_transactions.get_fund_output().value;
 
     let signer = signer_provider.derive_contract_signer(offered_contract.keys_id)?;
+
     let (signed_contract, adaptor_sigs) = verify_accepted_and_sign_contract_internal(
         secp,
         offered_contract,
@@ -301,6 +315,8 @@ where
         &dlc_transactions,
         None,
     )?;
+    let contract_id = signed_contract.accepted_contract.get_contract_id_string();
+    tracing::info!(contract_id, "Signed and verified contract.");
 
     let signed_msg: SignDlc = signed_contract.get_sign_dlc(adaptor_sigs);
 
@@ -308,6 +324,10 @@ where
 }
 
 fn populate_psbt(psbt: &mut Psbt, all_funding_inputs: &[&FundingInput]) -> Result<(), Error> {
+    tracing::info!(
+        funding_inputs = all_funding_inputs.len(),
+        "Populating PSBT."
+    );
     // add witness utxo to fund_psbt for all inputs
     for (input_index, x) in all_funding_inputs.iter().enumerate() {
         let tx = Transaction::consensus_decode(&mut x.prev_tx.as_slice()).map_err(|_| {
@@ -686,6 +706,11 @@ pub fn get_signed_cet<C: Signing, S: Deref>(
 where
     S::Target: ContractSigner,
 {
+    let contract_id = contract.accepted_contract.get_contract_id_string();
+    tracing::info!(
+        contract_id,
+        "Getting the signed CET for the Oracle Attestation."
+    );
     let (range_info, sigs) =
         crate::utils::get_range_info_and_oracle_sigs(contract_info, adaptor_info, attestations)?;
     let mut cet = contract.accepted_contract.dlc_transactions.cets[range_info.cet_index].clone();
@@ -709,6 +734,7 @@ where
 
     let funding_sk = signer.get_secret_key()?;
 
+    tracing::info!(contract_id, "Getting signed CET.");
     dlc::sign_cet(
         secp,
         &mut cet,
@@ -740,6 +766,7 @@ pub fn get_signed_refund<C: Signing, S: Deref>(
 where
     S::Target: ContractSigner,
 {
+    tracing::info!("Getting signed refund transaction.");
     let accepted_contract = &contract.accepted_contract;
     let offered_contract = &accepted_contract.offered_contract;
     let funding_script_pubkey = &accepted_contract.dlc_transactions.funding_script_pubkey;

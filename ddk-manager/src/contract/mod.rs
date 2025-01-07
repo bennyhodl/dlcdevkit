@@ -13,6 +13,7 @@ use secp256k1_zkp::PublicKey;
 #[cfg(feature = "use-serde")]
 use serde::{Deserialize, Serialize};
 use signed_contract::SignedContract;
+use std::fmt::Write;
 
 use self::utils::unordered_equal;
 
@@ -84,6 +85,18 @@ impl Contract {
             Contract::PreClosed(c) => c.signed_contract.accepted_contract.get_contract_id(),
             Contract::Closed(c) => c.contract_id,
         }
+    }
+
+    /// Get the string representation of the contract id.
+    pub fn get_id_string(&self) -> String {
+        let mut string_id = String::with_capacity(32 * 2 + 2);
+        string_id.push_str("0x");
+        let id = self.get_id();
+        for i in &id {
+            write!(string_id, "{:02x}", i).unwrap();
+        }
+
+        string_id
     }
 
     /// Returns the temporary contract id of a contract.
