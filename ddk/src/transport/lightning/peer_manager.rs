@@ -275,7 +275,8 @@ mod tests {
 
         let offer = get_offer();
         bob.transport
-            .send_message(alice_pk, Message::Offer(offer.clone()));
+            .send_message(alice_pk, Message::Offer(offer.clone()))
+            .await;
 
         let mut offer_received = false;
         let mut retries = 0;

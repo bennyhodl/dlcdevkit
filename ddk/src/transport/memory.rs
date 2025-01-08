@@ -50,7 +50,7 @@ impl Transport for MemoryTransport {
         self.keypair.public_key()
     }
 
-    fn send_message(&self, counterparty: PublicKey, message: Message) {
+    async fn send_message(&self, counterparty: PublicKey, message: Message) {
         let counterparties = self.counterparty_transport.lock().unwrap();
         let connected_counterparty = counterparties.get(&counterparty);
         if let Some(counterparty) = connected_counterparty {
@@ -80,7 +80,7 @@ impl Transport for MemoryTransport {
                         match manager.on_dlc_message(&msg.0, msg.1).await {
                             Ok(s) => {
                                 if let Some(reply) = s {
-                                    self.send_message(msg.1, reply);
+                                    self.send_message(msg.1, reply).await;
                                 } else {
                                     tracing::info!("Handled on_dlc_message.");
                                 }

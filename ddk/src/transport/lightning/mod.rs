@@ -19,7 +19,7 @@ impl Transport for LightningTransport {
     }
 
     /// Sends a message to a peer.
-    fn send_message(&self, counterparty: PublicKey, message: dlc_messages::Message) {
+    async fn send_message(&self, counterparty: PublicKey, message: dlc_messages::Message) {
         tracing::info!(message=?message, "Sending message to {}", counterparty.to_string());
         if self.peer_manager.peer_by_node_id(&counterparty).is_some() {
             self.message_handler.send_message(counterparty, message)
