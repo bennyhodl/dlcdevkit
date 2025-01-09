@@ -1,4 +1,6 @@
 use crate::nostr::{DLC_MESSAGE_KIND, ORACLE_ANNOUNCMENT_KIND, ORACLE_ATTESTATION_KIND};
+use crate::transport::nostr::nostr_to_bitcoin_pubkey;
+use crate::util::message_variant_name;
 use dlc::secp256k1_zkp::PublicKey as SecpPublicKey;
 use dlc_messages::message_handler::read_dlc_message;
 use dlc_messages::{Message, WireMessage};
@@ -9,6 +11,8 @@ use nostr_rs::{
     Event, EventBuilder, EventId, Filter, Keys, Kind, PublicKey, SecretKey, Tag, Timestamp,
 };
 
+/// Listens for DLC messages with event kind 8,888. These are messages such as
+/// these are any of the [dlc_messages::Message]
 pub fn create_dlc_message_filter(since: Timestamp, public_key: PublicKey) -> Filter {
     Filter::new()
         .kind(DLC_MESSAGE_KIND)
@@ -16,6 +20,7 @@ pub fn create_dlc_message_filter(since: Timestamp, public_key: PublicKey) -> Fil
         .pubkey(public_key)
 }
 
+/// Listens for oracle attestations and announcements. Kind 89 and 88.
 pub fn create_oracle_message_filter(since: Timestamp) -> Filter {
     Filter::new()
         .kinds([ORACLE_ANNOUNCMENT_KIND, ORACLE_ATTESTATION_KIND])
@@ -35,12 +40,20 @@ pub fn parse_dlc_msg_event(event: &Event, secret_key: &SecretKey) -> anyhow::Res
         return Err(anyhow::anyhow!("Couldn't read DLC message."));
     };
 
-    match wire {
+    let message = match wire {
         WireMessage::Message(msg) => Ok(msg),
         WireMessage::SegmentStart(_) | WireMessage::SegmentChunk(_) => {
             Err(anyhow::anyhow!("Blah blah, something with a wire"))
         }
-    }
+    }?;
+
+    tracing::info!(
+        message = message_variant_name(&message),
+        "Decrypted message from {}",
+        event.pubkey.to_string()
+    );
+
+    Ok(message)
 }
 
 pub fn handle_dlc_msg_event(
@@ -58,13 +71,7 @@ pub fn handle_dlc_msg_event(
 
     let message = parse_dlc_msg_event(&event, secret_key)?;
 
-    let pubkey = bitcoin::secp256k1::PublicKey::from_slice(
-        &event
-            .pubkey
-            .public_key(nostr_sdk::secp256k1::Parity::Even)
-            .serialize(),
-    )
-    .expect("converting pubkey between crates should not fail");
+    let pubkey = nostr_to_bitcoin_pubkey(&event.pubkey);
 
     Ok((pubkey, message, event.clone()))
 }
@@ -80,7 +87,7 @@ pub fn create_dlc_msg_event(
 
     let content = nip04::encrypt(&keys.secret_key().clone(), &to, base64::encode(&bytes))?;
 
-    let p_tags = Tag::public_key(keys.public_key);
+    let p_tags = Tag::public_key(to);
 
     let e_tags = event_id.map(|e| Tag::event(e));
 

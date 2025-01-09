@@ -8,6 +8,7 @@ use ddk_manager::contract::{
 };
 use ddk_manager::error::Error;
 use dlc_messages::oracle_msgs::OracleAnnouncement;
+use dlc_messages::Message;
 use lightning::io::Read;
 
 /// Helper from rust-dlc to implement types for contracts.
@@ -142,6 +143,18 @@ pub(crate) fn filter_expired_oracle_announcements(
         .filter(|ann| ann.oracle_event.event_maturity_epoch < now)
         .cloned()
         .collect()
+}
+
+pub fn message_variant_name(message: &Message) -> String {
+    let str = match message {
+        Message::Accept(_) => "Accept",
+        Message::Offer(_) => "Offer",
+        Message::Sign(_) => "Sign",
+        Message::Reject(_) => "Reject",
+        _ => "Channel Related",
+    };
+
+    str.to_string()
 }
 
 #[cfg(test)]

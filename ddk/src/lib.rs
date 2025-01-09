@@ -56,7 +56,7 @@ pub trait Transport: Send + Sync + 'static {
         manager: Arc<DlcDevKitDlcManager<S, O>>,
     ) -> Result<(), anyhow::Error>;
     /// Send a message to a specific counterparty.
-    fn send_message(&self, counterparty: PublicKey, message: Message);
+    async fn send_message(&self, counterparty: PublicKey, message: Message);
     /// Connect to another peer
     async fn connect_outbound(&self, pubkey: PublicKey, host: &str);
 }

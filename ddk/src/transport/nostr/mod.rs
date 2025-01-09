@@ -18,8 +18,7 @@ impl Transport for NostrDlc {
     }
 
     fn public_key(&self) -> BitcoinPublicKey {
-        BitcoinPublicKey::from_slice(&self.keys.public_key.serialize())
-            .expect("Should not fail converting nostr key to bitcoin key.")
+        nostr_to_bitcoin_pubkey(&self.keys.public_key)
     }
 
     /// Get messages that have not been processed yet.
@@ -37,13 +36,39 @@ impl Transport for NostrDlc {
         }
     }
     /// Send a message to a specific counterparty.
-    fn send_message(&self, counterparty: BitcoinPublicKey, message: Message) {
-        let public_key = PublicKey::from_slice(&counterparty.serialize())
-            .expect("Should not fail converting nostr key to bitcoin key.");
-        let _event = messages::create_dlc_msg_event(public_key, None, message, &self.keys);
+    async fn send_message(&self, counterparty: BitcoinPublicKey, message: Message) {
+        let nostr_counterparty = bitcoin_to_nostr_pubkey(&counterparty);
+        tracing::info!(
+            bitcoin_pk = counterparty.to_string(),
+            nostr_pk = nostr_counterparty.to_string(),
+            "Sending nostr message."
+        );
+        let event =
+            messages::create_dlc_msg_event(nostr_counterparty, None, message, &self.keys).unwrap();
+        match self.client.send_event(event).await {
+            Err(e) => tracing::error!(error = e.to_string(), "Failed to send nostr event."),
+            Ok(e) => tracing::info!(event_id = e.val.to_string(), "Sent DLC message event."),
+        }
     }
-    /// Connect to another peer
-    async fn connect_outbound(&self, _pubkey: BitcoinPublicKey, _host: &str) {
-        todo!("Connect outbound")
+    /// Connect to a relay.
+    async fn connect_outbound(&self, _pubkey: BitcoinPublicKey, host: &str) {
+        match self.client.add_relay(host).await {
+            Ok(_) => tracing::info!(host, "Added relay."),
+            Err(e) => tracing::error!(host, error = e.to_string(), "Could not add relay."),
+        }
     }
+}
+
+fn bitcoin_to_nostr_pubkey(bitcoin_pk: &BitcoinPublicKey) -> PublicKey {
+    // Convert to XOnlyPublicKey first
+    let (xonly, _parity) = bitcoin_pk.x_only_public_key();
+
+    // Create nostr public key from the x-only bytes
+    PublicKey::from_slice(xonly.serialize().as_slice())
+        .expect("Could not convert Bitcoin key to nostr key.")
+}
+
+fn nostr_to_bitcoin_pubkey(nostr_pk: &PublicKey) -> BitcoinPublicKey {
+    BitcoinPublicKey::from_slice(&nostr_pk.serialize())
+        .expect("Should not fail converting nostr key to bitcoin key.")
 }

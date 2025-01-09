@@ -3,8 +3,9 @@ use std::sync::Arc;
 use crate::DlcDevKitDlcManager;
 use crate::{Oracle, Storage};
 use bitcoin::bip32::Xpriv;
+use bitcoin::secp256k1::PublicKey as BitcoinPublicKey;
 use bitcoin::Network;
-use nostr_rs::{secp256k1::Secp256k1, Keys, PublicKey, Timestamp, Url};
+use nostr_rs::{secp256k1::Secp256k1, Keys, Timestamp, Url};
 use nostr_sdk::{Client, RelayPoolNotification};
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
@@ -38,8 +39,19 @@ impl NostrDlc {
         })
     }
 
-    pub fn public_key(&self) -> PublicKey {
-        self.keys.public_key()
+    pub fn transport_public_key(&self) -> BitcoinPublicKey {
+        // Get the bytes from nostr public key
+        let pk_bytes = self.keys.public_key().to_bytes();
+
+        // Convert to XOnlyPublicKey first
+        let xonly = bitcoin::secp256k1::XOnlyPublicKey::from_slice(&pk_bytes)
+            .expect("Converting from nostr public key to bitcoin public key should not fail.");
+
+        // Convert to full PublicKey (this will assume even y coordinate)
+        let bitcoin_pk =
+            BitcoinPublicKey::from_x_only_public_key(xonly, bitcoin::key::Parity::Even);
+
+        bitcoin_pk
     }
 
     pub fn start<S: Storage, O: Oracle>(
@@ -47,17 +59,22 @@ impl NostrDlc {
         mut stop_signal: watch::Receiver<bool>,
         manager: Arc<DlcDevKitDlcManager<S, O>>,
     ) -> JoinHandle<Result<(), anyhow::Error>> {
-        let public_key = self.public_key();
         tracing::info!(
-            pubkey = public_key.to_string(),
+            pubkey = self.keys.public_key().to_string(),
+            transport_public_key = self.transport_public_key().to_string(),
             "Starting Nostr DLC listener."
         );
         let nostr_client = self.client.clone();
         let keys = self.keys.clone();
         tokio::spawn(async move {
             let since = Timestamp::now();
-            let msg_subscription = super::messages::create_dlc_message_filter(since, public_key);
+            let msg_subscription =
+                super::messages::create_dlc_message_filter(since, keys.public_key());
             nostr_client.subscribe(vec![msg_subscription], None).await?;
+            tracing::info!(
+                "Listening for messages on {}",
+                keys.public_key().to_string()
+            );
             let mut notifications = nostr_client.notifications();
             loop {
                 tokio::select! {

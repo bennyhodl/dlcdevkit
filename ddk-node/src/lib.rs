@@ -150,6 +150,7 @@ impl DdkRpc for DdkNode {
         let offer_msg = self
             .node
             .send_dlc_offer(&contract_input, counter_party, oracle_announcements)
+            .await
             .map_err(|e| {
                 Status::new(
                     Code::Cancelled,
@@ -177,6 +178,7 @@ impl DdkRpc for DdkNode {
         let (contract_id, counter_party, accept_dlc) = self
             .node
             .accept_dlc_offer(contract_id)
+            .await
             .map_err(|_| Status::new(Code::Cancelled, "Contract could not be accepted."))?;
 
         let accept_dlc = serde_json::to_vec(&accept_dlc).map_err(|_| {

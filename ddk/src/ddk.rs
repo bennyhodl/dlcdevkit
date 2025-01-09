@@ -192,7 +192,7 @@ where
         self.network
     }
 
-    pub fn send_dlc_offer(
+    pub async fn send_dlc_offer(
         &self,
         contract_input: &ContractInput,
         counter_party: PublicKey,
@@ -209,7 +209,8 @@ where
 
         let contract_id = hex::encode(offer.temporary_contract_id);
         self.transport
-            .send_message(counter_party, Message::Offer(offer.clone()));
+            .send_message(counter_party, Message::Offer(offer.clone()))
+            .await;
         tracing::info!(
             counterparty = counter_party.to_string(),
             contract_id,
@@ -219,7 +220,7 @@ where
         Ok(offer)
     }
 
-    pub fn accept_dlc_offer(
+    pub async fn accept_dlc_offer(
         &self,
         contract: [u8; 32],
     ) -> anyhow::Result<(String, String, AcceptDlc)> {
@@ -235,7 +236,8 @@ where
         })?;
 
         self.transport
-            .send_message(public_key, Message::Accept(accept_dlc.clone()));
+            .send_message(public_key, Message::Accept(accept_dlc.clone()))
+            .await;
 
         let contract_id = hex::encode(contract_id);
         let counter_party = public_key.to_string();

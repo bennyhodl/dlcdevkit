@@ -3,7 +3,7 @@ mod test_util;
 #[cfg(feature = "nostr")]
 mod nostr_test {
     use super::*;
-    use bitcoin::{key::rand::Fill, secp256k1::PublicKey, Network};
+    use bitcoin::{key::rand::Fill, Network};
     use chrono::{Local, TimeDelta};
     use ddk::builder::Builder;
     use ddk::oracle::memory::MemoryOracle;
@@ -98,10 +98,10 @@ mod nostr_test {
             oracle.oracle.public_key().to_string(),
             EVENT_ID.to_string(),
         );
-        let alice_pubkey =
-            PublicKey::from_slice(&alice.transport.public_key().serialize()).expect("cant convert");
+        let alice_pubkey = alice.transport.transport_public_key();
         let _offer = bob
             .send_dlc_offer(&contract_input, alice_pubkey, vec![announcement])
+            .await
             .unwrap();
     }
 }
