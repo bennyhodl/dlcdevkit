@@ -1,7 +1,7 @@
 name: "dlcdevkit"
 services:
   bitcoin:
-    image: kylemanna/bitcoind:latest
+    image: bitcoin/bitcoin:28.0
     container_name: bitcoin
     command: |
       -regtest=1
