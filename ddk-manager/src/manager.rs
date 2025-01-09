@@ -39,7 +39,6 @@ use lightning::chain::chaininterface::FeeEstimator;
 use lightning::ln::chan_utils::{
     build_commitment_secret, derive_private_key, derive_private_revocation_key,
 };
-use log::{error, warn};
 use secp256k1_zkp::XOnlyPublicKey;
 use secp256k1_zkp::{
     ecdsa::Signature, All, EcdsaAdaptorSignature, PublicKey, Secp256k1, SecretKey,
@@ -141,7 +140,7 @@ macro_rules! check_for_timed_out_channels {
                 let is_timed_out = timeout < $manager.time.unix_time_now();
                 if is_timed_out {
                     match $manager.force_close_channel_internal(channel, true).await {
-                        Err(e) => error!("Error force closing channel {}", e),
+                        Err(e) => tracing::error!("Error force closing channel {}", e),
                         _ => {}
                     }
                 }
@@ -379,6 +378,7 @@ where
     /// Function to call to check the state of the currently executing DLCs and
     /// update them if possible.
     pub async fn periodic_check(&self, check_channels: bool) -> Result<(), Error> {
+        tracing::debug!("Periodic check.");
         self.check_signed_contracts().await?;
         self.check_confirmed_contracts().await?;
         self.check_preclosed_contracts().await?;
@@ -500,7 +500,7 @@ where
         sign_message: SignDlc,
         e: Error,
     ) -> Result<R, Error> {
-        error!("Error in on_sign {}", e);
+        tracing::error!("Error in on_sign {}", e);
         self.store
             .update_contract(&Contract::FailedSign(FailedSignContract {
                 accepted_contract,
@@ -516,7 +516,7 @@ where
         accept_message: AcceptDlc,
         e: Error,
     ) -> Result<R, Error> {
-        error!("Error in on_accept {}", e);
+        tracing::error!("Error in on_accept {}", e);
         self.store
             .update_contract(&Contract::FailedAccept(FailedAcceptContract {
                 offered_contract,
@@ -538,8 +538,20 @@ where
             )
             .await?;
         if confirmations >= NB_CONFIRMATIONS {
+            tracing::info!(
+                confirmations,
+                contract_id = contract.accepted_contract.get_contract_id_string(),
+                "Marking contract as confirmed."
+            );
             self.store
                 .update_contract(&Contract::Confirmed(contract.clone()))?;
+        } else {
+            tracing::info!(
+                confirmations,
+                required = NB_CONFIRMATIONS,
+                contract_id = contract.accepted_contract.get_contract_id_string(),
+                "Not enough confirmations to mark contract as confirmed."
+            );
         }
         Ok(())
     }
@@ -547,7 +559,7 @@ where
     async fn check_signed_contracts(&self) -> Result<(), Error> {
         for c in self.store.get_signed_contracts()? {
             if let Err(e) = self.check_signed_contract(&c).await {
-                error!(
+                tracing::error!(
                     "Error checking confirmed contract {}: {}",
                     c.accepted_contract.get_contract_id_string(),
                     e
@@ -565,7 +577,7 @@ where
                 continue;
             }
             if let Err(e) = self.check_confirmed_contract(&c).await {
-                error!(
+                tracing::error!(
                     "Error checking confirmed contract {}: {}",
                     c.accepted_contract.get_contract_id_string(),
                     e
@@ -598,7 +610,7 @@ where
                         let oracle = match self.oracles.get(&announcement.oracle_public_key) {
                             Some(oracle) => oracle,
                             None => {
-                                log::debug!(
+                                tracing::debug!(
                                     "Oracle not found for key: {}",
                                     announcement.oracle_public_key
                                 );
@@ -613,7 +625,7 @@ where
                         {
                             Ok(attestation) => attestation,
                             Err(e) => {
-                                log::error!(
+                                tracing::error!(
                                     "Attestation not found for event. id={} error={}",
                                     announcement.oracle_event.event_id,
                                     e.to_string()
@@ -624,7 +636,7 @@ where
 
                         // Validate the attestation
                         if let Err(e) = attestation.validate(&self.secp, announcement) {
-                            log::error!(
+                            tracing::error!(
                                 "Oracle attestation is not valid. pubkey={} event_id={}, error={:?}",
                                 announcement.oracle_public_key,
                                 announcement.oracle_event.event_id,
@@ -655,7 +667,7 @@ where
             let signer = self.signer_provider.derive_contract_signer(offer.keys_id)?;
 
             //  === WARNING ===
-            // This code could potentiall be problematic. When running refund tests, it would look for a CET
+            // This code could potentially be problematic. When running refund tests, it would look for a CET
             // but the CET would be invalid and refund would not pass. By only updating with a valid CET,
             // we then go to update. This way if it fails we can check for refund instead of bailing and getting locked
             // funds.
@@ -680,7 +692,7 @@ where
                         return Ok(());
                     }
                     Err(e) => {
-                        warn!(
+                        tracing::warn!(
                             "Failed to close contract {}: {}",
                             contract.accepted_contract.get_contract_id_string(),
                             e
@@ -757,7 +769,7 @@ where
                     Ok(closed_contract)
                 }
                 Err(e) => {
-                    warn!(
+                    tracing::warn!(
                         "Failed to close contract {}: {e}",
                         contract.accepted_contract.get_contract_id_string()
                     );
@@ -774,7 +786,7 @@ where
     async fn check_preclosed_contracts(&self) -> Result<(), Error> {
         for c in self.store.get_preclosed_contracts()? {
             if let Err(e) = self.check_preclosed_contract(&c).await {
-                error!(
+                tracing::error!(
                     "Error checking pre-closed contract {}: {}",
                     c.signed_contract.accepted_contract.get_contract_id_string(),
                     e
@@ -830,6 +842,10 @@ where
             .await?;
 
         if confirmations < 1 {
+            tracing::info!(
+                txid = signed_cet.compute_txid().to_string(),
+                "Broadcasting signed CET."
+            );
             // TODO(tibo): if this fails because another tx is already in
             // mempool or blockchain, we might have been cheated. There is
             // not much to be done apart from possibly extracting a fraud
@@ -1368,7 +1384,7 @@ where
             .await?
             >= CET_NSEQUENCE
         {
-            log::info!(
+            tracing::info!(
                 "Buffer transaction for contract {} has enough confirmations to spend from it",
                 serialize_hex(&contract_id)
             );
@@ -2132,7 +2148,7 @@ where
                 }
             }
         } else {
-            warn!(
+            tracing::warn!(
                 "Couldn't find rejected dlc channel with id: {}",
                 reject.channel_id.to_lower_hex_string()
             );
@@ -2148,12 +2164,12 @@ where
 
         for channel in established_closing_channels {
             if let Err(e) = self.try_finalize_closing_established_channel(channel).await {
-                error!("Error trying to close established channel: {}", e);
+                tracing::error!("Error trying to close established channel: {}", e);
             }
         }
 
         if let Err(e) = self.check_for_timed_out_channels().await {
-            error!("Error checking timed out channels {}", e);
+            tracing::error!("Error checking timed out channels {}", e);
         }
         self.check_for_watched_tx().await
     }
@@ -2182,9 +2198,10 @@ where
             ) {
                 Ok(c) => c,
                 Err(e) => {
-                    error!(
+                    tracing::error!(
                         "Could not retrieve channel {:?}: {}",
-                        channel_info.channel_id, e
+                        channel_info.channel_id,
+                        e
                     );
                     continue;
                 }
@@ -2425,7 +2442,7 @@ where
                                 }
                             }
                             _ => {
-                                error!("Saw spending of buffer transaction without being in closing state");
+                                tracing::error!("Saw spending of buffer transaction without being in closing state");
                                 Channel::Closed(ClosedChannel {
                                     counter_party: signed_channel.counter_party,
                                     temporary_channel_id: signed_channel.temporary_channel_id,
@@ -2662,7 +2679,7 @@ where
                     match future.await {
                         Ok(result) => Ok(result),
                         Err(e) => {
-                            log::error!("Failed to get oracle announcements: {}", e);
+                            tracing::error!("Failed to get oracle announcements: {}", e);
                             Err(e)
                         }
                     }

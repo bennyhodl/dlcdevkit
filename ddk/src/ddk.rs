@@ -269,10 +269,7 @@ where
         let contract_pnl = &contracts
             .iter()
             .map(|contract| match contract {
-                Contract::Closed(c) => {
-                    println!("Closed contract: {}", c.pnl);
-                    0_i64
-                }
+                Contract::Closed(_) => 0_i64,
                 Contract::PreClosed(p) => p
                     .signed_contract
                     .accepted_contract

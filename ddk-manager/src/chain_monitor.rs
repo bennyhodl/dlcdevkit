@@ -79,7 +79,7 @@ impl ChainMonitor {
     }
 
     pub(crate) fn add_tx(&mut self, txid: Txid, channel_info: ChannelInfo) {
-        log::debug!("Watching transaction {txid}: {channel_info:?}");
+        tracing::debug!("Watching transaction {txid}: {channel_info:?}");
         self.watched_tx.insert(txid, WatchState::new(channel_info));
 
         // When we watch a buffer transaction we also want to watch
@@ -103,13 +103,13 @@ impl ChainMonitor {
     }
 
     fn add_txo(&mut self, outpoint: OutPoint, channel_info: ChannelInfo) {
-        log::debug!("Watching transaction output {outpoint}: {channel_info:?}");
+        tracing::debug!("Watching transaction output {outpoint}: {channel_info:?}");
         self.watched_txo
             .insert(outpoint, WatchState::new(channel_info));
     }
 
     pub(crate) fn cleanup_channel(&mut self, channel_id: ChannelId) {
-        log::debug!("Cleaning up data related to channel {channel_id:?}");
+        tracing::debug!("Cleaning up data related to channel {channel_id:?}");
 
         self.watched_tx
             .retain(|_, state| state.channel_id() != channel_id);
@@ -119,7 +119,7 @@ impl ChainMonitor {
     }
 
     pub(crate) fn remove_tx(&mut self, txid: &Txid) {
-        log::debug!("Stopped watching transaction {txid}");
+        tracing::debug!("Stopped watching transaction {txid}");
         self.watched_tx.remove(txid);
     }
 
@@ -188,7 +188,7 @@ impl WatchState {
     fn confirm(&mut self, transaction: Transaction) {
         match self {
             WatchState::Registered { ref channel_info } => {
-                log::info!(
+                tracing::info!(
                     "Transaction {} confirmed: {channel_info:?}",
                     transaction.compute_txid()
                 );
@@ -202,7 +202,7 @@ impl WatchState {
                 channel_info,
                 transaction,
             } => {
-                log::error!(
+                tracing::error!(
                     "Transaction {} already confirmed: {channel_info:?}",
                     transaction.compute_txid()
                 );

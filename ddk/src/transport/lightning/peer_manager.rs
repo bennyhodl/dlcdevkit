@@ -7,7 +7,7 @@ use lightning::{
         PeerManager as LdkPeerManager,
     },
     sign::{KeysManager, NodeSigner},
-    util::logger::{Logger, Record},
+    util::logger::{Level, Logger, Record},
 };
 use lightning_net_tokio::{setup_inbound, SocketDescriptor};
 use std::{
@@ -23,7 +23,13 @@ pub struct DlcDevKitLogger;
 /// TODO: make a logging struct for the crate.
 impl Logger for DlcDevKitLogger {
     fn log(&self, record: Record) {
-        tracing::info!("{}", record.args);
+        match record.level {
+            Level::Info => tracing::info!("{}", record.args),
+            Level::Warn => tracing::warn!("{}", record.args),
+            Level::Debug => tracing::debug!("{}", record.args),
+            Level::Error => tracing::error!("{}", record.args),
+            _ => tracing::trace!("{}", record.args),
+        }
     }
 }
 
