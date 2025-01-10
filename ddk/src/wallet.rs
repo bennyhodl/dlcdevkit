@@ -366,14 +366,6 @@ impl ddk_manager::ContractSignerProvider for DlcDevKitWallet {
         );
         Ok(SimpleSigner::new(child_key))
     }
-
-    fn get_secret_key_for_pubkey(&self, _pubkey: &PublicKey) -> Result<SecretKey, ManagerError> {
-        unreachable!("get_secret_key_for_pubkey is only used in channels.")
-    }
-
-    fn get_new_secret_key(&self) -> Result<SecretKey, ManagerError> {
-        unreachable!("get_new_secret_key is only used for channels")
-    }
 }
 
 impl ddk_manager::Wallet for DlcDevKitWallet {
