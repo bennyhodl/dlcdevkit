@@ -28,7 +28,6 @@ pub type DlcDevKitDlcManager<S, O> = ddk_manager::manager::Manager<
     Arc<S>,
     Arc<O>,
     Arc<SystemTimeProvider>,
-    Arc<DlcDevKitWallet>,
     SimpleSigner,
 >;
 
@@ -174,7 +173,7 @@ where
                     responder.send(accept_dlc).expect("can't send")
                 }
                 DlcManagerMessage::PeriodicCheck => {
-                    manager.periodic_check(false).await.unwrap();
+                    manager.periodic_check().await.unwrap();
                 }
             }
         }

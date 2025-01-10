@@ -1,21 +1,10 @@
-use super::{SledStorage, CHAIN_MONITOR_KEY, CHAIN_MONITOR_TREE};
+use super::SledStorage;
 use crate::util::{deserialize_contract, serialize_contract};
-use bitcoin::consensus::ReadExt;
-use ddk_manager::chain_monitor::ChainMonitor;
-use ddk_manager::channel::accepted_channel::AcceptedChannel;
-use ddk_manager::channel::offered_channel::OfferedChannel;
-use ddk_manager::channel::signed_channel::{SignedChannel, SignedChannelStateType};
-use ddk_manager::channel::{
-    Channel, ClosedChannel, ClosedPunishedChannel, ClosingChannel, FailedAccept, FailedSign,
-};
 use ddk_manager::contract::offered_contract::OfferedContract;
-use ddk_manager::contract::ser::Serializable;
 use ddk_manager::contract::signed_contract::SignedContract;
 use ddk_manager::contract::{Contract, PreClosedContract};
 use ddk_manager::{error::Error, ContractId, Storage};
-use sled::transaction::{ConflictableTransactionResult, UnabortableTransactionError};
-use sled::Transactional;
-use std::convert::TryInto;
+use sled::transaction::UnabortableTransactionError;
 
 macro_rules! convertible_enum {
     (enum $name:ident {
@@ -72,41 +61,6 @@ convertible_enum!(
         Rejected,;
     },
     Contract
-);
-
-convertible_enum!(
-    enum ChannelPrefix {
-        Offered = 100,
-        Accepted,
-        Signed,
-        FailedAccept,
-        FailedSign,
-        Closing,
-        Closed,
-        CounterClosed,
-        ClosedPunished,
-        CollaborativelyClosed,
-        Cancelled,;
-    },
-    Channel
-);
-
-convertible_enum!(
-    enum SignedChannelPrefix {;
-        Established = 1,
-        SettledOffered,
-        SettledReceived,
-        SettledAccepted,
-        SettledConfirmed,
-        Settled,
-        Closing,
-        CollaborativeCloseOffered,
-        RenewAccepted,
-        RenewOffered,
-        RenewFinalized,
-        RenewConfirmed,
-    },
-    SignedChannelStateType
 );
 
 fn to_storage_error<T>(e: T) -> Error
@@ -204,108 +158,6 @@ impl Storage for SledStorage {
             None,
         )
     }
-
-    fn upsert_channel(&self, channel: Channel, contract: Option<Contract>) -> Result<(), Error> {
-        let serialized = serialize_channel(&channel)?;
-        let serialized_contract = match contract.as_ref() {
-            Some(c) => Some(serialize_contract(c)?),
-            None => None,
-        };
-        let channel_tree = self.channel_tree()?;
-        let contract_tree = self.contract_tree()?;
-        (&channel_tree, &contract_tree)
-            .transaction::<_, ()>(
-                |(channel_db, contract_db)| -> ConflictableTransactionResult<(), UnabortableTransactionError> {
-                    match &channel {
-                        a @ Channel::Accepted(_) | a @ Channel::Signed(_) => {
-                            channel_db.remove(&a.get_temporary_id())?;
-                        }
-                        _ => {}
-                    };
-
-                    channel_db.insert(&channel.get_id(), serialized.clone())?;
-
-                    if let Some(c) = contract.as_ref() {
-                        insert_contract(
-                            contract_db,
-                            serialized_contract
-                                .clone()
-                                .expect("to have the serialized version"),
-                            c,
-                        )?;
-                    }
-                    Ok(())
-                },
-            )
-        .map_err(to_storage_error)?;
-        Ok(())
-    }
-
-    fn delete_channel(&self, channel_id: &ddk_manager::ChannelId) -> Result<(), Error> {
-        self.channel_tree()?
-            .remove(channel_id)
-            .map_err(to_storage_error)?;
-        Ok(())
-    }
-
-    fn get_channel(&self, channel_id: &ddk_manager::ChannelId) -> Result<Option<Channel>, Error> {
-        match self
-            .channel_tree()?
-            .get(channel_id)
-            .map_err(to_storage_error)?
-        {
-            Some(res) => Ok(Some(deserialize_channel(&res)?)),
-            None => Ok(None),
-        }
-    }
-
-    fn get_signed_channels(
-        &self,
-        channel_state: Option<SignedChannelStateType>,
-    ) -> Result<Vec<SignedChannel>, Error> {
-        let (prefix, consume) = if let Some(state) = &channel_state {
-            (
-                vec![
-                    ChannelPrefix::Signed.into(),
-                    SignedChannelPrefix::get_prefix(state),
-                ],
-                None,
-            )
-        } else {
-            (vec![ChannelPrefix::Signed.into()], Some(1))
-        };
-
-        self.get_data_with_prefix(&self.channel_tree()?, &prefix, consume)
-    }
-
-    fn get_offered_channels(&self) -> Result<Vec<OfferedChannel>, Error> {
-        self.get_data_with_prefix(
-            &self.channel_tree()?,
-            &[ChannelPrefix::Offered.into()],
-            None,
-        )
-    }
-
-    fn persist_chain_monitor(&self, monitor: &ChainMonitor) -> Result<(), Error> {
-        self.open_tree(&[CHAIN_MONITOR_TREE])?
-            .insert([CHAIN_MONITOR_KEY], monitor.serialize()?)
-            .map_err(|e| Error::StorageError(format!("Error writing chain monitor: {}", e)))?;
-        Ok(())
-    }
-    fn get_chain_monitor(&self) -> Result<Option<ChainMonitor>, ddk_manager::error::Error> {
-        let serialized = self
-            .open_tree(&[CHAIN_MONITOR_TREE])?
-            .get([CHAIN_MONITOR_KEY])
-            .map_err(|e| Error::StorageError(format!("Error reading chain monitor: {}", e)))?;
-        let deserialized = match serialized {
-            Some(s) => Some(
-                ChainMonitor::deserialize(&mut ::lightning::io::Cursor::new(s))
-                    .map_err(to_storage_error)?,
-            ),
-            None => None,
-        };
-        Ok(deserialized)
-    }
 }
 
 fn insert_contract(
@@ -323,77 +175,10 @@ fn insert_contract(
     db.insert(&contract.get_id(), serialized)
 }
 
-fn serialize_channel(channel: &Channel) -> Result<Vec<u8>, ::lightning::io::Error> {
-    let serialized = match channel {
-        Channel::Offered(o) => o.serialize(),
-        Channel::Accepted(a) => a.serialize(),
-        Channel::Signed(s) => s.serialize(),
-        Channel::FailedAccept(f) => f.serialize(),
-        Channel::FailedSign(f) => f.serialize(),
-        Channel::Cancelled(o) => o.serialize(),
-        Channel::Closing(c) => c.serialize(),
-        Channel::Closed(c) => c.serialize(),
-        Channel::CollaborativelyClosed(c) => c.serialize(),
-        Channel::CounterClosed(c) => c.serialize(),
-        Channel::ClosedPunished(c) => c.serialize(),
-    };
-    let mut serialized = serialized?;
-    let mut res = Vec::with_capacity(serialized.len() + 1);
-    res.push(ChannelPrefix::get_prefix(channel));
-    if let Channel::Signed(s) = channel {
-        res.push(SignedChannelPrefix::get_prefix(&s.state.get_type()))
-    }
-    res.append(&mut serialized);
-    Ok(res)
-}
-
-fn deserialize_channel(buff: &sled::IVec) -> Result<Channel, Error> {
-    let mut cursor = lightning::io::Cursor::new(buff);
-    let mut prefix = [0u8; 1];
-    cursor.read_slice(&mut prefix)?;
-    let channel_prefix: ChannelPrefix = prefix[0].try_into()?;
-    let channel = match channel_prefix {
-        ChannelPrefix::Offered => {
-            Channel::Offered(OfferedChannel::deserialize(&mut cursor).map_err(to_storage_error)?)
-        }
-        ChannelPrefix::Accepted => {
-            Channel::Accepted(AcceptedChannel::deserialize(&mut cursor).map_err(to_storage_error)?)
-        }
-        ChannelPrefix::Signed => {
-            // Skip the channel state prefix.
-            cursor.set_position(cursor.position() + 1);
-            Channel::Signed(SignedChannel::deserialize(&mut cursor).map_err(to_storage_error)?)
-        }
-        ChannelPrefix::FailedAccept => {
-            Channel::FailedAccept(FailedAccept::deserialize(&mut cursor).map_err(to_storage_error)?)
-        }
-        ChannelPrefix::FailedSign => {
-            Channel::FailedSign(FailedSign::deserialize(&mut cursor).map_err(to_storage_error)?)
-        }
-        ChannelPrefix::Cancelled => {
-            Channel::Cancelled(OfferedChannel::deserialize(&mut cursor).map_err(to_storage_error)?)
-        }
-        ChannelPrefix::Closed => {
-            Channel::Closed(ClosedChannel::deserialize(&mut cursor).map_err(to_storage_error)?)
-        }
-        ChannelPrefix::Closing => {
-            Channel::Closing(ClosingChannel::deserialize(&mut cursor).map_err(to_storage_error)?)
-        }
-        ChannelPrefix::CounterClosed => Channel::CounterClosed(
-            ClosedChannel::deserialize(&mut cursor).map_err(to_storage_error)?,
-        ),
-        ChannelPrefix::ClosedPunished => Channel::ClosedPunished(
-            ClosedPunishedChannel::deserialize(&mut cursor).map_err(to_storage_error)?,
-        ),
-        ChannelPrefix::CollaborativelyClosed => Channel::CollaborativelyClosed(
-            ClosedChannel::deserialize(&mut cursor).map_err(to_storage_error)?,
-        ),
-    };
-    Ok(channel)
-}
-
 #[cfg(test)]
 mod tests {
+    use ddk_manager::contract::ser::Serializable;
+
     use super::*;
 
     macro_rules! sled_test {
@@ -515,31 +300,6 @@ mod tests {
             .expect("Error creating contract");
     }
 
-    fn insert_offered_and_signed_channels(storage: &mut SledStorage) {
-        let serialized = include_bytes!("../../../tests/data/dlc_storage/Offered");
-        let offered_contract = deserialize_object(serialized);
-        let serialized = include_bytes!("../../../tests/data/dlc_storage/OfferedChannel");
-        let offered_channel = deserialize_object(serialized);
-        storage
-            .upsert_channel(
-                Channel::Offered(offered_channel),
-                Some(Contract::Offered(offered_contract)),
-            )
-            .expect("Error creating contract");
-
-        let serialized = include_bytes!("../../../tests/data/dlc_storage/SignedChannelEstablished");
-        let signed_channel = Channel::Signed(deserialize_object(serialized));
-        storage
-            .upsert_channel(signed_channel, None)
-            .expect("Error creating contract");
-
-        let serialized = include_bytes!("../../../tests/data/dlc_storage/SignedChannelSettled");
-        let signed_channel = Channel::Signed(deserialize_object(serialized));
-        storage
-            .upsert_channel(signed_channel, None)
-            .expect("Error creating contract");
-    }
-
     sled_test!(
         get_signed_contracts_only_signed,
         |mut storage: SledStorage| {
@@ -597,20 +357,5 @@ mod tests {
         let contracts = storage.get_contracts().expect("Error retrieving contracts");
 
         assert_eq!(6, contracts.len());
-    });
-
-    sled_test!(persist_chain_monitor_test, |storage: SledStorage| {
-        let chain_monitor = ChainMonitor::new(123);
-
-        storage
-            .persist_chain_monitor(&chain_monitor)
-            .expect("to be able to persist the chain monistor.");
-
-        let retrieved = storage
-            .get_chain_monitor()
-            .expect("to be able to retrieve the chain monitor.")
-            .expect("to have a persisted chain monitor.");
-
-        assert_eq!(chain_monitor, retrieved);
     });
 }
