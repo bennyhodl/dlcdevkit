@@ -20,7 +20,6 @@ type TestManager = Manager<
     Arc<MemoryStorage>,
     Arc<MemoryOracle>,
     Arc<MockTime>,
-    Arc<EsploraClient>,
     SimpleSigner,
 >;
 
@@ -58,7 +57,6 @@ async fn get_manager() -> TestManager {
         store.clone(),
         oracles,
         time,
-        blockchain,
     )
     .await
     .unwrap()
@@ -74,25 +72,6 @@ fn pubkey() -> PublicKey {
 async fn reject_offer_with_existing_contract_id() {
     let offer_message = Message::Offer(
         serde_json::from_str(include_str!("../test_inputs/offer_contract.json")).unwrap(),
-    );
-
-    let manager = get_manager().await;
-
-    manager
-        .on_dlc_message(&offer_message, pubkey())
-        .await
-        .expect("To accept the first offer message");
-
-    manager
-        .on_dlc_message(&offer_message, pubkey())
-        .await
-        .expect_err("To reject the second offer message");
-}
-
-#[tokio::test]
-async fn reject_channel_offer_with_existing_channel_id() {
-    let offer_message = Message::OfferChannel(
-        serde_json::from_str(include_str!("../test_inputs/offer_channel.json")).unwrap(),
     );
 
     let manager = get_manager().await;

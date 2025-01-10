@@ -98,7 +98,7 @@ macro_rules! periodic_check {
     ($d:expr, $id:expr, $p:ident) => {
         $d.lock()
             .await
-            .periodic_check(true)
+            .periodic_check()
             .await
             .expect("Periodic check error");
         assert_contract_state!($d, $id, $p);
@@ -670,7 +670,6 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
             Arc::clone(&alice_storage),
             alice_oracles,
             Arc::clone(&mock_time),
-            Arc::clone(&electrs),
         )
         .await
         .unwrap(),
@@ -687,7 +686,6 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
             Arc::clone(&bob_storage),
             bob_oracles,
             Arc::clone(&mock_time),
-            Arc::clone(&electrs),
         )
         .await
         .unwrap(),
