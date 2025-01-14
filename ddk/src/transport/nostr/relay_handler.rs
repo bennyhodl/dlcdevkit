@@ -28,7 +28,7 @@ impl NostrDlc {
         let keys = Keys::new_with_ctx(&secp, seed.private_key.into());
 
         let relay_url = relay_host.parse()?;
-        let client = Client::new(&keys);
+        let client = Client::new(keys.clone());
         client.add_relay(&relay_url).await?;
         client.connect().await;
 
