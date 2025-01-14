@@ -22,7 +22,8 @@ impl Transport for LightningTransport {
     async fn send_message(&self, counterparty: PublicKey, message: dlc_messages::Message) {
         tracing::info!(message=?message, "Sending message to {}", counterparty.to_string());
         if self.peer_manager.peer_by_node_id(&counterparty).is_some() {
-            self.message_handler.send_message(counterparty, message)
+            self.message_handler.send_message(counterparty, message);
+            self.peer_manager.process_events();
         } else {
             tracing::warn!(
                 pubkey = counterparty.to_string(),

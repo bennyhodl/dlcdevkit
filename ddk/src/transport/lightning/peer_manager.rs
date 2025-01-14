@@ -147,7 +147,7 @@ impl LightningTransport {
         let peer_manager = Arc::clone(&self.peer_manager);
         let message_handler = Arc::clone(&self.message_handler);
         tokio::spawn(async move {
-            let mut message_interval = interval(Duration::from_secs(5));
+            let mut message_interval = interval(Duration::from_secs(20));
             // let mut event_interval = interval(Duration::from_secs(2));
             loop {
                 tokio::select! {
