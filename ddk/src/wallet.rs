@@ -1,7 +1,7 @@
 use crate::error::{wallet_err_to_manager_err, WalletError};
 use crate::{chain::EsploraClient, Storage};
 use bdk_chain::{spk_client::FullScanRequest, Balance};
-use bdk_esplora::EsploraExt;
+use bdk_esplora::EsploraAsyncExt;
 use bdk_wallet::coin_selection::{
     BranchAndBoundCoinSelection, CoinSelectionAlgorithm, SingleRandomDraw,
 };
@@ -28,11 +28,12 @@ use lightning::chain::chaininterface::{ConfirmationTarget, FeeEstimator};
 use std::collections::HashMap;
 use std::io::Write;
 use std::sync::atomic::AtomicU32;
-use std::sync::RwLock;
+// use std::sync::RwLock;
 use std::{
     collections::BTreeMap,
     sync::{atomic::Ordering, Arc},
 };
+use tokio::sync::Mutex;
 
 /// Wrapper type to pass `crate::Storage` to a BDK wallet.
 #[derive(Clone)]
@@ -53,7 +54,7 @@ impl WalletPersister for WalletStorage {
 /// Internal [`bdk_wallet::PersistedWallet`] for ddk.
 pub struct DlcDevKitWallet {
     /// BDK persisted wallet.
-    pub wallet: Arc<RwLock<PersistedWallet<WalletStorage>>>,
+    pub wallet: Arc<Mutex<PersistedWallet<WalletStorage>>>,
     storage: WalletStorage,
     blockchain: Arc<EsploraClient>,
     network: Network,
@@ -100,7 +101,7 @@ impl DlcDevKitWallet {
                 .map_err(|_| WalletError::WalletPersistanceError)?,
         };
 
-        let wallet = Arc::new(RwLock::new(internal_wallet));
+        let wallet = Arc::new(Mutex::new(internal_wallet));
 
         let blockchain = Arc::new(
             EsploraClient::new(esplora_url, network)
@@ -148,8 +149,8 @@ impl DlcDevKitWallet {
         })
     }
 
-    pub fn sync(&self) -> Result<(), WalletError> {
-        let mut wallet = match self.wallet.try_write() {
+    pub async fn sync(&self) -> Result<(), WalletError> {
+        let mut wallet = match self.wallet.try_lock() {
             Ok(w) => w,
             Err(e) => {
                 tracing::error!(error =? e, "Could not get lock to sync wallet.");
@@ -175,7 +176,7 @@ impl DlcDevKitWallet {
                 .spks_for_keychain(KeychainKind::External, spks.clone())
                 .chain_tip(prev_tip)
                 .build();
-            let sync = self.blockchain.blocking_client.full_scan(chain, 10, 1)?;
+            let sync = self.blockchain.async_client.full_scan(chain, 10, 1).await?;
             Update {
                 last_active_indices: sync.last_active_indices,
                 tx_update: sync.tx_update,
@@ -186,7 +187,7 @@ impl DlcDevKitWallet {
                 .start_sync_with_revealed_spks()
                 .chain_tip(prev_tip)
                 .build();
-            let sync = self.blockchain.blocking_client.sync(spks, 1)?;
+            let sync = self.blockchain.async_client.sync(spks, 1).await?;
             let indices = wallet.derivation_index(KeychainKind::External).unwrap_or(0);
             let internal_index = wallet.derivation_index(KeychainKind::Internal).unwrap_or(0);
             let mut last_active_indices = BTreeMap::new();
@@ -211,7 +212,7 @@ impl DlcDevKitWallet {
     }
 
     pub fn get_balance(&self) -> Result<Balance, WalletError> {
-        let Ok(wallet) = self.wallet.try_read() else {
+        let Ok(wallet) = self.wallet.try_lock() else {
             tracing::error!("Could not get lock to sync wallet.");
             return Err(WalletError::Lock);
         };
@@ -219,7 +220,7 @@ impl DlcDevKitWallet {
     }
 
     pub fn new_external_address(&self) -> Result<AddressInfo, WalletError> {
-        let Ok(mut wallet) = self.wallet.try_write() else {
+        let Ok(mut wallet) = self.wallet.try_lock() else {
             tracing::error!("Could not get lock to sync wallet.");
             return Err(WalletError::Lock);
         };
@@ -230,7 +231,7 @@ impl DlcDevKitWallet {
     }
 
     pub fn new_change_address(&self) -> Result<AddressInfo, WalletError> {
-        let Ok(mut wallet) = self.wallet.try_write() else {
+        let Ok(mut wallet) = self.wallet.try_lock() else {
             tracing::error!("Could not get lock to sync wallet.");
             return Err(WalletError::Lock);
         };
@@ -242,13 +243,13 @@ impl DlcDevKitWallet {
         Ok(address)
     }
 
-    pub fn send_to_address(
+    pub async fn send_to_address(
         &self,
         address: Address,
         amount: Amount,
         fee_rate: FeeRate,
     ) -> Result<Txid, WalletError> {
-        let Ok(mut wallet) = self.wallet.try_write() else {
+        let Ok(mut wallet) = self.wallet.try_lock() else {
             tracing::error!("Could not get lock to sync wallet.");
             return Err(WalletError::Lock);
         };
@@ -270,13 +271,13 @@ impl DlcDevKitWallet {
 
         let tx = psbt.extract_tx()?;
 
-        self.blockchain.blocking_client.broadcast(&tx)?;
+        self.blockchain.async_client.broadcast(&tx).await?;
 
         Ok(tx.compute_txid())
     }
 
-    pub fn send_all(&self, address: Address, fee_rate: FeeRate) -> Result<Txid, WalletError> {
-        let Ok(mut wallet) = self.wallet.try_write() else {
+    pub async fn send_all(&self, address: Address, fee_rate: FeeRate) -> Result<Txid, WalletError> {
+        let Ok(mut wallet) = self.wallet.try_lock() else {
             tracing::error!("Could not get lock to sync wallet.");
             return Err(WalletError::Lock);
         };
@@ -293,13 +294,13 @@ impl DlcDevKitWallet {
         let mut psbt = tx_builder.finish().unwrap();
         wallet.sign(&mut psbt, SignOptions::default()).unwrap();
         let tx = psbt.extract_tx()?;
-        self.blockchain.blocking_client.broadcast(&tx)?;
+        self.blockchain.async_client.broadcast(&tx).await?;
 
         Ok(tx.compute_txid())
     }
 
     pub fn get_transactions(&self) -> Result<Vec<Arc<Transaction>>, WalletError> {
-        let Ok(wallet) = self.wallet.try_read() else {
+        let Ok(wallet) = self.wallet.try_lock() else {
             tracing::error!("Could not get lock to sync wallet.");
             return Err(WalletError::Lock);
         };
@@ -310,7 +311,7 @@ impl DlcDevKitWallet {
     }
 
     pub fn list_utxos(&self) -> Result<Vec<LocalOutput>, WalletError> {
-        let Ok(wallet) = self.wallet.try_read() else {
+        let Ok(wallet) = self.wallet.try_lock() else {
             tracing::error!("Could not get lock to sync wallet.");
             return Err(WalletError::Lock);
         };
@@ -318,7 +319,7 @@ impl DlcDevKitWallet {
     }
 
     fn next_derivation_index(&self) -> Result<u32, WalletError> {
-        let Ok(wallet) = self.wallet.try_read() else {
+        let Ok(wallet) = self.wallet.try_lock() else {
             tracing::error!("Could not get lock to sync wallet.");
             return Err(WalletError::Lock);
         };
@@ -409,7 +410,7 @@ impl ddk_manager::Wallet for DlcDevKitWallet {
             outputs = psbt.outputs.len(),
             "Signing psbt input for dlc manager."
         );
-        let Ok(wallet) = self.wallet.try_read() else {
+        let Ok(wallet) = self.wallet.try_lock() else {
             tracing::error!("Could not get lock to sync wallet.");
             return Err(ManagerError::WalletError(WalletError::Lock.into()));
         };
@@ -570,8 +571,8 @@ mod tests {
         assert!(key_info.is_ok())
     }
 
-    #[test]
-    fn send_all() {
+    #[tokio::test]
+    async fn send_all() {
         let wallet = create_wallet();
         let network = wallet.blockchain.get_network().unwrap();
         let address = match network {
@@ -583,16 +584,17 @@ mod tests {
         let addr_two = wallet.new_external_address().unwrap().address;
         fund_address(&addr_one);
         fund_address(&addr_two);
-        wallet.sync().unwrap();
+        wallet.sync().await.unwrap();
         assert!(wallet.get_balance().unwrap().confirmed > Amount::ZERO);
         wallet
             .send_all(
                 Address::from_str(address).unwrap().assume_checked(),
                 FeeRate::from_sat_per_vb(1).unwrap(),
             )
+            .await
             .unwrap();
         generate_blocks(5);
-        wallet.sync().unwrap();
+        wallet.sync().await.unwrap();
         assert!(wallet.get_balance().unwrap().confirmed == Amount::ZERO)
     }
 }

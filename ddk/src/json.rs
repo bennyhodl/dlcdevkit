@@ -48,7 +48,7 @@ fn accepted_contract_to_value(accepted: &AcceptedContract) -> Value {
     })
 }
 
-fn signed_contract_to_value(signed: &SignedContract, state: &str) -> Value {
+pub fn signed_contract_to_value(signed: &SignedContract, state: &str) -> Value {
     let accepted_contract = accepted_contract_to_value(&signed.accepted_contract);
     json!({
         "state": state,
@@ -71,7 +71,7 @@ fn closed_contract_to_value(closed: &ClosedContract) -> Value {
     })
 }
 
-fn preclosed_contract_to_value(preclosed: &PreClosedContract) -> Value {
+pub fn preclosed_contract_to_value(preclosed: &PreClosedContract) -> Value {
     let signed_contract = signed_contract_to_value(&preclosed.signed_contract, "confirmed");
     json!({
         "state": "preclosed",

@@ -586,7 +586,7 @@ pub async fn refresh_wallet(wallet: &DlcDevKitWallet, expected_funds: u64) {
             panic!("Wallet refresh taking too long.")
         }
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        wallet.sync().unwrap();
+        wallet.sync().await.unwrap();
         retry += 1;
     }
 }
@@ -595,7 +595,7 @@ pub const OFFER_PARTY: &str = "alice";
 pub const ACCEPT_PARTY: &str = "bob";
 pub const SINK: &str = "ddk";
 
-pub fn init_clients() -> (
+pub async fn init_clients() -> (
     DlcDevKitWallet,
     Arc<MemoryStorage>,
     DlcDevKitWallet,
@@ -606,8 +606,8 @@ pub fn init_clients() -> (
     let sink_rpc = Client::new(&rpc_base(), auth.clone()).unwrap();
 
     std::thread::sleep(std::time::Duration::from_millis(100));
-    let offer_rpc = create_and_fund_wallet(OFFER_PARTY);
-    let accept_rpc = create_and_fund_wallet(ACCEPT_PARTY);
+    let offer_rpc = create_and_fund_wallet(OFFER_PARTY).await;
+    let accept_rpc = create_and_fund_wallet(ACCEPT_PARTY).await;
 
     let sink_address = sink_rpc
         .get_new_address(None, Some(AddressType::Bech32))
@@ -630,7 +630,7 @@ fn rpc_base() -> String {
     format!("http://{}:18443", host)
 }
 
-pub fn create_and_fund_wallet(name: &str) -> (DlcDevKitWallet, Arc<MemoryStorage>) {
+pub async fn create_and_fund_wallet(name: &str) -> (DlcDevKitWallet, Arc<MemoryStorage>) {
     let auth = Auth::UserPass("ddk".to_string(), "ddk".to_string());
     let sink_rpc = Client::new(&rpc_base(), auth.clone()).unwrap();
     let sink_address = sink_rpc
@@ -667,7 +667,7 @@ pub fn create_and_fund_wallet(name: &str) -> (DlcDevKitWallet, Arc<MemoryStorage
     sink_rpc.generate_to_address(5, &sink_address).unwrap();
     let mut done = false;
     while !done {
-        wallet.sync().unwrap();
+        wallet.sync().await.unwrap();
         let balance = wallet.get_balance().unwrap();
         if balance.confirmed > Amount::ZERO {
             done = true;

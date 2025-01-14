@@ -616,7 +616,7 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
     let (sync_send, mut sync_receive) = channel::<()>(100);
     let alice_sync_send = sync_send.clone();
     let bob_sync_send = sync_send;
-    let (bob_wallet, bob_storage, alice_wallet, alice_storage, sink_rpc) = init_clients();
+    let (bob_wallet, bob_storage, alice_wallet, alice_storage, sink_rpc) = init_clients().await;
     let alice_wallet = Arc::new(alice_wallet);
     let bob_wallet = Arc::new(bob_wallet);
     let sink = Arc::new(sink_rpc);
@@ -830,8 +830,8 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
 
             assert_contract_state!(alice_manager_send, contract_id, Signed);
 
-            alice_wallet.sync().unwrap();
-            bob_wallet.sync().unwrap();
+            alice_wallet.sync().await.unwrap();
+            bob_wallet.sync().await.unwrap();
 
             generate_blocks(10).await;
 
@@ -849,8 +849,8 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
                 (bob_manager_send, alice_manager_send)
             };
 
-            alice_wallet.sync().unwrap();
-            bob_wallet.sync().unwrap();
+            alice_wallet.sync().await.unwrap();
+            bob_wallet.sync().await.unwrap();
             match path {
                 TestPath::Close => {
                     let case = thread_rng().next_u64() % 3;
@@ -873,8 +873,8 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
                             .await
                             .expect("Error closing contract");
 
-                        alice_wallet.sync().unwrap();
-                        bob_wallet.sync().unwrap();
+                        alice_wallet.sync().await.unwrap();
+                        bob_wallet.sync().await.unwrap();
 
                         if let Contract::PreClosed(contract) = contract {
                             let mut s = second.lock().await;
@@ -887,8 +887,8 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
                                     blocks.unwrap_or(0),
                                 )
                                 .expect("Error registering counterparty close");
-                                alice_wallet.sync().unwrap();
-                                bob_wallet.sync().unwrap();
+                                alice_wallet.sync().await.unwrap();
+                                bob_wallet.sync().await.unwrap();
                             } else {
                                 panic!("Invalid contract state: {:?}", second_contract);
                             }
@@ -896,8 +896,8 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
                             panic!("Invalid contract state {:?}", contract);
                         }
                     } else {
-                        alice_wallet.sync().unwrap();
-                        bob_wallet.sync().unwrap();
+                        alice_wallet.sync().await.unwrap();
+                        bob_wallet.sync().await.unwrap();
                         periodic_check!(first, contract_id, PreClosed);
                     }
 
@@ -906,8 +906,8 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
                         generate_blocks(b as u64).await;
                     }
 
-                    alice_wallet.sync().unwrap();
-                    bob_wallet.sync().unwrap();
+                    alice_wallet.sync().await.unwrap();
+                    bob_wallet.sync().await.unwrap();
 
                     // Randomly check with or without having the CET mined
                     if case == 2 {
@@ -920,8 +920,8 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
                     }
                 }
                 TestPath::Refund => {
-                    alice_wallet.sync().unwrap();
-                    bob_wallet.sync().unwrap();
+                    alice_wallet.sync().await.unwrap();
+                    bob_wallet.sync().await.unwrap();
                     periodic_check!(first, contract_id, Confirmed);
 
                     periodic_check!(second, contract_id, Confirmed);
@@ -932,8 +932,8 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
 
                     generate_blocks(10).await;
 
-                    alice_wallet.sync().unwrap();
-                    bob_wallet.sync().unwrap();
+                    alice_wallet.sync().await.unwrap();
+                    bob_wallet.sync().await.unwrap();
 
                     periodic_check!(first, contract_id, Refunded);
 
@@ -942,8 +942,8 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
                         generate_blocks(1).await;
                     }
 
-                    alice_wallet.sync().unwrap();
-                    bob_wallet.sync().unwrap();
+                    alice_wallet.sync().await.unwrap();
+                    bob_wallet.sync().await.unwrap();
 
                     periodic_check!(second, contract_id, Refunded);
                 }
