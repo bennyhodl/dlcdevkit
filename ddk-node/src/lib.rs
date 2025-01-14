@@ -1,6 +1,5 @@
 pub mod cli_opts;
 pub mod command;
-pub mod convert;
 pub mod ddkrpc;
 pub mod opts;
 mod seed;

@@ -1,5 +1,5 @@
 use crate::cli_opts::{CliCommand, OracleCommand, WalletCommand};
-use crate::convert::*;
+// use crate::convert::*;
 use crate::ddkrpc::ddk_rpc_client::DdkRpcClient;
 use crate::ddkrpc::{
     AcceptOfferRequest, ConnectRequest, GetWalletTransactionsRequest, InfoRequest,
@@ -9,6 +9,7 @@ use crate::ddkrpc::{
 };
 use anyhow::anyhow;
 use bitcoin::Transaction;
+use ddk::json::*;
 use ddk::util;
 use ddk::wallet::LocalOutput;
 use ddk_manager::contract::contract_input::ContractInput;
@@ -183,7 +184,11 @@ pub async fn cli_command(
                 .iter()
                 .map(|offer| serde_json::from_slice(offer).unwrap())
                 .collect();
-            print!("{}", offered_contract_to_string_pretty(offers).unwrap());
+            let pretty_offer = offers
+                .iter()
+                .map(|offer| offered_contract_to_value(offer, "offer"))
+                .collect::<Vec<Value>>();
+            print!("{}", serde_json::to_string_pretty(&pretty_offer).unwrap());
         }
         CliCommand::AcceptOffer(accept) => {
             let accept = client
