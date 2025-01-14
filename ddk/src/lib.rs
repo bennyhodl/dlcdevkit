@@ -8,6 +8,8 @@ pub mod builder;
 pub mod chain;
 mod ddk;
 mod error;
+/// JSON structs
+pub mod json;
 /// Nostr related functions.
 #[cfg(any(feature = "nostr", feature = "marketplace"))]
 pub(crate) mod nostr;
