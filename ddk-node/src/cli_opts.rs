@@ -31,9 +31,9 @@ pub enum CliCommand {
 
 #[derive(Parser, Clone, Debug)]
 pub struct Offer {
-    #[arg(help = "Path to a contract input file. Eventually to be a repl asking contract params")]
-    #[arg(short = 'f', long = "file")]
-    pub contract_input_file: Option<String>,
+    #[arg(help = "Generate a contract automatically with peer.")]
+    #[arg(short = 'g', long = "generate", default_value = "false")]
+    pub generate: bool,
     #[arg(help = "The contract counterparty to send to.")]
     pub counter_party: String,
 }
