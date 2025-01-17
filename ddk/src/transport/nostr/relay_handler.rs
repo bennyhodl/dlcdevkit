@@ -81,6 +81,9 @@ impl NostrDlc {
                     _ = stop_signal.changed() => {
                         if *stop_signal.borrow() {
                             tracing::warn!("Stopping nostr dlc message subscription.");
+                            if let Err(e) = nostr_client.disconnect().await {
+                                tracing::error!(error = e.to_string(), "Error disconnecting from nostr relay.");
+                            }
                             break;
                         }
                     },
