@@ -214,7 +214,7 @@ impl KormirOracleClient {
 
         let event = SignNumericEvent {
             event_id: event_id.clone(),
-            outcome: outcome.clone(),
+            outcome,
         };
 
         let (body, headers) = self.body_and_headers(&event)?;

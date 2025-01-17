@@ -211,7 +211,7 @@ async fn generate_contract_input() -> anyhow::Result<ContractInput> {
         ],
     });
 
-    let kormir = KormirOracleClient::new("https://kormir.dlcdevkit.com").await?;
+    let kormir = KormirOracleClient::new("https://kormir.dlcdevkit.com", None).await?;
 
     let expiry = (chrono::Utc::now()
         .checked_add_signed(TimeDelta::minutes(15))
