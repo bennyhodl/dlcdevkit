@@ -77,7 +77,7 @@ impl DdkNode {
         )?);
 
         // let oracle = Arc::new(P2PDOracleClient::new(&oracle_host).await?);
-        let oracle = Arc::new(KormirOracleClient::new(&opts.oracle_host).await?);
+        let oracle = Arc::new(KormirOracleClient::new(&opts.oracle_host, None).await?);
 
         let mut builder = Builder::new();
         builder.set_seed_bytes(seed_bytes.private_key.secret_bytes());
