@@ -162,7 +162,6 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
                 storage.clone(),
                 oracles,
                 Arc::new(SystemTimeProvider {}),
-                wallet.clone(),
             )
             .await?,
         );
