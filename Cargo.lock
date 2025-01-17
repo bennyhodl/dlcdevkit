@@ -912,7 +912,7 @@ checksum = "e8566979429cf69b49a5c740c60791108e86440e8be149bbea4fe54d2c32d6e2"
 
 [[package]]
 name = "ddk"
-version = "0.0.13"
+version = "0.0.14"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -951,7 +951,7 @@ dependencies = [
 
 [[package]]
 name = "ddk-manager"
-version = "0.7.2"
+version = "0.7.3"
 dependencies = [
  "async-trait",
  "bitcoin",
@@ -976,7 +976,7 @@ dependencies = [
 
 [[package]]
 name = "ddk-node"
-version = "0.0.13"
+version = "0.0.14"
 dependencies = [
  "anyhow",
  "bitcoin",
@@ -1003,7 +1003,7 @@ dependencies = [
 
 [[package]]
 name = "ddk-payouts"
-version = "0.0.13"
+version = "0.0.14"
 dependencies = [
  "anyhow",
  "bitcoin",
