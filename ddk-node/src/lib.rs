@@ -1,6 +1,5 @@
 pub mod cli_opts;
 pub mod command;
-pub mod convert;
 pub mod ddkrpc;
 pub mod opts;
 mod seed;
@@ -337,7 +336,11 @@ impl DdkRpc for DdkNode {
             Some(f) => f,
             None => return Err(Status::new(Code::InvalidArgument, "Invalid fee rate.")),
         };
-        let txn = self.node.wallet.send_to_address(address, amount, fee_rate);
+        let txn = self
+            .node
+            .wallet
+            .send_to_address(address, amount, fee_rate)
+            .await;
         if let Ok(tx) = txn {
             Ok(Response::new(SendResponse {
                 txid: tx.to_string(),
@@ -370,6 +373,7 @@ impl DdkRpc for DdkNode {
         self.node
             .wallet
             .sync()
+            .await
             .map_err(|_| Status::new(Code::Aborted, "Did not sync wallet."))?;
         Ok(Response::new(WalletSyncResponse {}))
     }

@@ -119,8 +119,8 @@ async fn enumeration_contract() {
     let contract = alice.ddk.storage.get_contract(&contract_id);
     assert!(matches!(contract.unwrap().unwrap(), Contract::Confirmed(_)));
 
-    bob.ddk.wallet.sync().unwrap();
-    alice.ddk.wallet.sync().unwrap();
+    bob.ddk.wallet.sync().await.unwrap();
+    alice.ddk.wallet.sync().await.unwrap();
 
     // Used to check that timelock is reached.
     let locktime = match alice.ddk.storage.get_contract(&contract_id).unwrap() {
@@ -163,8 +163,8 @@ async fn enumeration_contract() {
 
     assert!(attestation.is_ok());
 
-    bob.ddk.wallet.sync().unwrap();
-    alice.ddk.wallet.sync().unwrap();
+    bob.ddk.wallet.sync().await.unwrap();
+    alice.ddk.wallet.sync().await.unwrap();
 
     bob.ddk
         .manager

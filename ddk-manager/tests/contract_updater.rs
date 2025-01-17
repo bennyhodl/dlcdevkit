@@ -28,9 +28,9 @@ async fn accept_contract_test() {
     let blockchain =
         Rc::new(EsploraClient::new("http://localhost:30000", Network::Regtest).unwrap());
 
-    let stuff = test_utils::create_and_fund_wallet("accept_contract_test");
+    let stuff = test_utils::create_and_fund_wallet("accept_contract_test").await;
     let wallet = Arc::new(stuff.0);
-    wallet.sync().unwrap();
+    wallet.sync().await.unwrap();
 
     ddk_manager::contract_updater::accept_contract(
         secp256k1_zkp::SECP256K1,

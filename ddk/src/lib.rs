@@ -7,7 +7,10 @@ pub mod builder;
 /// Working with the bitcoin chain.
 pub mod chain;
 mod ddk;
-mod error;
+/// DDK error types
+pub mod error;
+/// JSON structs
+pub mod json;
 /// Nostr related functions.
 #[cfg(any(feature = "nostr", feature = "marketplace"))]
 pub(crate) mod nostr;

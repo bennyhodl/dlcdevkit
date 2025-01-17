@@ -96,7 +96,9 @@ pub fn create_dlc_msg_event(
         .flatten()
         .collect::<Vec<_>>();
 
-    let event = EventBuilder::new(DLC_MESSAGE_KIND, content, tags).to_event(&keys)?;
+    let event = EventBuilder::new(DLC_MESSAGE_KIND, content)
+        .tags(tags)
+        .sign_with_keys(&keys)?;
 
     Ok(event)
 }

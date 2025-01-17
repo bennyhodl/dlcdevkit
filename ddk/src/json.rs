@@ -3,42 +3,20 @@ use ddk_manager::contract::{
     signed_contract::SignedContract, ClosedContract, Contract, FailedAcceptContract,
     FailedSignContract, PreClosedContract,
 };
+use dlc_messages::oracle_msgs::EventDescriptor;
 use serde_json::{json, Value};
 use std::collections::HashSet;
 
-pub fn offered_contract_to_string_pretty(
-    offered_contracts: Vec<OfferedContract>,
-) -> Result<String, serde_json::Error> {
-    let offers = offered_contracts
-        .iter()
-        .map(|offered_contract| {
-            let contract_id = hex::encode(offered_contract.id);
-            let mut event_ids = HashSet::new();
-            for contract_input in &offered_contract.contract_info {
-                for announcement in &contract_input.oracle_announcements {
-                    let oracle_event = json!({ "event_id": announcement.oracle_event.event_id, "oracle_pubkey": announcement.oracle_public_key.to_string()});
-                    event_ids.insert(oracle_event);
-                }
-            }
-            let event_ids = event_ids.into_iter().collect::<Vec<Value>>();
-            json!({
-                "contract_id": contract_id,
-                "is_offer_party": offered_contract.is_offer_party,
-                "counterparty": offered_contract.counter_party,
-                "collateral": offered_contract.total_collateral,
-                "event_ids": event_ids,
-            })
-        })
-        .collect::<Vec<Value>>();
-    serde_json::to_string_pretty(&offers)
-}
-
-fn offered_contract_to_value(offered_contract: &OfferedContract, state: &str) -> Value {
+pub fn offered_contract_to_value(offered_contract: &OfferedContract, state: &str) -> Value {
     let contract_id = hex::encode(offered_contract.id);
     let mut event_ids = HashSet::new();
     for contract_input in &offered_contract.contract_info {
         for announcement in &contract_input.oracle_announcements {
-            let oracle_event = json!({ "event_id": announcement.oracle_event.event_id, "oracle_pubkey": announcement.oracle_public_key.to_string()});
+            let event_type = match announcement.oracle_event.event_descriptor {
+                EventDescriptor::EnumEvent(_) => "enum",
+                EventDescriptor::DigitDecompositionEvent(_) => "numerical",
+            };
+            let oracle_event = json!({ "event_id": announcement.oracle_event.event_id, "oracle_pubkey": announcement.oracle_public_key.to_string(), "event_type": event_type});
             event_ids.insert(oracle_event);
         }
     }
@@ -47,8 +25,9 @@ fn offered_contract_to_value(offered_contract: &OfferedContract, state: &str) ->
         "state": state,
         "contract_id": contract_id,
         "is_offer_party": offered_contract.is_offer_party,
-        "counter_party": offered_contract.counter_party,
+        "counter_party": offered_contract.counter_party.to_string(),
         "collateral": offered_contract.total_collateral,
+        "offer_amount": offered_contract.offer_params.input_amount,
         "event_ids": event_ids,
     })
 }
@@ -57,16 +36,19 @@ fn accepted_contract_to_value(accepted: &AcceptedContract) -> Value {
     let offered_contract = offered_contract_to_value(&accepted.offered_contract, "offered");
     json!({
         "contract_id": hex::encode(accepted.offered_contract.id),
+        "is_offer_party": offered_contract["is_offer_party"],
         "counter_party": offered_contract["counter_party"],
         "collateral": offered_contract["collateral"],
         "event_ids": offered_contract["event_ids"],
+        "offer_amount": offered_contract["offer_amount"],
+        "accept_amount": accepted.offered_contract.offer_params.input_amount,
         "num_cets": accepted.dlc_transactions.cets.len(),
         "funding_txid": accepted.dlc_transactions.fund.compute_txid(),
-        "refund_transaction": accepted.dlc_transactions.refund.compute_txid(),
+        "refund_txid": accepted.dlc_transactions.refund.compute_txid(),
     })
 }
 
-fn signed_contract_to_value(signed: &SignedContract, state: &str) -> Value {
+pub fn signed_contract_to_value(signed: &SignedContract, state: &str) -> Value {
     let accepted_contract = accepted_contract_to_value(&signed.accepted_contract);
     json!({
         "state": state,
@@ -89,13 +71,17 @@ fn closed_contract_to_value(closed: &ClosedContract) -> Value {
     })
 }
 
-fn preclosed_contract_to_value(preclosed: &PreClosedContract) -> Value {
+pub fn preclosed_contract_to_value(preclosed: &PreClosedContract) -> Value {
     let signed_contract = signed_contract_to_value(&preclosed.signed_contract, "confirmed");
     json!({
         "state": "preclosed",
         "attestations": preclosed.attestations,
-        "signed_cet": preclosed.signed_cet,
-        "signed_contract": signed_contract,
+        "signed_cet_txid": preclosed.signed_cet.compute_txid(),
+        "contract_id": signed_contract["contract_id"],
+        "counterparty": signed_contract["counter_party"],
+        "collateral": signed_contract["collateral"],
+        "event_ids": signed_contract["event_ids"],
+        "funding_txid": signed_contract["funding_txid"],
     })
 }
 

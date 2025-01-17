@@ -147,7 +147,7 @@ impl LightningTransport {
         let peer_manager = Arc::clone(&self.peer_manager);
         let message_handler = Arc::clone(&self.message_handler);
         tokio::spawn(async move {
-            let mut message_interval = interval(Duration::from_secs(5));
+            let mut message_interval = interval(Duration::from_secs(20));
             // let mut event_interval = interval(Duration::from_secs(2));
             loop {
                 tokio::select! {
@@ -158,7 +158,10 @@ impl LightningTransport {
                         }
                     },
                     _ = message_interval.tick() => {
-                        peer_manager.process_events();
+                        if message_handler.has_pending_messages() {
+                            tracing::info!("There are pending messages to be sent.");
+                            peer_manager.process_events();
+                        }
                         let messages = message_handler.get_and_clear_received_messages();
                         for (counter_party, message) in messages {
                             tracing::info!(
@@ -166,8 +169,17 @@ impl LightningTransport {
                                 "Processing DLC message"
                             );
                             match message_manager.on_dlc_message(&message, counter_party).await {
-                                Ok(Some(response)) => {
-                                    message_handler.send_message(counter_party, response);
+                                Ok(Some(message)) => {
+                                    if peer_manager.peer_by_node_id(&counter_party).is_some() {
+                                        tracing::info!(message=?message, "Sending message to {}", counter_party.to_string());
+                                        message_handler.send_message(counter_party, message);
+                                        peer_manager.process_events();
+                                    } else {
+                                        tracing::warn!(
+                                            pubkey = counter_party.to_string(),
+                                            "Not connected to counterparty. Message not sent"
+                                        )
+                                    }
                                 }
                                 Ok(None) => (),
                                 Err(e) => {

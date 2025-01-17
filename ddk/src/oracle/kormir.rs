@@ -3,11 +3,10 @@ use bitcoin::key::XOnlyPublicKey;
 use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
 use hmac::{Hmac, Mac};
 use kormir::storage::OracleEventData;
-use lightning::{io::Cursor, util::ser::Readable};
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
+use serde::Deserialize;
 use serde::Serialize;
 use sha2::Sha256;
-use std::str::FromStr;
 use uuid::Uuid;
 
 async fn get<T>(host: &str, path: &str) -> anyhow::Result<T>
@@ -51,7 +50,7 @@ pub struct SignNumericEvent {
 
 /// Kormir oracle client.
 ///
-/// Allows the creation of enum announcements and signing as well.
+/// Allows the creation of enum and numeric announcements as well as signing.
 #[derive(Debug)]
 pub struct KormirOracleClient {
     pubkey: XOnlyPublicKey,
@@ -60,13 +59,17 @@ pub struct KormirOracleClient {
     hmac_secret: Option<Vec<u8>>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct PubkeyResponse {
+    pub pubkey: XOnlyPublicKey,
+}
+
 impl KormirOracleClient {
     pub async fn new(
         host: &str,
         hmac_secret: Option<Vec<u8>>,
     ) -> anyhow::Result<KormirOracleClient> {
-        let request: String = get(host, "pubkey").await?;
-        let pubkey = XOnlyPublicKey::from_str(&request)?;
+        let pubkey: XOnlyPublicKey = get::<PubkeyResponse>(host, "pubkey").await?.pubkey;
         let client = reqwest::Client::new();
         tracing::info!(
             host,
@@ -122,15 +125,10 @@ impl KormirOracleClient {
             .headers(headers)
             .send()
             .await?
-            .text()
-            .await?
-            .trim_matches('"')
-            .to_string();
+            .json::<OracleAnnouncement>()
+            .await?;
 
-        let announcement_bytes = hex::decode(&announcement)?;
-        let mut cursor = Cursor::new(&announcement_bytes);
-        let announcement: OracleAnnouncement = Readable::read(&mut cursor)
-            .map_err(|_| anyhow!("Can't read bytes for attestation."))?;
+        tracing::info!(event_id, "Created Kormir oracle event.");
 
         Ok(announcement)
     }
@@ -143,29 +141,24 @@ impl KormirOracleClient {
     ) -> anyhow::Result<OracleAttestation> {
         tracing::info!("Signing event. event_id={} outcome={}", event_id, outcome);
 
-        let event = SignEnumEvent { event_id, outcome };
+        let event = SignEnumEvent {
+            event_id: event_id.clone(),
+            outcome: outcome.clone(),
+        };
 
         let (body, headers) = self.body_and_headers(&event)?;
 
-        let hex = self
+        let attestation = self
             .client
             .post(format!("{}/sign-enum", &self.host))
             .body(body)
             .headers(headers)
             .send()
             .await?
-            .text()
-            .await?
-            .trim_matches('"')
-            .to_string();
+            .json::<OracleAttestation>()
+            .await?;
 
-        let attestion_buffer = hex::decode(hex)?;
-
-        let mut cursor = lightning::io::Cursor::new(attestion_buffer);
-        let attestation: OracleAttestation = Readable::read(&mut cursor)
-            .map_err(|_| anyhow!("Can't read bytes for attestation."))?;
-
-        tracing::info!("Signed Kormir oracle event.");
+        tracing::info!(event_id, outcome, "Signed Kormir oracle event.");
 
         Ok(attestation)
     }
@@ -203,15 +196,10 @@ impl KormirOracleClient {
             .headers(headers)
             .send()
             .await?
-            .text()
-            .await?
-            .trim_matches('"')
-            .to_string();
+            .json::<OracleAnnouncement>()
+            .await?;
 
-        let announcement_bytes = hex::decode(&announcement)?;
-        let mut cursor = Cursor::new(&announcement_bytes);
-        let announcement: OracleAnnouncement = Readable::read(&mut cursor)
-            .map_err(|_| anyhow!("Can't read bytes for attestation."))?;
+        tracing::info!(event_id, "Created Kormir oracle event.");
 
         Ok(announcement)
     }
@@ -224,29 +212,24 @@ impl KormirOracleClient {
     ) -> anyhow::Result<OracleAttestation> {
         tracing::info!("Signing event. event_id={} outcome={}", event_id, outcome);
 
-        let event = SignNumericEvent { event_id, outcome };
+        let event = SignNumericEvent {
+            event_id: event_id.clone(),
+            outcome,
+        };
 
         let (body, headers) = self.body_and_headers(&event)?;
 
-        let hex = self
+        let attestation = self
             .client
             .post(format!("{}/sign-numeric", &self.host))
             .body(body)
             .headers(headers)
             .send()
             .await?
-            .text()
-            .await?
-            .trim_matches('"')
-            .to_string();
+            .json::<OracleAttestation>()
+            .await?;
 
-        let attestion_buffer = hex::decode(hex)?;
-
-        let mut cursor = lightning::io::Cursor::new(attestion_buffer);
-        let attestation: OracleAttestation = Readable::read(&mut cursor)
-            .map_err(|_| anyhow!("Can't read bytes for attestation."))?;
-
-        tracing::info!("Signed Kormir oracle event.");
+        tracing::info!(event_id, outcome, "Signed Kormir oracle event.");
 
         Ok(attestation)
     }

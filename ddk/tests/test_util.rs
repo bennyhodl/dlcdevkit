@@ -37,8 +37,8 @@ pub async fn test_ddk() -> (TestSuite, TestSuite, Arc<MemoryOracle>) {
 
     fund_addresses(&node_one_address, &node_two_address);
 
-    test.ddk.wallet.sync().unwrap();
-    test_two.ddk.wallet.sync().unwrap();
+    test.ddk.wallet.sync().await.unwrap();
+    test_two.ddk.wallet.sync().await.unwrap();
 
     (test, test_two, oracle)
 }

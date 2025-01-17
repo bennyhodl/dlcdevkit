@@ -100,7 +100,7 @@ where
             let mut timer = tokio::time::interval(Duration::from_secs(60));
             loop {
                 timer.tick().await;
-                if let Err(e) = wallet_clone.sync() {
+                if let Err(e) = wallet_clone.sync().await {
                     tracing::warn!(error=?e, "Did not sync wallet.");
                 };
             }

@@ -11,6 +11,7 @@ Application tooling to get started with [DLCs](https://github.com/discreetlogcon
 Build DLC application by plugging in your own transport, storage, and oracle clients.
 
 ## Get Started
+
 ```
 $ cargo add ddk
 ```
@@ -29,7 +30,7 @@ type ApplicationDdk = ddk::DlcDevKit<LightningTransport, SledStorage, KormirOrac
 fn main() {
     let transport = Arc::new(LightningTransport::new([0u8;32], <port>, Network::Regtest));
     let storage = Arc::new(SledStorage::new("<storage path>")?);
-    let oracle_client = Arc::new(KormirOracleClient::new("<oracle host>").await?);
+    let oracle_client = Arc::new(KormirOracleClient::new("<oracle host>", None).await?);
 
     let ddk: ApplicationDdk = Builder::new()
         .set_seed_bytes([0u8;32])
@@ -46,6 +47,7 @@ fn main() {
 ```
 
 ## Crates
+
 Ready-to-go clients for developing applications:
 
 [`ddk`](./ddk/) - DLC management with an internal BDK wallet.
@@ -59,14 +61,17 @@ You can create a custom DDK instance by implementing the required traits for sto
 To quickly get started building a DDK application, there are pre-built components.
 
 ### Storage
+
 [`sled`](./ddk/src/storage/sled) - A simple file based storage using [sled](https://crates.io/crates/sled)
 
 ### Transport
+
 [`LDK Peer Manager`](./ddk/src/transport/lightning/) - Communication over Lightning gossip using [`rust-dlc's implementation`](https://github.com/p2pderivatives/rust-dlc/blob/master/dlc-messages/src/message_handler.rs)
 
 [`nostr`](./ddk/src/transport/nostr/) - DLC communication from the [NIP-88 spec](https://github.com/nostr-protocol/nips/pull/919)
 
 ### Oracle Clients
+
 [`P2PDerivatives`](./ddk/src/oracle/p2p_derivatives.rs) - Spot price futures on the Bitcoin price [repo](https://github.com/p2pderivatives/p2pderivatives-oracle)
 
 [`kormir`](./ddk/src/oracle/kormir.rs) - Enumeration based oracle with server and nostr support [repo](https://github.com/benthecarman/kormir)

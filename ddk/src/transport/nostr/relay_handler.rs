@@ -28,7 +28,7 @@ impl NostrDlc {
         let keys = Keys::new_with_ctx(&secp, seed.private_key.into());
 
         let relay_url = relay_host.parse()?;
-        let client = Client::new(&keys);
+        let client = Client::new(keys.clone());
         client.add_relay(&relay_url).await?;
         client.connect().await;
 
@@ -81,6 +81,9 @@ impl NostrDlc {
                     _ = stop_signal.changed() => {
                         if *stop_signal.borrow() {
                             tracing::warn!("Stopping nostr dlc message subscription.");
+                            if let Err(e) = nostr_client.disconnect().await {
+                                tracing::error!(error = e.to_string(), "Error disconnecting from nostr relay.");
+                            }
                             break;
                         }
                     },
