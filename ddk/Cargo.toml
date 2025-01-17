@@ -1,6 +1,6 @@
 [package]
 name = "ddk"
-version = "0.0.13"
+version = "0.0.14"
 edition = "2021"
 license = "MIT"
 description = "application tooling for DLCs 🌊"
@@ -25,7 +25,7 @@ sled = ["dep:sled"]
 
 [dependencies]
 dlc = { version = "0.7.1", features = ["use-serde"] }
-ddk-manager = { path = "../ddk-manager", version = "0.7.1", features = ["use-serde"] }
+ddk-manager = { path = "../ddk-manager", version = "0.7.3", features = ["use-serde"] }
 dlc-messages = { version = "0.7.1", features = [ "use-serde"] }
 dlc-trie = { version = "0.7.1", features = ["use-serde"] }
 # dlc = { path = "../../rust-dlc/dlc", features = ["use-serde"] }

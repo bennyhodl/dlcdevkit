@@ -1,6 +1,6 @@
 [package]
 name = "ddk-node"
-version = "0.0.13"
+version = "0.0.14"
 authors = ["benny b <ben@bitcoinbay.foundation>"]
 description = "DDK node to facilitate DLC contracts."
 license = "MIT"
@@ -8,9 +8,9 @@ repository = "https://github.com/bennyhodl/dlcdevkit"
 edition = "2021"
 
 [dependencies]
-ddk = { version = "0.0.13", path = "../ddk", features = ["lightning", "marketplace", "sled", "kormir"] }
-ddk-manager = { version = "0.7.2", path = "../ddk-manager", features = ["use-serde"] }
-ddk-payouts = { version = "0.0.13", path = "../payouts" }
+ddk = { version = "0.0.14", path = "../ddk", features = ["lightning", "marketplace", "sled", "kormir"] }
+ddk-manager = { version = "0.7.3", path = "../ddk-manager", features = ["use-serde"] }
+ddk-payouts = { version = "0.0.14", path = "../payouts" }
 
 dlc = { version = "0.7.1", features = ["use-serde"] }
 dlc-messages = { version = "0.7.1", features = [ "use-serde"] }
