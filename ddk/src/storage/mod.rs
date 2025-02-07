@@ -4,5 +4,5 @@ pub mod postgres;
 #[cfg(feature = "sled")]
 pub mod sled;
 
-#[cfg(any(feature = "postgres"))]
+#[cfg(feature = "postgres")]
 mod sqlx;

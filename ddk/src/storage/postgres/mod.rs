@@ -1,9 +1,13 @@
 use super::sqlx::SqlxError;
 use crate::{
+    error::to_storage_error,
     storage::sqlx::ContractRow,
     util::ser::{deserialize_contract, serialize_contract},
 };
-use ddk_manager::contract::{offered_contract::OfferedContract, Contract};
+use ddk_manager::{
+    contract::{offered_contract::OfferedContract, Contract},
+    Storage,
+};
 use sqlx::{Database, Pool, Postgres};
 
 /// Manages a pool of database connections.
@@ -23,8 +27,62 @@ impl Store<Postgres> {
         }
         Ok(Self { pool })
     }
+}
 
-    pub async fn create_offer_contract(&self, contract: &OfferedContract) -> Result<(), SqlxError> {
+#[async_trait::async_trait]
+impl Storage for Store<Postgres> {
+    async fn get_contract(
+        &self,
+        id: &ddk_manager::ContractId,
+    ) -> Result<Option<ddk_manager::contract::Contract>, ddk_manager::error::Error> {
+        let contract = sqlx::query_as!(
+            ContractRow,
+            "SELECT * FROM contracts WHERE id = $1",
+            hex::encode(id)
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(to_storage_error)?;
+
+        if let Some(contract) = contract {
+            Ok(Some(deserialize_contract(&contract.contract_data)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn get_channel(
+        &self,
+        _channel_id: &ddk_manager::ChannelId,
+    ) -> Result<Option<ddk_manager::channel::Channel>, ddk_manager::error::Error> {
+        todo!()
+    }
+
+    async fn get_contracts(
+        &self,
+    ) -> Result<Vec<ddk_manager::contract::Contract>, ddk_manager::error::Error> {
+        todo!()
+    }
+
+    async fn upsert_channel(
+        &self,
+        _channel: ddk_manager::channel::Channel,
+        _contract: Option<ddk_manager::contract::Contract>,
+    ) -> Result<(), ddk_manager::error::Error> {
+        todo!()
+    }
+
+    async fn delete_channel(
+        &self,
+        _channel_id: &ddk_manager::ChannelId,
+    ) -> Result<(), ddk_manager::error::Error> {
+        todo!()
+    }
+
+    async fn create_contract(
+        &self,
+        contract: &OfferedContract,
+    ) -> Result<(), ddk_manager::error::Error> {
         sqlx::query_as!(
             ContractRow,
             r#"
@@ -50,24 +108,85 @@ impl Store<Postgres> {
             serialize_contract(&Contract::Offered(contract.clone()))?
         )
         .fetch_one(&self.pool)
-        .await?;
+        .await
+        .map_err(to_storage_error)?;
 
         Ok(())
     }
 
-    pub async fn get_stored_contract(&self, id: &[u8]) -> Result<Contract, SqlxError> {
-        let contract = sqlx::query_as!(
-            ContractRow,
-            "SELECT * FROM contracts WHERE id = $1",
-            hex::encode(id)
-        )
-        .fetch_one(&self.pool)
-        .await?;
+    async fn delete_contract(
+        &self,
+        _id: &ddk_manager::ContractId,
+    ) -> Result<(), ddk_manager::error::Error> {
+        todo!()
+    }
 
-        Ok(
-            deserialize_contract(&contract.contract_data)
-                .map_err(SqlxError::DeserializeContract)?,
-        )
+    async fn update_contract(
+        &self,
+        _contract: &ddk_manager::contract::Contract,
+    ) -> Result<(), ddk_manager::error::Error> {
+        todo!()
+    }
+
+    async fn get_chain_monitor(
+        &self,
+    ) -> Result<Option<ddk_manager::chain_monitor::ChainMonitor>, ddk_manager::error::Error> {
+        Ok(None)
+    }
+
+    async fn get_contract_offers(
+        &self,
+    ) -> Result<
+        Vec<ddk_manager::contract::offered_contract::OfferedContract>,
+        ddk_manager::error::Error,
+    > {
+        todo!()
+    }
+
+    async fn get_signed_channels(
+        &self,
+        _channel_state: Option<ddk_manager::channel::signed_channel::SignedChannelStateType>,
+    ) -> Result<Vec<ddk_manager::channel::signed_channel::SignedChannel>, ddk_manager::error::Error>
+    {
+        todo!()
+    }
+
+    async fn get_signed_contracts(
+        &self,
+    ) -> Result<
+        Vec<ddk_manager::contract::signed_contract::SignedContract>,
+        ddk_manager::error::Error,
+    > {
+        todo!()
+    }
+
+    async fn get_offered_channels(
+        &self,
+    ) -> Result<Vec<ddk_manager::channel::offered_channel::OfferedChannel>, ddk_manager::error::Error>
+    {
+        todo!()
+    }
+
+    async fn persist_chain_monitor(
+        &self,
+        _monitor: &ddk_manager::chain_monitor::ChainMonitor,
+    ) -> Result<(), ddk_manager::error::Error> {
+        Ok(())
+    }
+
+    async fn get_confirmed_contracts(
+        &self,
+    ) -> Result<
+        Vec<ddk_manager::contract::signed_contract::SignedContract>,
+        ddk_manager::error::Error,
+    > {
+        todo!()
+    }
+
+    async fn get_preclosed_contracts(
+        &self,
+    ) -> Result<Vec<ddk_manager::contract::PreClosedContract>, ddk_manager::error::Error> {
+        todo!()
     }
 }
 
@@ -95,11 +214,11 @@ mod tests {
         .unwrap();
         let serialized = include_bytes!("../../../tests/data/dlc_storage/Offered");
         let offered_contract = deserialize_object::<OfferedContract>(&serialized.to_vec());
-        let result = store.create_offer_contract(&offered_contract).await;
+        let result = store.create_contract(&offered_contract).await;
         assert!(result.is_ok());
 
-        let contract = store.get_stored_contract(&offered_contract.id).await;
+        let contract = store.get_contract(&offered_contract.id).await;
         assert!(contract.is_ok());
-        assert!(matches!(contract.unwrap(), Contract::Offered(_)));
+        assert!(matches!(contract.unwrap().unwrap(), Contract::Offered(_)));
     }
 }
