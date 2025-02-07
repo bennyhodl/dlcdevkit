@@ -22,6 +22,7 @@ p2pderivatives = ["dep:reqwest"]
 
 # storage features
 sled = ["dep:sled"]
+postgres = ["dep:sqlx", "sqlx/postgres"]
 
 [dependencies]
 dlc = { version = "0.7.1", features = ["use-serde"] }
@@ -68,6 +69,7 @@ kormir = "0.4.1"
 # kormir = { path = "../../kormir/kormir" }
 hmac = "0.12.1"
 sha2 = "0.10"
+sqlx = { version = "0.8.3", optional = true, features = ["runtime-tokio", "time", "bigdecimal", "chrono"] }
 
 [dev-dependencies]
 test-log = { version = "0.2.16", features = ["trace"] }
