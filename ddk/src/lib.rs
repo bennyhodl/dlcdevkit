@@ -64,6 +64,7 @@ pub trait Transport: Send + Sync + 'static {
     async fn connect_outbound(&self, pubkey: PublicKey, host: &str);
 }
 
+#[async_trait]
 /// Storage for DLC contracts.
 pub trait Storage: ddk_manager::Storage + Send + Sync + 'static {
     ///// Instantiate the storage for the BDK wallet.

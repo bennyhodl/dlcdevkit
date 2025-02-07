@@ -24,6 +24,7 @@ async fn contract_balance() {
     bob.ddk
         .storage
         .update_contract(&Contract::PreClosed(preclosed.clone()))
+        .await
         .unwrap();
 
     let address = bob.ddk.wallet.new_external_address().unwrap().address;
@@ -45,7 +46,7 @@ async fn contract_balance() {
     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 
     bob.ddk.wallet.sync().await.unwrap();
-    let balance = bob.ddk.balance().unwrap();
+    let balance = bob.ddk.balance().await.unwrap();
     assert_eq!(balance.foreign_unconfirmed, Amount::ONE_BTC);
     assert_eq!(balance.contract_pnl, -11000000);
 
@@ -53,7 +54,7 @@ async fn contract_balance() {
 
     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
     bob.ddk.wallet.sync().await.unwrap();
-    let balance = bob.ddk.balance().unwrap();
+    let balance = bob.ddk.balance().await.unwrap();
     assert_eq!(balance.confirmed, Amount::ONE_BTC);
     assert_eq!(balance.foreign_unconfirmed, Amount::ZERO);
     assert_eq!(balance.contract_pnl, -11000000);

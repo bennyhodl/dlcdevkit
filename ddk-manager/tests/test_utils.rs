@@ -112,6 +112,7 @@ macro_rules! assert_contract_state {
             .await
             .get_store()
             .get_contract(&$id)
+            .await
             .expect("Could not retrieve contract");
         if let Some(c) = res {
             if let Contract::$p(_) = c {

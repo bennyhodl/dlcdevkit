@@ -1,6 +1,7 @@
 //! # This module contains static functions to update the state of a DLC channel.
 
-use std::{ops::Deref, sync::Mutex};
+use std::ops::Deref;
+use tokio::sync::Mutex;
 
 use crate::{
     chain_monitor::{ChainMonitor, ChannelInfo, TxType},
@@ -277,7 +278,7 @@ where
 /// to a [`SignedChannel`] and [`SignedContract`], returning them as well as the
 /// [`SignChannel`] to be sent to the counter party.
 #[allow(clippy::too_many_arguments)]
-pub fn verify_and_sign_accepted_channel<W: Deref, SP: Deref, X: ContractSigner>(
+pub async fn verify_and_sign_accepted_channel<W: Deref, SP: Deref, X: ContractSigner>(
     secp: &Secp256k1<All>,
     offered_channel: &OfferedChannel,
     offered_contract: &OfferedContract,
@@ -395,7 +396,7 @@ where
         &accept_revoke_params.publish_pk.inner,
     )?;
 
-    chain_monitor.lock().unwrap().add_tx(
+    chain_monitor.lock().await.add_tx(
         buffer_transaction.compute_txid(),
         ChannelInfo {
             channel_id,
@@ -454,7 +455,7 @@ where
 /// Verify that the given [`SignChannel`] message is valid with respect to the
 /// given [`AcceptedChannel`] and [`AcceptedContract`], transforming them
 /// to a [`SignedChannel`] and [`SignedContract`], and returning them.
-pub fn verify_signed_channel<W: Deref>(
+pub async fn verify_signed_channel<W: Deref>(
     secp: &Secp256k1<All>,
     accepted_channel: &AcceptedChannel,
     accepted_contract: &AcceptedContract,
@@ -501,7 +502,7 @@ where
         Some(accepted_channel.channel_id),
     )?;
 
-    chain_monitor.lock().unwrap().add_tx(
+    chain_monitor.lock().await.add_tx(
         accepted_channel.buffer_transaction.compute_txid(),
         ChannelInfo {
             channel_id: accepted_channel.channel_id,
@@ -648,7 +649,7 @@ pub fn on_settle_offer(
 /// parameters, updating the state of the channel at the same time. Expects the
 /// channel to be in [`SignedChannelState::SettledReceived`] state.
 #[allow(clippy::too_many_arguments)]
-pub fn settle_channel_accept<SP: Deref, T: Deref>(
+pub async fn settle_channel_accept<SP: Deref, T: Deref>(
     secp: &Secp256k1<All>,
     channel: &mut SignedChannel,
     csv_timelock: u32,
@@ -722,7 +723,7 @@ where
         channel.fee_rate_per_vb,
     )?;
 
-    chain_monitor.lock().unwrap().add_tx(
+    chain_monitor.lock().await.add_tx(
         settle_tx.compute_txid(),
         ChannelInfo {
             channel_id: channel.channel_id,
@@ -755,7 +756,7 @@ where
 /// the state of the channel at the same time.  Expects the channel to be in
 /// [`SignedChannelState::SettledOffered`] state.
 #[allow(clippy::too_many_arguments)]
-pub fn settle_channel_confirm<T: Deref, SP: Deref>(
+pub async fn settle_channel_confirm<T: Deref, SP: Deref>(
     secp: &Secp256k1<All>,
     channel: &mut SignedChannel,
     settle_channel_accept: &SettleAccept,
@@ -817,7 +818,7 @@ where
         channel.fee_rate_per_vb,
     )?;
 
-    chain_monitor.lock().unwrap().add_tx(
+    chain_monitor.lock().await.add_tx(
         settle_tx.compute_txid(),
         ChannelInfo {
             channel_id: channel.channel_id,
@@ -1473,7 +1474,7 @@ where
 /// channel and associated contract the same time. Expects the channel to be in
 /// [`SignedChannelState::RenewAccepted`] state.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn verify_renew_confirm_and_finalize<S: Deref, T: Deref, W: Deref>(
+pub(crate) async fn verify_renew_confirm_and_finalize<S: Deref, T: Deref, W: Deref>(
     secp: &Secp256k1<All>,
     signed_channel: &mut SignedChannel,
     accepted_contract: &AcceptedContract,
@@ -1576,7 +1577,7 @@ where
     let total_collateral =
         signed_channel.own_params.collateral + signed_channel.counter_params.collateral;
 
-    chain_monitor.lock().unwrap().add_tx(
+    chain_monitor.lock().await.add_tx(
         buffer_transaction.compute_txid(),
         ChannelInfo {
             channel_id: signed_channel.channel_id,

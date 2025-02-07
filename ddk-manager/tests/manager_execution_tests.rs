@@ -878,14 +878,19 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
 
                         if let Contract::PreClosed(contract) = contract {
                             let mut s = second.lock().await;
-                            let second_contract =
-                                s.get_store().get_contract(&contract_id).unwrap().unwrap();
+                            let second_contract = s
+                                .get_store()
+                                .get_contract(&contract_id)
+                                .await
+                                .unwrap()
+                                .unwrap();
                             if let Contract::Confirmed(signed) = second_contract {
                                 s.on_counterparty_close(
                                     &signed,
                                     contract.signed_cet,
                                     blocks.unwrap_or(0),
                                 )
+                                .await
                                 .expect("Error registering counterparty close");
                                 alice_wallet.sync().await.unwrap();
                                 bob_wallet.sync().await.unwrap();

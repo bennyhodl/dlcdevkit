@@ -133,6 +133,136 @@ impl Contract {
             Contract::FailedSign(f) => f.accepted_contract.offered_contract.counter_party,
         }
     }
+
+    /// Checks if the contract is the offer party.
+    pub fn is_offer_party(&self) -> bool {
+        match self {
+            Contract::Offered(o) | Contract::Rejected(o) => o.is_offer_party,
+            Contract::Accepted(a) => a.offered_contract.is_offer_party,
+            Contract::Signed(s) | Contract::Confirmed(s) | Contract::Refunded(s) => {
+                s.accepted_contract.offered_contract.is_offer_party
+            }
+            Contract::FailedAccept(f) => f.offered_contract.is_offer_party,
+            Contract::FailedSign(f) => f.accepted_contract.offered_contract.is_offer_party,
+            Contract::PreClosed(c) => {
+                c.signed_contract
+                    .accepted_contract
+                    .offered_contract
+                    .is_offer_party
+            }
+            Contract::Closed(_) => false,
+        }
+    }
+
+    /// Get the collateral for a contract.
+    pub fn get_collateral(
+        &self,
+    ) -> (
+        u64, /* offer collateral */
+        u64, /* accept collateral */
+        u64, /* total collateral */
+    ) {
+        // TODO: We should assert that the offer + accept collateral is equal to the total collateral
+        match self {
+            Contract::Offered(o) => (
+                o.offer_params.collateral,
+                o.total_collateral - o.offer_params.collateral,
+                o.total_collateral,
+            ),
+            Contract::Accepted(a) => (
+                a.offered_contract.offer_params.collateral,
+                a.accept_params.collateral,
+                a.offered_contract.total_collateral,
+            ),
+            Contract::Signed(s) | Contract::Confirmed(s) | Contract::Refunded(s) => (
+                s.accepted_contract.offered_contract.offer_params.collateral,
+                s.accepted_contract.accept_params.collateral,
+                s.accepted_contract.offered_contract.total_collateral,
+            ),
+            Contract::FailedAccept(f) => (
+                f.offered_contract.offer_params.collateral,
+                0,
+                f.offered_contract.total_collateral,
+            ),
+            Contract::FailedSign(f) => (
+                f.accepted_contract.offered_contract.offer_params.collateral,
+                f.accepted_contract.accept_params.collateral,
+                f.accepted_contract.offered_contract.total_collateral,
+            ),
+            Contract::PreClosed(p) => (
+                p.signed_contract
+                    .accepted_contract
+                    .offered_contract
+                    .offer_params
+                    .collateral,
+                p.signed_contract.accepted_contract.accept_params.collateral,
+                p.signed_contract
+                    .accepted_contract
+                    .offered_contract
+                    .total_collateral,
+            ),
+            Contract::Closed(_) => (0, 0, 0),
+            Contract::Rejected(_) => (0, 0, 0),
+        }
+    }
+
+    /// Get the CET locktime for a contract.
+    pub fn get_cet_locktime(&self) -> u32 {
+        match self {
+            Contract::Offered(o) => o.cet_locktime,
+            Contract::Accepted(a) => a.offered_contract.cet_locktime,
+            Contract::Signed(s) => s.accepted_contract.offered_contract.cet_locktime,
+            Contract::Confirmed(c) => c.accepted_contract.offered_contract.cet_locktime,
+            Contract::PreClosed(p) => {
+                p.signed_contract
+                    .accepted_contract
+                    .offered_contract
+                    .cet_locktime
+            }
+            Contract::Closed(c) => c.signed_cet.as_ref().unwrap().lock_time.to_consensus_u32(),
+            Contract::Refunded(r) => r.accepted_contract.offered_contract.cet_locktime,
+            Contract::FailedAccept(f) => f.offered_contract.cet_locktime,
+            Contract::FailedSign(f) => f.accepted_contract.offered_contract.cet_locktime,
+            Contract::Rejected(_) => 0,
+        }
+    }
+
+    /// Get the refund locktime for a contract.
+    pub fn get_refund_locktime(&self) -> u32 {
+        match self {
+            Contract::Offered(o) => o.refund_locktime,
+            Contract::Accepted(a) => a.offered_contract.refund_locktime,
+            Contract::Signed(s) => s.accepted_contract.offered_contract.refund_locktime,
+            Contract::Confirmed(c) => c.accepted_contract.offered_contract.refund_locktime,
+            Contract::PreClosed(p) => {
+                p.signed_contract
+                    .accepted_contract
+                    .offered_contract
+                    .refund_locktime
+            }
+            Contract::Closed(c) => c.signed_cet.as_ref().unwrap().lock_time.to_consensus_u32(),
+            Contract::Refunded(r) => r.accepted_contract.offered_contract.refund_locktime,
+            Contract::FailedAccept(f) => f.offered_contract.refund_locktime,
+            Contract::FailedSign(f) => f.accepted_contract.offered_contract.refund_locktime,
+            Contract::Rejected(_) => 0,
+        }
+    }
+
+    /// Get the profit and loss for a contract.
+    pub fn get_pnl(&self) -> i64 {
+        match self {
+            Contract::Offered(_) => 0,
+            Contract::Accepted(_) => 0,
+            Contract::Signed(_) => 0,
+            Contract::Confirmed(_) => 0,
+            Contract::PreClosed(_) => 0,
+            Contract::Closed(c) => c.pnl,
+            Contract::Refunded(_) => 0,
+            Contract::FailedAccept(_) => 0,
+            Contract::FailedSign(_) => 0,
+            Contract::Rejected(_) => 0,
+        }
+    }
 }
 
 /// Information about a contract that failed while verifying an accept message.
