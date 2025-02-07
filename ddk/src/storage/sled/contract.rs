@@ -1,5 +1,7 @@
 use super::{SledStorage, CHAIN_MONITOR_KEY, CHAIN_MONITOR_TREE};
-use crate::util::{deserialize_contract, serialize_contract};
+use crate::util::ser::{
+    deserialize_contract, serialize_contract, ChannelPrefix, ContractPrefix, SignedChannelPrefix,
+};
 use bitcoin::consensus::ReadExt;
 use ddk_manager::chain_monitor::ChainMonitor;
 use ddk_manager::channel::accepted_channel::AcceptedChannel;
@@ -16,98 +18,6 @@ use ddk_manager::{error::Error, ContractId, Storage};
 use sled::transaction::{ConflictableTransactionResult, UnabortableTransactionError};
 use sled::Transactional;
 use std::convert::TryInto;
-
-macro_rules! convertible_enum {
-    (enum $name:ident {
-        $($vname:ident $(= $val:expr)?,)*;
-        $($tname:ident $(= $tval:expr)?,)*
-    }, $input:ident) => {
-        #[derive(Debug)]
-        enum $name {
-            $($vname $(= $val)?,)*
-            $($tname $(= $tval)?,)*
-        }
-
-        impl From<$name> for u8 {
-            fn from(prefix: $name) -> u8 {
-                prefix as u8
-            }
-        }
-
-        impl std::convert::TryFrom<u8> for $name {
-            type Error = Error;
-
-            fn try_from(v: u8) -> Result<Self, Self::Error> {
-                match v {
-                    $(x if x == u8::from($name::$vname) => Ok($name::$vname),)*
-                    $(x if x == u8::from($name::$tname) => Ok($name::$tname),)*
-                    _ => Err(Error::StorageError("Unknown prefix".to_string())),
-                }
-            }
-        }
-
-        impl $name {
-            fn get_prefix(input: &$input) -> u8 {
-                let prefix = match input {
-                    $($input::$vname(_) => $name::$vname,)*
-                    $($input::$tname{..} => $name::$tname,)*
-                };
-                prefix.into()
-            }
-        }
-    }
-}
-
-convertible_enum!(
-    enum ContractPrefix {
-        Offered = 1,
-        Accepted,
-        Signed,
-        Confirmed,
-        PreClosed,
-        Closed,
-        FailedAccept,
-        FailedSign,
-        Refunded,
-        Rejected,;
-    },
-    Contract
-);
-
-convertible_enum!(
-    enum ChannelPrefix {
-        Offered = 100,
-        Accepted,
-        Signed,
-        FailedAccept,
-        FailedSign,
-        Closing,
-        Closed,
-        CounterClosed,
-        ClosedPunished,
-        CollaborativelyClosed,
-        Cancelled,;
-    },
-    Channel
-);
-
-convertible_enum!(
-    enum SignedChannelPrefix {;
-        Established = 1,
-        SettledOffered,
-        SettledReceived,
-        SettledAccepted,
-        SettledConfirmed,
-        Settled,
-        Closing,
-        CollaborativeCloseOffered,
-        RenewAccepted,
-        RenewOffered,
-        RenewFinalized,
-        RenewConfirmed,
-    },
-    SignedChannelStateType
-);
 
 fn to_storage_error<T>(e: T) -> Error
 where
