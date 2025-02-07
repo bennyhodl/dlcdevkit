@@ -21,7 +21,7 @@ use crate::{
 
 macro_rules! get_object_in_state {
     ($manager: expr, $id: expr, $state: ident, $peer_id: expr, $object_type: ident, $get_call: ident) => {{
-        let object = $manager.get_store().$get_call($id)?;
+        let object = $manager.get_store().$get_call($id).await?;
         match object {
             Some(c) => match $peer_id as Option<PublicKey> {
                 Some(p) if c.get_counter_party_id() != p => Err(Error::InvalidParameters(format!(

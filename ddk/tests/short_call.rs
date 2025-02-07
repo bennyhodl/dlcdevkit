@@ -102,14 +102,14 @@ async fn short_call() {
         .await
         .expect("bob check failed");
 
-    let contract = bob.ddk.storage.get_contract(&contract_id);
-    assert!(matches!(contract.unwrap().unwrap(), Contract::Confirmed(_)));
+    let contract = bob.ddk.storage.get_contract(&contract_id).await.unwrap();
+    assert!(matches!(contract.unwrap(), Contract::Confirmed(_)));
 
     bob.ddk.wallet.sync().await.unwrap();
     alice.ddk.wallet.sync().await.unwrap();
 
     // Used to check that timelock is reached.
-    let locktime = match alice.ddk.storage.get_contract(&contract_id).unwrap() {
+    let locktime = match alice.ddk.storage.get_contract(&contract_id).await.unwrap() {
         Some(contract) => match contract {
             Contract::Confirmed(signed_contract) => {
                 signed_contract.accepted_contract.dlc_transactions.cets[0]
@@ -157,7 +157,13 @@ async fn short_call() {
 
     sleep(Duration::from_secs(10)).await;
 
-    let contract = bob.ddk.storage.get_contract(&contract_id).unwrap().unwrap();
+    let contract = bob
+        .ddk
+        .storage
+        .get_contract(&contract_id)
+        .await
+        .unwrap()
+        .unwrap();
     assert!(matches!(contract, Contract::PreClosed(_)));
 
     generate_blocks(10);
@@ -165,14 +171,27 @@ async fn short_call() {
     bob.ddk.manager.periodic_check(false).await.unwrap();
     alice.ddk.manager.periodic_check(false).await.unwrap();
 
-    let contract = bob.ddk.storage.get_contract(&contract_id);
-    assert!(matches!(contract.unwrap().unwrap(), Contract::Closed(_)));
+    let contract = bob
+        .ddk
+        .storage
+        .get_contract(&contract_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(matches!(contract, Contract::Closed(_)));
 
-    let bob_contract = bob.ddk.storage.get_contract(&contract_id).unwrap().unwrap();
+    let bob_contract = bob
+        .ddk
+        .storage
+        .get_contract(&contract_id)
+        .await
+        .unwrap()
+        .unwrap();
     let alice_contract = alice
         .ddk
         .storage
         .get_contract(&contract_id)
+        .await
         .unwrap()
         .unwrap();
 
