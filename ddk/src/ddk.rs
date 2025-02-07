@@ -250,9 +250,9 @@ where
         Ok((contract_id, counter_party, accept_dlc))
     }
 
-    pub fn balance(&self) -> anyhow::Result<crate::Balance> {
+    pub async fn balance(&self) -> anyhow::Result<crate::Balance> {
         let wallet_balance = self.wallet.get_balance()?;
-        let contracts = self.storage.get_contracts()?;
+        let contracts = self.storage.get_contracts().await?;
 
         let contract = &contracts
             .iter()

@@ -302,6 +302,7 @@ mod tests {
             if alice
                 .storage
                 .get_contract_offers()
+                .await
                 .unwrap()
                 .iter()
                 .find(|o| o.id == offer.temporary_contract_id)

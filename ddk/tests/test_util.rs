@@ -121,14 +121,14 @@ impl TestSuite {
     }
 }
 
-pub fn wait_for_offer_is_stored(contract_id: ContractId, storage: Arc<MemoryStorage>) {
+pub async fn wait_for_offer_is_stored(contract_id: ContractId, storage: Arc<MemoryStorage>) {
     let mut tries = 0;
     let mut time = Duration::from_secs(1);
     loop {
         if tries == 5 {
             panic!("Never found contract.");
         }
-        let offers = storage.get_contract_offers().unwrap();
+        let offers = storage.get_contract_offers().await.unwrap();
         let offer = offers.iter().find(|o| o.id == contract_id);
         if offer.is_some() {
             break;
