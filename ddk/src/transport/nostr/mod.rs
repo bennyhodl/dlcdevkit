@@ -8,7 +8,7 @@ use crate::{DlcDevKitDlcManager, Oracle, Storage, Transport};
 use async_trait::async_trait;
 use bitcoin::secp256k1::PublicKey as BitcoinPublicKey;
 use dlc_messages::Message;
-use nostr_rs::PublicKey;
+use nostr_rs::key::PublicKey;
 use std::sync::Arc;
 
 #[async_trait]
@@ -69,6 +69,6 @@ fn bitcoin_to_nostr_pubkey(bitcoin_pk: &BitcoinPublicKey) -> PublicKey {
 }
 
 fn nostr_to_bitcoin_pubkey(nostr_pk: &PublicKey) -> BitcoinPublicKey {
-    BitcoinPublicKey::from_slice(&nostr_pk.serialize())
+    BitcoinPublicKey::from_slice(nostr_pk.as_bytes())
         .expect("Should not fail converting nostr key to bitcoin key.")
 }

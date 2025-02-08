@@ -188,9 +188,9 @@ dependencies = [
 
 [[package]]
 name = "async-wsocket"
-version = "0.12.0"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34d2efbc332d581321b37a3012c942b0555483030b5cfc1325a95c386b11e27b"
+checksum = "197c8c4d501d615e193e548ff0225925306b1f413a0f27f0b0952367ff25e41c"
 dependencies = [
  "async-utility",
  "futures",
@@ -552,9 +552,9 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "bytes"
-version = "1.8.0"
+version = "1.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ac0150caa2ae65ca5bd83f25c7de183dea78d4d366469f148435e2acfbad0da"
+checksum = "f61dac84819c6588b558454b194026eb1f09c293b9036ae9b159e74e73ab6cf9"
 
 [[package]]
 name = "cast"
@@ -935,6 +935,7 @@ dependencies = [
  "lightning",
  "lightning-net-tokio",
  "nostr",
+ "nostr-database",
  "nostr-sdk",
  "reqwest 0.12.12",
  "rstest",
@@ -943,7 +944,7 @@ dependencies = [
  "sha2",
  "sled",
  "test-log",
- "thiserror",
+ "thiserror 1.0.65",
  "tokio",
  "tracing",
  "uuid",
@@ -2059,9 +2060,9 @@ checksum = "e664971378a3987224f7a0e10059782035e89899ae403718ee07de85bec42afe"
 
 [[package]]
 name = "negentropy"
-version = "0.4.3"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43a88da9dd148bbcdce323dd6ac47d369b4769d4a3b78c6c52389b9269f77932"
+checksum = "f0efe882e02d206d8d279c20eb40e03baf7cb5136a1476dc084a324fbc3ec42d"
 
 [[package]]
 name = "newline-converter"
@@ -2086,25 +2087,22 @@ dependencies = [
 
 [[package]]
 name = "nostr"
-version = "0.38.0"
+version = "0.39.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af7c1eebe17dd785e52e1f81149c1b50fa6ec92e4ac239840934d1ffbd4f631c"
+checksum = "d90b55eff1f0747d9e423972179672e1aacac3d3ccee4c1281147eaa90d6491e"
 dependencies = [
  "aes",
- "async-trait",
  "base64 0.22.1",
  "bech32 0.11.0",
  "bip39",
- "bitcoin",
+ "bitcoin_hashes 0.14.0",
  "cbc",
  "chacha20",
  "chacha20poly1305",
  "getrandom",
  "instant",
- "negentropy 0.3.1",
- "negentropy 0.4.3",
- "once_cell",
  "scrypt",
+ "secp256k1",
  "serde",
  "serde_json",
  "unicode-normalization",
@@ -2113,26 +2111,25 @@ dependencies = [
 
 [[package]]
 name = "nostr-database"
-version = "0.38.0"
+version = "0.39.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c175f769291b39e399905c1e1f0dcde0ea4959642db50a9a97f47fe73fac947"
+checksum = "ce07b47c77b8e5a856727885fe0ae47b9aa53d8d853a2190dd479b5a0d6e4f52"
 dependencies = [
- "async-trait",
  "nostr",
  "tokio",
 ]
 
 [[package]]
 name = "nostr-relay-pool"
-version = "0.38.0"
+version = "0.39.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc0a11b3d117d729b32efffacf7566ec6845e96e836cfab32c61b818cf90f8e4"
+checksum = "211ac5bbdda1a8eec0c21814a838da832038767a5d354fe2fcc1ca438cae56fd"
 dependencies = [
  "async-utility",
  "async-wsocket",
  "atomic-destructor",
  "negentropy 0.3.1",
- "negentropy 0.4.3",
+ "negentropy 0.5.0",
  "nostr",
  "nostr-database",
  "tokio",
@@ -2141,9 +2138,9 @@ dependencies = [
 
 [[package]]
 name = "nostr-sdk"
-version = "0.38.0"
+version = "0.39.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dce4741c6b4bcb46fe5fdf6834c64b2d8aee090264319aa4749f268e20ace111"
+checksum = "5baca581deb810a88bb51c54d1d7980f4506a64a3e9a19270829b406e47adf31"
 dependencies = [
  "async-utility",
  "nostr",
@@ -2447,9 +2444,9 @@ dependencies = [
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.89"
+version = "1.0.93"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f139b0662de085916d1fb67d2b4169d1addddda1919e696f3252b740b629986e"
+checksum = "60946a68e5f9d28b0dc1c21bb8a97ee7d018a8b322fa57838ba31cc878e22d99"
 dependencies = [
  "unicode-ident",
 ]
@@ -3029,7 +3026,6 @@ version = "1.0.132"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d726bfaff4b320266d395898905d0eba0345aae23b54aee3a737e260fd46db03"
 dependencies = [
- "indexmap 2.6.0",
  "itoa",
  "memchr",
  "ryu",
@@ -3176,9 +3172,9 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "syn"
-version = "2.0.85"
+version = "2.0.98"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5023162dfcd14ef8f32034d8bcd4cc5ddc61ef7a247c024a33e24e1f24d21b56"
+checksum = "36147f1a48ae0ec2b5b3bc5b537d267457555a10dc06f3dbc8cb11ba3006d3b1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3298,7 +3294,16 @@ version = "1.0.65"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d11abd9594d9b38965ef50805c5e469ca9cc6f197f883f717e0269a3057b3d5"
 dependencies = [
- "thiserror-impl",
+ "thiserror-impl 1.0.65",
+]
+
+[[package]]
+name = "thiserror"
+version = "2.0.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d452f284b73e6d76dd36758a0c8684b1d5be31f92b89d07fd5822175732206fc"
+dependencies = [
+ "thiserror-impl 2.0.11",
 ]
 
 [[package]]
@@ -3306,6 +3311,17 @@ name = "thiserror-impl"
 version = "1.0.65"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ae71770322cbd277e69d762a16c444af02aa0575ac0d174f0b9562d3b37f8602"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "thiserror-impl"
+version = "2.0.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "26afc1baea8a989337eeb52b6e72a039780ce45c3edfcc9c5b9d112feeb173c2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3415,7 +3431,7 @@ checksum = "0d4770b8024672c1101b3f6733eab95b18007dbe0847a8afe341fcf79e06043f"
 dependencies = [
  "either",
  "futures-util",
- "thiserror",
+ "thiserror 1.0.65",
  "tokio",
 ]
 
@@ -3432,9 +3448,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-tungstenite"
-version = "0.24.0"
+version = "0.26.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "edc5f74e248dc973e0dbb7b74c7e0d6fcc301c694ff50049504004ef4d0cdcd9"
+checksum = "be4bf6fecd69fcdede0ec680aaf474cdab988f9de6bc73d3758f0160e3b7025a"
 dependencies = [
  "futures-util",
  "log",
@@ -3632,9 +3648,9 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tungstenite"
-version = "0.24.0"
+version = "0.26.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18e5b8366ee7a95b16d32197d0b2604b43a0be89dc5fac9f8e96ccafbaedda8a"
+checksum = "413083a99c579593656008130e29255e54dcaae495be556cc26888f211648c24"
 dependencies = [
  "byteorder",
  "bytes",
@@ -3646,7 +3662,7 @@ dependencies = [
  "rustls 0.23.16",
  "rustls-pki-types",
  "sha1",
- "thiserror",
+ "thiserror 2.0.11",
  "utf-8",
 ]
 

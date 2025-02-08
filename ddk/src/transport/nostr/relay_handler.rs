@@ -70,7 +70,7 @@ impl NostrDlc {
             let since = Timestamp::now();
             let msg_subscription =
                 super::messages::create_dlc_message_filter(since, keys.public_key());
-            nostr_client.subscribe(vec![msg_subscription], None).await?;
+            nostr_client.subscribe(msg_subscription, None).await?;
             tracing::info!(
                 "Listening for messages on {}",
                 keys.public_key().to_string()
@@ -81,9 +81,7 @@ impl NostrDlc {
                     _ = stop_signal.changed() => {
                         if *stop_signal.borrow() {
                             tracing::warn!("Stopping nostr dlc message subscription.");
-                            if let Err(e) = nostr_client.disconnect().await {
-                                tracing::error!(error = e.to_string(), "Error disconnecting from nostr relay.");
-                            }
+                            nostr_client.disconnect().await;
                             break;
                         }
                     },

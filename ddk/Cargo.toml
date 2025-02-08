@@ -19,9 +19,12 @@ lightning = ["dep:lightning-net-tokio"]
 # oracle features
 kormir = ["dep:reqwest"]
 p2pderivatives = ["dep:reqwest"]
+nostr-oracle = ["nostr-database", "nostr"]
 
 # storage features
 sled = ["dep:sled"]
+
+nostr-database = ["dep:nostr-database"]
 
 [dependencies]
 dlc = { version = "0.7.1", features = ["use-serde"] }
@@ -56,8 +59,8 @@ sled = { version = "0.34.7", optional = true }
 
 # Nostr transport dependencies
 base64 = { version = "0.13.0" , optional = true }
-nostr-rs = { package = "nostr", version = "0.38.0", features = ["std", "nip04"], optional = true }
-nostr-sdk = { version = "0.38.0", optional = true }
+nostr-rs = { package = "nostr", version = "0.39.0", features = ["std", "nip04"], optional = true }
+nostr-sdk = { version = "0.39.0", optional = true }
 
 # lightning transport
 lightning-net-tokio = { version = "0.0.125", optional = true }
@@ -68,6 +71,7 @@ kormir = "0.4.1"
 # kormir = { path = "../../kormir/kormir" }
 hmac = "0.12.1"
 sha2 = "0.10"
+nostr-database = { version = "0.39.0", optional = true }
 
 [dev-dependencies]
 test-log = { version = "0.2.16", features = ["trace"] }
