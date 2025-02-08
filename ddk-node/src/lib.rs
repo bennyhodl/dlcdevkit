@@ -10,7 +10,7 @@ use ddk::builder::Builder;
 use ddk::oracle::kormir::KormirOracleClient;
 use ddk::storage::sled::SledStorage;
 use ddk::transport::nostr::NostrDlc;
-use ddk::util::serialize_contract;
+use ddk::util::ser::serialize_contract;
 use ddk::DlcDevKit;
 use ddk::{Oracle, Storage, Transport};
 use ddk_manager::contract::contract_input::ContractInput;
