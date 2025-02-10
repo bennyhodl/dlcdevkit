@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::nostr;
 use crate::DlcDevKitDlcManager;
 use crate::{Oracle, Storage};
 use bitcoin::bip32::Xpriv;
@@ -69,8 +70,8 @@ impl NostrDlc {
         tokio::spawn(async move {
             let since = Timestamp::now();
             let msg_subscription =
-                super::messages::create_dlc_message_filter(since, keys.public_key());
-            nostr_client.subscribe(vec![msg_subscription], None).await?;
+                nostr::messages::create_dlc_message_filter(since, keys.public_key());
+            nostr_client.subscribe(msg_subscription, None).await?;
             tracing::info!(
                 "Listening for messages on {}",
                 keys.public_key().to_string()
@@ -81,9 +82,7 @@ impl NostrDlc {
                     _ = stop_signal.changed() => {
                         if *stop_signal.borrow() {
                             tracing::warn!("Stopping nostr dlc message subscription.");
-                            if let Err(e) = nostr_client.disconnect().await {
-                                tracing::error!(error = e.to_string(), "Error disconnecting from nostr relay.");
-                            }
+                            nostr_client.disconnect().await;
                             break;
                         }
                     },
@@ -94,7 +93,7 @@ impl NostrDlc {
                                 subscription_id: _,
                                 event,
                             } => {
-                                let (pubkey, message, event) = match super::messages::handle_dlc_msg_event(
+                                let (pubkey, message, event) = match nostr::messages::handle_dlc_msg_event(
                                     &event,
                                     &keys.secret_key(),
                                 ) {
@@ -110,7 +109,7 @@ impl NostrDlc {
 
                                 match manager.on_dlc_message(&message, pubkey).await {
                                     Ok(Some(msg)) => {
-                                        let event = super::messages::create_dlc_msg_event(
+                                        let event = nostr::messages::create_dlc_msg_event(
                                             event.pubkey,
                                             Some(event.id),
                                             msg,

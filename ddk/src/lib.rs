@@ -13,7 +13,7 @@ pub mod error;
 pub mod json;
 /// Nostr related functions.
 #[cfg(any(feature = "nostr", feature = "marketplace"))]
-pub(crate) mod nostr;
+pub mod nostr;
 /// Oracle clients.
 pub mod oracle;
 /// Storage implementations.

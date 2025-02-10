@@ -23,7 +23,7 @@ where
     let now = Timestamp::now();
     let oracle_filter = super::create_oracle_message_filter(now);
 
-    client.subscribe(vec![oracle_filter], None).await?;
+    client.subscribe(oracle_filter, None).await?;
 
     while let Ok(notification) = client.notifications().recv().await {
         match notification {
