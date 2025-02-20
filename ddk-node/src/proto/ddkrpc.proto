@@ -9,6 +9,7 @@ service DdkRpc {
   rpc NewAddress (NewAddressRequest) returns (NewAddressResponse);
   rpc WalletBalance (WalletBalanceRequest) returns (WalletBalanceResponse);
   rpc WalletSync (WalletSyncRequest) returns (WalletSyncResponse);
+  rpc Sync (SyncRequest) returns (SyncResponse);
   rpc GetWalletTransactions (GetWalletTransactionsRequest) returns (GetWalletTransactionsResponse);
   rpc ListUtxos (ListUtxosRequest) returns (ListUtxosResponse);
   rpc ListPeers (ListPeersRequest) returns (ListPeersResponse);
@@ -127,4 +128,9 @@ message OracleAnnouncementsResponse {
 }
 
 message WalletSyncRequest {}
+
 message WalletSyncResponse {}
+
+message SyncRequest {}
+
+message SyncResponse {}

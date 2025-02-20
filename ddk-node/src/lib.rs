@@ -23,8 +23,9 @@ use ddkrpc::{
     ListContractsResponse, ListOffersRequest, ListOffersResponse, ListOraclesRequest,
     ListOraclesResponse, ListPeersRequest, ListPeersResponse, ListUtxosRequest, ListUtxosResponse,
     NewAddressRequest, NewAddressResponse, OracleAnnouncementsRequest, OracleAnnouncementsResponse,
-    Peer, SendOfferRequest, SendOfferResponse, SendRequest, SendResponse, WalletBalanceRequest,
-    WalletBalanceResponse, WalletSyncRequest, WalletSyncResponse,
+    Peer, SendOfferRequest, SendOfferResponse, SendRequest, SendResponse, SyncRequest,
+    SyncResponse, WalletBalanceRequest, WalletBalanceResponse, WalletSyncRequest,
+    WalletSyncResponse,
 };
 use ddkrpc::{InfoRequest, InfoResponse};
 use opts::NodeOpts;
@@ -376,5 +377,19 @@ impl DdkRpc for DdkNode {
             .await
             .map_err(|_| Status::new(Code::Aborted, "Did not sync wallet."))?;
         Ok(Response::new(WalletSyncResponse {}))
+    }
+
+    async fn sync(&self, _request: Request<SyncRequest>) -> Result<Response<SyncResponse>, Status> {
+        if let Err(e) = self.node.manager.periodic_check(false).await {
+            tracing::error!("Error syncing: {:?}", e);
+            return Err(Status::new(Code::Internal, "Error syncing."));
+        };
+
+        if let Err(e) = self.node.wallet.sync().await {
+            tracing::error!("Error syncing wallet: {:?}", e);
+            return Err(Status::new(Code::Internal, "Error syncing wallet."));
+        };
+
+        Ok(Response::new(SyncResponse {}))
     }
 }
