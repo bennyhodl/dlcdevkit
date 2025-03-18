@@ -69,7 +69,7 @@ pub fn handle_dlc_msg_event(
         "Received DLC message event."
     );
 
-    let message = parse_dlc_msg_event(&event, secret_key)?;
+    let message = parse_dlc_msg_event(event, secret_key)?;
 
     let pubkey = nostr_to_bitcoin_pubkey(&event.pubkey);
 
@@ -89,7 +89,7 @@ pub fn create_dlc_msg_event(
 
     let p_tags = Tag::public_key(to);
 
-    let e_tags = event_id.map(|e| Tag::event(e));
+    let e_tags = event_id.map(Tag::event);
 
     let tags = [Some(p_tags), e_tags]
         .into_iter()
@@ -98,7 +98,7 @@ pub fn create_dlc_msg_event(
 
     let event = EventBuilder::new(DLC_MESSAGE_KIND, content)
         .tags(tags)
-        .sign_with_keys(&keys)?;
+        .sign_with_keys(keys)?;
 
     Ok(event)
 }

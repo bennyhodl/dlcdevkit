@@ -48,10 +48,8 @@ impl NostrDlc {
             .expect("Converting from nostr public key to bitcoin public key should not fail.");
 
         // Convert to full PublicKey (this will assume even y coordinate)
-        let bitcoin_pk =
-            BitcoinPublicKey::from_x_only_public_key(xonly, bitcoin::key::Parity::Even);
 
-        bitcoin_pk
+        BitcoinPublicKey::from_x_only_public_key(xonly, bitcoin::key::Parity::Even)
     }
 
     pub fn start<S: Storage, O: Oracle>(
@@ -88,47 +86,45 @@ impl NostrDlc {
                         }
                     },
                     Ok(notification) = notifications.recv() => {
-                        match notification {
-                            RelayPoolNotification::Event {
-                                relay_url: _,
-                                subscription_id: _,
-                                event,
-                            } => {
-                                let (pubkey, message, event) = match super::messages::handle_dlc_msg_event(
-                                    &event,
-                                    &keys.secret_key(),
-                                ) {
-                                    Ok(msg) => {
-                                        tracing::info!(pubkey=msg.0.to_string(), "Received DLC nostr message.");
-                                        (msg.0, msg.1, msg.2)
-                                    },
-                                    Err(_) => {
-                                        tracing::error!("Could not parse event {}", event.id);
-                                        continue;
-                                    }
-                                };
 
-                                match manager.on_dlc_message(&message, pubkey).await {
-                                    Ok(Some(msg)) => {
-                                        let event = super::messages::create_dlc_msg_event(
-                                            event.pubkey,
-                                            Some(event.id),
-                                            msg,
-                                            &keys,
-                                        )
-                                        .expect("no message");
-                                        nostr_client
-                                            .send_event(event)
-                                            .await
-                                            .expect("Break out into functions.");
-                                    }
-                                    Ok(None) => (),
-                                    Err(_) => {
-                                        // handle the error case and send
-                                    }
+                        if let RelayPoolNotification::Event {
+                            relay_url: _,
+                            subscription_id: _,
+                            event,
+                        } = notification {
+                            let (pubkey, message, event) = match super::messages::handle_dlc_msg_event(
+                                &event,
+                                keys.secret_key(),
+                            ) {
+                                Ok(msg) => {
+                                    tracing::info!(pubkey=msg.0.to_string(), "Received DLC nostr message.");
+                                    (msg.0, msg.1, msg.2)
+                                },
+                                Err(_) => {
+                                    tracing::error!("Could not parse event {}", event.id);
+                                    continue;
+                                }
+                            };
+
+                            match manager.on_dlc_message(&message, pubkey).await {
+                                Ok(Some(msg)) => {
+                                    let event = super::messages::create_dlc_msg_event(
+                                        event.pubkey,
+                                        Some(event.id),
+                                        msg,
+                                        &keys,
+                                    )
+                                    .expect("no message");
+                                    nostr_client
+                                        .send_event(event)
+                                        .await
+                                        .expect("Break out into functions.");
+                                }
+                                Ok(None) => (),
+                                Err(_) => {
+                                    // handle the error case and send
                                 }
                             }
-                            _ => ()
                         }
                     }
                 }

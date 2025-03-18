@@ -269,7 +269,7 @@ impl DlcDevKitWallet {
 
         wallet.sign(&mut psbt, SignOptions::default())?;
 
-        let tx = psbt.extract_tx()?;
+        let tx = psbt.extract_tx().map_err(|_| WalletError::ExtractTx)?;
 
         self.blockchain.async_client.broadcast(&tx).await?;
 
@@ -293,7 +293,7 @@ impl DlcDevKitWallet {
         tx_builder.drain_to(address.script_pubkey());
         let mut psbt = tx_builder.finish().unwrap();
         wallet.sign(&mut psbt, SignOptions::default()).unwrap();
-        let tx = psbt.extract_tx()?;
+        let tx = psbt.extract_tx().map_err(|_| WalletError::ExtractTx)?;
         self.blockchain.async_client.broadcast(&tx).await?;
 
         Ok(tx.compute_txid())
