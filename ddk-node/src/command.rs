@@ -5,7 +5,7 @@ use crate::ddkrpc::{
     AcceptOfferRequest, ConnectRequest, GetWalletTransactionsRequest, InfoRequest,
     ListContractsRequest, ListOffersRequest, ListOraclesRequest, ListPeersRequest,
     ListUtxosRequest, NewAddressRequest, OracleAnnouncementsRequest, SendOfferRequest, SendRequest,
-    WalletBalanceRequest, WalletSyncRequest,
+    SyncRequest, WalletBalanceRequest, WalletSyncRequest,
 };
 use anyhow::anyhow;
 use bitcoin::Transaction;
@@ -185,6 +185,10 @@ pub async fn cli_command(
                 })
                 .await?;
             print!("Connected to {}", parts[0])
+        }
+        CliCommand::Sync => {
+            let _ = client.sync(SyncRequest {}).await?.into_inner();
+            println!("Synced.")
         }
     }
 

@@ -6,7 +6,7 @@ use tokio::sync::watch;
 
 use crate::{DlcDevKitDlcManager, Oracle, Storage, Transport};
 use async_trait::async_trait;
-use bitcoin::secp256k1::PublicKey as BitcoinPublicKey;
+use dlc::secp256k1_zkp::PublicKey as BitcoinPublicKey;
 use dlc_messages::Message;
 use nostr_rs::PublicKey;
 use std::sync::Arc;
@@ -69,6 +69,24 @@ fn bitcoin_to_nostr_pubkey(bitcoin_pk: &BitcoinPublicKey) -> PublicKey {
 }
 
 fn nostr_to_bitcoin_pubkey(nostr_pk: &PublicKey) -> BitcoinPublicKey {
-    BitcoinPublicKey::from_slice(&nostr_pk.serialize())
-        .expect("Should not fail converting nostr key to bitcoin key.")
+    nostr_pk.public_key(bitcoin::key::Parity::Even)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use super::*;
+
+    #[test]
+    fn test_nostr_to_bitcoin_pubkey() {
+        let nostr_pk = "7622b0ca2b5ad4d7441784a97bfc50c69d09853a640ad793a4fb9d238c7e0b15";
+        let bitcoin_pk = "027622b0ca2b5ad4d7441784a97bfc50c69d09853a640ad793a4fb9d238c7e0b15";
+        let nostr_pk_2 = bitcoin_to_nostr_pubkey(&BitcoinPublicKey::from_str(bitcoin_pk).unwrap());
+        assert_eq!(nostr_pk_2.to_string(), nostr_pk);
+
+        let nostr = PublicKey::from_str(nostr_pk).unwrap();
+        let btc_pk = nostr_to_bitcoin_pubkey(&nostr);
+        assert_eq!(btc_pk.to_string(), bitcoin_pk);
+    }
 }

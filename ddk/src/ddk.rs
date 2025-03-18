@@ -108,7 +108,7 @@ where
 
         let processor = self.sender.clone();
         runtime.spawn(async move {
-            let mut timer = tokio::time::interval(Duration::from_secs(5));
+            let mut timer = tokio::time::interval(Duration::from_secs(30));
             loop {
                 timer.tick().await;
                 processor
@@ -241,7 +241,11 @@ where
 
         let contract_id = hex::encode(contract_id);
         let counter_party = public_key.to_string();
-        tracing::info!(counter_party, contract_id, "Accepted DLC contract.");
+        tracing::info!(
+            counter_party,
+            contract_id,
+            "Accepted and sent accept DLC contract."
+        );
 
         Ok((contract_id, counter_party, accept_dlc))
     }
