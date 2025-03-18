@@ -248,7 +248,7 @@ impl EnumDescriptor {
                 let hash =
                     bitcoin::hashes::sha256::Hash::hash(x.outcome.as_bytes()).to_byte_array();
                 let message = vec![Message::from_digest(hash)];
-                std::iter::repeat(message).take(threshold).collect()
+                std::iter::repeat_n(message, threshold).collect()
             })
             .collect();
         let combination_iter = CombinationIterator::new(oracle_infos.len(), threshold);
