@@ -8,7 +8,7 @@ repository = "https://github.com/bennyhodl/dlcdevkit"
 edition = "2021"
 
 [dependencies]
-ddk = { version = "0.0.14", path = "../ddk", features = ["lightning", "marketplace", "sled", "kormir"] }
+ddk = { version = "0.0.14", path = "../ddk", features = ["marketplace", "sled", "kormir", "nostr"] }
 ddk-manager = { version = "0.7.3", path = "../ddk-manager", features = ["use-serde"] }
 ddk-payouts = { version = "0.0.14", path = "../payouts" }
 

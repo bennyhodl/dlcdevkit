@@ -9,7 +9,7 @@ use bitcoin::{Address, Amount, FeeRate, Network};
 use ddk::builder::Builder;
 use ddk::oracle::kormir::KormirOracleClient;
 use ddk::storage::sled::SledStorage;
-use ddk::transport::lightning::LightningTransport;
+use ddk::transport::nostr::NostrDlc;
 use ddk::util::serialize_contract;
 use ddk::DlcDevKit;
 use ddk::{Oracle, Storage, Transport};
@@ -23,9 +23,8 @@ use ddkrpc::{
     ListContractsResponse, ListOffersRequest, ListOffersResponse, ListOraclesRequest,
     ListOraclesResponse, ListPeersRequest, ListPeersResponse, ListUtxosRequest, ListUtxosResponse,
     NewAddressRequest, NewAddressResponse, OracleAnnouncementsRequest, OracleAnnouncementsResponse,
-    Peer, SendOfferRequest, SendOfferResponse, SendRequest, SendResponse, SyncRequest,
-    SyncResponse, WalletBalanceRequest, WalletBalanceResponse, WalletSyncRequest,
-    WalletSyncResponse,
+    SendOfferRequest, SendOfferResponse, SendRequest, SendResponse, SyncRequest, SyncResponse,
+    WalletBalanceRequest, WalletBalanceResponse, WalletSyncRequest, WalletSyncResponse,
 };
 use ddkrpc::{InfoRequest, InfoResponse};
 use opts::NodeOpts;
@@ -37,7 +36,7 @@ use tonic::Response;
 use tonic::Status;
 use tonic::{async_trait, Code};
 
-type Ddk = DlcDevKit<LightningTransport, SledStorage, KormirOracleClient>;
+type Ddk = DlcDevKit<NostrDlc, SledStorage, KormirOracleClient>;
 
 #[derive(Clone)]
 pub struct DdkNode {
@@ -67,10 +66,14 @@ impl DdkNode {
 
         tracing::info!("Starting DDK node.");
 
-        let transport = Arc::new(LightningTransport::new(
-            &seed_bytes.private_key.secret_bytes(),
-            opts.listening_port,
-        )?);
+        let transport = Arc::new(
+            NostrDlc::new(
+                &seed_bytes.private_key.secret_bytes(),
+                "wss://nostr.dlcdevkit.com",
+                network,
+            )
+            .await?,
+        );
 
         let storage = Arc::new(SledStorage::new(
             storage_path.join("sled_db").to_str().unwrap(),
@@ -112,7 +115,7 @@ impl DdkRpc for DdkNode {
     #[tracing::instrument(skip(self, _request), name = "grpc_server")]
     async fn info(&self, _request: Request<InfoRequest>) -> Result<Response<InfoResponse>, Status> {
         tracing::info!("Request for node info.");
-        let pubkey = self.node.transport.node_id.to_string();
+        let pubkey = self.node.transport.public_key().to_string();
         let transport = self.node.transport.name();
         let oracle = self.node.oracle.name();
         let response = InfoResponse {
@@ -271,18 +274,19 @@ impl DdkRpc for DdkNode {
         _request: Request<ListPeersRequest>,
     ) -> Result<Response<ListPeersResponse>, Status> {
         tracing::info!("List peers request");
-        let peers = self.node.transport.peer_manager.list_peers();
-        let peers = peers
-            .iter()
-            .map(|peer| {
-                let host = match &peer.socket_address {
-                    Some(h) => h.to_string(),
-                    None => "".to_string(),
-                };
-                let pubkey = peer.counterparty_node_id.to_string();
-                Peer { pubkey, host }
-            })
-            .collect::<Vec<Peer>>();
+        let peers = vec![];
+        // let peers = self.node.transport.peer_manager.list_peers();
+        // let peers = peers
+        //     .iter()
+        //     .map(|peer| {
+        //         let host = match &peer.socket_address {
+        //             Some(h) => h.to_string(),
+        //             None => "".to_string(),
+        //         };
+        //         let pubkey = peer.counterparty_node_id.to_string();
+        //         Peer { pubkey, host }
+        //     })
+        //     .collect::<Vec<Peer>>();
 
         Ok(Response::new(ListPeersResponse { peers }))
     }
