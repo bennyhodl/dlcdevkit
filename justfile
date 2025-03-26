@@ -1,7 +1,4 @@
 deps:
-  - docker compose --profile "*" up -d
-
-ci-deps:
   - docker compose up -d
 
 bc *args:
@@ -18,3 +15,9 @@ cli-one *args:
 
 cli-two *args:
   - cargo run --bin ddk-cli -- --server http://127.0.0.1:3031 {{args}}
+
+up:
+  - DATABASE_URL=postgres://loco:loco@localhost:5432/sons-of-liberty_development sqlx migrate run --source ddk/src/storage/postgres/migrations
+
+down:
+  - DATABASE_URL=postgres://loco:loco@localhost:5432/sons-of-liberty_development sqlx migrate revert --source ddk/src/storage/postgres/migrations

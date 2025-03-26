@@ -86,7 +86,7 @@ pub async fn cli_command(
             let contract_values = contracts
                 .iter()
                 .map(|c| {
-                    let contract: Contract = util::deserialize_contract(c).unwrap();
+                    let contract: Contract = util::ser::deserialize_contract(c).unwrap();
                     contract_to_value(&contract)
                 })
                 .collect::<Vec<Value>>();

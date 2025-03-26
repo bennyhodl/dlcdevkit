@@ -43,3 +43,10 @@ pub enum WalletError {
     #[error("Error converting to descriptor.")]
     Descriptor(#[from] bdk_wallet::descriptor::DescriptorError),
 }
+
+pub fn to_storage_error<T>(e: T) -> ddk_manager::error::Error
+where
+    T: std::fmt::Display,
+{
+    ddk_manager::error::Error::StorageError(e.to_string())
+}

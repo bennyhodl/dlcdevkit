@@ -162,7 +162,7 @@ impl Storage for SledStorage {
                 None => vec![],
             };
         let mut announcements =
-            crate::util::filter_expired_oracle_announcements(stored_announcements);
+            crate::util::ser::filter_expired_oracle_announcements(stored_announcements);
         announcements.push(announcement);
 
         let serialize_announcements = serde_json::to_vec(&announcements)?;
