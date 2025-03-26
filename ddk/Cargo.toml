@@ -27,7 +27,7 @@ postgres = ["dep:sqlx", "sqlx/postgres"]
 
 [dependencies]
 dlc = { version = "0.7.1", features = ["use-serde"] }
-ddk-manager = { path = "../ddk-manager", version = "0.7.3", features = ["use-serde"] }
+ddk-manager = { path = "../ddk-manager", version = "0.7.4", features = ["use-serde"] }
 dlc-messages = { version = "0.7.1", features = [ "use-serde"] }
 dlc-trie = { version = "0.7.1", features = ["use-serde"] }
 # dlc = { path = "../../rust-dlc/dlc", features = ["use-serde"] }

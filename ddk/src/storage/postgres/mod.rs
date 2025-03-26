@@ -291,12 +291,12 @@ mod tests {
         .await
         .unwrap();
         let accept = include_bytes!("../../../tests/data/dlc_storage/Accepted");
-        let signed = include_bytes!("../../../tests/data/dlc_storage/Signed");
-        let confirmed = include_bytes!("../../../tests/data/dlc_storage/Confirmed");
-        let preclosed = include_bytes!("../../../tests/data/dlc_storage/PreClosed");
-        let offered = include_bytes!("../../../tests/data/dlc_storage/Offered");
+        let _signed = include_bytes!("../../../tests/data/dlc_storage/Signed");
+        let _confirmed = include_bytes!("../../../tests/data/dlc_storage/Confirmed");
+        let _preclosed = include_bytes!("../../../tests/data/dlc_storage/PreClosed");
+        let _offered = include_bytes!("../../../tests/data/dlc_storage/Offered");
 
-        let accepted_contract = deserialize_object::<AcceptedContract>(&accept.to_vec());
+        let _accepted_contract = deserialize_object::<AcceptedContract>(&accept.to_vec());
         let serialized = include_bytes!("../../../tests/data/dlc_storage/Offered");
         let offered_contract = deserialize_object::<OfferedContract>(&serialized.to_vec());
         let result = store.create_contract(&offered_contract).await;
