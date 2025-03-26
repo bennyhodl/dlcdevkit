@@ -1,14 +1,15 @@
-mod messages;
 mod relay_handler;
 
+use bitcoin::key::Parity;
+use nostr_rs::PublicKey;
 pub use relay_handler::NostrDlc;
 use tokio::sync::watch;
 
+use crate::nostr;
 use crate::{DlcDevKitDlcManager, Oracle, Storage, Transport};
 use async_trait::async_trait;
 use dlc::secp256k1_zkp::PublicKey as BitcoinPublicKey;
 use dlc_messages::Message;
-use nostr_rs::PublicKey;
 use std::sync::Arc;
 
 #[async_trait]
@@ -18,7 +19,7 @@ impl Transport for NostrDlc {
     }
 
     fn public_key(&self) -> BitcoinPublicKey {
-        nostr_to_bitcoin_pubkey(&self.keys.public_key)
+        nostr::nostr_to_bitcoin_pubkey(&self.keys.public_key)
     }
 
     /// Get messages that have not been processed yet.
@@ -37,14 +38,15 @@ impl Transport for NostrDlc {
     }
     /// Send a message to a specific counterparty.
     async fn send_message(&self, counterparty: BitcoinPublicKey, message: Message) {
-        let nostr_counterparty = bitcoin_to_nostr_pubkey(&counterparty);
+        let nostr_counterparty = nostr::bitcoin_to_nostr_pubkey(&counterparty);
         tracing::info!(
             bitcoin_pk = counterparty.to_string(),
             nostr_pk = nostr_counterparty.to_string(),
             "Sending nostr message."
         );
         let event =
-            messages::create_dlc_msg_event(nostr_counterparty, None, message, &self.keys).unwrap();
+            nostr::messages::create_dlc_msg_event(nostr_counterparty, None, message, &self.keys)
+                .unwrap();
         match self.client.send_event(event).await {
             Err(e) => tracing::error!(error = e.to_string(), "Failed to send nostr event."),
             Ok(e) => tracing::info!(event_id = e.val.to_string(), "Sent DLC message event."),
@@ -69,7 +71,8 @@ fn bitcoin_to_nostr_pubkey(bitcoin_pk: &BitcoinPublicKey) -> PublicKey {
 }
 
 fn nostr_to_bitcoin_pubkey(nostr_pk: &PublicKey) -> BitcoinPublicKey {
-    nostr_pk.public_key(bitcoin::key::Parity::Even)
+    let xonly = nostr_pk.xonly().expect("Could not get xonly public key.");
+    BitcoinPublicKey::from_x_only_public_key(xonly, Parity::Even)
 }
 
 #[cfg(test)]
