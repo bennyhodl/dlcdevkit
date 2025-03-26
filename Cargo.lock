@@ -1849,7 +1849,9 @@ dependencies = [
 
 [[package]]
 name = "kormir"
-version = "0.4.2"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b49390cd20115267c6b9d60dffb2f68a9d0e83f6aca9ae336e3892f11a7b8ff6"
 dependencies = [
  "base64 0.13.1",
  "bitcoin",
