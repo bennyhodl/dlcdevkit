@@ -1,7 +1,4 @@
 deps:
-  - docker compose --profile "*" up -d
-
-ci-deps:
   - docker compose up -d
 
 bc *args:
