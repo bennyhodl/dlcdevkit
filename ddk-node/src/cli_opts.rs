@@ -27,6 +27,9 @@ pub enum CliCommand {
         #[arg(help = "The counter party to connect to. <PUBKEY>@<HOST>")]
         connect_string: String,
     },
+    /// Sync the wallet and contracts.
+    #[command(about = "Sync the wallet and contracts.")]
+    Sync,
 }
 
 #[derive(Parser, Clone, Debug)]

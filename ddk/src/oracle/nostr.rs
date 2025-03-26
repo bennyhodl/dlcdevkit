@@ -156,8 +156,6 @@ impl ddk_manager::Oracle for NostrOracle {
             }
         }
 
-        println!("Fetching event from relay...");
-
         let event = self
             .client
             .fetch_events(
@@ -168,8 +166,6 @@ impl ddk_manager::Oracle for NostrOracle {
             .map_err(|_| {
                 ManagerError::OracleError(format!("Failed to fetch event: {}", event_id))
             })?;
-
-        println!("Event: {:?}", event);
 
         if let Some(event) = event.first() {
             let announcement = serde_json::from_str(&event.content).unwrap();
