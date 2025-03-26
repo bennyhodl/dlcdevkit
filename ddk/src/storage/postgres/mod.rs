@@ -1,25 +1,32 @@
 use super::sqlx::SqlxError;
+use crate::error::WalletError;
+use crate::transport::PeerInformation;
+use crate::Storage;
 use crate::{
     error::to_storage_error,
     storage::sqlx::ContractRow,
     util::ser::{deserialize_contract, serialize_contract, ContractPrefix},
 };
+use bdk_sqlx::Store;
+use bdk_wallet::ChangeSet;
 use ddk_manager::{
     contract::{
         offered_contract::OfferedContract, ser::Serializable, signed_contract::SignedContract,
         Contract, PreClosedContract,
     },
-    Storage,
+    Storage as ManagerStorage,
 };
-use sqlx::{Database, Pool, Postgres};
+use dlc_messages::oracle_msgs::OracleAnnouncement;
+use sqlx::{Pool, Postgres};
 
 /// Manages a pool of database connections.
-#[derive(Debug, Clone)]
-pub struct Store<DB: Database> {
-    pub(crate) pool: Pool<DB>,
+#[derive(Debug)]
+pub struct PostgresStore {
+    pub(crate) pool: Pool<Postgres>,
+    pub(crate) bdk_pool: Store<Postgres>,
 }
 
-impl Store<Postgres> {
+impl PostgresStore {
     pub async fn new(url: &str, migrations: bool) -> Result<Self, SqlxError> {
         let pool = Pool::<Postgres>::connect(url).await?;
         if migrations {
@@ -28,12 +35,43 @@ impl Store<Postgres> {
                 .run(&pool)
                 .await?;
         }
-        Ok(Self { pool })
+
+        let bdk_pool = Store::<Postgres>::new(pool.clone(), "bdk_store".to_string(), false)
+            .await
+            .unwrap();
+
+        Ok(Self { pool, bdk_pool })
+    }
+}
+
+impl Storage for PostgresStore {
+    fn initialize_bdk(&self) -> Result<ChangeSet, WalletError> {
+        Ok(ChangeSet::default())
+    }
+
+    fn persist_bdk(&self, _changeset: &ChangeSet) -> Result<(), WalletError> {
+        Ok(())
+    }
+
+    fn list_peers(&self) -> anyhow::Result<Vec<PeerInformation>> {
+        unimplemented!()
+    }
+
+    fn save_peer(&self, _peer: PeerInformation) -> anyhow::Result<()> {
+        unimplemented!()
+    }
+
+    fn save_announcement(&self, _announcement: OracleAnnouncement) -> anyhow::Result<()> {
+        unimplemented!()
+    }
+
+    fn get_marketplace_announcements(&self) -> anyhow::Result<Vec<OracleAnnouncement>> {
+        unimplemented!()
     }
 }
 
 #[async_trait::async_trait]
-impl Storage for Store<Postgres> {
+impl ManagerStorage for PostgresStore {
     async fn get_contract(
         &self,
         id: &ddk_manager::ContractId,
@@ -284,7 +322,7 @@ mod tests {
 
     #[tokio::test]
     async fn postgres() {
-        let store = Store::new(
+        let store = PostgresStore::new(
             "postgres://loco:loco@localhost:5432/sons-of-liberty_development",
             true,
         )
