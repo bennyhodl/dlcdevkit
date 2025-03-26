@@ -1,6 +1,6 @@
 [package]
 name = "ddk-payouts"
-version = "0.0.14"
+version = "0.0.15"
 authors = ["benny b <ben@bitcoinbay.foundation>"]
 description = "Library to build payout functions for DLC contracts."
 license = "MIT"
