@@ -46,7 +46,8 @@ use secp256k1_zkp::{
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::string::ToString;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 /// The number of confirmations required before moving the the confirmed state.
 pub const NB_CONFIRMATIONS: u32 = 6;
@@ -133,7 +134,8 @@ macro_rules! check_for_timed_out_channels {
     ($manager: ident, $state: ident) => {
         let channels = $manager
             .store
-            .get_signed_channels(Some(SignedChannelStateType::$state))?;
+            .get_signed_channels(Some(SignedChannelStateType::$state))
+            .await?;
 
         for channel in channels {
             if let SignedChannelState::$state { timeout, .. } = channel.state {
@@ -173,7 +175,8 @@ where
         let init_height = blockchain.get_blockchain_height().await?;
         let chain_monitor = Mutex::new(
             store
-                .get_chain_monitor()?
+                .get_chain_monitor()
+                .await?
                 .unwrap_or(ChainMonitor::new(init_height)),
         );
 
@@ -205,63 +208,63 @@ where
     ) -> Result<Option<DlcMessage>, Error> {
         match msg {
             DlcMessage::Offer(o) => {
-                self.on_offer_message(o, counter_party)?;
+                self.on_offer_message(o, counter_party).await?;
                 Ok(None)
             }
-            DlcMessage::Accept(a) => Ok(Some(self.on_accept_message(a, &counter_party)?)),
+            DlcMessage::Accept(a) => Ok(Some(self.on_accept_message(a, &counter_party).await?)),
             DlcMessage::Sign(s) => {
                 self.on_sign_message(s, &counter_party).await?;
                 Ok(None)
             }
             DlcMessage::OfferChannel(o) => {
-                self.on_offer_channel(o, counter_party)?;
+                self.on_offer_channel(o, counter_party).await?;
                 Ok(None)
             }
             DlcMessage::AcceptChannel(a) => Ok(Some(DlcMessage::SignChannel(
-                self.on_accept_channel(a, &counter_party)?,
+                self.on_accept_channel(a, &counter_party).await?,
             ))),
             DlcMessage::SignChannel(s) => {
                 self.on_sign_channel(s, &counter_party).await?;
                 Ok(None)
             }
-            DlcMessage::SettleOffer(s) => match self.on_settle_offer(s, &counter_party)? {
+            DlcMessage::SettleOffer(s) => match self.on_settle_offer(s, &counter_party).await? {
                 Some(msg) => Ok(Some(DlcMessage::Reject(msg))),
                 None => Ok(None),
             },
             DlcMessage::SettleAccept(s) => Ok(Some(DlcMessage::SettleConfirm(
-                self.on_settle_accept(s, &counter_party)?,
+                self.on_settle_accept(s, &counter_party).await?,
             ))),
             DlcMessage::SettleConfirm(s) => Ok(Some(DlcMessage::SettleFinalize(
-                self.on_settle_confirm(s, &counter_party)?,
+                self.on_settle_confirm(s, &counter_party).await?,
             ))),
             DlcMessage::SettleFinalize(s) => {
-                self.on_settle_finalize(s, &counter_party)?;
+                self.on_settle_finalize(s, &counter_party).await?;
                 Ok(None)
             }
-            DlcMessage::RenewOffer(r) => match self.on_renew_offer(r, &counter_party)? {
+            DlcMessage::RenewOffer(r) => match self.on_renew_offer(r, &counter_party).await? {
                 Some(msg) => Ok(Some(DlcMessage::Reject(msg))),
                 None => Ok(None),
             },
             DlcMessage::RenewAccept(r) => Ok(Some(DlcMessage::RenewConfirm(
-                self.on_renew_accept(r, &counter_party)?,
+                self.on_renew_accept(r, &counter_party).await?,
             ))),
             DlcMessage::RenewConfirm(r) => Ok(Some(DlcMessage::RenewFinalize(
-                self.on_renew_confirm(r, &counter_party)?,
+                self.on_renew_confirm(r, &counter_party).await?,
             ))),
             DlcMessage::RenewFinalize(r) => {
-                let revoke = self.on_renew_finalize(r, &counter_party)?;
+                let revoke = self.on_renew_finalize(r, &counter_party).await?;
                 Ok(Some(DlcMessage::RenewRevoke(revoke)))
             }
             DlcMessage::RenewRevoke(r) => {
-                self.on_renew_revoke(r, &counter_party)?;
+                self.on_renew_revoke(r, &counter_party).await?;
                 Ok(None)
             }
             DlcMessage::CollaborativeCloseOffer(c) => {
-                self.on_collaborative_close_offer(c, &counter_party)?;
+                self.on_collaborative_close_offer(c, &counter_party).await?;
                 Ok(None)
             }
             DlcMessage::Reject(r) => {
-                self.on_reject(r, &counter_party)?;
+                self.on_reject(r, &counter_party).await?;
                 Ok(None)
             }
         }
@@ -309,7 +312,7 @@ where
 
         offered_contract.validate()?;
 
-        self.store.create_contract(&offered_contract)?;
+        self.store.create_contract(&offered_contract).await?;
 
         Ok(offer_msg)
     }
@@ -341,7 +344,8 @@ where
         let contract_id = accepted_contract.get_contract_id();
 
         self.store
-            .update_contract(&Contract::Accepted(accepted_contract))?;
+            .update_contract(&Contract::Accepted(accepted_contract))
+            .await?;
 
         Ok((contract_id, counter_party, accept_msg))
     }
@@ -353,7 +357,7 @@ where
     /// determine when pending transactions reach confirmation.
     pub async fn periodic_chain_monitor(&self) -> Result<(), Error> {
         let cur_height = self.blockchain.get_blockchain_height().await?;
-        let last_height = self.chain_monitor.lock().unwrap().last_height;
+        let last_height = self.chain_monitor.lock().await.last_height;
 
         // TODO(luckysori): We could end up reprocessing a block at
         // the same height if there is a reorg.
@@ -368,7 +372,7 @@ where
 
             self.chain_monitor
                 .lock()
-                .unwrap()
+                .await
                 .process_block(&block, height);
         }
 
@@ -390,7 +394,7 @@ where
         Ok(())
     }
 
-    fn on_offer_message(
+    async fn on_offer_message(
         &self,
         offered_message: &OfferDlc,
         counter_party: PublicKey,
@@ -403,18 +407,18 @@ where
             OfferedContract::try_from_offer_dlc(offered_message, counter_party, keys_id)?;
         contract.validate()?;
 
-        if self.store.get_contract(&contract.id)?.is_some() {
+        if self.store.get_contract(&contract.id).await?.is_some() {
             return Err(Error::InvalidParameters(
                 "Contract with identical id already exists".to_string(),
             ));
         }
 
-        self.store.create_contract(&contract)?;
+        self.store.create_contract(&contract).await?;
 
         Ok(())
     }
 
-    fn on_accept_message(
+    async fn on_accept_message(
         &self,
         accept_msg: &AcceptDlc,
         counter_party: &PublicKey,
@@ -434,7 +438,11 @@ where
             &self.signer_provider,
         ) {
             Ok(contract) => contract,
-            Err(e) => return self.accept_fail_on_error(offered_contract, accept_msg.clone(), e),
+            Err(e) => {
+                return self
+                    .accept_fail_on_error(offered_contract, accept_msg.clone(), e)
+                    .await
+            }
         };
 
         self.wallet.import_address(&Address::p2wsh(
@@ -446,7 +454,8 @@ where
         ))?;
 
         self.store
-            .update_contract(&Contract::Signed(signed_contract))?;
+            .update_contract(&Contract::Signed(signed_contract))
+            .await?;
 
         Ok(DlcMessage::Sign(signed_msg))
     }
@@ -466,11 +475,16 @@ where
             &self.wallet,
         ) {
             Ok(contract) => contract,
-            Err(e) => return self.sign_fail_on_error(accepted_contract, sign_message.clone(), e),
+            Err(e) => {
+                return self
+                    .sign_fail_on_error(accepted_contract, sign_message.clone(), e)
+                    .await
+            }
         };
 
         self.store
-            .update_contract(&Contract::Signed(signed_contract))?;
+            .update_contract(&Contract::Signed(signed_contract))
+            .await?;
 
         self.blockchain.send_transaction(&fund_tx).await?;
 
@@ -494,7 +508,7 @@ where
         Ok(announcements)
     }
 
-    fn sign_fail_on_error<R>(
+    async fn sign_fail_on_error<R>(
         &self,
         accepted_contract: AcceptedContract,
         sign_message: SignDlc,
@@ -506,11 +520,12 @@ where
                 accepted_contract,
                 sign_message,
                 error_message: e.to_string(),
-            }))?;
+            }))
+            .await?;
         Err(e)
     }
 
-    fn accept_fail_on_error<R>(
+    async fn accept_fail_on_error<R>(
         &self,
         offered_contract: OfferedContract,
         accept_message: AcceptDlc,
@@ -522,7 +537,8 @@ where
                 offered_contract,
                 accept_message,
                 error_message: e.to_string(),
-            }))?;
+            }))
+            .await?;
         Err(e)
     }
 
@@ -544,7 +560,8 @@ where
                 "Marking contract as confirmed."
             );
             self.store
-                .update_contract(&Contract::Confirmed(contract.clone()))?;
+                .update_contract(&Contract::Confirmed(contract.clone()))
+                .await?;
         } else {
             tracing::info!(
                 confirmations,
@@ -557,7 +574,7 @@ where
     }
 
     async fn check_signed_contracts(&self) -> Result<(), Error> {
-        for c in self.store.get_signed_contracts()? {
+        for c in self.store.get_signed_contracts().await? {
             if let Err(e) = self.check_signed_contract(&c).await {
                 tracing::error!(
                     "Error checking confirmed contract {}: {}",
@@ -571,7 +588,7 @@ where
     }
 
     async fn check_confirmed_contracts(&self) -> Result<(), Error> {
-        for c in self.store.get_confirmed_contracts()? {
+        for c in self.store.get_confirmed_contracts().await? {
             // Confirmed contracts from channel are processed in channel specific methods.
             if c.channel_id.is_some() {
                 continue;
@@ -688,7 +705,7 @@ where
                     .await
                 {
                     Ok(closed_contract) => {
-                        self.store.update_contract(&closed_contract)?;
+                        self.store.update_contract(&closed_contract).await?;
                         return Ok(());
                     }
                     Err(e) => {
@@ -765,7 +782,7 @@ where
                 .await
             {
                 Ok(closed_contract) => {
-                    self.store.update_contract(&closed_contract)?;
+                    self.store.update_contract(&closed_contract).await?;
                     Ok(closed_contract)
                 }
                 Err(e) => {
@@ -784,7 +801,7 @@ where
     }
 
     async fn check_preclosed_contracts(&self) -> Result<(), Error> {
-        for c in self.store.get_preclosed_contracts()? {
+        for c in self.store.get_preclosed_contracts().await? {
             if let Err(e) = self.check_preclosed_contract(&c).await {
                 tracing::error!(
                     "Error checking pre-closed contract {}: {}",
@@ -824,7 +841,8 @@ where
                     .compute_pnl(&contract.signed_cet),
             };
             self.store
-                .update_contract(&Contract::Closed(closed_contract))?;
+                .update_contract(&Contract::Closed(closed_contract))
+                .await?;
         }
 
         Ok(())
@@ -906,7 +924,8 @@ where
             }
 
             self.store
-                .update_contract(&Contract::Refunded(contract.clone()))?;
+                .update_contract(&Contract::Refunded(contract.clone()))
+                .await?;
         }
 
         Ok(())
@@ -914,7 +933,7 @@ where
 
     /// Function to call when we detect that a contract was closed by our counter party.
     /// This will update the state of the contract and return the [`Contract`] object.
-    pub fn on_counterparty_close(
+    pub async fn on_counterparty_close(
         &mut self,
         contract: &SignedContract,
         closing_tx: Transaction,
@@ -942,7 +961,7 @@ where
             == closing_tx.compute_txid()
         {
             let refunded = Contract::Refunded(contract.clone());
-            self.store.update_contract(&refunded)?;
+            self.store.update_contract(&refunded).await?;
             return Ok(refunded);
         }
 
@@ -963,7 +982,7 @@ where
             })
         };
 
-        self.store.update_contract(&contract)?;
+        self.store.update_contract(&contract).await?;
 
         Ok(contract)
     }
@@ -1006,17 +1025,22 @@ where
 
         let msg = offered_channel.get_offer_channel_msg(&offered_contract);
 
-        self.store.upsert_channel(
-            Channel::Offered(offered_channel),
-            Some(Contract::Offered(offered_contract)),
-        )?;
+        self.store
+            .upsert_channel(
+                Channel::Offered(offered_channel),
+                Some(Contract::Offered(offered_contract)),
+            )
+            .await?;
 
         Ok(msg)
     }
 
     /// Reject a channel that was offered. Returns the [`dlc_messages::channel::Reject`]
     /// message to be sent as well as the public key of the offering node.
-    pub fn reject_channel(&self, channel_id: &ChannelId) -> Result<(Reject, PublicKey), Error> {
+    pub async fn reject_channel(
+        &self,
+        channel_id: &ChannelId,
+    ) -> Result<(Reject, PublicKey), Error> {
         let offered_channel =
             get_channel_in_state!(self, channel_id, Offered, None as Option<PublicKey>)?;
 
@@ -1034,10 +1058,12 @@ where
         )?;
 
         let counterparty = offered_channel.counter_party;
-        self.store.upsert_channel(
-            Channel::Cancelled(offered_channel),
-            Some(Contract::Rejected(offered_contract)),
-        )?;
+        self.store
+            .upsert_channel(
+                Channel::Cancelled(offered_channel),
+                Some(Contract::Rejected(offered_contract)),
+            )
+            .await?;
 
         let msg = Reject {
             channel_id: *channel_id,
@@ -1088,10 +1114,12 @@ where
         let contract_id = accepted_contract.get_contract_id();
         let counter_party = accepted_contract.offered_contract.counter_party;
 
-        self.store.upsert_channel(
-            Channel::Accepted(accepted_channel),
-            Some(Contract::Accepted(accepted_contract)),
-        )?;
+        self.store
+            .upsert_channel(
+                Channel::Accepted(accepted_channel),
+                Some(Contract::Accepted(accepted_contract)),
+            )
+            .await?;
 
         Ok((accept_channel, channel_id, contract_id, counter_party))
     }
@@ -1106,7 +1134,7 @@ where
     /// Offer to settle the balance of a channel so that the counter party gets
     /// `counter_payout`. Returns the [`dlc_messages::channel::SettleChannelOffer`]
     /// message to be sent and the public key of the counter party node.
-    pub fn settle_offer(
+    pub async fn settle_offer(
         &self,
         channel_id: &ChannelId,
         counter_payout: u64,
@@ -1126,14 +1154,15 @@ where
         let counter_party = signed_channel.counter_party;
 
         self.store
-            .upsert_channel(Channel::Signed(signed_channel), None)?;
+            .upsert_channel(Channel::Signed(signed_channel), None)
+            .await?;
 
         Ok((msg, counter_party))
     }
 
     /// Accept a settlement offer, returning the [`SettleAccept`] message to be
     /// sent to the node with the returned [`PublicKey`] id.
-    pub fn accept_settle_offer(
+    pub async fn accept_settle_offer(
         &self,
         channel_id: &ChannelId,
     ) -> Result<(SettleAccept, PublicKey), Error> {
@@ -1149,12 +1178,14 @@ where
             &self.signer_provider,
             &self.time,
             &self.chain_monitor,
-        )?;
+        )
+        .await?;
 
         let counter_party = signed_channel.counter_party;
 
         self.store
-            .upsert_channel(Channel::Signed(signed_channel), None)?;
+            .upsert_channel(Channel::Signed(signed_channel), None)
+            .await?;
 
         Ok((msg, counter_party))
     }
@@ -1188,10 +1219,12 @@ where
 
         let counter_party = offered_contract.counter_party;
 
-        self.store.upsert_channel(
-            Channel::Signed(signed_channel),
-            Some(Contract::Offered(offered_contract)),
-        )?;
+        self.store
+            .upsert_channel(
+                Channel::Signed(signed_channel),
+                Some(Contract::Offered(offered_contract)),
+            )
+            .await?;
 
         Ok((msg, counter_party))
     }
@@ -1199,7 +1232,7 @@ where
     /// Accept an offer to renew the contract in the channel. Returns the
     /// [`RenewAccept`] message to be sent to the peer with the returned
     /// [`PublicKey`] as node id.
-    pub fn accept_renew_offer(
+    pub async fn accept_renew_offer(
         &self,
         channel_id: &ChannelId,
     ) -> Result<(RenewAccept, PublicKey), Error> {
@@ -1228,10 +1261,12 @@ where
 
         let counter_party = signed_channel.counter_party;
 
-        self.store.upsert_channel(
-            Channel::Signed(signed_channel),
-            Some(Contract::Accepted(accepted_contract)),
-        )?;
+        self.store
+            .upsert_channel(
+                Channel::Signed(signed_channel),
+                Some(Contract::Accepted(accepted_contract)),
+            )
+            .await?;
 
         Ok((msg, counter_party))
     }
@@ -1239,7 +1274,10 @@ where
     /// Reject an offer to renew the contract in the channel. Returns the
     /// [`Reject`] message to be sent to the peer with the returned
     /// [`PublicKey`] node id.
-    pub fn reject_renew_offer(&self, channel_id: &ChannelId) -> Result<(Reject, PublicKey), Error> {
+    pub async fn reject_renew_offer(
+        &self,
+        channel_id: &ChannelId,
+    ) -> Result<(Reject, PublicKey), Error> {
         let mut signed_channel =
             get_channel_in_state!(self, channel_id, Signed, None as Option<PublicKey>)?;
         let offered_contract_id = signed_channel.get_contract_id().ok_or_else(|| {
@@ -1259,10 +1297,12 @@ where
 
         let counter_party = signed_channel.counter_party;
 
-        self.store.upsert_channel(
-            Channel::Signed(signed_channel),
-            Some(Contract::Rejected(offered_contract)),
-        )?;
+        self.store
+            .upsert_channel(
+                Channel::Signed(signed_channel),
+                Some(Contract::Rejected(offered_contract)),
+            )
+            .await?;
 
         Ok((reject_msg, counter_party))
     }
@@ -1270,7 +1310,7 @@ where
     /// Returns a [`Reject`] message to be sent to the counter party of the
     /// channel to inform them that the local party does not wish to accept the
     /// proposed settle offer.
-    pub fn reject_settle_offer(
+    pub async fn reject_settle_offer(
         &self,
         channel_id: &ChannelId,
     ) -> Result<(Reject, PublicKey), Error> {
@@ -1282,7 +1322,8 @@ where
         let counter_party = signed_channel.counter_party;
 
         self.store
-            .upsert_channel(Channel::Signed(signed_channel), None)?;
+            .upsert_channel(Channel::Signed(signed_channel), None)
+            .await?;
 
         Ok((msg, counter_party))
     }
@@ -1291,7 +1332,7 @@ where
     /// party of the channel and update the state of the channel. Note that the
     /// channel will be forced closed after a timeout if the counter party does
     /// not broadcast the close transaction.
-    pub fn offer_collaborative_close(
+    pub async fn offer_collaborative_close(
         &self,
         channel_id: &ChannelId,
         counter_payout: u64,
@@ -1307,7 +1348,7 @@ where
             &self.time,
         )?;
 
-        self.chain_monitor.lock().unwrap().add_tx(
+        self.chain_monitor.lock().await.add_tx(
             close_tx.compute_txid(),
             ChannelInfo {
                 channel_id: *channel_id,
@@ -1316,9 +1357,11 @@ where
         );
 
         self.store
-            .upsert_channel(Channel::Signed(signed_channel), None)?;
+            .upsert_channel(Channel::Signed(signed_channel), None)
+            .await?;
         self.store
-            .persist_chain_monitor(&self.chain_monitor.lock().unwrap())?;
+            .persist_chain_monitor(&*self.chain_monitor.lock().await)
+            .await?;
 
         Ok(msg)
     }
@@ -1339,11 +1382,10 @@ where
                 CollaborativeCloseOffered,
                 counter_payout
             )?;
-            Some(self.get_collaboratively_closed_contract(
-                signed_contract_id,
-                *counter_payout,
-                true,
-            )?)
+            Some(
+                self.get_collaboratively_closed_contract(signed_contract_id, *counter_payout, true)
+                    .await?,
+            )
         } else {
             None
         };
@@ -1356,11 +1398,12 @@ where
 
         self.blockchain.send_transaction(&close_tx).await?;
 
-        self.store.upsert_channel(closed_channel, None)?;
+        self.store.upsert_channel(closed_channel, None).await?;
 
         if let Some(closed_contract) = closed_contract {
             self.store
-                .update_contract(&Contract::Closed(closed_contract))?;
+                .update_contract(&Contract::Closed(closed_contract))
+                .await?;
         }
 
         Ok(())
@@ -1421,17 +1464,18 @@ where
 
             self.chain_monitor
                 .lock()
-                .unwrap()
+                .await
                 .cleanup_channel(signed_channel.channel_id);
 
             self.store
-                .upsert_channel(closed_channel, Some(closed_contract))?;
+                .upsert_channel(closed_channel, Some(closed_contract))
+                .await?;
         }
 
         Ok(())
     }
 
-    fn on_offer_channel(
+    async fn on_offer_channel(
         &self,
         offer_channel: &OfferChannel,
         counter_party: PublicKey,
@@ -1454,7 +1498,8 @@ where
 
         if self
             .store
-            .get_channel(&channel.temporary_channel_id)?
+            .get_channel(&channel.temporary_channel_id)
+            .await?
             .is_some()
         {
             return Err(Error::InvalidParameters(
@@ -1463,12 +1508,13 @@ where
         }
 
         self.store
-            .upsert_channel(Channel::Offered(channel), Some(Contract::Offered(contract)))?;
+            .upsert_channel(Channel::Offered(channel), Some(Contract::Offered(contract)))
+            .await?;
 
         Ok(())
     }
 
-    fn on_accept_channel(
+    async fn on_accept_channel(
         &self,
         accept_channel: &AcceptChannel,
         peer_id: &PublicKey,
@@ -1497,7 +1543,8 @@ where
                 &self.wallet,
                 &self.signer_provider,
                 &self.chain_monitor,
-            );
+            )
+            .await;
 
             match res {
                 Ok(res) => res,
@@ -1509,7 +1556,8 @@ where
                         counter_party: *peer_id,
                     };
                     self.store
-                        .upsert_channel(Channel::FailedAccept(channel), None)?;
+                        .upsert_channel(Channel::FailedAccept(channel), None)
+                        .await?;
                     return Err(e);
                 }
             }
@@ -1527,7 +1575,7 @@ where
             buffer_transaction, ..
         } = &signed_channel.state
         {
-            self.chain_monitor.lock().unwrap().add_tx(
+            self.chain_monitor.lock().await.add_tx(
                 buffer_transaction.compute_txid(),
                 ChannelInfo {
                     channel_id: signed_channel.channel_id,
@@ -1538,13 +1586,16 @@ where
             unreachable!();
         }
 
-        self.store.upsert_channel(
-            Channel::Signed(signed_channel),
-            Some(Contract::Signed(signed_contract)),
-        )?;
+        self.store
+            .upsert_channel(
+                Channel::Signed(signed_channel),
+                Some(Contract::Signed(signed_contract)),
+            )
+            .await?;
 
         self.store
-            .persist_chain_monitor(&self.chain_monitor.lock().unwrap())?;
+            .persist_chain_monitor(&*self.chain_monitor.lock().await)
+            .await?;
 
         Ok(sign_channel)
     }
@@ -1571,7 +1622,8 @@ where
                 sign_channel,
                 &self.wallet,
                 &self.chain_monitor,
-            );
+            )
+            .await;
 
             match res {
                 Ok(res) => res,
@@ -1583,7 +1635,8 @@ where
                         counter_party: *peer_id,
                     };
                     self.store
-                        .upsert_channel(Channel::FailedSign(channel), None)?;
+                        .upsert_channel(Channel::FailedSign(channel), None)
+                        .await?;
                     return Err(e);
                 }
             }
@@ -1593,7 +1646,7 @@ where
             buffer_transaction, ..
         } = &signed_channel.state
         {
-            self.chain_monitor.lock().unwrap().add_tx(
+            self.chain_monitor.lock().await.add_tx(
                 buffer_transaction.compute_txid(),
                 ChannelInfo {
                     channel_id: signed_channel.channel_id,
@@ -1606,17 +1659,20 @@ where
 
         self.blockchain.send_transaction(&signed_fund_tx).await?;
 
-        self.store.upsert_channel(
-            Channel::Signed(signed_channel),
-            Some(Contract::Signed(signed_contract)),
-        )?;
         self.store
-            .persist_chain_monitor(&self.chain_monitor.lock().unwrap())?;
+            .upsert_channel(
+                Channel::Signed(signed_channel),
+                Some(Contract::Signed(signed_contract)),
+            )
+            .await?;
+        self.store
+            .persist_chain_monitor(&*self.chain_monitor.lock().await)
+            .await?;
 
         Ok(())
     }
 
-    fn on_settle_offer(
+    async fn on_settle_offer(
         &self,
         settle_offer: &SettleOffer,
         peer_id: &PublicKey,
@@ -1633,12 +1689,13 @@ where
         crate::channel_updater::on_settle_offer(&mut signed_channel, settle_offer)?;
 
         self.store
-            .upsert_channel(Channel::Signed(signed_channel), None)?;
+            .upsert_channel(Channel::Signed(signed_channel), None)
+            .await?;
 
         Ok(None)
     }
 
-    fn on_settle_accept(
+    async fn on_settle_accept(
         &self,
         settle_accept: &SettleAccept,
         peer_id: &PublicKey,
@@ -1656,15 +1713,17 @@ where
             &self.signer_provider,
             &self.time,
             &self.chain_monitor,
-        )?;
+        )
+        .await?;
 
         self.store
-            .upsert_channel(Channel::Signed(signed_channel), None)?;
+            .upsert_channel(Channel::Signed(signed_channel), None)
+            .await?;
 
         Ok(msg)
     }
 
-    fn on_settle_confirm(
+    async fn on_settle_confirm(
         &self,
         settle_confirm: &SettleConfirm,
         peer_id: &PublicKey,
@@ -1693,7 +1752,7 @@ where
             &self.signer_provider,
         )?;
 
-        self.chain_monitor.lock().unwrap().add_tx(
+        self.chain_monitor.lock().await.add_tx(
             prev_buffer_txid,
             ChannelInfo {
                 channel_id: signed_channel.channel_id,
@@ -1706,21 +1765,22 @@ where
             },
         );
 
-        let closed_contract = Contract::Closed(self.get_collaboratively_closed_contract(
-            &signed_contract_id,
-            own_payout,
-            true,
-        )?);
+        let closed_contract = Contract::Closed(
+            self.get_collaboratively_closed_contract(&signed_contract_id, own_payout, true)
+                .await?,
+        );
 
         self.store
-            .upsert_channel(Channel::Signed(signed_channel), Some(closed_contract))?;
+            .upsert_channel(Channel::Signed(signed_channel), Some(closed_contract))
+            .await?;
         self.store
-            .persist_chain_monitor(&self.chain_monitor.lock().unwrap())?;
+            .persist_chain_monitor(&*self.chain_monitor.lock().await)
+            .await?;
 
         Ok(msg)
     }
 
-    fn on_settle_finalize(
+    async fn on_settle_finalize(
         &self,
         settle_finalize: &SettleFinalize,
         peer_id: &PublicKey,
@@ -1748,7 +1808,7 @@ where
             settle_finalize,
         )?;
 
-        self.chain_monitor.lock().unwrap().add_tx(
+        self.chain_monitor.lock().await.add_tx(
             buffer_txid,
             ChannelInfo {
                 channel_id: signed_channel.channel_id,
@@ -1761,20 +1821,21 @@ where
             },
         );
 
-        let closed_contract = Contract::Closed(self.get_collaboratively_closed_contract(
-            &signed_contract_id,
-            own_payout,
-            true,
-        )?);
+        let closed_contract = Contract::Closed(
+            self.get_collaboratively_closed_contract(&signed_contract_id, own_payout, true)
+                .await?,
+        );
         self.store
-            .upsert_channel(Channel::Signed(signed_channel), Some(closed_contract))?;
+            .upsert_channel(Channel::Signed(signed_channel), Some(closed_contract))
+            .await?;
         self.store
-            .persist_chain_monitor(&self.chain_monitor.lock().unwrap())?;
+            .persist_chain_monitor(&*self.chain_monitor.lock().await)
+            .await?;
 
         Ok(())
     }
 
-    fn on_renew_offer(
+    async fn on_renew_offer(
         &self,
         renew_offer: &RenewOffer,
         peer_id: &PublicKey,
@@ -1798,14 +1859,15 @@ where
             &self.time,
         )?;
 
-        self.store.create_contract(&offered_contract)?;
+        self.store.create_contract(&offered_contract).await?;
         self.store
-            .upsert_channel(Channel::Signed(signed_channel), None)?;
+            .upsert_channel(Channel::Signed(signed_channel), None)
+            .await?;
 
         Ok(None)
     }
 
-    fn on_renew_accept(
+    async fn on_renew_accept(
         &self,
         renew_accept: &RenewAccept,
         peer_id: &PublicKey,
@@ -1834,15 +1896,17 @@ where
         )?;
 
         // Directly confirmed as we're in a channel the fund tx is already confirmed.
-        self.store.upsert_channel(
-            Channel::Signed(signed_channel),
-            Some(Contract::Confirmed(signed_contract)),
-        )?;
+        self.store
+            .upsert_channel(
+                Channel::Signed(signed_channel),
+                Some(Contract::Confirmed(signed_contract)),
+            )
+            .await?;
 
         Ok(msg)
     }
 
-    fn on_renew_confirm(
+    async fn on_renew_confirm(
         &self,
         renew_confirm: &RenewConfirm,
         peer_id: &PublicKey,
@@ -1867,11 +1931,10 @@ where
                 signed_contract_id,
                 ..
             } => {
-                let closed_contract = Contract::Closed(self.get_collaboratively_closed_contract(
-                    signed_contract_id,
-                    *own_payout,
-                    true,
-                )?);
+                let closed_contract = Contract::Closed(
+                    self.get_collaboratively_closed_contract(signed_contract_id, *own_payout, true)
+                        .await?,
+                );
                 (
                     TxType::Revoked {
                         update_idx: signed_channel.update_idx,
@@ -1916,9 +1979,10 @@ where
             &self.wallet,
             &self.signer_provider,
             &self.chain_monitor,
-        )?;
+        )
+        .await?;
 
-        self.chain_monitor.lock().unwrap().add_tx(
+        self.chain_monitor.lock().await.add_tx(
             prev_tx_id,
             ChannelInfo {
                 channel_id: signed_channel.channel_id,
@@ -1927,22 +1991,25 @@ where
         );
 
         // Directly confirmed as we're in a channel the fund tx is already confirmed.
-        self.store.upsert_channel(
-            Channel::Signed(signed_channel),
-            Some(Contract::Confirmed(signed_contract)),
-        )?;
+        self.store
+            .upsert_channel(
+                Channel::Signed(signed_channel),
+                Some(Contract::Confirmed(signed_contract)),
+            )
+            .await?;
 
         self.store
-            .persist_chain_monitor(&self.chain_monitor.lock().unwrap())?;
+            .persist_chain_monitor(&*self.chain_monitor.lock().await)
+            .await?;
 
         if let Some(closed_contract) = closed_contract {
-            self.store.update_contract(&closed_contract)?;
+            self.store.update_contract(&closed_contract).await?;
         }
 
         Ok(msg)
     }
 
-    fn on_renew_finalize(
+    async fn on_renew_finalize(
         &self,
         renew_finalize: &RenewFinalize,
         peer_id: &PublicKey,
@@ -1962,11 +2029,9 @@ where
                 signed_contract_id,
                 ..
             } => {
-                let closed_contract = self.get_collaboratively_closed_contract(
-                    signed_contract_id,
-                    *own_payout,
-                    true,
-                )?;
+                let closed_contract = self
+                    .get_collaboratively_closed_contract(signed_contract_id, *own_payout, true)
+                    .await?;
                 (
                     TxType::Revoked {
                         update_idx: signed_channel.update_idx,
@@ -2006,7 +2071,7 @@ where
             &self.signer_provider,
         )?;
 
-        self.chain_monitor.lock().unwrap().add_tx(
+        self.chain_monitor.lock().await.add_tx(
             prev_tx_id,
             ChannelInfo {
                 channel_id: signed_channel.channel_id,
@@ -2017,7 +2082,7 @@ where
         let buffer_tx =
             get_signed_channel_state!(signed_channel, Established, ref buffer_transaction)?;
 
-        self.chain_monitor.lock().unwrap().add_tx(
+        self.chain_monitor.lock().await.add_tx(
             buffer_tx.compute_txid(),
             ChannelInfo {
                 channel_id: signed_channel.channel_id,
@@ -2026,18 +2091,20 @@ where
         );
 
         self.store
-            .upsert_channel(Channel::Signed(signed_channel), None)?;
+            .upsert_channel(Channel::Signed(signed_channel), None)
+            .await?;
         self.store
-            .persist_chain_monitor(&self.chain_monitor.lock().unwrap())?;
+            .persist_chain_monitor(&*self.chain_monitor.lock().await)
+            .await?;
 
         if let Some(closed_contract) = closed_contract {
-            self.store.update_contract(&closed_contract)?;
+            self.store.update_contract(&closed_contract).await?;
         }
 
         Ok(msg)
     }
 
-    fn on_renew_revoke(
+    async fn on_renew_revoke(
         &self,
         renew_revoke: &RenewRevoke,
         peer_id: &PublicKey,
@@ -2053,9 +2120,12 @@ where
 
         self.store
             .upsert_channel(Channel::Signed(signed_channel), None)
+            .await?;
+
+        Ok(())
     }
 
-    fn on_collaborative_close_offer(
+    async fn on_collaborative_close_offer(
         &self,
         close_offer: &CollaborativeCloseOffer,
         peer_id: &PublicKey,
@@ -2071,13 +2141,14 @@ where
         )?;
 
         self.store
-            .upsert_channel(Channel::Signed(signed_channel), None)?;
+            .upsert_channel(Channel::Signed(signed_channel), None)
+            .await?;
 
         Ok(())
     }
 
-    fn on_reject(&self, reject: &Reject, counter_party: &PublicKey) -> Result<(), Error> {
-        let channel = self.store.get_channel(&reject.channel_id)?;
+    async fn on_reject(&self, reject: &Reject, counter_party: &PublicKey) -> Result<(), Error> {
+        let channel = self.store.get_channel(&reject.channel_id).await?;
 
         if let Some(channel) = channel {
             if channel.get_counter_party_id() != *counter_party {
@@ -2113,10 +2184,12 @@ where
                     self.wallet.unreserve_utxos(&utxos)?;
 
                     // remove rejected channel, since nothing has been confirmed on chain yet.
-                    self.store.upsert_channel(
-                        Channel::Cancelled(offered_channel),
-                        Some(Contract::Rejected(offered_contract)),
-                    )?;
+                    self.store
+                        .upsert_channel(
+                            Channel::Cancelled(offered_channel),
+                            Some(Contract::Rejected(offered_contract)),
+                        )
+                        .await?;
                 }
                 Channel::Signed(mut signed_channel) => {
                     let contract = match signed_channel.state {
@@ -2138,7 +2211,8 @@ where
                     crate::channel_updater::on_reject(&mut signed_channel)?;
 
                     self.store
-                        .upsert_channel(Channel::Signed(signed_channel), contract)?;
+                        .upsert_channel(Channel::Signed(signed_channel), contract)
+                        .await?;
                 }
                 channel => {
                     return Err(Error::InvalidState(format!(
@@ -2160,7 +2234,8 @@ where
     async fn channel_checks(&self) -> Result<(), Error> {
         let established_closing_channels = self
             .store
-            .get_signed_channels(Some(SignedChannelStateType::Closing))?;
+            .get_signed_channels(Some(SignedChannelStateType::Closing))
+            .await?;
 
         for channel in established_closing_channels {
             if let Err(e) = self.try_finalize_closing_established_channel(channel).await {
@@ -2231,7 +2306,8 @@ where
                     signed_channel.roll_back_state = Some(state);
 
                     self.store
-                        .upsert_channel(Channel::Signed(signed_channel), None)?;
+                        .upsert_channel(Channel::Signed(signed_channel), None)
+                        .await?;
 
                     false
                 }
@@ -2374,9 +2450,9 @@ where
                     //stop watching the cheating tx.
                     self.chain_monitor
                         .lock()
-                        .unwrap()
+                        .await
                         .cleanup_channel(signed_channel.channel_id);
-                    self.store.upsert_channel(closed_channel, None)?;
+                    self.store.upsert_channel(closed_channel, None).await?;
                     true
                 }
                 TxType::CollaborativeClose => {
@@ -2389,13 +2465,16 @@ where
                             CollaborativeCloseOffered,
                             counter_payout
                         )?;
-                        let closed_contract = self.get_collaboratively_closed_contract(
-                            &signed_contract_id,
-                            *counter_payout,
-                            false,
-                        )?;
+                        let closed_contract = self
+                            .get_collaboratively_closed_contract(
+                                &signed_contract_id,
+                                *counter_payout,
+                                false,
+                            )
+                            .await?;
                         self.store
-                            .update_contract(&Contract::Closed(closed_contract))?;
+                            .update_contract(&Contract::Closed(closed_contract))
+                            .await?;
                     }
                     let closed_channel = Channel::CollaborativelyClosed(ClosedChannel {
                         counter_party: signed_channel.counter_party,
@@ -2404,9 +2483,9 @@ where
                     });
                     self.chain_monitor
                         .lock()
-                        .unwrap()
+                        .await
                         .cleanup_channel(signed_channel.channel_id);
-                    self.store.upsert_channel(closed_channel, None)?;
+                    self.store.upsert_channel(closed_channel, None).await?;
                     true
                 }
                 TxType::SettleTx => {
@@ -2417,9 +2496,9 @@ where
                     });
                     self.chain_monitor
                         .lock()
-                        .unwrap()
+                        .await
                         .cleanup_channel(signed_channel.channel_id);
-                    self.store.upsert_channel(closed_channel, None)?;
+                    self.store.upsert_channel(closed_channel, None).await?;
                     true
                 }
                 TxType::Cet => {
@@ -2454,30 +2533,35 @@ where
 
                     self.chain_monitor
                         .lock()
-                        .unwrap()
+                        .await
                         .cleanup_channel(signed_channel.channel_id);
-
-                    let pre_closed_contract = contract_id
-                        .map(|contract_id| {
-                            self.store.get_contract(&contract_id).map(|contract| {
-                                contract.map(|contract| match contract {
-                                    Contract::Confirmed(signed_contract) => {
-                                        Some(Contract::PreClosed(PreClosedContract {
-                                            signed_contract,
-                                            attestations: None,
-                                            signed_cet: tx.clone(),
-                                        }))
-                                    }
-                                    _ => None,
+                    let pre_closed_contract = futures::stream::iter(contract_id)
+                        .then(|contract_id| {
+                            let txn = tx.clone();
+                            async move {
+                                self.store.get_contract(&contract_id).await.map(|contract| {
+                                    contract.and_then(|contract| match contract {
+                                        Contract::Confirmed(signed_contract) => {
+                                            Some(Contract::PreClosed(PreClosedContract {
+                                                signed_contract,
+                                                attestations: None,
+                                                signed_cet: txn,
+                                            }))
+                                        }
+                                        _ => None,
+                                    })
                                 })
-                            })
+                            }
                         })
-                        .transpose()?
+                        .try_collect::<Vec<_>>()
+                        .await?
+                        .into_iter()
                         .flatten()
-                        .flatten();
+                        .next();
 
                     self.store
-                        .upsert_channel(closed_channel, pre_closed_contract)?;
+                        .upsert_channel(closed_channel, pre_closed_contract)
+                        .await?;
 
                     true
                 }
@@ -2485,19 +2569,21 @@ where
 
             if persist {
                 self.store
-                    .persist_chain_monitor(&self.chain_monitor.lock().unwrap())?;
+                    .persist_chain_monitor(&*self.chain_monitor.lock().await)
+                    .await?;
             }
         }
         Ok(())
     }
 
     async fn check_for_watched_tx(&self) -> Result<(), Error> {
-        let confirmed_txs = self.chain_monitor.lock().unwrap().confirmed_txs();
+        let confirmed_txs = self.chain_monitor.lock().await.confirmed_txs();
 
         self.process_watched_txs(confirmed_txs).await?;
 
-        self.get_store()
-            .persist_chain_monitor(&self.chain_monitor.lock().unwrap())?;
+        self.store
+            .persist_chain_monitor(&*self.chain_monitor.lock().await)
+            .await?;
 
         Ok(())
     }
@@ -2591,14 +2677,16 @@ where
 
         self.chain_monitor
             .lock()
-            .unwrap()
+            .await
             .remove_tx(&buffer_transaction.compute_txid());
 
         self.store
-            .upsert_channel(Channel::Signed(signed_channel), None)?;
+            .upsert_channel(Channel::Signed(signed_channel), None)
+            .await?;
 
         self.store
-            .persist_chain_monitor(&self.chain_monitor.lock().unwrap())?;
+            .persist_chain_monitor(&*self.chain_monitor.lock().await)
+            .await?;
 
         Ok(())
     }
@@ -2628,15 +2716,15 @@ where
 
         self.chain_monitor
             .lock()
-            .unwrap()
+            .await
             .cleanup_channel(signed_channel.channel_id);
 
-        self.store.upsert_channel(closed_channel, None)?;
+        self.store.upsert_channel(closed_channel, None).await?;
 
         Ok(())
     }
 
-    fn get_collaboratively_closed_contract(
+    async fn get_collaboratively_closed_contract(
         &self,
         contract_id: &ContractId,
         payout: u64,

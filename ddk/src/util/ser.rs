@@ -1,4 +1,6 @@
 use chrono::Utc;
+use ddk_manager::channel::signed_channel::SignedChannelStateType;
+use ddk_manager::channel::Channel;
 use ddk_manager::contract::accepted_contract::AcceptedContract;
 use ddk_manager::contract::offered_contract::OfferedContract;
 use ddk_manager::contract::ser::Serializable;
@@ -11,6 +13,8 @@ use dlc_messages::oracle_msgs::OracleAnnouncement;
 use dlc_messages::Message;
 use lightning::io::Read;
 
+use crate::error::to_storage_error;
+
 /// Helper from rust-dlc to implement types for contracts.
 macro_rules! convertible_enum {
     (enum $name:ident {
@@ -18,7 +22,7 @@ macro_rules! convertible_enum {
         $($tname:ident $(= $tval:expr)?,)*
     }, $input:ident) => {
         #[derive(Debug)]
-        enum $name {
+        pub enum $name {
             $($vname $(= $val)?,)*
             $($tname $(= $tval)?,)*
         }
@@ -42,7 +46,7 @@ macro_rules! convertible_enum {
         }
 
         impl $name {
-            fn get_prefix(input: &$input) -> u8 {
+            pub fn get_prefix(input: &$input) -> u8 {
                 let prefix = match input {
                     $($input::$vname(_) => $name::$vname,)*
                     $($input::$tname{..} => $name::$tname,)*
@@ -69,12 +73,40 @@ convertible_enum!(
     Contract
 );
 
-fn to_storage_error<T>(e: T) -> Error
-where
-    T: std::fmt::Display,
-{
-    Error::StorageError(e.to_string())
-}
+convertible_enum!(
+    enum ChannelPrefix {
+        Offered = 100,
+        Accepted,
+        Signed,
+        FailedAccept,
+        FailedSign,
+        Closing,
+        Closed,
+        CounterClosed,
+        ClosedPunished,
+        CollaborativelyClosed,
+        Cancelled,;
+    },
+    Channel
+);
+
+convertible_enum!(
+    enum SignedChannelPrefix {;
+        Established = 1,
+        SettledOffered,
+        SettledReceived,
+        SettledAccepted,
+        SettledConfirmed,
+        Settled,
+        Closing,
+        CollaborativeCloseOffered,
+        RenewAccepted,
+        RenewOffered,
+        RenewFinalized,
+        RenewConfirmed,
+    },
+    SignedChannelStateType
+);
 
 pub fn serialize_contract(contract: &Contract) -> Result<Vec<u8>, ::lightning::io::Error> {
     let serialized = match contract {

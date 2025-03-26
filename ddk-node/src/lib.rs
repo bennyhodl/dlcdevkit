@@ -10,7 +10,7 @@ use ddk::builder::Builder;
 use ddk::oracle::kormir::KormirOracleClient;
 use ddk::storage::sled::SledStorage;
 use ddk::transport::nostr::NostrDlc;
-use ddk::util::serialize_contract;
+use ddk::util::ser::serialize_contract;
 use ddk::DlcDevKit;
 use ddk::{Oracle, Storage, Transport};
 use ddk_manager::contract::contract_input::ContractInput;
@@ -212,7 +212,7 @@ impl DdkRpc for DdkNode {
         _request: Request<ListOffersRequest>,
     ) -> Result<Response<ListOffersResponse>, Status> {
         tracing::info!("Request for offers to the node.");
-        let offers = self.node.storage.get_contract_offers().unwrap();
+        let offers = self.node.storage.get_contract_offers().await.unwrap();
         let offers: Vec<Vec<u8>> = offers
             .iter()
             .map(|offer| serde_json::to_vec(offer).unwrap())
@@ -227,7 +227,7 @@ impl DdkRpc for DdkNode {
         _request: Request<WalletBalanceRequest>,
     ) -> Result<Response<WalletBalanceResponse>, Status> {
         tracing::info!("Request for wallet balance.");
-        let wallet_balance = self.node.balance().unwrap();
+        let wallet_balance = self.node.balance().await.unwrap();
 
         let response = WalletBalanceResponse {
             confirmed: wallet_balance.confirmed.to_sat(),
@@ -319,6 +319,7 @@ impl DdkRpc for DdkNode {
             .node
             .storage
             .get_contracts()
+            .await
             .map_err(|e| Status::new(Code::Cancelled, e.to_string()))?;
         let contract_bytes: Vec<Vec<u8>> = contracts
             .iter()

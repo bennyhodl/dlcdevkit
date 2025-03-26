@@ -38,6 +38,23 @@ jobs:
   check:
     name: check
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:latest
+        env:
+          POSTGRES_DB: testdb
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/testdb
+
     steps:
       - name: Install Protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
@@ -46,13 +63,34 @@ jobs:
         with:
           toolchain: nightly
           override: true
+      - name: Install sqlx-cli
+        run: cargo install sqlx-cli
+      - name: Run database migrations
+        run: cargo sqlx migrate run --source ddk/src/storage/postgres/migrations
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/testdb
       - name: cargo check
         run: cargo check --all-features
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/testdb
   integration_tests_prepare:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
+    services:
+      postgres:
+        image: postgres:latest
+        env:
+          POSTGRES_DB: testdb
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Install Protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
@@ -62,6 +100,12 @@ jobs:
           toolchain: nightly
           components: rustfmt
           override: true
+      - name: Install sqlx-cli
+        run: cargo install sqlx-cli
+      - name: Run database migrations
+        run: cargo sqlx migrate run --source ddk/src/storage/postgres/migrations
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/testdb
       - uses: actions/cache@v3
         env:
           cache-name: test-cache
@@ -71,11 +115,28 @@ jobs:
       - uses: actions/checkout@v4
       - id: set-matrix
         run: cargo test --no-run --all-features && echo "::set-output name=matrix::$(testconfig/scripts/get_test_list.sh manager_execution manager_tests contract_updater)"
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/testdb
   integration_tests:
     name: integration tests
     needs: integration_tests_prepare
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:latest
+        env:
+          POSTGRES_DB: testdb
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/testdb
     strategy:
       matrix:
         tests: ${{ fromJson(needs.integration_tests_prepare.outputs.matrix) }}
