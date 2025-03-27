@@ -21,6 +21,9 @@ pub enum SqlxError {
     SerializeContract(#[from] bitcoin::io::Error),
     #[error("deserialize contract error: {0}")]
     DeserializeContract(#[from] ddk_manager::error::Error),
+    /// miniscript error
+    #[error("miniscript error: {0}")]
+    Miniscript(#[from] bdk_chain::miniscript::Error),
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
@@ -37,4 +40,19 @@ pub struct ContractRow {
     pub refund_locktime: i32,
     pub pnl: Option<i64>,
     pub contract_data: Vec<u8>,
+}
+
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
+pub struct ContractRowNoBytes {
+    pub id: String,
+    pub state: i16,
+    pub is_offer_party: bool,
+    pub counter_party: String,
+    pub offer_collateral: i64,
+    pub total_collateral: i64,
+    pub accept_collateral: i64,
+    pub fee_rate_per_vb: i64,
+    pub cet_locktime: i32,
+    pub refund_locktime: i32,
+    pub pnl: Option<i64>,
 }
