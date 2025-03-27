@@ -13,8 +13,9 @@ async fn main() -> Result<()> {
     let transport = Arc::new(LightningTransport::new(&[0u8; 32], 1776)?);
     let storage = Arc::new(
         PostgresStore::new(
-            "postgres://loco:loco@localhost:5432/sons-of-liberty_development",
+            &std::env::var("DATABASE_URL").expect("DATABASE_URL must be set"),
             false,
+            "test".to_string(),
         )
         .await?,
     );

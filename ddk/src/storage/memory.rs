@@ -29,6 +29,7 @@ impl MemoryStorage {
     }
 }
 
+#[async_trait::async_trait]
 impl Storage for MemoryStorage {
     fn save_peer(&self, _peer: PeerInformation) -> anyhow::Result<()> {
         // self.peers.write().unwrap().insert(peer.id.clone(), peer);
@@ -43,7 +44,7 @@ impl Storage for MemoryStorage {
         }])
     }
 
-    fn persist_bdk(
+    async fn persist_bdk(
         &self,
         changeset: &bdk_wallet::ChangeSet,
     ) -> Result<(), crate::error::WalletError> {
@@ -53,7 +54,7 @@ impl Storage for MemoryStorage {
         Ok(())
     }
 
-    fn initialize_bdk(&self) -> Result<bdk_wallet::ChangeSet, crate::error::WalletError> {
+    async fn initialize_bdk(&self) -> Result<bdk_wallet::ChangeSet, crate::error::WalletError> {
         Ok(self.bdk_data.read().unwrap().clone().unwrap_or_default())
     }
 

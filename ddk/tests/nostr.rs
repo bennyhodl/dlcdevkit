@@ -5,11 +5,11 @@ mod nostr_test {
     use super::*;
     use bitcoin::{key::rand::Fill, Network};
     use chrono::{Local, TimeDelta};
-    use ddk::builder::Builder;
     use ddk::oracle::memory::MemoryOracle;
     use ddk::storage::memory::MemoryStorage;
     use ddk::transport::nostr::NostrDlc;
     use ddk::DlcDevKit;
+    use ddk::{builder::Builder, Transport};
     use dlc::{EnumerationPayout, Payout};
     use std::sync::Arc;
 
@@ -53,8 +53,8 @@ mod nostr_test {
         alice.start().unwrap();
         bob.start().unwrap();
 
-        let alice_address = alice.wallet.new_external_address().unwrap().address;
-        let bob_address = bob.wallet.new_external_address().unwrap().address;
+        let alice_address = alice.wallet.new_external_address().await.unwrap().address;
+        let bob_address = bob.wallet.new_external_address().await.unwrap().address;
         test_util::fund_addresses(&alice_address, &bob_address);
 
         let expiry = TimeDelta::seconds(15);
@@ -98,7 +98,7 @@ mod nostr_test {
             oracle.oracle.public_key().to_string(),
             EVENT_ID.to_string(),
         );
-        let alice_pubkey = alice.transport.transport_public_key();
+        let alice_pubkey = alice.transport.public_key();
         let _offer = bob
             .send_dlc_offer(&contract_input, alice_pubkey, vec![announcement])
             .await

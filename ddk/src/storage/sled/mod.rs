@@ -95,8 +95,9 @@ impl SledStorage {
     }
 }
 
+#[async_trait::async_trait]
 impl Storage for SledStorage {
-    fn persist_bdk(&self, changeset: &ChangeSet) -> Result<(), WalletError> {
+    async fn persist_bdk(&self, changeset: &ChangeSet) -> Result<(), WalletError> {
         let wallet_tree = self.wallet_tree().map_err(sled_to_wallet_error)?;
         let new_changeset = match wallet_tree
             .get(CHANGESET_KEY)
@@ -116,7 +117,7 @@ impl Storage for SledStorage {
         Ok(())
     }
 
-    fn initialize_bdk(&self) -> Result<ChangeSet, WalletError> {
+    async fn initialize_bdk(&self) -> Result<ChangeSet, WalletError> {
         tracing::info!("Initializing wallet persistance.");
         let changeset = match self
             .wallet_tree()

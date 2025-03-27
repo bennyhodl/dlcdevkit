@@ -39,6 +39,7 @@ async fn get_manager() -> TestManager {
             Network::Regtest,
             store.clone(),
         )
+        .await
         .unwrap(),
     );
 

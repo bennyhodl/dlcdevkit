@@ -6,8 +6,8 @@ use bdk_wallet::coin_selection::{
     BranchAndBoundCoinSelection, CoinSelectionAlgorithm, SingleRandomDraw,
 };
 use bdk_wallet::descriptor::IntoWalletDescriptor;
+use bdk_wallet::AsyncWalletPersister;
 pub use bdk_wallet::LocalOutput;
-use bdk_wallet::WalletPersister;
 use bdk_wallet::{
     bitcoin::{
         bip32::Xpriv,
@@ -26,7 +26,9 @@ use bitcoin::{secp256k1::SecretKey, Amount, FeeRate, ScriptBuf, Transaction};
 use ddk_manager::{error::Error as ManagerError, SimpleSigner};
 use lightning::chain::chaininterface::{ConfirmationTarget, FeeEstimator};
 use std::collections::HashMap;
+use std::future::Future;
 use std::io::Write;
+use std::pin::Pin;
 use std::sync::atomic::AtomicU32;
 // use std::sync::RwLock;
 use std::{
@@ -35,19 +37,34 @@ use std::{
 };
 use tokio::sync::Mutex;
 
+type FutureResult<'a, T, E> = Pin<Box<dyn Future<Output = Result<T, E>> + Send + 'a>>;
+
 /// Wrapper type to pass `crate::Storage` to a BDK wallet.
 #[derive(Clone)]
 pub struct WalletStorage(Arc<dyn Storage>);
 
-impl WalletPersister for WalletStorage {
+impl AsyncWalletPersister for WalletStorage {
     type Error = WalletError;
 
-    fn persist(persister: &mut Self, changeset: &bdk_wallet::ChangeSet) -> Result<(), Self::Error> {
-        persister.0.as_ref().persist_bdk(changeset)
+    fn initialize<'a>(
+        persister: &'a mut Self,
+    ) -> FutureResult<'a, bdk_wallet::ChangeSet, Self::Error>
+    where
+        Self: 'a,
+    {
+        tracing::info!("initialize store");
+        Box::pin(persister.0.initialize_bdk())
     }
 
-    fn initialize(persister: &mut Self) -> Result<bdk_wallet::ChangeSet, Self::Error> {
-        persister.0.as_ref().initialize_bdk()
+    fn persist<'a>(
+        persister: &'a mut Self,
+        changeset: &'a bdk_wallet::ChangeSet,
+    ) -> FutureResult<'a, (), Self::Error>
+    where
+        Self: 'a,
+    {
+        tracing::info!("persist store");
+        Box::pin(persister.0.persist_bdk(changeset))
     }
 }
 
@@ -67,7 +84,7 @@ pub struct DlcDevKitWallet {
 const MIN_FEERATE: u32 = 253;
 
 impl DlcDevKitWallet {
-    pub fn new(
+    pub async fn new(
         name: &str,
         seed_bytes: &[u8; 32],
         esplora_url: &str,
@@ -90,14 +107,16 @@ impl DlcDevKitWallet {
             .descriptor(KeychainKind::Internal, Some(internal_descriptor.clone()))
             .extract_keys()
             .check_network(network)
-            .load_wallet(&mut storage)
+            .load_wallet_async(&mut storage)
+            .await
             .map_err(|_| WalletError::WalletPersistanceError)?;
 
         let internal_wallet = match load_wallet {
             Some(w) => w,
             None => Wallet::create(external_descriptor, internal_descriptor)
                 .network(network)
-                .create_wallet(&mut storage)
+                .create_wallet_async(&mut storage)
+                .await
                 .map_err(|_| WalletError::WalletPersistanceError)?,
         };
 
@@ -201,7 +220,8 @@ impl DlcDevKitWallet {
         };
         wallet.apply_update(sync_result)?;
         wallet
-            .persist(&mut storage)
+            .persist_async(&mut storage)
+            .await
             .map_err(|_| WalletError::WalletPersistanceError)?;
         Ok(())
     }
@@ -219,27 +239,25 @@ impl DlcDevKitWallet {
         Ok(wallet.balance())
     }
 
-    pub fn new_external_address(&self) -> Result<AddressInfo, WalletError> {
+    pub async fn new_external_address(&self) -> Result<AddressInfo, WalletError> {
         let Ok(mut wallet) = self.wallet.try_lock() else {
             tracing::error!("Could not get lock to sync wallet.");
             return Err(WalletError::Lock);
         };
         let mut storage = self.storage.clone();
         let address = wallet.next_unused_address(KeychainKind::External);
-        let _ = wallet.persist(&mut storage);
+        let _ = wallet.persist_async(&mut storage).await;
         Ok(address)
     }
 
-    pub fn new_change_address(&self) -> Result<AddressInfo, WalletError> {
+    pub async fn new_change_address(&self) -> Result<AddressInfo, WalletError> {
         let Ok(mut wallet) = self.wallet.try_lock() else {
             tracing::error!("Could not get lock to sync wallet.");
             return Err(WalletError::Lock);
         };
         let mut storage = self.storage.clone();
         let address = wallet.next_unused_address(KeychainKind::Internal);
-        wallet
-            .persist(&mut storage)
-            .map_err(|_| WalletError::WalletPersistanceError)?;
+        let _ = wallet.persist_async(&mut storage).await;
         Ok(address)
     }
 
@@ -378,9 +396,11 @@ impl ddk_manager::ContractSignerProvider for DlcDevKitWallet {
 
 impl ddk_manager::Wallet for DlcDevKitWallet {
     fn get_new_address(&self) -> Result<bitcoin::Address, ManagerError> {
-        let address = self
-            .new_external_address()
-            .map_err(wallet_err_to_manager_err)?;
+        let address = tokio::task::block_in_place(|| {
+            // This runs in a blocking context but yields to the runtime
+            tokio::runtime::Handle::current().block_on(self.new_external_address())
+        })
+        .map_err(wallet_err_to_manager_err)?;
         tracing::info!(
             address = address.address.to_string(),
             "Revealed new address for contract."
@@ -389,9 +409,11 @@ impl ddk_manager::Wallet for DlcDevKitWallet {
     }
 
     fn get_new_change_address(&self) -> Result<bitcoin::Address, ManagerError> {
-        let address = self
-            .new_change_address()
-            .map_err(wallet_err_to_manager_err)?;
+        let address = tokio::task::block_in_place(|| {
+            // This runs in a blocking context but yields to the runtime
+            tokio::runtime::Handle::current().block_on(self.new_change_address())
+        })
+        .map_err(wallet_err_to_manager_err)?;
         tracing::info!(
             address = address.address.to_string(),
             "Revealed new change address for contract."
@@ -502,7 +524,7 @@ mod tests {
 
     use super::DlcDevKitWallet;
 
-    fn create_wallet() -> DlcDevKitWallet {
+    async fn create_wallet() -> DlcDevKitWallet {
         let storage = Arc::new(MemoryStorage::new());
         let mut entropy = [0u8; 64];
         entropy
@@ -516,6 +538,7 @@ mod tests {
             Network::Regtest,
             storage.clone(),
         )
+        .await
         .unwrap()
     }
 
@@ -552,16 +575,16 @@ mod tests {
         generate_blocks(5)
     }
 
-    #[test]
-    fn address_is_p2wpkh() {
-        let test = create_wallet();
-        let address = test.new_external_address().unwrap();
+    #[tokio::test]
+    async fn address_is_p2wpkh() {
+        let test = create_wallet().await;
+        let address = test.new_external_address().await.unwrap();
         assert_eq!(address.address.address_type().unwrap(), AddressType::P2wpkh)
     }
 
-    #[test]
-    fn derive_contract_signer() {
-        let test = create_wallet();
+    #[tokio::test]
+    async fn derive_contract_signer() {
+        let test = create_wallet().await;
         let mut temp_key_id = [0u8; 32];
         temp_key_id
             .try_fill(&mut bitcoin::key::rand::thread_rng())
@@ -573,15 +596,15 @@ mod tests {
 
     #[tokio::test]
     async fn send_all() {
-        let wallet = create_wallet();
+        let wallet = create_wallet().await;
         let network = wallet.blockchain.get_network().unwrap();
         let address = match network {
             Network::Regtest => "bcrt1qt0yrvs7qx8guvpqsx8u9mypz6t4zr3pxthsjkm",
             Network::Signet => "bcrt1q7h9uzwvyw29vrpujp69l7kce7e5w98mpn8kwsp",
             _ => "bcrt1qt0yrvs7qx8guvpqsx8u9mypz6t4zr3pxthsjkm",
         };
-        let addr_one = wallet.new_external_address().unwrap().address;
-        let addr_two = wallet.new_external_address().unwrap().address;
+        let addr_one = wallet.new_external_address().await.unwrap().address;
+        let addr_two = wallet.new_external_address().await.unwrap().address;
         fund_address(&addr_one);
         fund_address(&addr_two);
         wallet.sync().await.unwrap();
