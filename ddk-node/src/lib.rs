@@ -8,7 +8,7 @@ use bitcoin::secp256k1::PublicKey;
 use bitcoin::{Address, Amount, FeeRate, Network};
 use ddk::builder::Builder;
 use ddk::oracle::kormir::KormirOracleClient;
-use ddk::storage::sled::SledStorage;
+use ddk::storage::postgres::PostgresStore;
 use ddk::transport::nostr::NostrDlc;
 use ddk::util::ser::serialize_contract;
 use ddk::DlcDevKit;
@@ -36,7 +36,7 @@ use tonic::Response;
 use tonic::Status;
 use tonic::{async_trait, Code};
 
-type Ddk = DlcDevKit<NostrDlc, SledStorage, KormirOracleClient>;
+type Ddk = DlcDevKit<NostrDlc, PostgresStore, KormirOracleClient>;
 
 #[derive(Clone)]
 pub struct DdkNode {
@@ -75,9 +75,7 @@ impl DdkNode {
             .await?,
         );
 
-        let storage = Arc::new(SledStorage::new(
-            storage_path.join("sled_db").to_str().unwrap(),
-        )?);
+        let storage = Arc::new(PostgresStore::new(&opts.postgres_url, true, opts.name).await?);
 
         // let oracle = Arc::new(P2PDOracleClient::new(&oracle_host).await?);
         let oracle = Arc::new(KormirOracleClient::new(&opts.oracle_host, None).await?);
@@ -201,7 +199,13 @@ impl DdkRpc for DdkNode {
         _request: Request<NewAddressRequest>,
     ) -> Result<Response<NewAddressResponse>, Status> {
         tracing::info!("Request for new wallet address");
-        let address = self.node.wallet.new_external_address().unwrap().to_string();
+        let address = self
+            .node
+            .wallet
+            .new_external_address()
+            .await
+            .unwrap()
+            .to_string();
         let response = NewAddressResponse { address };
         Ok(Response::new(response))
     }
@@ -213,6 +217,7 @@ impl DdkRpc for DdkNode {
     ) -> Result<Response<ListOffersResponse>, Status> {
         tracing::info!("Request for offers to the node.");
         let offers = self.node.storage.get_contract_offers().await.unwrap();
+        tracing::info!("Offers: {:?}", offers);
         let offers: Vec<Vec<u8>> = offers
             .iter()
             .map(|offer| serde_json::to_vec(offer).unwrap())

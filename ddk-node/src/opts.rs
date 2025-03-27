@@ -46,4 +46,12 @@ pub struct NodeOpts {
     #[arg(default_value = "file")]
     #[arg(value_parser = ["file", "bytes"])]
     pub seed: String,
+    #[arg(long)]
+    #[arg(help = "Name for the wallet.")]
+    #[arg(default_value = "ddk-node")]
+    pub name: String,
+    #[arg(long)]
+    #[arg(help = "Url for the postgres database connection.")]
+    #[arg(default_value = "postgres://dlcdevkit:dlcdevkit@localhost:5433/ddk_one")]
+    pub postgres_url: String,
 }
