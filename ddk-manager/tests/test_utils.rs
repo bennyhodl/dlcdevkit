@@ -649,9 +649,10 @@ pub async fn create_and_fund_wallet(name: &str) -> (DlcDevKitWallet, Arc<MemoryS
         Network::Regtest,
         memory_storage.clone(),
     )
+    .await
     .unwrap();
 
-    let address = wallet.new_external_address().unwrap().address;
+    let address = wallet.new_external_address().await.unwrap().address;
     sink_rpc
         .send_to_address(
             &address,

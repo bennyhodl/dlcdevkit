@@ -248,7 +248,7 @@ mod tests {
         let nostr_client = nostr_sdk::Client::new(key);
         nostr_client.add_relay("ws://localhost:8081").await.unwrap();
         nostr_client.connect().await;
-        nostr_client.send_event(ann_event.clone()).await.unwrap();
+        nostr_client.send_event(&ann_event).await.unwrap();
         (announcement, ann_event)
     }
 
