@@ -60,18 +60,45 @@ macro_rules! convertible_enum {
 convertible_enum!(
     enum ContractPrefix {
         Offered = 1,
+        // 2
         Accepted,
+        // 3
         Signed,
+        // 4
         Confirmed,
+        // 5
         PreClosed,
+        // 6
         Closed,
+        // 7
         FailedAccept,
+        // 8
         FailedSign,
+        // 9
         Refunded,
+        // 10
         Rejected,;
     },
     Contract
 );
+
+impl From<String> for ContractPrefix {
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "offered" => ContractPrefix::Offered,
+            "accepted" => ContractPrefix::Accepted,
+            "signed" => ContractPrefix::Signed,
+            "confirmed" => ContractPrefix::Confirmed,
+            "pre-closed" => ContractPrefix::PreClosed,
+            "closed" => ContractPrefix::Closed,
+            "failed-accept" => ContractPrefix::FailedAccept,
+            "failed-sign" => ContractPrefix::FailedSign,
+            "refunded" => ContractPrefix::Refunded,
+            "rejected" => ContractPrefix::Rejected,
+            _ => ContractPrefix::Offered,
+        }
+    }
+}
 
 convertible_enum!(
     enum ChannelPrefix {

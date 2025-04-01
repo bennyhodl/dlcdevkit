@@ -138,13 +138,16 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
             .clone()
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-        let wallet = Arc::new(DlcDevKitWallet::new(
-            &name,
-            &self.seed_bytes,
-            &self.esplora_host,
-            self.network,
-            storage.clone(),
-        )?);
+        let wallet = Arc::new(
+            DlcDevKitWallet::new(
+                &name,
+                &self.seed_bytes,
+                &self.esplora_host,
+                self.network,
+                storage.clone(),
+            )
+            .await?,
+        );
 
         let mut oracles = HashMap::new();
         oracles.insert(oracle.get_public_key(), oracle.clone());
