@@ -32,8 +32,20 @@ pub async fn test_ddk() -> (TestSuite, TestSuite, Arc<MemoryOracle>) {
     let test = TestSuite::new(&secp, "send_offer", oracle.clone()).await;
     let test_two = TestSuite::new(&secp, "sender_offer_two", oracle.clone()).await;
 
-    let node_one_address = test.ddk.wallet.new_external_address().unwrap().address;
-    let node_two_address = test_two.ddk.wallet.new_external_address().unwrap().address;
+    let node_one_address = test
+        .ddk
+        .wallet
+        .new_external_address()
+        .await
+        .unwrap()
+        .address;
+    let node_two_address = test_two
+        .ddk
+        .wallet
+        .new_external_address()
+        .await
+        .unwrap()
+        .address;
 
     fund_addresses(&node_one_address, &node_two_address);
 

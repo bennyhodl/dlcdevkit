@@ -5,4 +5,4 @@ pub mod postgres;
 pub mod sled;
 
 #[cfg(feature = "postgres")]
-mod sqlx;
+pub mod sqlx;

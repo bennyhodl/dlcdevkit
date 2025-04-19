@@ -1,0 +1,80 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, state, is_offer_party, counter_party, offer_collateral, accept_collateral, total_collateral, fee_rate_per_vb, cet_locktime, refund_locktime, pnl FROM contracts WHERE state = 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "state",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 2,
+        "name": "is_offer_party",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "counter_party",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "offer_collateral",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "accept_collateral",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "total_collateral",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "fee_rate_per_vb",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "cet_locktime",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "refund_locktime",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
+        "name": "pnl",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "a41467ffcd6821838eda59888f4556d7a8afecdd3807f863f8c7453e1ded1d7e"
+}

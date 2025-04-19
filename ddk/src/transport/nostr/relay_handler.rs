@@ -1,11 +1,10 @@
 use std::sync::Arc;
 
-use crate::nostr;
 use crate::nostr::messages::{create_dlc_msg_event, handle_dlc_msg_event};
 use crate::DlcDevKitDlcManager;
+use crate::{nostr, Transport};
 use crate::{Oracle, Storage};
 use bitcoin::bip32::Xpriv;
-use bitcoin::secp256k1::PublicKey as BitcoinPublicKey;
 use bitcoin::Network;
 use nostr_rs::{secp256k1::Secp256k1, Keys, Timestamp, Url};
 use nostr_sdk::{Client, RelayPoolNotification};
@@ -41,19 +40,6 @@ impl NostrDlc {
         })
     }
 
-    pub fn transport_public_key(&self) -> BitcoinPublicKey {
-        // Get the bytes from nostr public key
-        let pk_bytes = self.keys.public_key().to_bytes();
-
-        // Convert to XOnlyPublicKey first
-        let xonly = bitcoin::secp256k1::XOnlyPublicKey::from_slice(&pk_bytes)
-            .expect("Converting from nostr public key to bitcoin public key should not fail.");
-
-        // Convert to full PublicKey (this will assume even y coordinate)
-
-        BitcoinPublicKey::from_x_only_public_key(xonly, bitcoin::key::Parity::Even)
-    }
-
     pub fn start<S: Storage, O: Oracle>(
         &self,
         mut stop_signal: watch::Receiver<bool>,
@@ -61,7 +47,7 @@ impl NostrDlc {
     ) -> JoinHandle<Result<(), anyhow::Error>> {
         tracing::info!(
             pubkey = self.keys.public_key().to_string(),
-            transport_public_key = self.transport_public_key().to_string(),
+            transport_public_key = self.public_key().to_string(),
             "Starting Nostr DLC listener."
         );
         let nostr_client = self.client.clone();
@@ -115,7 +101,7 @@ impl NostrDlc {
                                     )
                                     .expect("no message");
                                     nostr_client
-                                        .send_event(event)
+                                        .send_event(&event)
                                         .await
                                         .expect("Break out into functions.");
                                 }

@@ -67,10 +67,10 @@ pub trait Transport: Send + Sync + 'static {
 #[async_trait]
 /// Storage for DLC contracts.
 pub trait Storage: ddk_manager::Storage + Send + Sync + 'static {
-    ///// Instantiate the storage for the BDK wallet.
-    fn initialize_bdk(&self) -> Result<ChangeSet, WalletError>;
+    /// Instantiate the storage for the BDK wallet.
+    async fn initialize_bdk(&self) -> Result<ChangeSet, WalletError>;
     /// Save changeset to the wallet storage.
-    fn persist_bdk(&self, changeset: &ChangeSet) -> Result<(), WalletError>;
+    async fn persist_bdk(&self, changeset: &ChangeSet) -> Result<(), WalletError>;
     /// Connected counterparties.
     fn list_peers(&self) -> anyhow::Result<Vec<PeerInformation>>;
     /// Persis counterparty.

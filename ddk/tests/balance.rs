@@ -27,7 +27,7 @@ async fn contract_balance() {
         .await
         .unwrap();
 
-    let address = bob.ddk.wallet.new_external_address().unwrap().address;
+    let address = bob.ddk.wallet.new_external_address().await.unwrap().address;
 
     let auth = bitcoincore_rpc::Auth::UserPass("ddk".to_string(), "ddk".to_string());
     let client = bitcoincore_rpc::Client::new("http://127.0.0.1:18443", auth).unwrap();

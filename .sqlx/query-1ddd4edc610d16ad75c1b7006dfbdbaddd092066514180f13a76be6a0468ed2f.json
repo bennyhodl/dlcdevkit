@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT * FROM contracts WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "state",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 2,
+        "name": "is_offer_party",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "counter_party",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "offer_collateral",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "accept_collateral",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "total_collateral",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "fee_rate_per_vb",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "cet_locktime",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "refund_locktime",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
+        "name": "pnl",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 11,
+        "name": "contract_data",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "1ddd4edc610d16ad75c1b7006dfbdbaddd092066514180f13a76be6a0468ed2f"
+}
