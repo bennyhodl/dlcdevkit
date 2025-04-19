@@ -103,10 +103,10 @@ where
 {
     let funding_pubkey = signer.get_public_key(secp)?;
 
-    let payout_addr = wallet.get_new_address()?;
+    let payout_addr = wallet.get_new_address().await?;
     let payout_spk = payout_addr.script_pubkey();
     let payout_serial_id = get_new_serial_id();
-    let change_addr = wallet.get_new_change_address()?;
+    let change_addr = wallet.get_new_change_address().await?;
     let change_spk = change_addr.script_pubkey();
     let change_serial_id = get_new_serial_id();
 

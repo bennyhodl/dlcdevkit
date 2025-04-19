@@ -136,13 +136,14 @@ pub trait ContractSignerProvider {
     fn get_new_secret_key(&self) -> Result<SecretKey, Error>;
 }
 
+#[async_trait::async_trait]
 /// Wallet trait to provide functionalities related to generating, storing and
 /// managing bitcoin addresses and UTXOs.
 pub trait Wallet {
     /// Returns a new (unused) address.
-    fn get_new_address(&self) -> Result<Address, Error>;
+    async fn get_new_address(&self) -> Result<Address, Error>;
     /// Returns a new (unused) change address.
-    fn get_new_change_address(&self) -> Result<Address, Error>;
+    async fn get_new_change_address(&self) -> Result<Address, Error>;
     /// Get a set of UTXOs to fund the given amount.
     fn get_utxos_for_amount(
         &self,

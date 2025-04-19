@@ -394,13 +394,13 @@ impl ddk_manager::ContractSignerProvider for DlcDevKitWallet {
     }
 }
 
+#[async_trait::async_trait]
 impl ddk_manager::Wallet for DlcDevKitWallet {
-    fn get_new_address(&self) -> Result<bitcoin::Address, ManagerError> {
-        let address = tokio::task::block_in_place(|| {
-            // This runs in a blocking context but yields to the runtime
-            tokio::runtime::Handle::current().block_on(self.new_external_address())
-        })
-        .map_err(wallet_err_to_manager_err)?;
+    async fn get_new_address(&self) -> Result<bitcoin::Address, ManagerError> {
+        let address = self
+            .new_external_address()
+            .await
+            .map_err(wallet_err_to_manager_err)?;
         tracing::info!(
             address = address.address.to_string(),
             "Revealed new address for contract."
@@ -408,12 +408,12 @@ impl ddk_manager::Wallet for DlcDevKitWallet {
         Ok(address.address)
     }
 
-    fn get_new_change_address(&self) -> Result<bitcoin::Address, ManagerError> {
-        let address = tokio::task::block_in_place(|| {
-            // This runs in a blocking context but yields to the runtime
-            tokio::runtime::Handle::current().block_on(self.new_change_address())
-        })
-        .map_err(wallet_err_to_manager_err)?;
+    async fn get_new_change_address(&self) -> Result<bitcoin::Address, ManagerError> {
+        let address = self
+            .new_change_address()
+            .await
+            .map_err(wallet_err_to_manager_err)?;
+
         tracing::info!(
             address = address.address.to_string(),
             "Revealed new change address for contract."

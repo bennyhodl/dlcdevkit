@@ -2414,7 +2414,7 @@ where
                                 &counter_sk,
                                 &counter_revocation_sk,
                                 &tx,
-                                &self.wallet.get_new_address()?,
+                                &self.wallet.get_new_address().await?,
                                 0,
                                 fee_rate_per_vb,
                             )?
@@ -2428,7 +2428,7 @@ where
                                 &counter_sk,
                                 &counter_revocation_sk,
                                 &tx,
-                                &self.wallet.get_new_address()?,
+                                &self.wallet.get_new_address().await?,
                                 CET_NSEQUENCE,
                                 0,
                                 fee_rate_per_vb,
