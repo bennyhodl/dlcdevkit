@@ -52,7 +52,6 @@ impl AsyncWalletPersister for WalletStorage {
     where
         Self: 'a,
     {
-        tracing::info!("initialize store");
         Box::pin(persister.0.initialize_bdk())
     }
 
@@ -109,7 +108,7 @@ impl DlcDevKitWallet {
             .check_network(network)
             .load_wallet_async(&mut storage)
             .await
-            .map_err(|_| WalletError::WalletPersistanceError)?;
+            .map_err(|e| WalletError::WalletPersistanceError(e.to_string()))?;
 
         let internal_wallet = match load_wallet {
             Some(w) => w,
@@ -117,14 +116,13 @@ impl DlcDevKitWallet {
                 .network(network)
                 .create_wallet_async(&mut storage)
                 .await
-                .map_err(|_| WalletError::WalletPersistanceError)?,
+                .map_err(|e| WalletError::WalletPersistanceError(e.to_string()))?,
         };
 
         let wallet = Arc::new(Mutex::new(internal_wallet));
 
         let blockchain = Arc::new(
-            EsploraClient::new(esplora_url, network)
-                .map_err(|_| WalletError::WalletPersistanceError)?,
+            EsploraClient::new(esplora_url, network).map_err(|e| WalletError::Esplora(e))?,
         );
 
         // TODO: Actually get fees. I don't think it's used for regular DLCs though
@@ -222,7 +220,7 @@ impl DlcDevKitWallet {
         wallet
             .persist_async(&mut storage)
             .await
-            .map_err(|_| WalletError::WalletPersistanceError)?;
+            .map_err(|e| WalletError::WalletPersistanceError(e.to_string()))?;
         Ok(())
     }
 

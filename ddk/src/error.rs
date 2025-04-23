@@ -12,8 +12,8 @@ pub fn wallet_err_to_manager_err(e: WalletError) -> ManagerError {
 /// BDK and wallet storage errors
 #[derive(thiserror::Error, Debug)]
 pub enum WalletError {
-    #[error("Wallet Persistance error.")]
-    WalletPersistanceError,
+    #[error("Wallet Persistance error: {0}")]
+    WalletPersistanceError(String),
     #[error("Seed error: {0}")]
     Seed(#[from] bitcoin::bip32::Error),
     #[error("Failed to get lock on BDK wallet.")]
