@@ -1014,7 +1014,7 @@ dependencies = [
 
 [[package]]
 name = "ddk-manager"
-version = "0.7.3"
+version = "0.7.5"
 dependencies = [
  "async-trait",
  "bitcoin",
