@@ -78,7 +78,9 @@ impl PostgresStore {
 
             query.fetch_all(&self.pool).await?
         } else {
-            sqlx::query_as!(ContractRowNoBytes, "SELECT id, state, is_offer_party, counter_party, offer_collateral, accept_collateral, total_collateral, fee_rate_per_vb, cet_locktime, refund_locktime, pnl FROM contracts")
+            sqlx::query_as::<Postgres, ContractRowNoBytes>(
+                "SELECT id, state, is_offer_party, counter_party, offer_collateral, accept_collateral, total_collateral, fee_rate_per_vb, cet_locktime, refund_locktime, pnl FROM contracts"
+            )
                 .fetch_all(&self.pool)
                 .await?
         };
@@ -86,7 +88,9 @@ impl PostgresStore {
     }
 
     pub async fn get_offer_rows(&self) -> Result<Vec<ContractRowNoBytes>, SqlxError> {
-        let rows = sqlx::query_as!(ContractRowNoBytes, "SELECT id, state, is_offer_party, counter_party, offer_collateral, accept_collateral, total_collateral, fee_rate_per_vb, cet_locktime, refund_locktime, pnl FROM contracts WHERE state = 1")
+        let rows = sqlx::query_as::<Postgres, ContractRowNoBytes>(
+            "SELECT id, state, is_offer_party, counter_party, offer_collateral, accept_collateral, total_collateral, fee_rate_per_vb, cet_locktime, refund_locktime, pnl FROM contracts WHERE state = 1"
+        )
             .fetch_all(&self.pool)
             .await?;
         Ok(rows)
@@ -237,14 +241,12 @@ impl ManagerStorage for PostgresStore {
         &self,
         id: &ddk_manager::ContractId,
     ) -> Result<Option<ddk_manager::contract::Contract>, ddk_manager::error::Error> {
-        let contract = sqlx::query_as!(
-            ContractRow,
-            "SELECT * FROM contracts WHERE id = $1",
-            hex::encode(id)
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(to_storage_error)?;
+        let contract =
+            sqlx::query_as::<Postgres, ContractRow>("SELECT * FROM contracts WHERE id = $1")
+                .bind(hex::encode(id))
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(to_storage_error)?;
 
         if let Some(contract) = contract {
             Ok(Some(deserialize_contract(&contract.contract_data)?))
@@ -256,7 +258,7 @@ impl ManagerStorage for PostgresStore {
     async fn get_contracts(
         &self,
     ) -> Result<Vec<ddk_manager::contract::Contract>, ddk_manager::error::Error> {
-        let contracts = sqlx::query_as!(ContractRow, "SELECT * FROM contracts")
+        let contracts = sqlx::query_as::<Postgres, ContractRow>("SELECT * FROM contracts")
             .fetch_all(&self.pool)
             .await
             .map_err(to_storage_error)?;
@@ -271,8 +273,7 @@ impl ManagerStorage for PostgresStore {
         &self,
         contract: &OfferedContract,
     ) -> Result<(), ddk_manager::error::Error> {
-        sqlx::query_as!(
-            ContractRow,
+        sqlx::query_as::<Postgres, ContractRow>(
             r#"
            INSERT INTO contracts (
                id, state, is_offer_party, counter_party,
@@ -282,19 +283,19 @@ impl ManagerStorage for PostgresStore {
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
            RETURNING *
            "#,
-            hex::encode(contract.id),
-            1 as i16,
-            contract.is_offer_party,
-            hex::encode(contract.counter_party.serialize()),
-            contract.offer_params.collateral as i64,
-            (contract.total_collateral - contract.offer_params.collateral) as i64,
-            contract.total_collateral as i64,
-            contract.fee_rate_per_vb as i64,
-            contract.cet_locktime as i32,
-            contract.refund_locktime as i32,
-            None as Option<i64>,
-            serialize_contract(&Contract::Offered(contract.clone()))?
         )
+        .bind(hex::encode(contract.id))
+        .bind(1 as i16)
+        .bind(contract.is_offer_party)
+        .bind(hex::encode(contract.counter_party.serialize()))
+        .bind(contract.offer_params.collateral as i64)
+        .bind((contract.total_collateral - contract.offer_params.collateral) as i64)
+        .bind(contract.total_collateral as i64)
+        .bind(contract.fee_rate_per_vb as i64)
+        .bind(contract.cet_locktime as i32)
+        .bind(contract.refund_locktime as i32)
+        .bind(None as Option<i64>)
+        .bind(serialize_contract(&Contract::Offered(contract.clone()))?)
         .fetch_one(&self.pool)
         .await
         .map_err(to_storage_error)?;
@@ -307,8 +308,9 @@ impl ManagerStorage for PostgresStore {
         id: &ddk_manager::ContractId,
     ) -> Result<(), ddk_manager::error::Error> {
         let id = hex::encode(id);
-        sqlx::query_as!(ContractRow, "DELETE FROM contracts WHERE id = $1", id)
-            .execute(&self.pool)
+        sqlx::query_as::<Postgres, ContractRow>("DELETE FROM contracts WHERE id = $1")
+            .bind(id)
+            .fetch_one(&self.pool)
             .await
             .map_err(to_storage_error)?;
 
@@ -336,8 +338,9 @@ impl ManagerStorage for PostgresStore {
                     hex::encode(a.get_temporary_id())
                 );
                 let temp_id = hex::encode(a.get_temporary_id());
-                sqlx::query_as!(ContractRow, "DELETE FROM contracts WHERE id = $1", temp_id)
-                    .execute(&mut *tx)
+                sqlx::query_as::<Postgres, ContractRow>("DELETE FROM contracts WHERE id = $1")
+                    .bind(temp_id)
+                    .fetch_all(&mut *tx)
                     .await
                     .map_err(to_storage_error)?;
             }
@@ -345,8 +348,7 @@ impl ManagerStorage for PostgresStore {
         }
 
         // Step 2: Upsert the contract by id
-        sqlx::query_as!(
-            ContractRow,
+        sqlx::query_as::<Postgres, ContractRow>(
             r#"
             INSERT INTO contracts (
                id, state, is_offer_party, counter_party,
@@ -361,22 +363,20 @@ impl ManagerStorage for PostgresStore {
                 contract_data = EXCLUDED.contract_data,
                 pnl = EXCLUDED.pnl
             "#,
-            contract_id,
-            prefix as i16,
-            // need to track if the contract is offer party
-            false,
-            hex::encode(contract.get_counter_party_id().serialize()),
-            offer_collateral as i64,
-            accept_collateral as i64,
-            total_collateral as i64,
-            // need to get fee rate per vb
-            1 as i64,
-            contract.get_cet_locktime() as i32,
-            contract.get_refund_locktime() as i32,
-            Some(contract.get_pnl()),
-            serialized_contract
         )
-        .execute(&mut *tx)
+        .bind(contract_id)
+        .bind(prefix as i16)
+        .bind(false)
+        .bind(hex::encode(contract.get_counter_party_id().serialize()))
+        .bind(offer_collateral as i64)
+        .bind(accept_collateral as i64)
+        .bind(total_collateral as i64)
+        .bind(1 as i64)
+        .bind(contract.get_cet_locktime() as i32)
+        .bind(contract.get_refund_locktime() as i32)
+        .bind(Some(contract.get_pnl()))
+        .bind(serialized_contract)
+        .fetch_all(&mut *tx)
         .await
         .map_err(to_storage_error)?;
 
@@ -387,10 +387,11 @@ impl ManagerStorage for PostgresStore {
     }
 
     async fn get_signed_contracts(&self) -> Result<Vec<SignedContract>, ddk_manager::error::Error> {
-        let contracts = sqlx::query_as!(ContractRow, "SELECT * FROM contracts WHERE state = 3")
-            .fetch_all(&self.pool)
-            .await
-            .map_err(to_storage_error)?;
+        let contracts =
+            sqlx::query_as::<Postgres, ContractRow>("SELECT * FROM contracts WHERE state = 3")
+                .fetch_all(&self.pool)
+                .await
+                .map_err(to_storage_error)?;
 
         let signed = contracts
             .into_iter()
@@ -405,9 +406,8 @@ impl ManagerStorage for PostgresStore {
     }
 
     async fn get_contract_offers(&self) -> Result<Vec<OfferedContract>, ddk_manager::error::Error> {
-        let contracts = sqlx::query_as!(
-            ContractRow,
-            "SELECT * FROM contracts WHERE state = 1 AND is_offer_party = false"
+        let contracts = sqlx::query_as::<Postgres, ContractRow>(
+            "SELECT * FROM contracts WHERE state = 1 AND is_offer_party = false",
         )
         .fetch_all(&self.pool)
         .await
@@ -428,10 +428,11 @@ impl ManagerStorage for PostgresStore {
     async fn get_confirmed_contracts(
         &self,
     ) -> Result<Vec<SignedContract>, ddk_manager::error::Error> {
-        let contracts = sqlx::query_as!(ContractRow, "SELECT * FROM contracts WHERE state = 4")
-            .fetch_all(&self.pool)
-            .await
-            .map_err(to_storage_error)?;
+        let contracts =
+            sqlx::query_as::<Postgres, ContractRow>("SELECT * FROM contracts WHERE state = 4")
+                .fetch_all(&self.pool)
+                .await
+                .map_err(to_storage_error)?;
 
         let signed = contracts
             .into_iter()
@@ -448,10 +449,11 @@ impl ManagerStorage for PostgresStore {
     async fn get_preclosed_contracts(
         &self,
     ) -> Result<Vec<PreClosedContract>, ddk_manager::error::Error> {
-        let contracts = sqlx::query_as!(ContractRow, "SELECT * FROM contracts WHERE state = 5")
-            .fetch_all(&self.pool)
-            .await
-            .map_err(to_storage_error)?;
+        let contracts =
+            sqlx::query_as::<Postgres, ContractRow>("SELECT * FROM contracts WHERE state = 5")
+                .fetch_all(&self.pool)
+                .await
+                .map_err(to_storage_error)?;
 
         let preclosed = contracts
             .into_iter()
