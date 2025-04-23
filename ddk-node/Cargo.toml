@@ -9,7 +9,7 @@ edition = "2021"
 
 [dependencies]
 ddk = { version = "0.0.16", path = "../ddk", features = ["marketplace", "postgres", "kormir", "nostr"] }
-ddk-manager = { version = "0.7.4", path = "../ddk-manager", features = ["use-serde"] }
+ddk-manager = { version = "0.7.5", path = "../ddk-manager", features = ["use-serde"] }
 ddk-payouts = { version = "0.0.16", path = "../payouts" }
 
 dlc = { version = "0.7.1", features = ["use-serde"] }

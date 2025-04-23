@@ -6,7 +6,7 @@ homepage = "https://github.com/bennyhodl/rust-dlc"
 license-file = "../LICENSE"
 name = "ddk-manager"
 repository = "https://github.com/bennyhodl/rust-dlc/tree/master/dlc-manager"
-version = "0.7.4"
+version = "0.7.5"
 
 [features]
 default= ["std"]
