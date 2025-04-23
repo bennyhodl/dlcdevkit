@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.16](https://github.com/bennyhodl/dlcdevkit/compare/ddk-v0.0.15...ddk-v0.0.16) - 2025-04-23
+
+### Other
+
+- async wallet trait
+- postgres module with sqlx
+- async wallet storage
+- update nostr & convert pubkey
+- postgres init
+
 ## [0.0.14](https://github.com/bennyhodl/dlcdevkit/compare/ddk-v0.0.13...ddk-v0.0.14) - 2025-01-17
 
 ### Added
