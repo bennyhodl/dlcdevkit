@@ -20,7 +20,7 @@ pub struct EsploraClient {
 }
 
 impl EsploraClient {
-    pub fn new(esplora_host: &str, network: Network) -> anyhow::Result<EsploraClient> {
+    pub fn new(esplora_host: &str, network: Network) -> Result<EsploraClient, bdk_esplora::Error> {
         let builder = Builder::new(esplora_host).timeout(Duration::from_secs(5).as_secs());
         let blocking_client = builder.clone().build_blocking();
         let async_client = builder.build_async()?;

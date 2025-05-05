@@ -13,7 +13,7 @@ async fn get<T>(host: &str, path: &str) -> anyhow::Result<T>
 where
     T: serde::de::DeserializeOwned,
 {
-    let url = format!("{}/{}", host, path);
+    let url = format!("{host}/{path}");
     let request = reqwest::get(url).await?.json::<T>().await?;
 
     Ok(request)

@@ -337,7 +337,7 @@ fn populate_psbt(psbt: &mut Psbt, all_funding_inputs: &[&FundingInput]) -> Resul
         })?;
         let vout = x.prev_tx_vout;
         let tx_out = tx.output.get(vout as usize).ok_or_else(|| {
-            Error::InvalidParameters(format!("Previous tx output not found at index {}", vout))
+            Error::InvalidParameters(format!("Previous tx output not found at index {vout}"))
         })?;
 
         psbt.inputs[input_index].witness_utxo = Some(tx_out.clone());

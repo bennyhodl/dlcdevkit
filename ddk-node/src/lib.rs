@@ -155,10 +155,7 @@ impl DdkRpc for DdkNode {
             .map_err(|e| {
                 Status::new(
                     Code::Cancelled,
-                    format!(
-                        "Contract offer could not be sent to counterparty. error={:?}",
-                        e
-                    ),
+                    format!("Contract offer could not be sent to counterparty. error={e}"),
                 )
             })?;
 

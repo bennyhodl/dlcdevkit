@@ -169,8 +169,7 @@ trait Evaluable {
         if payout_double.is_sign_negative() || (payout_double != 0.0 && !payout_double.is_normal())
         {
             return Err(Error::InvalidParameters(format!(
-                "Could not evaluate function for outcome {}, result was: {}",
-                outcome, payout_double
+                "Could not evaluate function for outcome {outcome}, result was: {payout_double}"
             )));
         }
 
