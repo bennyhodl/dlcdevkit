@@ -973,7 +973,7 @@ checksum = "e8566979429cf69b49a5c740c60791108e86440e8be149bbea4fe54d2c32d6e2"
 
 [[package]]
 name = "ddk"
-version = "0.0.16"
+version = "0.0.17"
 dependencies = [
  "anyhow",
  "async-trait",
