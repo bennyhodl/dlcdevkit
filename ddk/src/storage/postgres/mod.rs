@@ -64,11 +64,11 @@ impl PostgresStore {
     ) -> Result<Vec<ContractRowNoBytes>, SqlxError> {
         let rows = if let Some(states) = states {
             let placeholders = (1..=states.len())
-                .map(|i| format!("${}", i))
+                .map(|i| format!("${i}"))
                 .collect::<Vec<_>>()
                 .join(", ");
 
-            let query = format!("SELECT id, state, is_offer_party, counter_party, offer_collateral, accept_collateral, total_collateral, fee_rate_per_vb, cet_locktime, refund_locktime, pnl FROM contracts WHERE state IN ({})", placeholders);
+            let query = format!("SELECT id, state, is_offer_party, counter_party, offer_collateral, accept_collateral, total_collateral, fee_rate_per_vb, cet_locktime, refund_locktime, pnl FROM contracts WHERE state IN ({placeholders})");
 
             let mut query = sqlx::query_as::<_, ContractRowNoBytes>(&query);
 
@@ -285,7 +285,7 @@ impl ManagerStorage for PostgresStore {
            "#,
         )
         .bind(hex::encode(contract.id))
-        .bind(1 as i16)
+        .bind(1_i16)
         .bind(contract.is_offer_party)
         .bind(hex::encode(contract.counter_party.serialize()))
         .bind(contract.offer_params.collateral as i64)
@@ -371,7 +371,7 @@ impl ManagerStorage for PostgresStore {
         .bind(offer_collateral as i64)
         .bind(accept_collateral as i64)
         .bind(total_collateral as i64)
-        .bind(1 as i64)
+        .bind(1_i64)
         .bind(contract.get_cet_locktime() as i32)
         .bind(contract.get_refund_locktime() as i32)
         .bind(Some(contract.get_pnl()))

@@ -121,9 +121,8 @@ impl DlcDevKitWallet {
 
         let wallet = Arc::new(Mutex::new(internal_wallet));
 
-        let blockchain = Arc::new(
-            EsploraClient::new(esplora_url, network).map_err(|e| WalletError::Esplora(e))?,
-        );
+        let blockchain =
+            Arc::new(EsploraClient::new(esplora_url, network).map_err(WalletError::Esplora)?);
 
         // TODO: Actually get fees. I don't think it's used for regular DLCs though
         let mut fees: HashMap<ConfirmationTarget, AtomicU32> = HashMap::new();

@@ -93,7 +93,7 @@ impl Contract {
         string_id.push_str("0x");
         let id = self.get_id();
         for i in &id {
-            write!(string_id, "{:02x}", i).unwrap();
+            write!(string_id, "{i:02x}").unwrap();
         }
 
         string_id

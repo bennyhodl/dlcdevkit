@@ -34,14 +34,14 @@ impl fmt::Display for Error {
         match *self {
             Error::Conversion(_) => write!(f, "Conversion error"),
             Error::IOError(_) => write!(f, "IO error"),
-            Error::Deserialize(ref s) => write!(f, "Deserialize error: {}", s),
-            Error::InvalidState(ref s) => write!(f, "Invalid state: {}", s),
-            Error::InvalidParameters(ref s) => write!(f, "Invalid parameters were provided: {}", s),
-            Error::WalletError(ref e) => write!(f, "Wallet error {}", e),
-            Error::BlockchainError(ref s) => write!(f, "Blockchain error {}", s),
-            Error::StorageError(ref s) => write!(f, "Storage error {}", s),
-            Error::DlcError(ref e) => write!(f, "Dlc error {}", e),
-            Error::OracleError(ref s) => write!(f, "Oracle error {}", s),
+            Error::Deserialize(ref s) => write!(f, "Deserialize error: {s}"),
+            Error::InvalidState(ref s) => write!(f, "Invalid state: {s}"),
+            Error::InvalidParameters(ref s) => write!(f, "Invalid parameters were provided: {s}"),
+            Error::WalletError(ref e) => write!(f, "Wallet error {e}"),
+            Error::BlockchainError(ref s) => write!(f, "Blockchain error {s}"),
+            Error::StorageError(ref s) => write!(f, "Storage error {s}"),
+            Error::DlcError(ref e) => write!(f, "Dlc error {e}"),
+            Error::OracleError(ref s) => write!(f, "Oracle error {s}"),
             Error::SecpError(_) => write!(f, "Secp error"),
         }
     }

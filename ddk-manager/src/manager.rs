@@ -1551,7 +1551,7 @@ where
                 Err(e) => {
                     let channel = crate::channel::FailedAccept {
                         temporary_channel_id: accept_channel.temporary_channel_id,
-                        error_message: format!("Error validating accept channel: {}", e),
+                        error_message: format!("Error validating accept channel: {e}"),
                         accept_message: accept_channel.clone(),
                         counter_party: *peer_id,
                     };
@@ -1630,7 +1630,7 @@ where
                 Err(e) => {
                     let channel = crate::channel::FailedSign {
                         channel_id: sign_channel.channel_id,
-                        error_message: format!("Error validating accept channel: {}", e),
+                        error_message: format!("Error validating accept channel: {e}"),
                         sign_message: sign_channel.clone(),
                         counter_party: *peer_id,
                     };
@@ -2216,8 +2216,7 @@ where
                 }
                 channel => {
                     return Err(Error::InvalidState(format!(
-                        "Not in a state adequate to receive a reject message. {:?}",
-                        channel
+                        "Not in a state adequate to receive a reject message. {channel:?}"
                     )))
                 }
             }

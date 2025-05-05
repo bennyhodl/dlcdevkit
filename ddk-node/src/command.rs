@@ -51,7 +51,7 @@ pub async fn cli_command(
                 .into_inner();
             let offer_dlc: OfferDlc = serde_json::from_slice(&offer.offer_dlc)?;
             let offer = serde_json::to_string_pretty(&offer_dlc)?;
-            print!("{}", offer);
+            print!("{offer}");
         }
         CliCommand::Offers => {
             let offers_request = client.list_offers(ListOffersRequest {}).await?.into_inner();
@@ -75,7 +75,7 @@ pub async fn cli_command(
                 .into_inner();
             let accept_dlc: AcceptDlc = serde_json::from_slice(&accept.accept_dlc)?;
             let accept_dlc = serde_json::to_string_pretty(&accept_dlc)?;
-            print!("{}", accept_dlc)
+            print!("{accept_dlc}");
         }
         CliCommand::Contracts => {
             let contracts = client
@@ -98,7 +98,7 @@ pub async fn cli_command(
                 .await?
                 .into_inner();
             let pretty_string = serde_json::to_string_pretty(&balance)?;
-            println!("{}", pretty_string);
+            println!("{pretty_string}");
         }
         CliCommand::Wallet(wallet) => match wallet {
             WalletCommand::NewAddress => {
@@ -107,7 +107,7 @@ pub async fn cli_command(
                     .await?
                     .into_inner();
                 let pretty_string = serde_json::to_string_pretty(&address)?;
-                print!("{}", pretty_string);
+                print!("{pretty_string}");
             }
             WalletCommand::Transactions => {
                 let transactions = client
@@ -120,7 +120,7 @@ pub async fn cli_command(
                     .map(|txn| serde_json::from_slice(txn).unwrap())
                     .collect::<Vec<Transaction>>();
                 let txns = serde_json::to_string_pretty(&txns)?;
-                print!("{}", txns)
+                print!("{txns}");
             }
             WalletCommand::Utxos => {
                 let utxos = client
@@ -174,7 +174,7 @@ pub async fn cli_command(
                 .await?
                 .into_inner();
             let peers = serde_json::to_string_pretty(&peers_response.peers)?;
-            print!("{}", peers)
+            print!("{peers}");
         }
         CliCommand::Connect { connect_string } => {
             let parts = connect_string.split("@").collect::<Vec<&str>>();
@@ -337,7 +337,7 @@ async fn interactive_contract_input(
             let mut outcome_payouts = Vec::with_capacity(outcomes.len());
             println!("Specify the payouts for each outcome.");
             for outcome in outcomes {
-                println!("> Event outcome: {}", outcome);
+                println!("> Event outcome: {outcome}");
                 let offer: u64 = Text::new("Your payout:").prompt()?.parse()?;
                 let accept: u64 = Text::new("Counterparty payout:").prompt()?.parse()?;
                 let outcome_payout = EnumerationPayout {
