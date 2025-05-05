@@ -155,11 +155,15 @@ where
                 DlcManagerMessage::OfferDlc {
                     contract_input,
                     counter_party,
-                    oracle_announcements: _,
+                    oracle_announcements,
                     responder,
                 } => {
                     let offer = manager
-                        .send_offer(&contract_input, counter_party)
+                        .send_offer_with_announcements(
+                            &contract_input,
+                            counter_party,
+                            vec![oracle_announcements],
+                        )
                         .await
                         .expect("can't create offerdlc");
 
