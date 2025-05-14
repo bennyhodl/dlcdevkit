@@ -246,7 +246,7 @@ where
     }
 
     pub async fn balance(&self) -> Result<crate::Balance> {
-        let wallet_balance = self.wallet.get_balance()?;
+        let wallet_balance = self.wallet.get_balance().await?;
         let contracts = self.storage.get_contracts().await?;
 
         let contract = &contracts

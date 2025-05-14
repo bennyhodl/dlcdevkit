@@ -375,7 +375,8 @@ where
         Some(accept_revoke_params.own_pk.inner),
         &dlc_transactions,
         Some(channel_id),
-    )?;
+    )
+    .await?;
 
     verify_tx_adaptor_signature(
         secp,
@@ -500,7 +501,8 @@ where
         Some(counter_own_pk),
         wallet,
         Some(accepted_channel.channel_id),
-    )?;
+    )
+    .await?;
 
     chain_monitor.lock().await.add_tx(
         accepted_channel.buffer_transaction.compute_txid(),
@@ -1354,7 +1356,7 @@ where
 /// channel and associated contract the same time. Expects the channel to be in
 /// [`SignedChannelState::RenewOffered`] state.
 #[allow(clippy::too_many_arguments)]
-pub fn verify_renew_accept_and_confirm<W: Deref, SP: Deref, X: ContractSigner, T: Deref>(
+pub async fn verify_renew_accept_and_confirm<W: Deref, SP: Deref, X: ContractSigner, T: Deref>(
     secp: &Secp256k1<All>,
     renew_accept: &RenewAccept,
     signed_channel: &mut SignedChannel,
@@ -1433,7 +1435,8 @@ where
         Some(accept_revoke_params.own_pk.inner),
         &dlc_transactions,
         Some(signed_channel.channel_id),
-    )?;
+    )
+    .await?;
 
     let own_buffer_adaptor_signature = get_tx_adaptor_signature(
         secp,
@@ -1542,7 +1545,8 @@ where
         Some(counter_own_pk),
         wallet,
         Some(signed_channel.channel_id),
-    )?;
+    )
+    .await?;
 
     let prev_offer_per_update_point = signed_channel.counter_per_update_point;
     signed_channel.counter_per_update_point = offer_per_update_point;

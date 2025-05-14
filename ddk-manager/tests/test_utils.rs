@@ -582,7 +582,7 @@ pub fn get_variable_oracle_numeric_infos(nb_digits: &[usize]) -> OracleNumericIn
 
 pub async fn refresh_wallet(wallet: &DlcDevKitWallet, expected_funds: u64) {
     let mut retry = 0;
-    while wallet.get_balance().unwrap().confirmed.to_sat() < expected_funds {
+    while wallet.get_balance().await.unwrap().confirmed.to_sat() < expected_funds {
         if retry > 30 {
             panic!("Wallet refresh taking too long.")
         }
@@ -670,7 +670,7 @@ pub async fn create_and_fund_wallet(name: &str) -> (DlcDevKitWallet, Arc<MemoryS
     let mut done = false;
     while !done {
         wallet.sync().await.unwrap();
-        let balance = wallet.get_balance().unwrap();
+        let balance = wallet.get_balance().await.unwrap();
         if balance.confirmed > Amount::ZERO {
             done = true;
         }

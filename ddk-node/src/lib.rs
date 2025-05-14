@@ -246,7 +246,7 @@ impl DdkRpc for DdkNode {
         _request: Request<GetWalletTransactionsRequest>,
     ) -> Result<Response<GetWalletTransactionsResponse>, Status> {
         tracing::info!("Request for all wallet transactions.");
-        let wallet_transactions = self.node.wallet.get_transactions().unwrap();
+        let wallet_transactions = self.node.wallet.get_transactions().await.unwrap();
         let transactions: Vec<Vec<u8>> = wallet_transactions
             .iter()
             .map(|t| serde_json::to_vec(&t).unwrap())
@@ -262,7 +262,7 @@ impl DdkRpc for DdkNode {
         _request: Request<ListUtxosRequest>,
     ) -> Result<Response<ListUtxosResponse>, Status> {
         tracing::info!("Request to list all wallet utxos");
-        let utxos = self.node.wallet.list_utxos().unwrap();
+        let utxos = self.node.wallet.list_utxos().await.unwrap();
         let utxos: Vec<Vec<u8>> = utxos
             .iter()
             .map(|utxo| serde_json::to_vec(utxo).unwrap())

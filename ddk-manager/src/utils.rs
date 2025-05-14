@@ -113,7 +113,9 @@ where
     // Add base cost of fund tx + CET / 2 and a CET output to the collateral.
     let appr_required_amount =
         own_collateral + get_half_common_fee(fee_rate)? + dlc::util::weight_to_fee(124, fee_rate)?;
-    let utxos = wallet.get_utxos_for_amount(appr_required_amount, fee_rate, true)?;
+    let utxos = wallet
+        .get_utxos_for_amount(appr_required_amount, fee_rate, true)
+        .await?;
 
     let mut funding_inputs: Vec<FundingInput> = Vec::new();
     let mut funding_tx_info: Vec<TxInputInfo> = Vec::new();

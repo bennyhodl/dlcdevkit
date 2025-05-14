@@ -1,3 +1,4 @@
+use crate::wallet::WalletCommand;
 use bdk_esplora::esplora_client::Error as EsploraError;
 use ddk_manager::error::Error as DlcManagerError;
 use thiserror::Error;
@@ -77,6 +78,7 @@ pub enum TransportError {
     MessageProcessing(String),
 }
 
+#[cfg(feature = "nostr")]
 #[derive(Error, Debug)]
 pub enum NostrError {
     #[error("Nostr nip4: {0}")]
@@ -107,8 +109,6 @@ pub enum WalletError {
     WalletPersistanceError(String),
     #[error("Seed error: {0}")]
     Seed(#[from] bitcoin::bip32::Error),
-    #[error("Failed to get lock on BDK wallet.")]
-    Lock,
     #[error("Error syncing the internal BDK wallet.")]
     SyncError,
     #[error("Wallet Ssorage error. {0}")]
@@ -116,7 +116,7 @@ pub enum WalletError {
     #[error("Signer error: {0}")]
     SignerError(String),
     #[error("TxnBuilder: Failed to build transaction. {0}")]
-    TxnBuildeR(#[from] bdk_wallet::error::CreateTxError),
+    TxnBuilder(#[from] bdk_wallet::error::CreateTxError),
     #[error("Wallet call to esplora: {0}")]
     Esplora(String),
     #[error("Broadcast to esplora: {0}")]
@@ -135,6 +135,10 @@ pub enum WalletError {
     Serde(#[from] serde_json::Error),
     #[error("Error converting to descriptor.")]
     Descriptor(#[from] bdk_wallet::descriptor::DescriptorError),
+    #[error("Wallet receiver error: {0}")]
+    Receiver(#[from] tokio::sync::oneshot::error::RecvError),
+    #[error("Wallet sender error: {0}")]
+    Sender(#[from] tokio::sync::mpsc::error::SendError<WalletCommand>),
 }
 
 pub fn to_storage_error<T>(e: T) -> ddk_manager::error::Error

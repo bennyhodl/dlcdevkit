@@ -1,7 +1,8 @@
+mod command;
+
 use crate::error::{wallet_err_to_manager_err, WalletError};
 use crate::{chain::EsploraClient, Storage};
-use bdk_chain::{spk_client::FullScanRequest, Balance};
-use bdk_esplora::EsploraAsyncExt;
+use bdk_chain::Balance;
 use bdk_wallet::coin_selection::{
     BranchAndBoundCoinSelection, CoinSelectionAlgorithm, SingleRandomDraw,
 };
@@ -15,7 +16,7 @@ use bdk_wallet::{
         Address, Network, Txid,
     },
     template::Bip84,
-    AddressInfo, KeychainKind, PersistedWallet, SignOptions, Update, Wallet,
+    AddressInfo, KeychainKind, SignOptions, Wallet,
 };
 use bdk_wallet::{Utxo, WeightedUtxo};
 use bitcoin::hashes::sha256::Hash as Sha256Hash;
@@ -30,12 +31,11 @@ use std::future::Future;
 use std::io::Write;
 use std::pin::Pin;
 use std::sync::atomic::AtomicU32;
-// use std::sync::RwLock;
-use std::{
-    collections::BTreeMap,
-    sync::{atomic::Ordering, Arc},
+use std::sync::{atomic::Ordering, Arc};
+use tokio::sync::{
+    mpsc::{channel, Sender},
+    oneshot,
 };
-use tokio::sync::Mutex;
 
 type FutureResult<'a, T, E> = Pin<Box<dyn Future<Output = std::result::Result<T, E>> + Send + 'a>>;
 type Result<T> = std::result::Result<T, WalletError>;
@@ -68,16 +68,30 @@ impl AsyncWalletPersister for WalletStorage {
     }
 }
 
+#[derive(Debug)]
+pub enum WalletCommand {
+    Sync(oneshot::Sender<Result<()>>),
+    Balance(oneshot::Sender<Balance>),
+    NewExternalAddress(oneshot::Sender<Result<AddressInfo>>),
+    NewChangeAddress(oneshot::Sender<Result<AddressInfo>>),
+    SendToAddress(Address, Amount, FeeRate, oneshot::Sender<Result<Txid>>),
+    SendAll(Address, FeeRate, oneshot::Sender<Result<Txid>>),
+    GetTransactions(oneshot::Sender<Result<Vec<Arc<Transaction>>>>),
+    ListUtxos(oneshot::Sender<Result<Vec<LocalOutput>>>),
+    NextDerivationIndex(oneshot::Sender<Result<u32>>),
+    SignPsbtInput(
+        bitcoin::psbt::Psbt,
+        usize,
+        oneshot::Sender<std::result::Result<(), ManagerError>>,
+    ),
+}
+
 /// Internal [`bdk_wallet::PersistedWallet`] for ddk.
 pub struct DlcDevKitWallet {
-    /// BDK persisted wallet.
-    pub wallet: Arc<Mutex<PersistedWallet<WalletStorage>>>,
-    storage: WalletStorage,
-    blockchain: Arc<EsploraClient>,
+    sender: Sender<WalletCommand>,
     network: Network,
     xprv: Xpriv,
     name: String,
-    fees: Arc<HashMap<ConfirmationTarget, AtomicU32>>,
     secp: Secp256k1<All>,
 }
 
@@ -111,7 +125,7 @@ impl DlcDevKitWallet {
             .await
             .map_err(|e| WalletError::WalletPersistanceError(e.to_string()))?;
 
-        let internal_wallet = match load_wallet {
+        let mut wallet = match load_wallet {
             Some(w) => w,
             None => Wallet::create(external_descriptor, internal_descriptor)
                 .network(network)
@@ -120,94 +134,199 @@ impl DlcDevKitWallet {
                 .map_err(|e| WalletError::WalletPersistanceError(e.to_string()))?,
         };
 
-        let wallet = Arc::new(Mutex::new(internal_wallet));
-
         let blockchain = Arc::new(
             EsploraClient::new(esplora_url, network)
                 .map_err(|e| WalletError::Esplora(e.to_string()))?,
         );
 
-        // not used for regular DLCs. only for channels
-        let fees = Arc::new(fee_estimator());
+        let (sender, mut receiver) = channel(100);
+
+        tokio::spawn(async move {
+            while let Some(command) = receiver.recv().await {
+                match command {
+                    WalletCommand::Sync(sender) => {
+                        let sync = command::sync(&mut wallet, &blockchain, &mut storage).await;
+                        let _ = sender.send(sync).map_err(|e| {
+                            tracing::error!("Error sending sync command: {:?}", e);
+                        });
+                    }
+                    WalletCommand::Balance(sender) => {
+                        let balance = wallet.balance();
+                        let _ = sender.send(balance).map_err(|e| {
+                            tracing::error!("Error sending balance command: {:?}", e);
+                        });
+                    }
+                    WalletCommand::NewExternalAddress(sender) => {
+                        let address = wallet.next_unused_address(KeychainKind::External);
+                        let _ = wallet.persist_async(&mut storage).await;
+                        let _ = sender.send(Ok(address)).map_err(|e| {
+                            tracing::error!("Error sending new external address command: {:?}", e);
+                        });
+                    }
+                    WalletCommand::NewChangeAddress(sender) => {
+                        let address = wallet.next_unused_address(KeychainKind::Internal);
+                        let _ = wallet.persist_async(&mut storage).await;
+                        let _ = sender.send(Ok(address)).map_err(|e| {
+                            tracing::error!("Error sending new change address command: {:?}", e);
+                        });
+                    }
+                    WalletCommand::SendToAddress(address, amount, fee_rate, sender) => {
+                        let mut txn_builder = wallet.build_tx();
+                        txn_builder
+                            .add_recipient(address.script_pubkey(), amount)
+                            .version(2)
+                            .fee_rate(fee_rate);
+                        let mut psbt = match txn_builder.finish() {
+                            Ok(psbt) => psbt,
+                            Err(e) => {
+                                let _ = sender.send(Err(WalletError::TxnBuilder(e))).map_err(|e| {
+                                    tracing::error!(
+                                        "Error sending send to address command: {:?}",
+                                        e
+                                    );
+                                });
+                                continue;
+                            }
+                        };
+                        if let Err(e) = wallet.sign(&mut psbt, SignOptions::default()) {
+                            let _ = sender.send(Err(WalletError::Signing(e))).map_err(|e| {
+                                tracing::error!("Error sending send to address command: {:?}", e);
+                            });
+                            continue;
+                        }
+                        let tx = match psbt.extract_tx() {
+                            Ok(tx) => tx,
+                            Err(_) => {
+                                let _ = sender.send(Err(WalletError::ExtractTx)).map_err(|e| {
+                                    tracing::error!(
+                                        "Error sending send to address command: {:?}",
+                                        e
+                                    );
+                                });
+                                continue;
+                            }
+                        };
+                        let txid = tx.compute_txid();
+                        if let Err(e) = blockchain.async_client.broadcast(&tx).await {
+                            let _ = sender
+                                .send(Err(WalletError::Esplora(e.to_string())))
+                                .map_err(|e| {
+                                    tracing::error!(
+                                        "Error sending send to address command: {:?}",
+                                        e
+                                    );
+                                });
+                            continue;
+                        }
+                        let _ = sender.send(Ok(txid)).map_err(|e| {
+                            tracing::error!("Error sending send to address command: {:?}", e);
+                        });
+                    }
+                    WalletCommand::SendAll(address, fee_rate, sender) => {
+                        let mut tx_builder = wallet.build_tx();
+                        tx_builder.fee_rate(fee_rate);
+                        tx_builder.drain_wallet();
+                        tx_builder.drain_to(address.script_pubkey());
+                        let mut psbt = match tx_builder.finish() {
+                            Ok(psbt) => psbt,
+                            Err(e) => {
+                                let _ = sender.send(Err(WalletError::TxnBuilder(e))).map_err(|e| {
+                                    tracing::error!("Error sending send all command: {:?}", e);
+                                });
+                                continue;
+                            }
+                        };
+                        if let Err(e) = wallet.sign(&mut psbt, SignOptions::default()) {
+                            let _ = sender.send(Err(WalletError::Signing(e))).map_err(|e| {
+                                tracing::error!("Error sending send all command: {:?}", e);
+                            });
+                            continue;
+                        }
+                        let tx = match psbt.extract_tx() {
+                            Ok(tx) => tx,
+                            Err(_) => {
+                                let _ = sender.send(Err(WalletError::ExtractTx)).map_err(|e| {
+                                    tracing::error!("Error sending send all command: {:?}", e);
+                                });
+                                continue;
+                            }
+                        };
+                        let txid = tx.compute_txid();
+                        if let Err(e) = blockchain.async_client.broadcast(&tx).await {
+                            let _ = sender
+                                .send(Err(WalletError::Esplora(e.to_string())))
+                                .map_err(|e| {
+                                    tracing::error!("Error sending send all command: {:?}", e);
+                                });
+                            continue;
+                        }
+                        let _ = sender.send(Ok(txid)).map_err(|e| {
+                            tracing::error!("Error sending send all command: {:?}", e);
+                        });
+                    }
+                    WalletCommand::GetTransactions(sender) => {
+                        let txs = wallet
+                            .transactions()
+                            .map(|t| t.tx_node.tx)
+                            .collect::<Vec<Arc<Transaction>>>();
+                        let _ = sender.send(Ok(txs)).map_err(|e| {
+                            tracing::error!("Error sending get transactions command: {:?}", e);
+                        });
+                    }
+                    WalletCommand::ListUtxos(sender) => {
+                        let utxos = wallet.list_unspent().map(|utxo| utxo.to_owned()).collect();
+                        let _ = sender.send(Ok(utxos)).map_err(|e| {
+                            tracing::error!("Error sending list utxos command: {:?}", e);
+                        });
+                    }
+                    WalletCommand::NextDerivationIndex(sender) => {
+                        let index = wallet.next_derivation_index(KeychainKind::External);
+                        let _ = sender.send(Ok(index)).map_err(|e| {
+                            tracing::error!("Error sending next derivation index command: {:?}", e);
+                        });
+                    }
+                    WalletCommand::SignPsbtInput(mut psbt, input_index, sender) => {
+                        let sign_opts = SignOptions {
+                            trust_witness_utxo: true,
+                            ..Default::default()
+                        };
+                        let mut signed_psbt = psbt.clone();
+                        if let Err(e) = wallet.sign(&mut signed_psbt, sign_opts) {
+                            tracing::error!("Could not sign PSBT: {:?}", e);
+                            let _ = sender
+                                .send(Err(ManagerError::WalletError(
+                                    WalletError::Signing(e).into(),
+                                )))
+                                .map_err(|e| {
+                                    tracing::error!(
+                                        "Error sending sign psbt input command: {:?}",
+                                        e
+                                    );
+                                });
+                        } else {
+                            psbt.inputs[input_index] = signed_psbt.inputs[input_index].clone();
+                            let _ = sender.send(Ok(())).map_err(|e| {
+                                tracing::error!("Error sending sign psbt input command: {:?}", e);
+                            });
+                        }
+                    }
+                }
+            }
+        });
 
         Ok(DlcDevKitWallet {
-            wallet,
-            storage,
-            blockchain,
+            sender,
             network,
             xprv,
-            fees,
             secp,
             name: name.to_string(),
         })
     }
 
     pub async fn sync(&self) -> Result<()> {
-        let mut wallet = match self.wallet.try_lock() {
-            Ok(w) => w,
-            Err(e) => {
-                tracing::error!(error =? e, "Could not get lock to sync wallet.");
-                return Err(WalletError::Lock);
-            }
-        };
-
-        let mut storage = self.storage.clone();
-
-        let prev_tip = wallet.latest_checkpoint();
-        tracing::debug!(
-            height = prev_tip.height(),
-            "Syncing wallet with latest known height."
-        );
-        let sync_result = if prev_tip.height() == 0 {
-            tracing::info!("Performing a full chain scan.");
-            let spks = wallet
-                .all_unbounded_spk_iters()
-                .get(&KeychainKind::External)
-                .unwrap()
-                .to_owned();
-            let chain = FullScanRequest::builder()
-                .spks_for_keychain(KeychainKind::External, spks.clone())
-                .chain_tip(prev_tip)
-                .build();
-            let sync = self
-                .blockchain
-                .async_client
-                .full_scan(chain, 10, 1)
-                .await
-                .map_err(|e| WalletError::Esplora(e.to_string()))?;
-            Update {
-                last_active_indices: sync.last_active_indices,
-                tx_update: sync.tx_update,
-                chain: sync.chain_update,
-            }
-        } else {
-            let spks = wallet
-                .start_sync_with_revealed_spks()
-                .chain_tip(prev_tip)
-                .build();
-            let sync = self
-                .blockchain
-                .async_client
-                .sync(spks, 1)
-                .await
-                .map_err(|e| WalletError::Esplora(e.to_string()))?;
-            let indices = wallet.derivation_index(KeychainKind::External).unwrap_or(0);
-            let internal_index = wallet.derivation_index(KeychainKind::Internal).unwrap_or(0);
-            let mut last_active_indices = BTreeMap::new();
-            last_active_indices.insert(KeychainKind::External, indices);
-            last_active_indices.insert(KeychainKind::Internal, internal_index);
-            Update {
-                last_active_indices,
-                tx_update: sync.tx_update,
-                chain: sync.chain_update,
-            }
-        };
-        wallet.apply_update(sync_result)?;
-        wallet
-            .persist_async(&mut storage)
-            .await
-            .map_err(|e| WalletError::WalletPersistanceError(e.to_string()))?;
-        Ok(())
+        let (tx, rx) = oneshot::channel();
+        self.sender.send(WalletCommand::Sync(tx)).await?;
+        rx.await.map_err(WalletError::Receiver)?
     }
 
     pub fn get_pubkey(&self) -> PublicKey {
@@ -215,34 +334,26 @@ impl DlcDevKitWallet {
         PublicKey::from_secret_key(&self.secp, &self.xprv.private_key)
     }
 
-    pub fn get_balance(&self) -> Result<Balance> {
-        let Ok(wallet) = self.wallet.try_lock() else {
-            tracing::error!("Could not get lock to sync wallet.");
-            return Err(WalletError::Lock);
-        };
-        Ok(wallet.balance())
+    pub async fn get_balance(&self) -> Result<Balance> {
+        let (tx, rx) = oneshot::channel();
+        self.sender.send(WalletCommand::Balance(tx)).await?;
+        rx.await.map_err(WalletError::Receiver)
     }
 
     pub async fn new_external_address(&self) -> Result<AddressInfo> {
-        let Ok(mut wallet) = self.wallet.try_lock() else {
-            tracing::error!("Could not get lock to sync wallet.");
-            return Err(WalletError::Lock);
-        };
-        let mut storage = self.storage.clone();
-        let address = wallet.next_unused_address(KeychainKind::External);
-        let _ = wallet.persist_async(&mut storage).await;
-        Ok(address)
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(WalletCommand::NewExternalAddress(tx))
+            .await?;
+        rx.await.map_err(WalletError::Receiver)?
     }
 
     pub async fn new_change_address(&self) -> Result<AddressInfo> {
-        let Ok(mut wallet) = self.wallet.try_lock() else {
-            tracing::error!("Could not get lock to sync wallet.");
-            return Err(WalletError::Lock);
-        };
-        let mut storage = self.storage.clone();
-        let address = wallet.next_unused_address(KeychainKind::Internal);
-        let _ = wallet.persist_async(&mut storage).await;
-        Ok(address)
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(WalletCommand::NewChangeAddress(tx))
+            .await?;
+        rx.await.map_err(WalletError::Receiver)?
     }
 
     pub async fn send_to_address(
@@ -251,89 +362,66 @@ impl DlcDevKitWallet {
         amount: Amount,
         fee_rate: FeeRate,
     ) -> Result<Txid> {
-        let Ok(mut wallet) = self.wallet.try_lock() else {
-            tracing::error!("Could not get lock to sync wallet.");
-            return Err(WalletError::Lock);
-        };
-        tracing::info!(
-            address = address.to_string(),
-            amount =? amount,
-            "Sending transaction."
-        );
-        let mut txn_builder = wallet.build_tx();
-
-        txn_builder
-            .add_recipient(address.script_pubkey(), amount)
-            .version(2)
-            .fee_rate(fee_rate);
-
-        let mut psbt = txn_builder.finish()?;
-
-        wallet.sign(&mut psbt, SignOptions::default())?;
-
-        let tx = psbt.extract_tx().map_err(|_| WalletError::ExtractTx)?;
-
-        self.blockchain.async_client.broadcast(&tx).await?;
-
-        Ok(tx.compute_txid())
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(WalletCommand::SendToAddress(address, amount, fee_rate, tx))
+            .await?;
+        rx.await.map_err(WalletError::Receiver)?
     }
 
     pub async fn send_all(&self, address: Address, fee_rate: FeeRate) -> Result<Txid> {
-        let Ok(mut wallet) = self.wallet.try_lock() else {
-            tracing::error!("Could not get lock to sync wallet.");
-            return Err(WalletError::Lock);
-        };
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(WalletCommand::SendAll(address, fee_rate, tx))
+            .await?;
+        rx.await.map_err(WalletError::Receiver)?
+    }
 
+    pub async fn get_transactions(&self) -> Result<Vec<Arc<Transaction>>> {
+        let (tx, rx) = oneshot::channel();
+        self.sender.send(WalletCommand::GetTransactions(tx)).await?;
+        rx.await.map_err(WalletError::Receiver)?
+    }
+
+    pub async fn list_utxos(&self) -> Result<Vec<LocalOutput>> {
+        let (tx, rx) = oneshot::channel();
+        self.sender.send(WalletCommand::ListUtxos(tx)).await?;
+        rx.await.map_err(WalletError::Receiver)?
+    }
+
+    async fn next_derivation_index(&self) -> Result<u32> {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(WalletCommand::NextDerivationIndex(tx))
+            .await?;
+        rx.await.map_err(WalletError::Receiver)?
+    }
+
+    async fn sign_psbt_input(
+        &self,
+        psbt: &mut bitcoin::psbt::Psbt,
+        input_index: usize,
+    ) -> std::result::Result<(), ManagerError> {
         tracing::info!(
-            address = address.to_string(),
-            "Sending all UTXOs to address."
+            input_index,
+            inputs = psbt.inputs.len(),
+            outputs = psbt.outputs.len(),
+            "Signing psbt input for dlc manager."
         );
-
-        let mut tx_builder = wallet.build_tx();
-        tx_builder.fee_rate(fee_rate);
-        tx_builder.drain_wallet();
-        tx_builder.drain_to(address.script_pubkey());
-        let mut psbt = tx_builder.finish().unwrap();
-        wallet.sign(&mut psbt, SignOptions::default()).unwrap();
-        let tx = psbt.extract_tx().map_err(|_| WalletError::ExtractTx)?;
-        self.blockchain.async_client.broadcast(&tx).await?;
-
-        Ok(tx.compute_txid())
-    }
-
-    pub fn get_transactions(&self) -> Result<Vec<Arc<Transaction>>> {
-        let Ok(wallet) = self.wallet.try_lock() else {
-            tracing::error!("Could not get lock to sync wallet.");
-            return Err(WalletError::Lock);
-        };
-        Ok(wallet
-            .transactions()
-            .map(|t| t.tx_node.tx)
-            .collect::<Vec<Arc<Transaction>>>())
-    }
-
-    pub fn list_utxos(&self) -> Result<Vec<LocalOutput>> {
-        let Ok(wallet) = self.wallet.try_lock() else {
-            tracing::error!("Could not get lock to sync wallet.");
-            return Err(WalletError::Lock);
-        };
-        Ok(wallet.list_unspent().map(|utxo| utxo.to_owned()).collect())
-    }
-
-    fn next_derivation_index(&self) -> Result<u32> {
-        let Ok(wallet) = self.wallet.try_lock() else {
-            tracing::error!("Could not get lock to sync wallet.");
-            return Err(WalletError::Lock);
-        };
-
-        Ok(wallet.next_derivation_index(KeychainKind::External))
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(WalletCommand::SignPsbtInput(psbt.clone(), input_index, tx))
+            .await
+            .map_err(|e| ManagerError::WalletError(Box::new(WalletError::Sender(e))))?;
+        rx.await
+            .map_err(|e| ManagerError::WalletError(Box::new(WalletError::Receiver(e))))?
     }
 }
 
 impl FeeEstimator for DlcDevKitWallet {
     fn get_est_sat_per_1000_weight(&self, confirmation_target: ConfirmationTarget) -> u32 {
-        self.fees
-            .get(&confirmation_target)
+        let fees = fee_estimator();
+        fees.get(&confirmation_target)
             .unwrap()
             .load(Ordering::Acquire)
     }
@@ -411,7 +499,7 @@ impl ddk_manager::Wallet for DlcDevKitWallet {
         Ok(address.address)
     }
 
-    fn sign_psbt_input(
+    async fn sign_psbt_input(
         &self,
         psbt: &mut bitcoin::psbt::Psbt,
         input_index: usize,
@@ -422,24 +510,13 @@ impl ddk_manager::Wallet for DlcDevKitWallet {
             outputs = psbt.outputs.len(),
             "Signing psbt input for dlc manager."
         );
-        let Ok(wallet) = self.wallet.try_lock() else {
-            tracing::error!("Could not get lock to sync wallet.");
-            return Err(ManagerError::WalletError(WalletError::Lock.into()));
-        };
-        let sign_opts = SignOptions {
-            trust_witness_utxo: true,
-            ..Default::default()
-        };
-
-        let mut signed_psbt = psbt.clone();
-        if let Err(e) = wallet.sign(&mut signed_psbt, sign_opts) {
-            tracing::error!("Could not sign PSBT: {:?}", e);
-            return Err(ManagerError::WalletError(WalletError::Signing(e).into()));
-        };
-
-        psbt.inputs[input_index] = signed_psbt.inputs[input_index].clone();
-
-        Ok(())
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(WalletCommand::SignPsbtInput(psbt.clone(), input_index, tx))
+            .await
+            .map_err(|e| ManagerError::WalletError(Box::new(WalletError::Sender(e))))?;
+        rx.await
+            .map_err(|e| ManagerError::WalletError(Box::new(WalletError::Receiver(e))))?
     }
 
     // BDK does not have reserving UTXOs nor need it.
@@ -455,13 +532,13 @@ impl ddk_manager::Wallet for DlcDevKitWallet {
     }
 
     // return all utxos
-    fn get_utxos_for_amount(
+    async fn get_utxos_for_amount(
         &self,
         amount: u64,
         fee_rate: u64,
         _lock_utxos: bool,
     ) -> std::result::Result<Vec<ddk_manager::Utxo>, ManagerError> {
-        let local_utxos = self.list_utxos().map_err(wallet_err_to_manager_err)?;
+        let local_utxos = self.list_utxos().await.map_err(wallet_err_to_manager_err)?;
 
         let utxos = local_utxos
             .iter()
@@ -543,7 +620,7 @@ mod tests {
         FeeRate, Network,
     };
     use bitcoincore_rpc::RpcApi;
-    use ddk_manager::{Blockchain, ContractSignerProvider};
+    use ddk_manager::ContractSignerProvider;
 
     use super::DlcDevKitWallet;
 
@@ -625,8 +702,7 @@ mod tests {
     #[tokio::test]
     async fn send_all() {
         let wallet = create_wallet().await;
-        let network = wallet.blockchain.get_network().unwrap();
-        let address = match network {
+        let address = match wallet.network {
             Network::Regtest => "bcrt1qt0yrvs7qx8guvpqsx8u9mypz6t4zr3pxthsjkm",
             Network::Signet => "bcrt1q7h9uzwvyw29vrpujp69l7kce7e5w98mpn8kwsp",
             _ => "bcrt1qt0yrvs7qx8guvpqsx8u9mypz6t4zr3pxthsjkm",
@@ -636,7 +712,8 @@ mod tests {
         fund_address(&addr_one);
         fund_address(&addr_two);
         wallet.sync().await.unwrap();
-        assert!(wallet.get_balance().unwrap().confirmed > Amount::ZERO);
+        let balance = wallet.get_balance().await.unwrap();
+        assert!(balance.confirmed > Amount::ZERO);
         wallet
             .send_all(
                 Address::from_str(address).unwrap().assume_checked(),
@@ -646,6 +723,7 @@ mod tests {
             .unwrap();
         generate_blocks(5);
         wallet.sync().await.unwrap();
-        assert!(wallet.get_balance().unwrap().confirmed == Amount::ZERO)
+        let balance = wallet.get_balance().await.unwrap();
+        assert!(balance.confirmed == Amount::ZERO)
     }
 }

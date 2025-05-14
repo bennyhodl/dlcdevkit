@@ -247,7 +247,7 @@ pub(crate) fn accept_contract_internal(
 
 /// Verifies the information of the accepting party [`Accept` message](dlc_messages::AcceptDlc),
 /// creates a [`SignedContract`], and generates the offering party CET adaptor signatures.
-pub fn verify_accepted_and_sign_contract<W: Deref, X: ContractSigner, SP: Deref>(
+pub async fn verify_accepted_and_sign_contract<W: Deref, X: ContractSigner, SP: Deref>(
     secp: &Secp256k1<All>,
     offered_contract: &OfferedContract,
     accept_msg: &AcceptDlc,
@@ -314,7 +314,8 @@ where
         None,
         &dlc_transactions,
         None,
-    )?;
+    )
+    .await?;
     let contract_id = signed_contract.accepted_contract.get_contract_id_string();
     tracing::info!(contract_id, "Signed and verified contract.");
 
@@ -348,7 +349,7 @@ fn populate_psbt(psbt: &mut Psbt, all_funding_inputs: &[&FundingInput]) -> Resul
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn verify_accepted_and_sign_contract_internal<W: Deref, X: ContractSigner>(
+pub(crate) async fn verify_accepted_and_sign_contract_internal<W: Deref, X: ContractSigner>(
     secp: &Secp256k1<All>,
     offered_contract: &OfferedContract,
     accept_params: &PartyParams,
@@ -468,33 +469,29 @@ where
 
     populate_psbt(&mut fund_psbt, &all_funding_inputs)?;
 
-    // Vec<Witness>
-    let witnesses: Vec<Witness> = offered_contract
-        .funding_inputs
-        .iter()
-        .map(|x| {
-            let input_index = all_funding_inputs
-                .iter()
-                .position(|y| y == &x)
-                .ok_or_else(|| {
-                    Error::InvalidState(format!(
-                        "Could not find input for serial id {}",
-                        x.input_serial_id
-                    ))
-                })?;
+    let mut witnesses: Vec<Witness> = Vec::new();
+    for funding_input in offered_contract.funding_inputs.iter() {
+        let input_index = all_funding_inputs
+            .iter()
+            .position(|y| y == &funding_input)
+            .ok_or_else(|| {
+                Error::InvalidState(format!(
+                    "Could not find input for serial id {}",
+                    funding_input.input_serial_id
+                ))
+            })?;
 
-            wallet.sign_psbt_input(&mut fund_psbt, input_index)?;
+        wallet.sign_psbt_input(&mut fund_psbt, input_index).await?;
 
-            let witness = fund_psbt.inputs[input_index]
-                .final_script_witness
-                .clone()
-                .ok_or(Error::InvalidParameters(
-                    "No witness from signing psbt input".to_string(),
-                ))?;
+        let witness = fund_psbt.inputs[input_index]
+            .final_script_witness
+            .clone()
+            .ok_or(Error::InvalidParameters(
+                "No witness from signing psbt input".to_string(),
+            ))?;
 
-            Ok(witness)
-        })
-        .collect::<Result<Vec<_>, Error>>()?;
+        witnesses.push(witness);
+    }
 
     let funding_signatures: Vec<FundingSignature> = witnesses
         .into_iter()
@@ -549,7 +546,7 @@ where
 /// Verifies the information from the offer party [`Sign` message](dlc_messages::SignDlc),
 /// creates the accepting party's [`SignedContract`] and returns it along with the
 /// signed fund transaction.
-pub fn verify_signed_contract<W: Deref>(
+pub async fn verify_signed_contract<W: Deref>(
     secp: &Secp256k1<All>,
     accepted_contract: &AcceptedContract,
     sign_msg: &SignDlc,
@@ -575,10 +572,11 @@ where
         wallet,
         None,
     )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn verify_signed_contract_internal<W: Deref>(
+pub(crate) async fn verify_signed_contract_internal<W: Deref>(
     secp: &Secp256k1<All>,
     accepted_contract: &AcceptedContract,
     refund_signature: &Signature,
@@ -678,7 +676,7 @@ where
                 ))
             })?;
 
-        wallet.sign_psbt_input(&mut fund_psbt, input_index)?;
+        wallet.sign_psbt_input(&mut fund_psbt, input_index).await?;
     }
 
     let signed_contract = SignedContract {
