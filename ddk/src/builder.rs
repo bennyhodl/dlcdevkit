@@ -7,9 +7,9 @@ use std::sync::{Arc, RwLock};
 
 use crate::chain::EsploraClient;
 use crate::ddk::{DlcDevKit, DlcManagerMessage};
+use crate::error::{BuilderError, Error};
 use crate::wallet::DlcDevKitWallet;
 use crate::{Oracle, Storage, Transport};
-use thiserror::Error;
 
 const DEFAULT_ESPLORA_HOST: &str = "https://mutinynet.com/api";
 const DEFAULT_NETWORK: Network = Network::Signet;
@@ -26,16 +26,6 @@ pub struct Builder<T, S, O> {
     seed_bytes: [u8; 32],
 }
 
-/// An error that could be thrown while building [`crate::ddk::DlcDevKit`]
-#[derive(Debug, Clone, Copy, Error)]
-pub enum BuilderError {
-    #[error("A transport was not provided.")]
-    NoTransport,
-    #[error("A storage implementation was not provided.")]
-    NoStorage,
-    #[error("An oracle client was not provided.")]
-    NoOracle,
-}
 /// Defaults when creating a DDK application
 /// Transport, storage, and oracle is set to none.
 ///
@@ -111,7 +101,7 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
     }
 
     /// Builds the `DlcDevKit` instance. Fails if any components are missing.
-    pub async fn finish(&self) -> anyhow::Result<DlcDevKit<T, S, O>> {
+    pub async fn finish(&self) -> Result<DlcDevKit<T, S, O>, Error> {
         tracing::info!(
             network = self.network.to_string(),
             esplora = self.esplora_host,

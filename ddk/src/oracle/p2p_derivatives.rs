@@ -3,12 +3,11 @@
 //! # cg-oracle-client
 //! Http client wrapper for the Crypto Garage DLC oracle
 
+use crate::{error::OracleError, Oracle};
 use chrono::{DateTime, SecondsFormat, Utc};
 use ddk_manager::error::Error as DlcManagerError;
 use dlc::secp256k1_zkp::{schnorr::Signature, XOnlyPublicKey};
 use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
-
-use crate::Oracle;
 
 /// Enables interacting with a DLC oracle.
 pub struct P2PDOracleClient {
@@ -55,20 +54,16 @@ struct AttestationResponse {
     values: Vec<String>,
 }
 
-async fn get<T>(path: &str) -> Result<T, DlcManagerError>
+async fn get<T>(path: &str) -> Result<T, OracleError>
 where
     T: serde::de::DeserializeOwned,
 {
     reqwest::get(path)
         .await
-        .map_err(|x| {
-            ddk_manager::error::Error::IOError(
-                std::io::Error::new(std::io::ErrorKind::Other, x).into(),
-            )
-        })?
+        .map_err(|x| OracleError::Reqwest(x))?
         .json::<T>()
         .await
-        .map_err(|e| ddk_manager::error::Error::OracleError(e.to_string()))
+        .map_err(|e| OracleError::Reqwest(e))
 }
 
 fn pubkey_path(host: &str) -> String {
@@ -97,11 +92,9 @@ impl P2PDOracleClient {
     /// Try to create an instance of an oracle client connecting to the provided
     /// host. Returns an error if the host could not be reached. Panics if the
     /// oracle uses an incompatible format.
-    pub async fn new(host: &str) -> Result<P2PDOracleClient, DlcManagerError> {
+    pub async fn new(host: &str) -> Result<P2PDOracleClient, OracleError> {
         if host.is_empty() {
-            return Err(DlcManagerError::InvalidParameters(
-                "Invalid host".to_string(),
-            ));
+            return Err(OracleError::Init("Invalid host".to_string()));
         }
         let host = if !host.ends_with('/') {
             format!("{}{}", host, "/")
@@ -117,19 +110,14 @@ impl P2PDOracleClient {
     }
 }
 
-fn parse_event_id(event_id: &str) -> Result<(String, DateTime<Utc>), DlcManagerError> {
+fn parse_event_id(event_id: &str) -> Result<(String, DateTime<Utc>), OracleError> {
     let asset_id = &event_id[..6];
     let timestamp_str = &event_id[6..];
     let timestamp: i64 = timestamp_str
         .parse()
-        .map_err(|_| DlcManagerError::OracleError("Invalid timestamp format".to_string()))?;
+        .map_err(|_| OracleError::Custom("Invalid timestamp format".to_string()))?;
     let naive_date_time = DateTime::from_timestamp(timestamp, 0)
-        .ok_or_else(|| {
-            DlcManagerError::InvalidParameters(format!(
-                "Invalid timestamp {} in event id",
-                timestamp
-            ))
-        })?
+        .ok_or_else(|| OracleError::Custom(format!("Invalid timestamp {} in event id", timestamp)))?
         .naive_utc();
     let date_time = DateTime::from_naive_utc_and_offset(naive_date_time, Utc);
     Ok((asset_id.to_string(), date_time))
@@ -145,9 +133,12 @@ impl ddk_manager::Oracle for P2PDOracleClient {
         &self,
         event_id: &str,
     ) -> Result<OracleAnnouncement, DlcManagerError> {
-        let (asset_id, date_time) = parse_event_id(event_id)?;
+        let (asset_id, date_time) =
+            parse_event_id(event_id).map_err(|e| DlcManagerError::OracleError(e.to_string()))?;
         let path = announcement_path(&self.host, &asset_id, &date_time);
-        let announcement = get(&path).await?;
+        let announcement = get(&path)
+            .await
+            .map_err(|e| DlcManagerError::OracleError(e.to_string()))?;
         Ok(announcement)
     }
 
@@ -155,13 +146,16 @@ impl ddk_manager::Oracle for P2PDOracleClient {
         &self,
         event_id: &str,
     ) -> Result<OracleAttestation, ddk_manager::error::Error> {
-        let (asset_id, date_time) = parse_event_id(event_id)?;
+        let (asset_id, date_time) =
+            parse_event_id(event_id).map_err(|e| DlcManagerError::OracleError(e.to_string()))?;
         let path = attestation_path(&self.host, &asset_id, &date_time);
         let AttestationResponse {
             event_id,
             signatures,
             values,
-        } = get::<AttestationResponse>(&path).await?;
+        } = get::<AttestationResponse>(&path)
+            .await
+            .map_err(|e| DlcManagerError::OracleError(e.to_string()))?;
 
         Ok(OracleAttestation {
             event_id,

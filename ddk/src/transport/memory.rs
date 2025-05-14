@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use crate::{ddk::DlcDevKitDlcManager, Oracle, Storage, Transport};
+use crate::{ddk::DlcDevKitDlcManager, error::TransportError, Oracle, Storage, Transport};
 use bitcoin::{
     key::{self, Keypair},
     secp256k1::{All, PublicKey, Secp256k1},
@@ -66,7 +66,7 @@ impl Transport for MemoryTransport {
         &self,
         mut stop_receiver: watch::Receiver<bool>,
         manager: Arc<DlcDevKitDlcManager<S, O>>,
-    ) -> Result<(), anyhow::Error> {
+    ) -> Result<(), TransportError> {
         let mut timer = tokio::time::interval(Duration::from_secs(1));
         loop {
             tokio::select! {

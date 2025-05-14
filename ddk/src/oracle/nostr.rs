@@ -1,6 +1,7 @@
 use std::str::FromStr;
 use std::time::Duration;
 
+use crate::error::OracleError;
 use bitcoin::XOnlyPublicKey;
 use ddk_manager::error::Error as ManagerError;
 use kormir::{OracleAnnouncement, OracleAttestation};
@@ -18,16 +19,6 @@ use nostr_sdk::RelayPoolNotification;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
-#[derive(Debug, thiserror::Error)]
-pub enum NostrOracleError {
-    #[error("Failed to make subscription.")]
-    FailedToMakeSubscription,
-    #[error("Failed to convert Nostr public key to XOnlyPublicKey.")]
-    XonlyConversionError,
-    #[error("Failed to read event.")]
-    DlcReadError,
-}
-
 #[derive(Debug)]
 pub struct NostrOracle {
     client: Client,
@@ -41,9 +32,13 @@ impl NostrOracle {
         relays: Vec<U>,
         since: Option<Timestamp>,
         nostr_oracle_pubkey: NostrPublicKey,
-    ) -> Result<Self, NostrOracleError> {
+    ) -> Result<Self, OracleError> {
         let xonly_oracle_pubkey = XOnlyPublicKey::from_slice(nostr_oracle_pubkey.as_bytes())
-            .map_err(|_| NostrOracleError::XonlyConversionError)?;
+            .map_err(|_| {
+                OracleError::Init(
+                    "Failed to convert Nostr public key to XOnlyPublicKey.".to_string(),
+                )
+            })?;
 
         let client = Client::default();
 
@@ -63,7 +58,7 @@ impl NostrOracle {
         client
             .subscribe(filter, None)
             .await
-            .map_err(|_| NostrOracleError::FailedToMakeSubscription)?;
+            .map_err(|_| OracleError::Init("Failed to make subscription.".to_string()))?;
 
         let db = MemoryDatabase::new();
 
@@ -78,7 +73,7 @@ impl NostrOracle {
     pub fn start(
         &self,
         mut stop_signal: watch::Receiver<bool>,
-    ) -> JoinHandle<Result<(), anyhow::Error>> {
+    ) -> JoinHandle<Result<(), OracleError>> {
         tracing::info!(
             pubkey = self.nostr_oracle_pubkey.to_string(),
             "Starting Nostr Oracle listener."
@@ -127,7 +122,7 @@ impl NostrOracle {
                     }
                 }
             }
-            Ok::<_, anyhow::Error>(())
+            Ok::<_, OracleError>(())
         })
     }
 }
@@ -205,10 +200,11 @@ impl ddk_manager::Oracle for NostrOracle {
     }
 }
 
-fn decode_base64<T: Readable>(content: &str) -> Result<T, NostrOracleError> {
-    let bytes = base64::decode(content).map_err(|_| NostrOracleError::DlcReadError)?;
+fn decode_base64<T: Readable>(content: &str) -> Result<T, OracleError> {
+    let bytes = base64::decode(content)
+        .map_err(|_| OracleError::Custom("Failed to decode base64.".to_string()))?;
     let mut cursor = Cursor::new(bytes);
-    T::read(&mut cursor).map_err(|_| NostrOracleError::DlcReadError)
+    T::read(&mut cursor).map_err(|_| OracleError::Custom("Failed to read event.".to_string()))
 }
 
 #[cfg(test)]

@@ -24,9 +24,12 @@ pub enum SqlxError {
     /// miniscript error
     #[error("miniscript error: {0}")]
     Miniscript(#[from] bdk_chain::miniscript::Error),
+    #[error("Custom error: {0}")]
+    Custom(String),
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
+/// todo: add fee rate and funding txid
 pub struct ContractRow {
     pub id: String,
     pub state: i16,

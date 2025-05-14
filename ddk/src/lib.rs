@@ -40,6 +40,7 @@ use bitcoin::Amount;
 use ddk::DlcDevKitDlcManager;
 use dlc_messages::oracle_msgs::OracleAnnouncement;
 use dlc_messages::Message;
+use error::TransportError;
 use error::WalletError;
 use std::sync::Arc;
 use tokio::sync::watch;
@@ -57,7 +58,7 @@ pub trait Transport: Send + Sync + 'static {
         &self,
         mut stop_signal: watch::Receiver<bool>,
         manager: Arc<DlcDevKitDlcManager<S, O>>,
-    ) -> Result<(), anyhow::Error>;
+    ) -> Result<(), TransportError>;
     /// Send a message to a specific counterparty.
     async fn send_message(&self, counterparty: PublicKey, message: Message);
     /// Connect to another peer
@@ -72,8 +73,10 @@ pub trait Storage: ddk_manager::Storage + Send + Sync + 'static {
     /// Save changeset to the wallet storage.
     async fn persist_bdk(&self, changeset: &ChangeSet) -> Result<(), WalletError>;
     /// Connected counterparties.
+    /// TODO: Remove
     fn list_peers(&self) -> anyhow::Result<Vec<PeerInformation>>;
     /// Persis counterparty.
+    /// TODO: Remove
     fn save_peer(&self, peer: PeerInformation) -> anyhow::Result<()>;
     // #[cfg(feature = "marketplace")]
     fn save_announcement(&self, announcement: OracleAnnouncement) -> anyhow::Result<()>;

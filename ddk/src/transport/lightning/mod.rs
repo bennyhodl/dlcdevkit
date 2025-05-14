@@ -1,4 +1,4 @@
-use crate::{DlcDevKitDlcManager, Oracle, Storage, Transport};
+use crate::{error::TransportError, DlcDevKitDlcManager, Oracle, Storage, Transport};
 use async_trait::async_trait;
 use bitcoin::secp256k1::PublicKey;
 use lightning_net_tokio::connect_outbound;
@@ -38,7 +38,7 @@ impl Transport for LightningTransport {
         &self,
         mut stop_signal: watch::Receiver<bool>,
         manager: Arc<DlcDevKitDlcManager<S, O>>,
-    ) -> Result<(), anyhow::Error> {
+    ) -> Result<(), TransportError> {
         let listen_handle = self.listen(stop_signal.clone());
 
         let process_handle = self.process_messages(stop_signal.clone(), manager.clone());
@@ -46,8 +46,8 @@ impl Transport for LightningTransport {
         // Wait for either task to complete or stop signal
         tokio::select! {
             _ = stop_signal.changed() => Ok(()),
-            res = listen_handle => res?,
-            res = process_handle => res?,
+            res = listen_handle => res.map_err(|e| TransportError::Listen(e.to_string()))?,
+            res = process_handle => res.map_err(|e| TransportError::MessageProcessing(e.to_string()))?,
         }
     }
 

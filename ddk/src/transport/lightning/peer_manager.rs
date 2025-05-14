@@ -1,4 +1,3 @@
-use anyhow::anyhow;
 use bitcoin::{key::rand::Fill, secp256k1::PublicKey};
 use dlc_messages::message_handler::MessageHandler as DlcMessageHandler;
 use lightning::{
@@ -16,7 +15,7 @@ use std::{
 };
 use tokio::{net::TcpListener, sync::watch, task::JoinHandle, time::interval};
 
-use crate::{ddk::DlcDevKitDlcManager, Oracle, Storage};
+use crate::{ddk::DlcDevKitDlcManager, error::TransportError, Oracle, Storage};
 
 pub struct DlcDevKitLogger;
 
@@ -58,12 +57,17 @@ pub struct LightningTransport {
 }
 
 impl LightningTransport {
-    pub fn new(seed_bytes: &[u8; 32], listening_port: u16) -> anyhow::Result<LightningTransport> {
-        let time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?;
+    pub fn new(
+        seed_bytes: &[u8; 32],
+        listening_port: u16,
+    ) -> Result<LightningTransport, TransportError> {
+        let time = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|e| TransportError::Init(e.to_string()))?;
         let key_signer = KeysManager::new(seed_bytes, time.as_secs(), time.as_nanos() as u32);
         let node_id = key_signer
             .get_node_id(lightning::sign::Recipient::Node)
-            .map_err(|_| anyhow!("Could not get node id."))?;
+            .map_err(|_| TransportError::Init("Could not get node id.".to_string()))?;
 
         let dlc_message_handler = Arc::new(DlcMessageHandler::new());
         let message_handler = MessageHandler {
@@ -74,7 +78,9 @@ impl LightningTransport {
         };
 
         let mut ephmeral_data = [0u8; 32];
-        ephmeral_data.try_fill(&mut bitcoin::key::rand::thread_rng())?;
+        ephmeral_data
+            .try_fill(&mut bitcoin::key::rand::thread_rng())
+            .map_err(|e| TransportError::Init(e.to_string()))?;
 
         Ok(LightningTransport {
             peer_manager: Arc::new(LnPeerManager::new(
@@ -93,14 +99,14 @@ impl LightningTransport {
     pub fn listen(
         &self,
         stop_signal: watch::Receiver<bool>,
-    ) -> JoinHandle<Result<(), anyhow::Error>> {
+    ) -> JoinHandle<Result<(), TransportError>> {
         let listening_port = self.listening_port;
         let mut listen_stop = stop_signal.clone();
         let peer_manager = Arc::clone(&self.peer_manager);
         tokio::spawn(async move {
             let listener = TcpListener::bind(format!("0.0.0.0:{}", listening_port))
                 .await
-                .expect("Coldn't get port.");
+                .map_err(|e| TransportError::Listen(e.to_string()))?;
 
             tracing::info!(
                 addr =? listener.local_addr().unwrap(),
@@ -133,7 +139,7 @@ impl LightningTransport {
                     }
                 }
             }
-            Ok::<_, anyhow::Error>(())
+            Ok::<_, TransportError>(())
         })
     }
 
@@ -141,14 +147,13 @@ impl LightningTransport {
         &self,
         stop_signal: watch::Receiver<bool>,
         manager: Arc<DlcDevKitDlcManager<S, O>>,
-    ) -> JoinHandle<Result<(), anyhow::Error>> {
+    ) -> JoinHandle<Result<(), TransportError>> {
         let mut message_stop = stop_signal.clone();
         let message_manager = Arc::clone(&manager);
         let peer_manager = Arc::clone(&self.peer_manager);
         let message_handler = Arc::clone(&self.message_handler);
         tokio::spawn(async move {
             let mut message_interval = interval(Duration::from_secs(20));
-            // let mut event_interval = interval(Duration::from_secs(2));
             loop {
                 tokio::select! {
                     _ = message_stop.changed() => {
@@ -195,7 +200,7 @@ impl LightningTransport {
                     }
                 }
             }
-            Ok::<_, anyhow::Error>(())
+            Ok::<_, TransportError>(())
         })
     }
 }

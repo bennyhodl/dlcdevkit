@@ -308,7 +308,7 @@ impl DdkRpc for DdkNode {
         &self,
         _request: Request<ListOraclesRequest>,
     ) -> Result<Response<ListOraclesResponse>, Status> {
-        let pubkey = self.node.oracle.get_pubkey().await.unwrap().to_string();
+        let pubkey = self.node.oracle.get_public_key().to_string();
         let name = self.node.oracle.name();
         Ok(Response::new(ListOraclesResponse { name, pubkey }))
     }

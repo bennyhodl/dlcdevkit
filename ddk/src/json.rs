@@ -4,8 +4,16 @@ use ddk_manager::contract::{
     FailedSignContract, PreClosedContract,
 };
 use dlc_messages::oracle_msgs::EventDescriptor;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashSet;
+
+#[derive(Debug, Serialize, Deserialize, Hash, Eq, PartialEq)]
+pub struct OracleEvent {
+    pub event_id: String,
+    pub oracle_pubkey: String,
+    pub event_type: String,
+}
 
 pub fn offered_contract_to_value(offered_contract: &OfferedContract, state: &str) -> Value {
     let contract_id = hex::encode(offered_contract.id);
@@ -16,11 +24,15 @@ pub fn offered_contract_to_value(offered_contract: &OfferedContract, state: &str
                 EventDescriptor::EnumEvent(_) => "enum",
                 EventDescriptor::DigitDecompositionEvent(_) => "numerical",
             };
-            let oracle_event = json!({ "event_id": announcement.oracle_event.event_id, "oracle_pubkey": announcement.oracle_public_key.to_string(), "event_type": event_type});
+            let oracle_event = OracleEvent {
+                event_id: announcement.oracle_event.event_id.to_string(),
+                oracle_pubkey: announcement.oracle_public_key.to_string(),
+                event_type: event_type.to_string(),
+            };
             event_ids.insert(oracle_event);
         }
     }
-    let event_ids = event_ids.into_iter().collect::<Vec<Value>>();
+    let event_ids = event_ids.into_iter().collect::<Vec<OracleEvent>>();
     json!({
         "state": state,
         "contract_id": contract_id,
