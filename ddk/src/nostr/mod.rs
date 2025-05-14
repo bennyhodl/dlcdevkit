@@ -1,16 +1,12 @@
+pub mod messages;
+
+use crate::error::Error;
 use bitcoin::key::Parity;
 use bitcoin::secp256k1::PublicKey as BitcoinPublicKey;
 use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
 use lightning::io::Cursor;
 use lightning::util::ser::Readable;
 use nostr_rs::{Filter, Kind, PublicKey, Timestamp};
-
-use crate::error::Error;
-
-/// Nostr [dlc_messages::oracle_msgs::OracleAnnouncement] marketplace.
-#[cfg(feature = "marketplace")]
-pub mod marketplace;
-pub mod messages;
 
 pub const DLC_MESSAGE_KIND: Kind = Kind::Custom(8_888);
 pub const ORACLE_ANNOUNCMENT_KIND: Kind = Kind::Custom(88);

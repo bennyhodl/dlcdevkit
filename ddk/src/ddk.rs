@@ -1,8 +1,6 @@
 use crate::chain::EsploraClient;
 use crate::error::Error;
 use crate::wallet::DlcDevKitWallet;
-#[cfg(feature = "marketplace")]
-use crate::{nostr::marketplace::*, DEFAULT_NOSTR_RELAY};
 use crate::{Oracle, Storage, Transport};
 use bitcoin::secp256k1::PublicKey;
 use bitcoin::{Amount, Network};
@@ -120,17 +118,6 @@ where
                     .expect("couldn't send periodic check");
             }
         });
-
-        #[cfg(feature = "marketplace")]
-        {
-            let storage_clone = self.storage.clone();
-            runtime.spawn(async move {
-                tracing::info!("Starting marketplace listener.");
-                marketplace_listener(&storage_clone, vec![DEFAULT_NOSTR_RELAY])
-                    .await
-                    .unwrap();
-            });
-        }
 
         *runtime_lock = Some(runtime);
         Ok(())

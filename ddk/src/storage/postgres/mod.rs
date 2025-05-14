@@ -2,7 +2,6 @@ use std::str::FromStr;
 
 use super::sqlx::{ContractRowNoBytes, SqlxError};
 use crate::error::{StorageError, WalletError};
-use crate::transport::PeerInformation;
 use crate::Storage;
 use crate::{
     error::to_storage_error,
@@ -31,7 +30,6 @@ use ddk_manager::{
     },
     Storage as ManagerStorage,
 };
-use dlc_messages::oracle_msgs::OracleAnnouncement;
 use serde_json::json;
 use sqlx::pool::PoolOptions;
 use sqlx::postgres::PgRow;
@@ -203,19 +201,19 @@ impl PostgresStore {
         if let Some(ref descriptor) = changeset.descriptor {
             insert_descriptor(&mut tx, wallet_name, descriptor, External)
                 .await
-                .map_err(|e| StorageError::Sqlx(e.into()))?;
+                .map_err(StorageError::Sqlx)?;
         }
 
         if let Some(ref change_descriptor) = changeset.change_descriptor {
             insert_descriptor(&mut tx, wallet_name, change_descriptor, Internal)
                 .await
-                .map_err(|e| StorageError::Sqlx(e.into()))?;
+                .map_err(StorageError::Sqlx)?;
         }
 
         if let Some(network) = changeset.network {
             insert_network(&mut tx, wallet_name, network)
                 .await
-                .map_err(|e| StorageError::Sqlx(e.into()))?;
+                .map_err(StorageError::Sqlx)?;
         }
 
         let last_revealed_indices = &changeset.indexer.last_revealed;
@@ -223,16 +221,16 @@ impl PostgresStore {
             for (desc_id, index) in last_revealed_indices {
                 update_last_revealed(&mut tx, wallet_name, *desc_id, *index)
                     .await
-                    .map_err(|e| StorageError::Sqlx(e.into()))?;
+                    .map_err(StorageError::Sqlx)?;
             }
         }
 
         local_chain_changeset_persist_to_postgres(&mut tx, wallet_name, &changeset.local_chain)
             .await
-            .map_err(|e| StorageError::Sqlx(e.into()))?;
+            .map_err(StorageError::Sqlx)?;
         tx_graph_changeset_persist_to_postgres(&mut tx, wallet_name, &changeset.tx_graph)
             .await
-            .map_err(|e| StorageError::Sqlx(e.into()))?;
+            .map_err(StorageError::Sqlx)?;
 
         tx.commit()
             .await
@@ -257,22 +255,6 @@ impl Storage for PostgresStore {
         self.write(changeset)
             .await
             .map_err(|_| WalletError::StorageError("Did not persist bdk storage".to_string()))
-    }
-
-    fn list_peers(&self) -> anyhow::Result<Vec<PeerInformation>> {
-        unimplemented!("Not implemented to list peers")
-    }
-
-    fn save_peer(&self, _peer: PeerInformation) -> anyhow::Result<()> {
-        unimplemented!("Not implemented to save peer")
-    }
-
-    fn save_announcement(&self, _announcement: OracleAnnouncement) -> anyhow::Result<()> {
-        unimplemented!("Not implemented to save announcement")
-    }
-
-    fn get_marketplace_announcements(&self) -> anyhow::Result<Vec<OracleAnnouncement>> {
-        unimplemented!("Not implemented to get marketplace announcements")
     }
 }
 

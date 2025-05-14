@@ -43,6 +43,12 @@ pub type LnPeerManager = LdkPeerManager<
     Arc<KeysManager>,
 >;
 
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+pub struct PeerInformation {
+    pub pubkey: String,
+    pub host: String,
+}
+
 /// BOLT-8 LightningTransport to manage TCP connections to communicate
 /// DLC contracts with another party.
 pub struct LightningTransport {
@@ -202,6 +208,17 @@ impl LightningTransport {
             }
             Ok::<_, TransportError>(())
         })
+    }
+
+    pub fn list_peers(&self) -> Vec<PeerInformation> {
+        self.peer_manager
+            .list_peers()
+            .into_iter()
+            .map(|p| PeerInformation {
+                pubkey: p.counterparty_node_id.to_string(),
+                host: p.socket_address.unwrap().to_string(),
+            })
+            .collect()
     }
 }
 

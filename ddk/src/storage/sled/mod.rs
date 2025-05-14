@@ -5,17 +5,14 @@
 mod contract;
 mod wallet;
 
+use crate::error::WalletError;
+use crate::Storage;
 use bdk_chain::Merge;
 use bdk_wallet::ChangeSet;
 use ddk_manager::contract::ser::Serializable;
 use ddk_manager::error::Error;
-use dlc_messages::oracle_msgs::OracleAnnouncement;
 use lightning::io::{Cursor, Read};
 use sled::{Db, Tree};
-
-use crate::error::WalletError;
-use crate::transport::PeerInformation;
-use crate::Storage;
 
 const CONTRACT_TREE: u8 = 1;
 const CHANNEL_TREE: u8 = 2;
@@ -129,57 +126,6 @@ impl Storage for SledStorage {
             None => ChangeSet::default(),
         };
         Ok(changeset)
-    }
-
-    fn list_peers(&self) -> anyhow::Result<Vec<PeerInformation>> {
-        if let Some(bytes) = self.db.get(PEERS_KEY)? {
-            let peers: Vec<_> = serde_json::from_slice(&bytes)?;
-            Ok(peers)
-        } else {
-            Ok(vec![])
-        }
-    }
-
-    fn save_peer(&self, peer: PeerInformation) -> anyhow::Result<()> {
-        let mut known_peers = self.list_peers()?;
-
-        if known_peers.contains(&peer) {
-            return Ok(());
-        }
-
-        known_peers.push(peer);
-        let peer_vec = serde_json::to_vec(&known_peers)?;
-
-        self.db.insert("peers", peer_vec)?;
-
-        Ok(())
-    }
-
-    fn save_announcement(&self, announcement: OracleAnnouncement) -> anyhow::Result<()> {
-        let marketplace = self.marketplace_tree().map_err(sled_to_wallet_error)?;
-        let stored_announcements: Vec<OracleAnnouncement> =
-            match marketplace.get(MARKETPLACE_KEY)? {
-                Some(o) => serde_json::from_slice(&o)?,
-                None => vec![],
-            };
-        let mut announcements =
-            crate::util::ser::filter_expired_oracle_announcements(stored_announcements);
-        announcements.push(announcement);
-
-        let serialize_announcements = serde_json::to_vec(&announcements)?;
-        marketplace.insert(MARKETPLACE_KEY, serialize_announcements)?;
-
-        Ok(())
-    }
-
-    fn get_marketplace_announcements(&self) -> anyhow::Result<Vec<OracleAnnouncement>> {
-        let marketplace = self.marketplace_tree().map_err(sled_to_wallet_error)?;
-        let prev_announcements = match marketplace.get(MARKETPLACE_KEY)? {
-            Some(o) => o.to_vec(),
-            None => vec![],
-        };
-        let announcements: Vec<OracleAnnouncement> = serde_json::from_slice(&prev_announcements)?;
-        Ok(announcements)
     }
 }
 

@@ -1,16 +1,12 @@
-use crate::transport::PeerInformation;
 use crate::Storage;
 use bdk_chain::Merge;
 use ddk_manager::{channel::Channel, contract::Contract, ChannelId, ContractId};
-use dlc_messages::oracle_msgs::OracleAnnouncement;
 use std::collections::HashMap;
 use std::sync::RwLock;
 
 #[derive(Default, Debug)]
 pub struct MemoryStorage {
-    peers: RwLock<HashMap<String, PeerInformation>>,
     bdk_data: RwLock<Option<bdk_wallet::ChangeSet>>,
-    announcements: RwLock<Vec<OracleAnnouncement>>,
     contracts: RwLock<HashMap<ContractId, Contract>>,
     channels: RwLock<HashMap<ChannelId, Channel>>,
     chain_monitor: RwLock<Option<ddk_manager::chain_monitor::ChainMonitor>>,
@@ -19,9 +15,7 @@ pub struct MemoryStorage {
 impl MemoryStorage {
     pub fn new() -> Self {
         Self {
-            peers: RwLock::new(HashMap::new()),
             bdk_data: RwLock::new(None),
-            announcements: RwLock::new(Vec::new()),
             contracts: RwLock::new(HashMap::new()),
             channels: RwLock::new(HashMap::new()),
             chain_monitor: RwLock::new(None),
@@ -31,19 +25,6 @@ impl MemoryStorage {
 
 #[async_trait::async_trait]
 impl Storage for MemoryStorage {
-    fn save_peer(&self, _peer: PeerInformation) -> anyhow::Result<()> {
-        // self.peers.write().unwrap().insert(peer.id.clone(), peer);
-        Ok(())
-    }
-
-    fn list_peers(&self) -> anyhow::Result<Vec<PeerInformation>> {
-        // Ok(self.peers.read().unwrap().values().cloned().collect())
-        Ok(vec![PeerInformation {
-            pubkey: "".to_string(),
-            host: "".to_string(),
-        }])
-    }
-
     async fn persist_bdk(
         &self,
         changeset: &bdk_wallet::ChangeSet,
@@ -56,15 +37,6 @@ impl Storage for MemoryStorage {
 
     async fn initialize_bdk(&self) -> Result<bdk_wallet::ChangeSet, crate::error::WalletError> {
         Ok(self.bdk_data.read().unwrap().clone().unwrap_or_default())
-    }
-
-    fn save_announcement(&self, announcement: kormir::OracleAnnouncement) -> anyhow::Result<()> {
-        self.announcements.write().unwrap().push(announcement);
-        Ok(())
-    }
-
-    fn get_marketplace_announcements(&self) -> anyhow::Result<Vec<kormir::OracleAnnouncement>> {
-        Ok(self.announcements.read().unwrap().clone())
     }
 }
 
