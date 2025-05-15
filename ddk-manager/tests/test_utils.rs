@@ -592,10 +592,6 @@ pub async fn refresh_wallet(wallet: &DlcDevKitWallet, expected_funds: u64) {
     }
 }
 
-pub const OFFER_PARTY: &str = "alice";
-pub const ACCEPT_PARTY: &str = "bob";
-pub const SINK: &str = "ddk";
-
 pub async fn init_clients() -> (
     DlcDevKitWallet,
     Arc<MemoryStorage>,
@@ -607,8 +603,8 @@ pub async fn init_clients() -> (
     let sink_rpc = Client::new(&rpc_base(), auth.clone()).unwrap();
 
     std::thread::sleep(std::time::Duration::from_millis(100));
-    let offer_rpc = create_and_fund_wallet(OFFER_PARTY).await;
-    let accept_rpc = create_and_fund_wallet(ACCEPT_PARTY).await;
+    let offer_rpc = create_and_fund_wallet().await;
+    let accept_rpc = create_and_fund_wallet().await;
 
     let sink_address = sink_rpc
         .get_new_address(None, Some(AddressType::Bech32))
@@ -631,7 +627,7 @@ fn rpc_base() -> String {
     format!("http://{}:18443", host)
 }
 
-pub async fn create_and_fund_wallet(name: &str) -> (DlcDevKitWallet, Arc<MemoryStorage>) {
+pub async fn create_and_fund_wallet() -> (DlcDevKitWallet, Arc<MemoryStorage>) {
     let auth = Auth::UserPass("ddk".to_string(), "ddk".to_string());
     let sink_rpc = Client::new(&rpc_base(), auth.clone()).unwrap();
     let sink_address = sink_rpc
@@ -643,7 +639,6 @@ pub async fn create_and_fund_wallet(name: &str) -> (DlcDevKitWallet, Arc<MemoryS
         .unwrap();
     let memory_storage = Arc::new(MemoryStorage::new());
     let wallet = DlcDevKitWallet::new(
-        name,
         &seed,
         "http://localhost:30000",
         Network::Regtest,

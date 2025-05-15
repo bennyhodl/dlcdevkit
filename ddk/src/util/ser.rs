@@ -1,4 +1,3 @@
-use chrono::Utc;
 use ddk_manager::channel::signed_channel::SignedChannelStateType;
 use ddk_manager::channel::Channel;
 use ddk_manager::contract::accepted_contract::AcceptedContract;
@@ -9,7 +8,6 @@ use ddk_manager::contract::{
     ClosedContract, Contract, FailedAcceptContract, FailedSignContract, PreClosedContract,
 };
 use ddk_manager::error::Error;
-use dlc_messages::oracle_msgs::OracleAnnouncement;
 use dlc_messages::Message;
 use lightning::io::Read;
 
@@ -192,18 +190,6 @@ pub fn deserialize_contract(buff: &Vec<u8>) -> Result<Contract, Error> {
     Ok(contract)
 }
 
-/// Filter stored oracle announcements if the event maturity is expired.
-pub(crate) fn filter_expired_oracle_announcements(
-    announcements: Vec<OracleAnnouncement>,
-) -> Vec<OracleAnnouncement> {
-    let now = Utc::now().timestamp() as u32;
-    announcements
-        .iter()
-        .filter(|ann| ann.oracle_event.event_maturity_epoch < now)
-        .cloned()
-        .collect()
-}
-
 pub fn message_variant_name(message: &Message) -> String {
     let str = match message {
         Message::Accept(_) => "Accept",
@@ -214,15 +200,4 @@ pub fn message_variant_name(message: &Message) -> String {
     };
 
     str.to_string()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn empty_stored_announcements_filter() {
-        let filter = filter_expired_oracle_announcements(vec![]);
-        assert!(filter.is_empty())
-    }
 }

@@ -241,15 +241,6 @@ mod tests {
         offer
     }
 
-    fn create_peer_manager(listening_port: u16) -> (LightningTransport, PublicKey) {
-        let mut seed = [0u8; 32];
-        seed.try_fill(&mut bitcoin::key::rand::thread_rng())
-            .unwrap();
-        let peer_manager = LightningTransport::new(&seed, listening_port).unwrap();
-        let pubkey = peer_manager.node_id.clone();
-        (peer_manager, pubkey)
-    }
-
     async fn manager(
         listening_port: u16,
     ) -> DlcDevKit<LightningTransport, MemoryStorage, MemoryOracle> {

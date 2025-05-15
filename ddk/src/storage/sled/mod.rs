@@ -21,10 +21,7 @@ pub const CHAIN_MONITOR_KEY: u8 = 4;
 const SIGNER_TREE: u8 = 6;
 const WALLET_TREE: u8 = 7;
 const MARKETPLACE_TREE: u8 = 8;
-
-const MARKETPLACE_KEY: &str = "marketplace";
 const CHANGESET_KEY: &str = "changeset";
-const PEERS_KEY: &str = "peers";
 
 /// Implementation of Storage interface using the sled DB backend.
 #[derive(Debug, Clone)]

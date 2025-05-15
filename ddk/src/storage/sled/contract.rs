@@ -403,34 +403,6 @@ mod tests {
             .expect("Error creating contract");
     }
 
-    async fn insert_offered_and_signed_channels(storage: &mut SledStorage) {
-        let serialized = include_bytes!("../../../tests/data/dlc_storage/Offered");
-        let offered_contract = deserialize_object(serialized);
-        let serialized = include_bytes!("../../../tests/data/dlc_storage/OfferedChannel");
-        let offered_channel = deserialize_object(serialized);
-        storage
-            .upsert_channel(
-                Channel::Offered(offered_channel),
-                Some(Contract::Offered(offered_contract)),
-            )
-            .await
-            .expect("Error creating contract");
-
-        let serialized = include_bytes!("../../../tests/data/dlc_storage/SignedChannelEstablished");
-        let signed_channel = Channel::Signed(deserialize_object(serialized));
-        storage
-            .upsert_channel(signed_channel, None)
-            .await
-            .expect("Error creating contract");
-
-        let serialized = include_bytes!("../../../tests/data/dlc_storage/SignedChannelSettled");
-        let signed_channel = Channel::Signed(deserialize_object(serialized));
-        storage
-            .upsert_channel(signed_channel, None)
-            .await
-            .expect("Error creating contract");
-    }
-
     sled_test!(
         update_contract_is_updated,
         |storage: SledStorage| async move {

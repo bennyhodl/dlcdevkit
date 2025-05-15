@@ -91,7 +91,6 @@ pub struct DlcDevKitWallet {
     sender: Sender<WalletCommand>,
     network: Network,
     xprv: Xpriv,
-    name: String,
     secp: Secp256k1<All>,
 }
 
@@ -99,7 +98,6 @@ const MIN_FEERATE: u32 = 253;
 
 impl DlcDevKitWallet {
     pub async fn new(
-        name: &str,
         seed_bytes: &[u8; 32],
         esplora_url: &str,
         network: Network,
@@ -319,7 +317,6 @@ impl DlcDevKitWallet {
             network,
             xprv,
             secp,
-            name: name.to_string(),
         })
     }
 
@@ -386,14 +383,6 @@ impl DlcDevKitWallet {
     pub async fn list_utxos(&self) -> Result<Vec<LocalOutput>> {
         let (tx, rx) = oneshot::channel();
         self.sender.send(WalletCommand::ListUtxos(tx)).await?;
-        rx.await.map_err(WalletError::Receiver)?
-    }
-
-    async fn next_derivation_index(&self) -> Result<u32> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(WalletCommand::NextDerivationIndex(tx))
-            .await?;
         rx.await.map_err(WalletError::Receiver)?
     }
 
@@ -510,13 +499,7 @@ impl ddk_manager::Wallet for DlcDevKitWallet {
             outputs = psbt.outputs.len(),
             "Signing psbt input for dlc manager."
         );
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(WalletCommand::SignPsbtInput(psbt.clone(), input_index, tx))
-            .await
-            .map_err(|e| ManagerError::WalletError(Box::new(WalletError::Sender(e))))?;
-        rx.await
-            .map_err(|e| ManagerError::WalletError(Box::new(WalletError::Receiver(e))))?
+        self.sign_psbt_input(psbt, input_index).await
     }
 
     // BDK does not have reserving UTXOs nor need it.
@@ -633,7 +616,6 @@ mod tests {
             .unwrap();
         let xpriv = Xpriv::new_master(Network::Regtest, &entropy).unwrap();
         DlcDevKitWallet::new(
-            "test".into(),
             &xpriv.private_key.secret_bytes(),
             &esplora,
             Network::Regtest,
