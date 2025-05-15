@@ -1,5 +1,4 @@
 use bitcoin::Network;
-use crossbeam::channel::unbounded;
 use ddk_manager::manager::Manager;
 use ddk_manager::SystemTimeProvider;
 use std::collections::HashMap;
@@ -144,7 +143,7 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
 
         let esplora_client = Arc::new(EsploraClient::new(&self.esplora_host, self.network)?);
 
-        let (sender, receiver) = unbounded::<DlcManagerMessage>();
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(100);
         let (stop_signal_sender, stop_signal) = tokio::sync::watch::channel(false);
 
         let manager = Arc::new(
@@ -159,14 +158,51 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
             )
             .await?,
         );
-        tracing::info!("Created ddk dlc manager.");
+
+        let manager_clone = manager.clone();
+        tokio::spawn(async move {
+            while let Some(msg) = receiver.recv().await {
+                match msg {
+                    DlcManagerMessage::OfferDlc {
+                        contract_input,
+                        counter_party,
+                        oracle_announcements,
+                        responder,
+                    } => {
+                        let offer = manager_clone
+                            .send_offer_with_announcements(
+                                &contract_input,
+                                counter_party,
+                                vec![oracle_announcements],
+                            )
+                            .await;
+
+                        let _ = responder.send(offer).map_err(|e| {
+                            tracing::error!("Error sending offer: {:?}", e);
+                        });
+                    }
+                    DlcManagerMessage::AcceptDlc {
+                        contract,
+                        responder,
+                    } => {
+                        let accept_dlc = manager_clone.accept_contract_offer(&contract).await;
+
+                        let _ = responder.send(accept_dlc).map_err(|e| {
+                            tracing::error!("Error sending accept DLC: {:?}", e);
+                        });
+                    }
+                    DlcManagerMessage::PeriodicCheck => {
+                        let _ = manager_clone.periodic_check(false).await;
+                    }
+                }
+            }
+        });
 
         Ok(DlcDevKit {
             runtime: Arc::new(RwLock::new(None)),
             wallet,
             manager,
-            sender: Arc::new(sender),
-            receiver: Arc::new(receiver),
+            sender,
             transport,
             storage,
             oracle,

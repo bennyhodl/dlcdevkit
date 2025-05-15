@@ -4,8 +4,8 @@ use crate::wallet::DlcDevKitWallet;
 use crate::{Oracle, Storage, Transport};
 use bitcoin::secp256k1::PublicKey;
 use bitcoin::{Amount, Network};
-use crossbeam::channel::{unbounded, Receiver, Sender};
 use ddk_manager::contract::Contract;
+use ddk_manager::error::Error as ManagerError;
 use ddk_manager::{
     contract::contract_input::ContractInput, CachedContractSignerProvider, ContractId,
     SimpleSigner, SystemTimeProvider,
@@ -15,6 +15,8 @@ use dlc_messages::{AcceptDlc, Message, OfferDlc};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio::runtime::Runtime;
+use tokio::sync::mpsc::Sender;
+use tokio::sync::oneshot;
 use tokio::sync::watch;
 
 /// DlcDevKit type alias for the [ddk_manager::manager::Manager]
@@ -29,22 +31,20 @@ pub type DlcDevKitDlcManager<S, O> = ddk_manager::manager::Manager<
     SimpleSigner,
 >;
 
-type Result<T> = std::result::Result<T, crate::error::Error>;
+type Result<T> = std::result::Result<T, Error>;
 type StdResult<T, E> = std::result::Result<T, E>;
 
 #[derive(Debug)]
 pub enum DlcManagerMessage {
     AcceptDlc {
         contract: ContractId,
-        responder: Sender<
-            std::result::Result<(ContractId, PublicKey, AcceptDlc), ddk_manager::error::Error>,
-        >,
+        responder: oneshot::Sender<StdResult<(ContractId, PublicKey, AcceptDlc), ManagerError>>,
     },
     OfferDlc {
         contract_input: ContractInput,
         counter_party: PublicKey,
         oracle_announcements: Vec<OracleAnnouncement>,
-        responder: Sender<StdResult<OfferDlc, ddk_manager::error::Error>>,
+        responder: oneshot::Sender<StdResult<OfferDlc, ManagerError>>,
     },
     PeriodicCheck,
 }
@@ -53,8 +53,7 @@ pub struct DlcDevKit<T: Transport, S: Storage, O: Oracle> {
     pub runtime: Arc<RwLock<Option<Runtime>>>,
     pub wallet: Arc<DlcDevKitWallet>,
     pub manager: Arc<DlcDevKitDlcManager<S, O>>,
-    pub sender: Arc<Sender<DlcManagerMessage>>,
-    pub receiver: Arc<Receiver<DlcManagerMessage>>,
+    pub sender: Sender<DlcManagerMessage>,
     pub transport: Arc<T>,
     pub storage: Arc<S>,
     pub oracle: Arc<O>,
@@ -84,10 +83,6 @@ where
             return Err(Error::RuntimeExists);
         }
 
-        let manager_clone = self.manager.clone();
-        let receiver_clone = self.receiver.clone();
-        runtime.spawn(async move { Self::run_manager(manager_clone, receiver_clone).await });
-
         let transport_clone = self.transport.clone();
         let manager_clone = self.manager.clone();
         let stop_signal = self.stop_signal.clone();
@@ -113,9 +108,12 @@ where
             let mut timer = tokio::time::interval(Duration::from_secs(30));
             loop {
                 timer.tick().await;
-                processor
+                let _ = processor
                     .send(DlcManagerMessage::PeriodicCheck)
-                    .expect("couldn't send periodic check");
+                    .await
+                    .map_err(|e| {
+                        tracing::error!("Error sending periodic check: {}", e);
+                    });
             }
         });
 
@@ -137,43 +135,6 @@ where
         }
     }
 
-    async fn run_manager(
-        manager: Arc<DlcDevKitDlcManager<S, O>>,
-        receiver: Arc<Receiver<DlcManagerMessage>>,
-    ) {
-        while let Ok(msg) = receiver.recv() {
-            match msg {
-                DlcManagerMessage::OfferDlc {
-                    contract_input,
-                    counter_party,
-                    oracle_announcements,
-                    responder,
-                } => {
-                    let offer = manager
-                        .send_offer_with_announcements(
-                            &contract_input,
-                            counter_party,
-                            vec![oracle_announcements],
-                        )
-                        .await;
-
-                    responder.send(offer).expect("send offer error")
-                }
-                DlcManagerMessage::AcceptDlc {
-                    contract,
-                    responder,
-                } => {
-                    let accept_dlc = manager.accept_contract_offer(&contract).await;
-
-                    responder.send(accept_dlc).expect("can't send")
-                }
-                DlcManagerMessage::PeriodicCheck => {
-                    let _ = manager.periodic_check(false).await;
-                }
-            }
-        }
-    }
-
     pub fn network(&self) -> Network {
         self.network
     }
@@ -184,7 +145,7 @@ where
         counter_party: PublicKey,
         oracle_announcements: Vec<OracleAnnouncement>,
     ) -> Result<OfferDlc> {
-        let (responder, receiver) = unbounded();
+        let (responder, receiver) = oneshot::channel();
         self.sender
             .send(DlcManagerMessage::OfferDlc {
                 contract_input: contract_input.to_owned(),
@@ -192,9 +153,10 @@ where
                 oracle_announcements,
                 responder,
             })
+            .await
             .map_err(|e| Error::ActorSendError(e.to_string()))?;
         let offer = receiver
-            .recv()
+            .await
             .map_err(|e| Error::ActorReceiveError(e.to_string()))?;
 
         let offer = offer?;
@@ -216,16 +178,17 @@ where
         &self,
         contract: [u8; 32],
     ) -> Result<(String, String, AcceptDlc)> {
-        let (responder, receiver) = unbounded();
+        let (responder, receiver) = oneshot::channel();
         self.sender
             .send(DlcManagerMessage::AcceptDlc {
                 contract,
                 responder,
             })
+            .await
             .map_err(|e| Error::ActorSendError(e.to_string()))?;
 
         let received_message = receiver
-            .recv()
+            .await
             .map_err(|e| Error::ActorReceiveError(e.to_string()))?;
 
         let (contract_id, public_key, accept_dlc) = received_message?;

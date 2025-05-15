@@ -127,8 +127,6 @@ pub enum WalletError {
     UtxoUpdate(#[from] bdk_chain::local_chain::CannotConnectError),
     #[error("Error signing PSBT: {0}")]
     Signing(#[from] bdk_wallet::signer::SignerError),
-    #[error("Receive error from wallet channel: {0}")]
-    ReceiveMessage(#[from] crossbeam::channel::RecvError),
     #[error("Sending error from wallet channel: {0}")]
     SendMessage(String),
     #[error("Serde error: {0}")]

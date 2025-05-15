@@ -1,21 +1,18 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
-
 use crate::{ddk::DlcDevKitDlcManager, error::TransportError, Oracle, Storage, Transport};
 use bitcoin::{
     key::{self, Keypair},
     secp256k1::{All, PublicKey, Secp256k1},
 };
-use crossbeam::channel::{unbounded, Receiver, Sender};
+use std::{collections::HashMap, sync::Arc, time::Duration};
+// use crossbeam::channel::{unbounded, Receiver, Sender};
 use dlc_messages::Message;
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::watch;
+use tokio::sync::Mutex;
 
 type CounterPartyTransport = Arc<Mutex<HashMap<PublicKey, Sender<(Message, PublicKey)>>>>;
 pub struct MemoryTransport {
-    pub receiver: Receiver<(Message, PublicKey)>,
+    pub receiver: Arc<Mutex<Receiver<(Message, PublicKey)>>>,
     pub sender: Sender<(Message, PublicKey)>,
     pub counterparty_transport: CounterPartyTransport,
     pub keypair: Keypair,
@@ -23,18 +20,22 @@ pub struct MemoryTransport {
 
 impl MemoryTransport {
     pub fn new(secp: &Secp256k1<All>) -> Self {
-        let (sender, receiver) = unbounded();
+        let (sender, receiver) = channel(100);
         let keypair = Keypair::new(secp, &mut key::rand::thread_rng());
         Self {
-            receiver,
+            receiver: Arc::new(Mutex::new(receiver)),
             sender,
             counterparty_transport: Arc::new(Mutex::new(HashMap::new())),
             keypair,
         }
     }
 
-    pub fn add_counterparty(&self, counterparty: PublicKey, sender: Sender<(Message, PublicKey)>) {
-        let mut guard = self.counterparty_transport.lock().unwrap();
+    pub async fn add_counterparty(
+        &self,
+        counterparty: PublicKey,
+        sender: Sender<(Message, PublicKey)>,
+    ) {
+        let mut guard = self.counterparty_transport.lock().await;
         guard.insert(counterparty, sender);
         drop(guard)
     }
@@ -51,11 +52,12 @@ impl Transport for MemoryTransport {
     }
 
     async fn send_message(&self, counterparty: PublicKey, message: Message) {
-        let counterparties = self.counterparty_transport.lock().unwrap();
+        let counterparties = self.counterparty_transport.lock().await;
         let connected_counterparty = counterparties.get(&counterparty);
         if let Some(counterparty) = connected_counterparty {
             counterparty
                 .send((message, self.keypair.public_key()))
+                .await
                 .expect("could not send message to counterparty")
         } else {
             tracing::error!("No counterparty connected.")
@@ -68,6 +70,7 @@ impl Transport for MemoryTransport {
         manager: Arc<DlcDevKitDlcManager<S, O>>,
     ) -> Result<(), TransportError> {
         let mut timer = tokio::time::interval(Duration::from_secs(1));
+        let receiver = self.receiver.clone();
         loop {
             tokio::select! {
                 _ = stop_receiver.changed() => {
@@ -76,7 +79,7 @@ impl Transport for MemoryTransport {
                     }
                 },
                 _ = timer.tick() => {
-                    if let Ok(msg) = self.receiver.recv() {
+                    if let Some(msg) = receiver.lock().await.recv().await {
                         match manager.on_dlc_message(&msg.0, msg.1).await {
                             Ok(s) => {
                                 if let Some(reply) = s {
