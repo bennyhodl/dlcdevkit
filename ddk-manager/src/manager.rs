@@ -436,7 +436,9 @@ where
             accept_msg,
             &self.wallet,
             &self.signer_provider,
-        ) {
+        )
+        .await
+        {
             Ok(contract) => contract,
             Err(e) => {
                 return self
@@ -473,7 +475,9 @@ where
             &accepted_contract,
             sign_message,
             &self.wallet,
-        ) {
+        )
+        .await
+        {
             Ok(contract) => contract,
             Err(e) => {
                 return self
@@ -1893,7 +1897,8 @@ where
             &self.wallet,
             &self.signer_provider,
             &self.time,
-        )?;
+        )
+        .await?;
 
         // Directly confirmed as we're in a channel the fund tx is already confirmed.
         self.store

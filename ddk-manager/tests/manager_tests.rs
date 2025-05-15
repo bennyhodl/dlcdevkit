@@ -33,7 +33,6 @@ async fn get_manager() -> TestManager {
         .unwrap();
     let wallet = Arc::new(
         DlcDevKitWallet::new(
-            "manager",
             &seed,
             "http://localhost:30000",
             Network::Regtest,

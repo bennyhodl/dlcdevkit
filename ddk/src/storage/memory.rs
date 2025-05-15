@@ -9,7 +9,6 @@ pub struct MemoryStorage {
     bdk_data: RwLock<Option<bdk_wallet::ChangeSet>>,
     contracts: RwLock<HashMap<ContractId, Contract>>,
     channels: RwLock<HashMap<ChannelId, Channel>>,
-    chain_monitor: RwLock<Option<ddk_manager::chain_monitor::ChainMonitor>>,
 }
 
 impl MemoryStorage {
@@ -18,7 +17,6 @@ impl MemoryStorage {
             bdk_data: RwLock::new(None),
             contracts: RwLock::new(HashMap::new()),
             channels: RwLock::new(HashMap::new()),
-            chain_monitor: RwLock::new(None),
         }
     }
 }

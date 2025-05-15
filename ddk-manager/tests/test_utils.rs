@@ -582,7 +582,7 @@ pub fn get_variable_oracle_numeric_infos(nb_digits: &[usize]) -> OracleNumericIn
 
 pub async fn refresh_wallet(wallet: &DlcDevKitWallet, expected_funds: u64) {
     let mut retry = 0;
-    while wallet.get_balance().unwrap().confirmed.to_sat() < expected_funds {
+    while wallet.get_balance().await.unwrap().confirmed.to_sat() < expected_funds {
         if retry > 30 {
             panic!("Wallet refresh taking too long.")
         }
@@ -591,10 +591,6 @@ pub async fn refresh_wallet(wallet: &DlcDevKitWallet, expected_funds: u64) {
         retry += 1;
     }
 }
-
-pub const OFFER_PARTY: &str = "alice";
-pub const ACCEPT_PARTY: &str = "bob";
-pub const SINK: &str = "ddk";
 
 pub async fn init_clients() -> (
     DlcDevKitWallet,
@@ -607,8 +603,8 @@ pub async fn init_clients() -> (
     let sink_rpc = Client::new(&rpc_base(), auth.clone()).unwrap();
 
     std::thread::sleep(std::time::Duration::from_millis(100));
-    let offer_rpc = create_and_fund_wallet(OFFER_PARTY).await;
-    let accept_rpc = create_and_fund_wallet(ACCEPT_PARTY).await;
+    let offer_rpc = create_and_fund_wallet().await;
+    let accept_rpc = create_and_fund_wallet().await;
 
     let sink_address = sink_rpc
         .get_new_address(None, Some(AddressType::Bech32))
@@ -631,7 +627,7 @@ fn rpc_base() -> String {
     format!("http://{}:18443", host)
 }
 
-pub async fn create_and_fund_wallet(name: &str) -> (DlcDevKitWallet, Arc<MemoryStorage>) {
+pub async fn create_and_fund_wallet() -> (DlcDevKitWallet, Arc<MemoryStorage>) {
     let auth = Auth::UserPass("ddk".to_string(), "ddk".to_string());
     let sink_rpc = Client::new(&rpc_base(), auth.clone()).unwrap();
     let sink_address = sink_rpc
@@ -643,7 +639,6 @@ pub async fn create_and_fund_wallet(name: &str) -> (DlcDevKitWallet, Arc<MemoryS
         .unwrap();
     let memory_storage = Arc::new(MemoryStorage::new());
     let wallet = DlcDevKitWallet::new(
-        name,
         &seed,
         "http://localhost:30000",
         Network::Regtest,
@@ -670,7 +665,7 @@ pub async fn create_and_fund_wallet(name: &str) -> (DlcDevKitWallet, Arc<MemoryS
     let mut done = false;
     while !done {
         wallet.sync().await.unwrap();
-        let balance = wallet.get_balance().unwrap();
+        let balance = wallet.get_balance().await.unwrap();
         if balance.confirmed > Amount::ZERO {
             done = true;
         }

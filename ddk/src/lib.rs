@@ -1,7 +1,7 @@
 //! application tooling for DLCs 🌊
 // #![doc = include_str!("../README.md")]
-#![allow(dead_code)]
-// #![allow(unused_imports)]
+#![allow(clippy::result_large_err)]
+
 /// Build a DDK application.
 pub mod builder;
 /// Working with the bitcoin chain.

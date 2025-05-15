@@ -145,16 +145,16 @@ pub trait Wallet {
     /// Returns a new (unused) change address.
     async fn get_new_change_address(&self) -> Result<Address, Error>;
     /// Get a set of UTXOs to fund the given amount.
-    fn get_utxos_for_amount(
+    async fn get_utxos_for_amount(
         &self,
         amount: u64,
         fee_rate: u64,
         lock_utxos: bool,
     ) -> Result<Vec<Utxo>, Error>;
+    /// Signs a transaction input
+    async fn sign_psbt_input(&self, psbt: &mut Psbt, input_index: usize) -> Result<(), Error>;
     /// Import the provided address.
     fn import_address(&self, address: &Address) -> Result<(), Error>;
-    /// Signs a transaction input
-    fn sign_psbt_input(&self, psbt: &mut Psbt, input_index: usize) -> Result<(), Error>;
     /// Unlock reserved utxo
     fn unreserve_utxos(&self, outpoints: &[OutPoint]) -> Result<(), Error>;
 }
