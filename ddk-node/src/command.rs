@@ -18,6 +18,7 @@ use ddk_manager::contract::contract_input::{ContractInput, ContractInputInfo, Or
 use ddk_manager::contract::enum_descriptor::EnumDescriptor;
 use ddk_manager::contract::offered_contract::OfferedContract;
 use ddk_manager::contract::{Contract, ContractDescriptor};
+use ddk_manager::Oracle;
 use dlc::{EnumerationPayout, Payout};
 use dlc_messages::oracle_msgs::{EventDescriptor, OracleAnnouncement};
 use dlc_messages::{AcceptDlc, OfferDlc};
@@ -227,7 +228,7 @@ async fn generate_contract_input() -> anyhow::Result<ContractInput> {
         .await?;
 
     let oracle_input = OracleInput {
-        public_keys: vec![kormir.get_pubkey().await?],
+        public_keys: vec![kormir.get_public_key()],
         event_id: announcement.oracle_event.event_id,
         threshold: 1,
     };

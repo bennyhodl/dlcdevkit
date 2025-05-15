@@ -10,8 +10,6 @@ homepage = "https://dlcdevkit.com"
 readme = "../README.md"
 
 [features]
-marketplace = ["dep:nostr-rs", "dep:nostr-sdk", "dep:base64"]
-
 # transport features
 nostr = ["dep:nostr-rs", "dep:nostr-sdk", "dep:base64"]
 lightning = ["dep:lightning-net-tokio"]
@@ -40,7 +38,6 @@ bdk_esplora = { version = "0.20.1", features = ["blocking-https", "async-https",
 # bdk_wallet = { version = "1.0.0-beta.5", features = ["bdk_file_store"] }
 bdk_wallet = "1.0.0"
 bdk_chain = "0.21.1"
-anyhow = "1.0.75"
 lightning = { version = "0.0.125", default-features = false, features = ["grind_signatures", "std"] }
 serde = { version = "1.0.192", features = ["derive"] }
 serde_json = "1.0.108"

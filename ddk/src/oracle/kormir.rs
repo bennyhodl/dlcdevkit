@@ -1,4 +1,3 @@
-use anyhow::anyhow;
 use bitcoin::key::XOnlyPublicKey;
 use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
 use hmac::{Hmac, Mac};
@@ -9,7 +8,9 @@ use serde::Serialize;
 use sha2::Sha256;
 use uuid::Uuid;
 
-async fn get<T>(host: &str, path: &str) -> anyhow::Result<T>
+use crate::error::OracleError;
+
+async fn get<T>(host: &str, path: &str) -> Result<T, reqwest::Error>
 where
     T: serde::de::DeserializeOwned,
 {
@@ -68,8 +69,11 @@ impl KormirOracleClient {
     pub async fn new(
         host: &str,
         hmac_secret: Option<Vec<u8>>,
-    ) -> anyhow::Result<KormirOracleClient> {
-        let pubkey: XOnlyPublicKey = get::<PubkeyResponse>(host, "pubkey").await?.pubkey;
+    ) -> Result<KormirOracleClient, OracleError> {
+        let pubkey: XOnlyPublicKey = get::<PubkeyResponse>(host, "pubkey")
+            .await
+            .map_err(|_| OracleError::Init("Could not get pubkey from Kormir.".to_string()))?
+            .pubkey;
         let client = reqwest::Client::new();
         tracing::info!(
             host,
@@ -85,18 +89,14 @@ impl KormirOracleClient {
         })
     }
 
-    pub async fn get_pubkey(&self) -> anyhow::Result<XOnlyPublicKey> {
-        Ok(self.pubkey)
-    }
-
     /// List all events stored with the connected Kormir server.
     ///
     /// Kormir events includes announcements info, nonce index, signatures
     /// if announcement has been signed, and nostr information.
-    pub async fn list_events(&self) -> anyhow::Result<Vec<OracleEventData>> {
+    pub async fn list_events(&self) -> Result<Vec<OracleEventData>, OracleError> {
         get(&self.host, "list-events").await.map_err(|e| {
             tracing::error!(error = e.to_string(), "Error getting all kormir events.");
-            anyhow!("List events")
+            OracleError::Announcement("Could not list events from Kormir.".to_string())
         })
     }
 
@@ -107,7 +107,7 @@ impl KormirOracleClient {
         &self,
         outcomes: Vec<String>,
         maturity: u32,
-    ) -> anyhow::Result<OracleAnnouncement> {
+    ) -> Result<OracleAnnouncement, OracleError> {
         let event_id = Uuid::new_v4().to_string();
 
         let create_event_request = CreateEnumEvent {
@@ -138,7 +138,7 @@ impl KormirOracleClient {
         &self,
         event_id: String,
         outcome: String,
-    ) -> anyhow::Result<OracleAttestation> {
+    ) -> Result<OracleAttestation, OracleError> {
         tracing::info!("Signing event. event_id={} outcome={}", event_id, outcome);
 
         let event = SignEnumEvent {
@@ -175,7 +175,7 @@ impl KormirOracleClient {
         precision: Option<i32>,
         unit: String,
         maturity: u32,
-    ) -> anyhow::Result<OracleAnnouncement> {
+    ) -> Result<OracleAnnouncement, OracleError> {
         let event_id = Uuid::new_v4().to_string();
 
         let create_event_request = CreateNumericEvent {
@@ -209,7 +209,7 @@ impl KormirOracleClient {
         &self,
         event_id: String,
         outcome: i64,
-    ) -> anyhow::Result<OracleAttestation> {
+    ) -> Result<OracleAttestation, OracleError> {
         tracing::info!("Signing event. event_id={} outcome={}", event_id, outcome);
 
         let event = SignNumericEvent {
@@ -237,19 +237,24 @@ impl KormirOracleClient {
     fn body_and_headers<T: Serialize + ?Sized>(
         &self,
         json: &T,
-    ) -> anyhow::Result<(Vec<u8>, HeaderMap)> {
-        let body = serde_json::to_vec(json)?;
+    ) -> Result<(Vec<u8>, HeaderMap), OracleError> {
+        let body = serde_json::to_vec(json).map_err(|e| OracleError::Custom(e.to_string()))?;
         let mut headers = HeaderMap::new();
         headers.append(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         if let Some(secret) = &self.hmac_secret {
             let hmac = Self::calculate_hmac(&body, secret)?;
-            headers.append("X-Signature", HeaderValue::from_bytes(hmac.as_bytes())?);
+            headers.append(
+                "X-Signature",
+                HeaderValue::from_bytes(hmac.as_bytes())
+                    .map_err(|e| OracleError::Custom(e.to_string()))?,
+            );
         }
         Ok((body, headers))
     }
 
-    fn calculate_hmac(payload: &[u8], secret: &[u8]) -> anyhow::Result<String> {
-        let mut mac = Hmac::<Sha256>::new_from_slice(secret)?;
+    fn calculate_hmac(payload: &[u8], secret: &[u8]) -> Result<String, OracleError> {
+        let mut mac = Hmac::<Sha256>::new_from_slice(secret)
+            .map_err(|e| OracleError::Custom(e.to_string()))?;
         mac.update(payload);
         let result = mac.finalize().into_bytes();
         Ok(hex::encode(result))
@@ -271,7 +276,7 @@ impl ddk_manager::Oracle for KormirOracleClient {
             .await
             .map_err(|e| {
                 tracing::error!(error=?e, "Could not get attestation.");
-                ddk_manager::error::Error::OracleError("Could not get attestation".into())
+                ddk_manager::error::Error::OracleError(format!("Could not get attestation: {e}"))
             })?;
         tracing::info!(event_id, attestation =? attestation, "Kormir attestation.");
         Ok(attestation)
@@ -287,7 +292,9 @@ impl ddk_manager::Oracle for KormirOracleClient {
                 .await
                 .map_err(|e| {
                     tracing::error!(error =? e, "Could not get announcement.");
-                    ddk_manager::error::Error::OracleError("Could not get announcement".into())
+                    ddk_manager::error::Error::OracleError(format!(
+                        "Could not get announcement: {e}"
+                    ))
                 })?;
         tracing::info!(event_id, announcement=?announcement, "Kormir announcement.");
         Ok(announcement)

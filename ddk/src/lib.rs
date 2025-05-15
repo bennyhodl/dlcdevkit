@@ -12,7 +12,7 @@ pub mod error;
 /// JSON structs
 pub mod json;
 /// Nostr related functions.
-#[cfg(any(feature = "nostr", feature = "marketplace"))]
+#[cfg(feature = "nostr")]
 pub mod nostr;
 /// Oracle clients.
 pub mod oracle;
@@ -38,12 +38,11 @@ use bdk_wallet::ChangeSet;
 use bitcoin::secp256k1::{PublicKey, SecretKey};
 use bitcoin::Amount;
 use ddk::DlcDevKitDlcManager;
-use dlc_messages::oracle_msgs::OracleAnnouncement;
 use dlc_messages::Message;
+use error::TransportError;
 use error::WalletError;
 use std::sync::Arc;
 use tokio::sync::watch;
-use transport::PeerInformation;
 
 #[async_trait]
 /// Allows ddk to open a listening connection and send/receive dlc messages functionality.
@@ -57,7 +56,7 @@ pub trait Transport: Send + Sync + 'static {
         &self,
         mut stop_signal: watch::Receiver<bool>,
         manager: Arc<DlcDevKitDlcManager<S, O>>,
-    ) -> Result<(), anyhow::Error>;
+    ) -> Result<(), TransportError>;
     /// Send a message to a specific counterparty.
     async fn send_message(&self, counterparty: PublicKey, message: Message);
     /// Connect to another peer
@@ -71,14 +70,6 @@ pub trait Storage: ddk_manager::Storage + Send + Sync + 'static {
     async fn initialize_bdk(&self) -> Result<ChangeSet, WalletError>;
     /// Save changeset to the wallet storage.
     async fn persist_bdk(&self, changeset: &ChangeSet) -> Result<(), WalletError>;
-    /// Connected counterparties.
-    fn list_peers(&self) -> anyhow::Result<Vec<PeerInformation>>;
-    /// Persis counterparty.
-    fn save_peer(&self, peer: PeerInformation) -> anyhow::Result<()>;
-    // #[cfg(feature = "marketplace")]
-    fn save_announcement(&self, announcement: OracleAnnouncement) -> anyhow::Result<()>;
-    // #[cfg(feature = "marketplace")]
-    fn get_marketplace_announcements(&self) -> anyhow::Result<Vec<OracleAnnouncement>>;
 }
 
 /// Retrieval of key material for signing DLC transactions

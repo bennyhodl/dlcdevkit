@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::error::esplora_err_to_manager_err;
+use crate::error::{esplora_err_to_manager_err, Error};
 use bdk_esplora::esplora_client::Error as EsploraError;
 use bdk_esplora::esplora_client::{AsyncClient, BlockingClient, Builder};
 use bitcoin::Network;
@@ -20,7 +20,7 @@ pub struct EsploraClient {
 }
 
 impl EsploraClient {
-    pub fn new(esplora_host: &str, network: Network) -> Result<EsploraClient, bdk_esplora::Error> {
+    pub fn new(esplora_host: &str, network: Network) -> Result<EsploraClient, Error> {
         let builder = Builder::new(esplora_host).timeout(Duration::from_secs(5).as_secs());
         let blocking_client = builder.clone().build_blocking();
         let async_client = builder.build_async()?;

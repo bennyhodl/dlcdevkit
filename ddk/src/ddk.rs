@@ -1,14 +1,11 @@
 use crate::chain::EsploraClient;
+use crate::error::Error;
 use crate::wallet::DlcDevKitWallet;
-#[cfg(feature = "marketplace")]
-use crate::{nostr::marketplace::*, DEFAULT_NOSTR_RELAY};
 use crate::{Oracle, Storage, Transport};
-use anyhow::anyhow;
 use bitcoin::secp256k1::PublicKey;
 use bitcoin::{Amount, Network};
 use crossbeam::channel::{unbounded, Receiver, Sender};
 use ddk_manager::contract::Contract;
-use ddk_manager::error::Error;
 use ddk_manager::{
     contract::contract_input::ContractInput, CachedContractSignerProvider, ContractId,
     SimpleSigner, SystemTimeProvider,
@@ -32,17 +29,22 @@ pub type DlcDevKitDlcManager<S, O> = ddk_manager::manager::Manager<
     SimpleSigner,
 >;
 
+type Result<T> = std::result::Result<T, crate::error::Error>;
+type StdResult<T, E> = std::result::Result<T, E>;
+
 #[derive(Debug)]
 pub enum DlcManagerMessage {
     AcceptDlc {
         contract: ContractId,
-        responder: Sender<Result<(ContractId, PublicKey, AcceptDlc), Error>>,
+        responder: Sender<
+            std::result::Result<(ContractId, PublicKey, AcceptDlc), ddk_manager::error::Error>,
+        >,
     },
     OfferDlc {
         contract_input: ContractInput,
         counter_party: PublicKey,
         oracle_announcements: Vec<OracleAnnouncement>,
-        responder: Sender<OfferDlc>,
+        responder: Sender<StdResult<OfferDlc, ddk_manager::error::Error>>,
     },
     PeriodicCheck,
 }
@@ -67,7 +69,7 @@ where
     S: Storage,
     O: Oracle,
 {
-    pub fn start(&self) -> anyhow::Result<()> {
+    pub fn start(&self) -> Result<()> {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
@@ -75,11 +77,11 @@ where
         self.start_with_runtime(runtime)
     }
 
-    pub fn start_with_runtime(&self, runtime: Runtime) -> anyhow::Result<()> {
+    pub fn start_with_runtime(&self, runtime: Runtime) -> Result<()> {
         let mut runtime_lock = self.runtime.write().unwrap();
 
         if runtime_lock.is_some() {
-            return Err(anyhow!("DDK is still running."));
+            return Err(Error::RuntimeExists);
         }
 
         let manager_clone = self.manager.clone();
@@ -117,32 +119,21 @@ where
             }
         });
 
-        #[cfg(feature = "marketplace")]
-        {
-            let storage_clone = self.storage.clone();
-            runtime.spawn(async move {
-                tracing::info!("Starting marketplace listener.");
-                marketplace_listener(&storage_clone, vec![DEFAULT_NOSTR_RELAY])
-                    .await
-                    .unwrap();
-            });
-        }
-
-        // TODO: connect stored peers.
-
         *runtime_lock = Some(runtime);
         Ok(())
     }
 
-    pub fn stop(&self) -> anyhow::Result<()> {
+    pub fn stop(&self) -> Result<()> {
         tracing::warn!("Shutting down DDK runtime and listeners.");
-        self.stop_signal_sender.send(true)?;
+        self.stop_signal_sender
+            .send(true)
+            .map_err(|e| Error::ActorSendError(e.to_string()))?;
         let mut runtime_lock = self.runtime.write().unwrap();
         if let Some(rt) = runtime_lock.take() {
             rt.shutdown_background();
             Ok(())
         } else {
-            Err(anyhow!("Runtime is not running."))
+            Err(Error::NoRuntime)
         }
     }
 
@@ -164,8 +155,7 @@ where
                             counter_party,
                             vec![oracle_announcements],
                         )
-                        .await
-                        .expect("can't create offerdlc");
+                        .await;
 
                     responder.send(offer).expect("send offer error")
                 }
@@ -178,18 +168,10 @@ where
                     responder.send(accept_dlc).expect("can't send")
                 }
                 DlcManagerMessage::PeriodicCheck => {
-                    manager.periodic_check(false).await.unwrap();
+                    let _ = manager.periodic_check(false).await;
                 }
             }
         }
-    }
-
-    pub fn connect_if_necessary(&self) -> anyhow::Result<()> {
-        let _known_peers = self.storage.list_peers()?;
-
-        // check from already connected
-
-        Ok(())
     }
 
     pub fn network(&self) -> Network {
@@ -201,15 +183,21 @@ where
         contract_input: &ContractInput,
         counter_party: PublicKey,
         oracle_announcements: Vec<OracleAnnouncement>,
-    ) -> anyhow::Result<OfferDlc> {
+    ) -> Result<OfferDlc> {
         let (responder, receiver) = unbounded();
-        self.sender.send(DlcManagerMessage::OfferDlc {
-            contract_input: contract_input.to_owned(),
-            counter_party,
-            oracle_announcements,
-            responder,
-        })?;
-        let offer = receiver.recv()?;
+        self.sender
+            .send(DlcManagerMessage::OfferDlc {
+                contract_input: contract_input.to_owned(),
+                counter_party,
+                oracle_announcements,
+                responder,
+            })
+            .map_err(|e| Error::ActorSendError(e.to_string()))?;
+        let offer = receiver
+            .recv()
+            .map_err(|e| Error::ActorReceiveError(e.to_string()))?;
+
+        let offer = offer?;
 
         let contract_id = hex::encode(offer.temporary_contract_id);
         self.transport
@@ -227,17 +215,20 @@ where
     pub async fn accept_dlc_offer(
         &self,
         contract: [u8; 32],
-    ) -> anyhow::Result<(String, String, AcceptDlc)> {
+    ) -> Result<(String, String, AcceptDlc)> {
         let (responder, receiver) = unbounded();
-        self.sender.send(DlcManagerMessage::AcceptDlc {
-            contract,
-            responder,
-        })?;
+        self.sender
+            .send(DlcManagerMessage::AcceptDlc {
+                contract,
+                responder,
+            })
+            .map_err(|e| Error::ActorSendError(e.to_string()))?;
 
-        let (contract_id, public_key, accept_dlc) = receiver.recv()?.map_err(|e| {
-            tracing::error!(error=?e, "Could not accept offer.");
-            anyhow!("Could not accept dlc offer.")
-        })?;
+        let received_message = receiver
+            .recv()
+            .map_err(|e| Error::ActorReceiveError(e.to_string()))?;
+
+        let (contract_id, public_key, accept_dlc) = received_message?;
 
         self.transport
             .send_message(public_key, Message::Accept(accept_dlc.clone()))
@@ -254,7 +245,7 @@ where
         Ok((contract_id, counter_party, accept_dlc))
     }
 
-    pub async fn balance(&self) -> anyhow::Result<crate::Balance> {
+    pub async fn balance(&self) -> Result<crate::Balance> {
         let wallet_balance = self.wallet.get_balance()?;
         let contracts = self.storage.get_contracts().await?;
 
@@ -279,7 +270,7 @@ where
         let contract_pnl = &contracts
             .iter()
             .map(|contract| match contract {
-                Contract::Closed(_) => 0_i64,
+                Contract::Closed(c) => c.pnl,
                 Contract::PreClosed(p) => p
                     .signed_contract
                     .accepted_contract

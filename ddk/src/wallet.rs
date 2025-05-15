@@ -37,7 +37,8 @@ use std::{
 };
 use tokio::sync::Mutex;
 
-type FutureResult<'a, T, E> = Pin<Box<dyn Future<Output = Result<T, E>> + Send + 'a>>;
+type FutureResult<'a, T, E> = Pin<Box<dyn Future<Output = std::result::Result<T, E>> + Send + 'a>>;
+type Result<T> = std::result::Result<T, WalletError>;
 
 /// Wrapper type to pass `crate::Storage` to a BDK wallet.
 #[derive(Clone)]
@@ -89,7 +90,7 @@ impl DlcDevKitWallet {
         esplora_url: &str,
         network: Network,
         storage: Arc<dyn Storage>,
-    ) -> Result<DlcDevKitWallet, WalletError> {
+    ) -> Result<DlcDevKitWallet> {
         let secp = Secp256k1::new();
 
         let xprv = Xpriv::new_master(network, seed_bytes)?;
@@ -121,37 +122,13 @@ impl DlcDevKitWallet {
 
         let wallet = Arc::new(Mutex::new(internal_wallet));
 
-        let blockchain =
-            Arc::new(EsploraClient::new(esplora_url, network).map_err(WalletError::Esplora)?);
+        let blockchain = Arc::new(
+            EsploraClient::new(esplora_url, network)
+                .map_err(|e| WalletError::Esplora(e.to_string()))?,
+        );
 
-        // TODO: Actually get fees. I don't think it's used for regular DLCs though
-        let mut fees: HashMap<ConfirmationTarget, AtomicU32> = HashMap::new();
-        fees.insert(ConfirmationTarget::UrgentOnChainSweep, AtomicU32::new(5000));
-        fees.insert(
-            ConfirmationTarget::MinAllowedAnchorChannelRemoteFee,
-            AtomicU32::new(25 * 250),
-        );
-        fees.insert(
-            ConfirmationTarget::MinAllowedAnchorChannelRemoteFee,
-            AtomicU32::new(MIN_FEERATE),
-        );
-        fees.insert(
-            ConfirmationTarget::MinAllowedNonAnchorChannelRemoteFee,
-            AtomicU32::new(MIN_FEERATE),
-        );
-        fees.insert(
-            ConfirmationTarget::AnchorChannelFee,
-            AtomicU32::new(MIN_FEERATE),
-        );
-        fees.insert(
-            ConfirmationTarget::NonAnchorChannelFee,
-            AtomicU32::new(2000),
-        );
-        fees.insert(
-            ConfirmationTarget::ChannelCloseMinimum,
-            AtomicU32::new(MIN_FEERATE),
-        );
-        let fees = Arc::new(fees);
+        // not used for regular DLCs. only for channels
+        let fees = Arc::new(fee_estimator());
 
         Ok(DlcDevKitWallet {
             wallet,
@@ -165,7 +142,7 @@ impl DlcDevKitWallet {
         })
     }
 
-    pub async fn sync(&self) -> Result<(), WalletError> {
+    pub async fn sync(&self) -> Result<()> {
         let mut wallet = match self.wallet.try_lock() {
             Ok(w) => w,
             Err(e) => {
@@ -192,7 +169,12 @@ impl DlcDevKitWallet {
                 .spks_for_keychain(KeychainKind::External, spks.clone())
                 .chain_tip(prev_tip)
                 .build();
-            let sync = self.blockchain.async_client.full_scan(chain, 10, 1).await?;
+            let sync = self
+                .blockchain
+                .async_client
+                .full_scan(chain, 10, 1)
+                .await
+                .map_err(|e| WalletError::Esplora(e.to_string()))?;
             Update {
                 last_active_indices: sync.last_active_indices,
                 tx_update: sync.tx_update,
@@ -203,7 +185,12 @@ impl DlcDevKitWallet {
                 .start_sync_with_revealed_spks()
                 .chain_tip(prev_tip)
                 .build();
-            let sync = self.blockchain.async_client.sync(spks, 1).await?;
+            let sync = self
+                .blockchain
+                .async_client
+                .sync(spks, 1)
+                .await
+                .map_err(|e| WalletError::Esplora(e.to_string()))?;
             let indices = wallet.derivation_index(KeychainKind::External).unwrap_or(0);
             let internal_index = wallet.derivation_index(KeychainKind::Internal).unwrap_or(0);
             let mut last_active_indices = BTreeMap::new();
@@ -228,7 +215,7 @@ impl DlcDevKitWallet {
         PublicKey::from_secret_key(&self.secp, &self.xprv.private_key)
     }
 
-    pub fn get_balance(&self) -> Result<Balance, WalletError> {
+    pub fn get_balance(&self) -> Result<Balance> {
         let Ok(wallet) = self.wallet.try_lock() else {
             tracing::error!("Could not get lock to sync wallet.");
             return Err(WalletError::Lock);
@@ -236,7 +223,7 @@ impl DlcDevKitWallet {
         Ok(wallet.balance())
     }
 
-    pub async fn new_external_address(&self) -> Result<AddressInfo, WalletError> {
+    pub async fn new_external_address(&self) -> Result<AddressInfo> {
         let Ok(mut wallet) = self.wallet.try_lock() else {
             tracing::error!("Could not get lock to sync wallet.");
             return Err(WalletError::Lock);
@@ -247,7 +234,7 @@ impl DlcDevKitWallet {
         Ok(address)
     }
 
-    pub async fn new_change_address(&self) -> Result<AddressInfo, WalletError> {
+    pub async fn new_change_address(&self) -> Result<AddressInfo> {
         let Ok(mut wallet) = self.wallet.try_lock() else {
             tracing::error!("Could not get lock to sync wallet.");
             return Err(WalletError::Lock);
@@ -263,7 +250,7 @@ impl DlcDevKitWallet {
         address: Address,
         amount: Amount,
         fee_rate: FeeRate,
-    ) -> Result<Txid, WalletError> {
+    ) -> Result<Txid> {
         let Ok(mut wallet) = self.wallet.try_lock() else {
             tracing::error!("Could not get lock to sync wallet.");
             return Err(WalletError::Lock);
@@ -280,7 +267,7 @@ impl DlcDevKitWallet {
             .version(2)
             .fee_rate(fee_rate);
 
-        let mut psbt = txn_builder.finish().unwrap();
+        let mut psbt = txn_builder.finish()?;
 
         wallet.sign(&mut psbt, SignOptions::default())?;
 
@@ -291,7 +278,7 @@ impl DlcDevKitWallet {
         Ok(tx.compute_txid())
     }
 
-    pub async fn send_all(&self, address: Address, fee_rate: FeeRate) -> Result<Txid, WalletError> {
+    pub async fn send_all(&self, address: Address, fee_rate: FeeRate) -> Result<Txid> {
         let Ok(mut wallet) = self.wallet.try_lock() else {
             tracing::error!("Could not get lock to sync wallet.");
             return Err(WalletError::Lock);
@@ -314,7 +301,7 @@ impl DlcDevKitWallet {
         Ok(tx.compute_txid())
     }
 
-    pub fn get_transactions(&self) -> Result<Vec<Arc<Transaction>>, WalletError> {
+    pub fn get_transactions(&self) -> Result<Vec<Arc<Transaction>>> {
         let Ok(wallet) = self.wallet.try_lock() else {
             tracing::error!("Could not get lock to sync wallet.");
             return Err(WalletError::Lock);
@@ -325,7 +312,7 @@ impl DlcDevKitWallet {
             .collect::<Vec<Arc<Transaction>>>())
     }
 
-    pub fn list_utxos(&self) -> Result<Vec<LocalOutput>, WalletError> {
+    pub fn list_utxos(&self) -> Result<Vec<LocalOutput>> {
         let Ok(wallet) = self.wallet.try_lock() else {
             tracing::error!("Could not get lock to sync wallet.");
             return Err(WalletError::Lock);
@@ -333,7 +320,7 @@ impl DlcDevKitWallet {
         Ok(wallet.list_unspent().map(|utxo| utxo.to_owned()).collect())
     }
 
-    fn next_derivation_index(&self) -> Result<u32, WalletError> {
+    fn next_derivation_index(&self) -> Result<u32> {
         let Ok(wallet) = self.wallet.try_lock() else {
             tracing::error!("Could not get lock to sync wallet.");
             return Err(WalletError::Lock);
@@ -373,7 +360,10 @@ impl ddk_manager::ContractSignerProvider for DlcDevKitWallet {
         hash.to_byte_array()
     }
 
-    fn derive_contract_signer(&self, key_id: [u8; 32]) -> Result<Self::Signer, ManagerError> {
+    fn derive_contract_signer(
+        &self,
+        key_id: [u8; 32],
+    ) -> std::result::Result<Self::Signer, ManagerError> {
         let child_key = SecretKey::from_slice(&key_id).expect("correct size");
         tracing::info!(
             key_id = hex::encode(key_id),
@@ -382,18 +372,21 @@ impl ddk_manager::ContractSignerProvider for DlcDevKitWallet {
         Ok(SimpleSigner::new(child_key))
     }
 
-    fn get_secret_key_for_pubkey(&self, _pubkey: &PublicKey) -> Result<SecretKey, ManagerError> {
+    fn get_secret_key_for_pubkey(
+        &self,
+        _pubkey: &PublicKey,
+    ) -> std::result::Result<SecretKey, ManagerError> {
         unreachable!("get_secret_key_for_pubkey is only used in channels.")
     }
 
-    fn get_new_secret_key(&self) -> Result<SecretKey, ManagerError> {
+    fn get_new_secret_key(&self) -> std::result::Result<SecretKey, ManagerError> {
         unreachable!("get_new_secret_key is only used for channels")
     }
 }
 
 #[async_trait::async_trait]
 impl ddk_manager::Wallet for DlcDevKitWallet {
-    async fn get_new_address(&self) -> Result<bitcoin::Address, ManagerError> {
+    async fn get_new_address(&self) -> std::result::Result<bitcoin::Address, ManagerError> {
         let address = self
             .new_external_address()
             .await
@@ -405,7 +398,7 @@ impl ddk_manager::Wallet for DlcDevKitWallet {
         Ok(address.address)
     }
 
-    async fn get_new_change_address(&self) -> Result<bitcoin::Address, ManagerError> {
+    async fn get_new_change_address(&self) -> std::result::Result<bitcoin::Address, ManagerError> {
         let address = self
             .new_change_address()
             .await
@@ -422,7 +415,7 @@ impl ddk_manager::Wallet for DlcDevKitWallet {
         &self,
         psbt: &mut bitcoin::psbt::Psbt,
         input_index: usize,
-    ) -> Result<(), ManagerError> {
+    ) -> std::result::Result<(), ManagerError> {
         tracing::info!(
             input_index,
             inputs = psbt.inputs.len(),
@@ -450,11 +443,14 @@ impl ddk_manager::Wallet for DlcDevKitWallet {
     }
 
     // BDK does not have reserving UTXOs nor need it.
-    fn unreserve_utxos(&self, _outpoints: &[bitcoin::OutPoint]) -> Result<(), ManagerError> {
+    fn unreserve_utxos(
+        &self,
+        _outpoints: &[bitcoin::OutPoint],
+    ) -> std::result::Result<(), ManagerError> {
         Ok(())
     }
 
-    fn import_address(&self, _address: &bitcoin::Address) -> Result<(), ManagerError> {
+    fn import_address(&self, _address: &bitcoin::Address) -> std::result::Result<(), ManagerError> {
         Ok(())
     }
 
@@ -464,7 +460,7 @@ impl ddk_manager::Wallet for DlcDevKitWallet {
         amount: u64,
         fee_rate: u64,
         _lock_utxos: bool,
-    ) -> Result<Vec<ddk_manager::Utxo>, ManagerError> {
+    ) -> std::result::Result<Vec<ddk_manager::Utxo>, ManagerError> {
         let local_utxos = self.list_utxos().map_err(wallet_err_to_manager_err)?;
 
         let utxos = local_utxos
@@ -507,6 +503,36 @@ impl ddk_manager::Wallet for DlcDevKitWallet {
     }
 }
 
+fn fee_estimator() -> HashMap<ConfirmationTarget, AtomicU32> {
+    let mut fees: HashMap<ConfirmationTarget, AtomicU32> = HashMap::new();
+    fees.insert(ConfirmationTarget::UrgentOnChainSweep, AtomicU32::new(5000));
+    fees.insert(
+        ConfirmationTarget::MinAllowedAnchorChannelRemoteFee,
+        AtomicU32::new(25 * 250),
+    );
+    fees.insert(
+        ConfirmationTarget::MinAllowedAnchorChannelRemoteFee,
+        AtomicU32::new(MIN_FEERATE),
+    );
+    fees.insert(
+        ConfirmationTarget::MinAllowedNonAnchorChannelRemoteFee,
+        AtomicU32::new(MIN_FEERATE),
+    );
+    fees.insert(
+        ConfirmationTarget::AnchorChannelFee,
+        AtomicU32::new(MIN_FEERATE),
+    );
+    fees.insert(
+        ConfirmationTarget::NonAnchorChannelFee,
+        AtomicU32::new(2000),
+    );
+    fees.insert(
+        ConfirmationTarget::ChannelCloseMinimum,
+        AtomicU32::new(MIN_FEERATE),
+    );
+    fees
+}
+
 #[cfg(test)]
 mod tests {
     use std::{str::FromStr, sync::Arc, time::Duration};
@@ -522,6 +548,7 @@ mod tests {
     use super::DlcDevKitWallet;
 
     async fn create_wallet() -> DlcDevKitWallet {
+        let esplora = std::env::var("ESPLORA_HOST").unwrap_or("http://localhost:30000".to_string());
         let storage = Arc::new(MemoryStorage::new());
         let mut entropy = [0u8; 64];
         entropy
@@ -531,7 +558,7 @@ mod tests {
         DlcDevKitWallet::new(
             "test".into(),
             &xpriv.private_key.secret_bytes(),
-            "http://localhost:30000",
+            &esplora,
             Network::Regtest,
             storage.clone(),
         )
@@ -541,8 +568,10 @@ mod tests {
 
     fn generate_blocks(num: u64) {
         tracing::warn!("Generating {} blocks.", num);
+        let bitcoind =
+            std::env::var("BITCOIND_HOST").unwrap_or("http://localhost:18443".to_string());
         let auth = bitcoincore_rpc::Auth::UserPass("ddk".to_string(), "ddk".to_string());
-        let client = bitcoincore_rpc::Client::new("http://127.0.0.1:18443", auth).unwrap();
+        let client = bitcoincore_rpc::Client::new(&bitcoind, auth).unwrap();
         let previous_height = client.get_block_count().unwrap();
 
         let address = client.get_new_address(None, None).unwrap().assume_checked();
@@ -555,8 +584,10 @@ mod tests {
     }
 
     fn fund_address(address: &Address<NetworkChecked>) {
+        let bitcoind =
+            std::env::var("BITCOIND_HOST").unwrap_or("http://localhost:18443".to_string());
         let auth = bitcoincore_rpc::Auth::UserPass("ddk".to_string(), "ddk".to_string());
-        let client = bitcoincore_rpc::Client::new("http://127.0.0.1:18443", auth).unwrap();
+        let client = bitcoincore_rpc::Client::new(&bitcoind, auth).unwrap();
         client
             .send_to_address(
                 address,

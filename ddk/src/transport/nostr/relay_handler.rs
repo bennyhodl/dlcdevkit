@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::error::TransportError;
 use crate::nostr::messages::{create_dlc_msg_event, handle_dlc_msg_event};
 use crate::DlcDevKitDlcManager;
 use crate::{nostr, Transport};
@@ -22,15 +23,21 @@ impl NostrDlc {
         seed_bytes: &[u8; 32],
         relay_host: &str,
         network: Network,
-    ) -> anyhow::Result<NostrDlc> {
+    ) -> Result<NostrDlc, TransportError> {
         tracing::info!("Creating Nostr Dlc handler.");
         let secp = Secp256k1::new();
-        let seed = Xpriv::new_master(network, seed_bytes)?;
+        let seed = Xpriv::new_master(network, seed_bytes)
+            .map_err(|e| TransportError::Init(e.to_string()))?;
         let keys = Keys::new_with_ctx(&secp, seed.private_key.into());
 
-        let relay_url = relay_host.parse()?;
+        let relay_url = relay_host
+            .parse()
+            .map_err(|_| TransportError::Init("Could not parse relay url.".to_string()))?;
         let client = Client::new(keys.clone());
-        client.add_relay(&relay_url).await?;
+        client
+            .add_relay(&relay_url)
+            .await
+            .map_err(|e| TransportError::Init(e.to_string()))?;
         client.connect().await;
 
         Ok(NostrDlc {
@@ -44,7 +51,7 @@ impl NostrDlc {
         &self,
         mut stop_signal: watch::Receiver<bool>,
         manager: Arc<DlcDevKitDlcManager<S, O>>,
-    ) -> JoinHandle<Result<(), anyhow::Error>> {
+    ) -> JoinHandle<Result<(), TransportError>> {
         tracing::info!(
             pubkey = self.keys.public_key().to_string(),
             transport_public_key = self.public_key().to_string(),
@@ -56,7 +63,10 @@ impl NostrDlc {
             let since = Timestamp::now();
             let msg_subscription =
                 nostr::messages::create_dlc_message_filter(since, keys.public_key());
-            nostr_client.subscribe(msg_subscription, None).await?;
+            nostr_client
+                .subscribe(msg_subscription, None)
+                .await
+                .map_err(|e| TransportError::Listen(e.to_string()))?;
             tracing::info!(
                 "Listening for messages on {}",
                 keys.public_key().to_string()
@@ -114,7 +124,7 @@ impl NostrDlc {
                     }
                 }
             }
-            Ok::<_, anyhow::Error>(())
+            Ok::<_, TransportError>(())
         })
     }
 }

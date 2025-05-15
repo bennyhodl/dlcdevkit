@@ -1,4 +1,3 @@
-use anyhow::Result;
 use bitcoin::key::rand::Fill;
 use ddk::builder::Builder;
 use ddk::oracle::kormir::KormirOracleClient;
@@ -9,7 +8,7 @@ use std::sync::Arc;
 type ApplicationDdk = ddk::DlcDevKit<LightningTransport, PostgresStore, KormirOracleClient>;
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<(), ddk::error::Error> {
     let transport = Arc::new(LightningTransport::new(&[0u8; 32], 1776)?);
     let storage = Arc::new(
         PostgresStore::new(
@@ -23,7 +22,9 @@ async fn main() -> Result<()> {
         Arc::new(KormirOracleClient::new("https://kormir.dlcdevkit.com", None).await?);
 
     let mut seed_bytes = [0u8; 32];
-    seed_bytes.try_fill(&mut bitcoin::key::rand::thread_rng())?;
+    seed_bytes
+        .try_fill(&mut bitcoin::key::rand::thread_rng())
+        .unwrap();
 
     let mut builder = Builder::new();
     builder.set_seed_bytes(seed_bytes);

@@ -3,6 +3,7 @@ mod relay_handler;
 pub use relay_handler::NostrDlc;
 use tokio::sync::watch;
 
+use crate::error::TransportError;
 use crate::nostr;
 use crate::{DlcDevKitDlcManager, Oracle, Storage, Transport};
 use async_trait::async_trait;
@@ -25,13 +26,13 @@ impl Transport for NostrDlc {
         &self,
         mut stop_signal: watch::Receiver<bool>,
         manager: Arc<DlcDevKitDlcManager<S, O>>,
-    ) -> Result<(), anyhow::Error> {
+    ) -> Result<(), TransportError> {
         let listen_handle = self.start(stop_signal.clone(), manager);
 
         // Wait for either task to complete or stop signal
         tokio::select! {
             _ = stop_signal.changed() => Ok(()),
-            res = listen_handle => res?,
+            res = listen_handle => res.map_err(|e| TransportError::Listen(e.to_string()))?,
         }
     }
     /// Send a message to a specific counterparty.

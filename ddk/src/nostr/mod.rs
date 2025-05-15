@@ -1,14 +1,12 @@
+pub mod messages;
+
+use crate::error::Error;
 use bitcoin::key::Parity;
 use bitcoin::secp256k1::PublicKey as BitcoinPublicKey;
 use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
 use lightning::io::Cursor;
 use lightning::util::ser::Readable;
 use nostr_rs::{Filter, Kind, PublicKey, Timestamp};
-
-/// Nostr [dlc_messages::oracle_msgs::OracleAnnouncement] marketplace.
-#[cfg(feature = "marketplace")]
-pub mod marketplace;
-pub mod messages;
 
 pub const DLC_MESSAGE_KIND: Kind = Kind::Custom(8_888);
 pub const ORACLE_ANNOUNCMENT_KIND: Kind = Kind::Custom(88);
@@ -41,18 +39,16 @@ pub fn create_oracle_message_filter(since: Timestamp) -> Filter {
         .since(since)
 }
 
-pub fn oracle_announcement_from_str(content: &str) -> anyhow::Result<OracleAnnouncement> {
-    let bytes = base64::decode(content)?;
+pub fn oracle_announcement_from_str(content: &str) -> Result<OracleAnnouncement, Error> {
+    let bytes = base64::decode(content).map_err(|e| Error::Generic(e.to_string()))?;
     let mut cursor = Cursor::new(bytes);
-    OracleAnnouncement::read(&mut cursor)
-        .map_err(|_| anyhow::anyhow!("could not get oracle announcement"))
+    OracleAnnouncement::read(&mut cursor).map_err(|e| Error::Generic(e.to_string()))
 }
 
-pub fn oracle_attestation_from_str(content: &str) -> anyhow::Result<OracleAttestation> {
-    let bytes = base64::decode(content)?;
+pub fn oracle_attestation_from_str(content: &str) -> Result<OracleAttestation, Error> {
+    let bytes = base64::decode(content).map_err(|e| Error::Generic(e.to_string()))?;
     let mut cursor = Cursor::new(bytes);
-    OracleAttestation::read(&mut cursor)
-        .map_err(|_| anyhow::anyhow!("could not read oracle attestation"))
+    OracleAttestation::read(&mut cursor).map_err(|e| Error::Generic(e.to_string()))
 }
 
 #[cfg(test)]

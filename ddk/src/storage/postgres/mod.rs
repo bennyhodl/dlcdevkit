@@ -1,8 +1,7 @@
 use std::str::FromStr;
 
 use super::sqlx::{ContractRowNoBytes, SqlxError};
-use crate::error::WalletError;
-use crate::transport::PeerInformation;
+use crate::error::{StorageError, WalletError};
 use crate::Storage;
 use crate::{
     error::to_storage_error,
@@ -31,8 +30,8 @@ use ddk_manager::{
     },
     Storage as ManagerStorage,
 };
-use dlc_messages::oracle_msgs::OracleAnnouncement;
 use serde_json::json;
+use sqlx::pool::PoolOptions;
 use sqlx::postgres::PgRow;
 use sqlx::{FromRow, Pool, Postgres, Row, Transaction};
 use std::sync::Arc;
@@ -46,13 +45,22 @@ pub struct PostgresStore {
 }
 
 impl PostgresStore {
-    pub async fn new(url: &str, migrations: bool, wallet_name: String) -> Result<Self, SqlxError> {
-        let pool = Pool::<Postgres>::connect(url).await?;
+    pub async fn new(
+        url: &str,
+        migrations: bool,
+        wallet_name: String,
+    ) -> Result<Self, StorageError> {
+        let pool = PoolOptions::<Postgres>::new()
+            .max_connections(5)
+            .connect(url)
+            .await
+            .map_err(|e| StorageError::Sqlx(e.into()))?;
         if migrations {
             tracing::info!("Migrating postgres");
             sqlx::migrate!("src/storage/postgres/migrations")
                 .run(&pool)
-                .await?;
+                .await
+                .map_err(|e| StorageError::Sqlx(e.into()))?;
         }
 
         Ok(Self { pool, wallet_name })
@@ -61,7 +69,7 @@ impl PostgresStore {
     pub async fn get_contract_rows(
         &self,
         states: Option<Vec<ContractPrefix>>,
-    ) -> Result<Vec<ContractRowNoBytes>, SqlxError> {
+    ) -> Result<Vec<ContractRowNoBytes>, StorageError> {
         let rows = if let Some(states) = states {
             let placeholders = (1..=states.len())
                 .map(|i| format!("${i}"))
@@ -76,29 +84,38 @@ impl PostgresStore {
                 query = query.bind(state as i16);
             }
 
-            query.fetch_all(&self.pool).await?
+            query
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|e| StorageError::Sqlx(e.into()))?
         } else {
             sqlx::query_as::<Postgres, ContractRowNoBytes>(
                 "SELECT id, state, is_offer_party, counter_party, offer_collateral, accept_collateral, total_collateral, fee_rate_per_vb, cet_locktime, refund_locktime, pnl FROM contracts"
             )
                 .fetch_all(&self.pool)
-                .await?
+                .await
+                .map_err(|e| StorageError::Sqlx(e.into()))?
         };
         Ok(rows)
     }
 
-    pub async fn get_offer_rows(&self) -> Result<Vec<ContractRowNoBytes>, SqlxError> {
+    pub async fn get_offer_rows(&self) -> Result<Vec<ContractRowNoBytes>, StorageError> {
         let rows = sqlx::query_as::<Postgres, ContractRowNoBytes>(
             "SELECT id, state, is_offer_party, counter_party, offer_collateral, accept_collateral, total_collateral, fee_rate_per_vb, cet_locktime, refund_locktime, pnl FROM contracts WHERE state = 1"
         )
             .fetch_all(&self.pool)
-            .await?;
+            .await
+            .map_err(|e| StorageError::Sqlx(e.into()))?;
         Ok(rows)
     }
 
     #[tracing::instrument]
-    pub(crate) async fn read(&self) -> Result<ChangeSet, SqlxError> {
-        let mut tx = self.pool.begin().await?;
+    pub(crate) async fn read(&self) -> Result<ChangeSet, StorageError> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| StorageError::Sqlx(e.into()))?;
         let mut changeset = ChangeSet::default();
         let sql =
             "SELECT n.name as network,
@@ -113,7 +130,8 @@ impl PostgresStore {
         let row = sqlx::query(sql)
             .bind(&self.wallet_name)
             .fetch_optional(&mut *tx)
-            .await?;
+            .await
+            .map_err(|e| StorageError::Sqlx(e.into()))?;
 
         if let Some(row) = row {
             Self::changeset_from_row(&mut tx, &mut changeset, row, &self.wallet_name).await?;
@@ -128,7 +146,7 @@ impl PostgresStore {
         changeset: &mut ChangeSet,
         row: PgRow,
         wallet_name: &str,
-    ) -> Result<(), SqlxError> {
+    ) -> Result<(), StorageError> {
         tracing::info!("changeset from row");
 
         let network: String = row.get("network");
@@ -140,7 +158,9 @@ impl PostgresStore {
         changeset.network = Some(Network::from_str(&network).expect("parse Network"));
 
         if let Some(desc_str) = external_desc_str {
-            let descriptor: Descriptor<DescriptorPublicKey> = desc_str.parse()?;
+            let descriptor: Descriptor<DescriptorPublicKey> = desc_str
+                .parse()
+                .map_err(|_| StorageError::Sqlx(SqlxError::Custom("parse descriptor".into())))?;
             let did = descriptor.descriptor_id();
             changeset.descriptor = Some(descriptor);
             if let Some(last_rev) = external_last_revealed {
@@ -149,7 +169,9 @@ impl PostgresStore {
         }
 
         if let Some(desc_str) = internal_desc_str {
-            let descriptor: Descriptor<DescriptorPublicKey> = desc_str.parse()?;
+            let descriptor: Descriptor<DescriptorPublicKey> = desc_str
+                .parse()
+                .map_err(|_| StorageError::Sqlx(SqlxError::Custom("parse descriptor".into())))?;
             let did = descriptor.descriptor_id();
             changeset.change_descriptor = Some(descriptor);
             if let Some(last_rev) = internal_last_revealed {
@@ -163,39 +185,56 @@ impl PostgresStore {
     }
 
     #[tracing::instrument]
-    pub(crate) async fn write(&self, changeset: &ChangeSet) -> Result<(), SqlxError> {
+    pub(crate) async fn write(&self, changeset: &ChangeSet) -> Result<(), StorageError> {
         tracing::info!("changeset write");
         if changeset.is_empty() {
             return Ok(());
         }
 
         let wallet_name = &self.wallet_name;
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| StorageError::Sqlx(e.into()))?;
 
         if let Some(ref descriptor) = changeset.descriptor {
-            insert_descriptor(&mut tx, wallet_name, descriptor, External).await?;
+            insert_descriptor(&mut tx, wallet_name, descriptor, External)
+                .await
+                .map_err(StorageError::Sqlx)?;
         }
 
         if let Some(ref change_descriptor) = changeset.change_descriptor {
-            insert_descriptor(&mut tx, wallet_name, change_descriptor, Internal).await?;
+            insert_descriptor(&mut tx, wallet_name, change_descriptor, Internal)
+                .await
+                .map_err(StorageError::Sqlx)?;
         }
 
         if let Some(network) = changeset.network {
-            insert_network(&mut tx, wallet_name, network).await?;
+            insert_network(&mut tx, wallet_name, network)
+                .await
+                .map_err(StorageError::Sqlx)?;
         }
 
         let last_revealed_indices = &changeset.indexer.last_revealed;
         if !last_revealed_indices.is_empty() {
             for (desc_id, index) in last_revealed_indices {
-                update_last_revealed(&mut tx, wallet_name, *desc_id, *index).await?;
+                update_last_revealed(&mut tx, wallet_name, *desc_id, *index)
+                    .await
+                    .map_err(StorageError::Sqlx)?;
             }
         }
 
         local_chain_changeset_persist_to_postgres(&mut tx, wallet_name, &changeset.local_chain)
-            .await?;
-        tx_graph_changeset_persist_to_postgres(&mut tx, wallet_name, &changeset.tx_graph).await?;
+            .await
+            .map_err(StorageError::Sqlx)?;
+        tx_graph_changeset_persist_to_postgres(&mut tx, wallet_name, &changeset.tx_graph)
+            .await
+            .map_err(StorageError::Sqlx)?;
 
-        tx.commit().await?;
+        tx.commit()
+            .await
+            .map_err(|e| StorageError::Sqlx(e.into()))?;
 
         Ok(())
     }
@@ -216,22 +255,6 @@ impl Storage for PostgresStore {
         self.write(changeset)
             .await
             .map_err(|_| WalletError::StorageError("Did not persist bdk storage".to_string()))
-    }
-
-    fn list_peers(&self) -> anyhow::Result<Vec<PeerInformation>> {
-        unimplemented!("Not implemented to list peers")
-    }
-
-    fn save_peer(&self, _peer: PeerInformation) -> anyhow::Result<()> {
-        unimplemented!("Not implemented to save peer")
-    }
-
-    fn save_announcement(&self, _announcement: OracleAnnouncement) -> anyhow::Result<()> {
-        unimplemented!("Not implemented to save announcement")
-    }
-
-    fn get_marketplace_announcements(&self) -> anyhow::Result<Vec<OracleAnnouncement>> {
-        unimplemented!("Not implemented to get marketplace announcements")
     }
 }
 

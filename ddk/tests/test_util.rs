@@ -153,23 +153,22 @@ pub async fn wait_for_offer_is_stored(contract_id: ContractId, storage: Arc<Memo
 
 /// Helper function that reads `[bitcoin::bip32::Xpriv]` bytes from a file.
 /// If the file does not exist then it will create a file `seed.ddk` in the specified path.
-pub fn xprv_from_path(path: PathBuf, network: Network) -> anyhow::Result<Xpriv> {
+pub fn xprv_from_path(path: PathBuf, network: Network) -> Xpriv {
     let seed_path = path.join("seed.ddk");
-    let seed = if Path::new(&seed_path).exists() {
-        let seed = std::fs::read(&seed_path)?;
+    if Path::new(&seed_path).exists() {
+        let seed = std::fs::read(&seed_path).unwrap();
         let mut key = [0; 32];
         key.copy_from_slice(&seed);
-        let xprv = Xpriv::new_master(network, &seed)?;
+        let xprv = Xpriv::new_master(network, &seed).unwrap();
         xprv
     } else {
-        let mut file = File::create(&seed_path)?;
+        let mut file = File::create(&seed_path).unwrap();
         let mut entropy = [0u8; 32];
-        entropy.try_fill(&mut bitcoin::key::rand::thread_rng())?;
-        // let _mnemonic = Mnemonic::from_entropy(&entropy)?;
-        let xprv = Xpriv::new_master(network, &entropy)?;
-        file.write_all(&entropy)?;
+        entropy
+            .try_fill(&mut bitcoin::key::rand::thread_rng())
+            .unwrap();
+        let xprv = Xpriv::new_master(network, &entropy).unwrap();
+        file.write_all(&entropy).unwrap();
         xprv
-    };
-
-    Ok(seed)
+    }
 }

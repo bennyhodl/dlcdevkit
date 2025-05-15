@@ -12,7 +12,7 @@ use ddk::storage::postgres::PostgresStore;
 use ddk::transport::nostr::NostrDlc;
 use ddk::util::ser::serialize_contract;
 use ddk::DlcDevKit;
-use ddk::{Oracle, Storage, Transport};
+use ddk::{Oracle, Transport};
 use ddk_manager::contract::contract_input::ContractInput;
 use ddk_manager::Oracle as DlcOracle;
 use ddk_manager::Storage as DlcStorage;
@@ -308,7 +308,7 @@ impl DdkRpc for DdkNode {
         &self,
         _request: Request<ListOraclesRequest>,
     ) -> Result<Response<ListOraclesResponse>, Status> {
-        let pubkey = self.node.oracle.get_pubkey().await.unwrap().to_string();
+        let pubkey = self.node.oracle.get_public_key().to_string();
         let name = self.node.oracle.name();
         Ok(Response::new(ListOraclesResponse { name, pubkey }))
     }
@@ -362,15 +362,7 @@ impl DdkRpc for DdkNode {
         &self,
         _request: Request<OracleAnnouncementsRequest>,
     ) -> Result<Response<OracleAnnouncementsResponse>, Status> {
-        let announcements: Vec<Vec<u8>> = self
-            .node
-            .storage
-            .get_marketplace_announcements()
-            // TODO: fails if no announcements
-            .unwrap()
-            .iter()
-            .map(|ann| serde_json::to_vec(ann).unwrap())
-            .collect();
+        let announcements: Vec<Vec<u8>> = vec![];
         Ok(Response::new(OracleAnnouncementsResponse { announcements }))
     }
 

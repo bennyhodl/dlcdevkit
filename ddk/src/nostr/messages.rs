@@ -1,3 +1,4 @@
+use crate::error::NostrError;
 use crate::nostr::nostr_to_bitcoin_pubkey;
 use crate::nostr::{DLC_MESSAGE_KIND, ORACLE_ANNOUNCMENT_KIND, ORACLE_ATTESTATION_KIND};
 use crate::util::ser::message_variant_name;
@@ -27,23 +28,33 @@ pub fn create_oracle_message_filter(since: Timestamp) -> Filter {
         .since(since)
 }
 
-pub fn parse_dlc_msg_event(event: &Event, secret_key: &SecretKey) -> anyhow::Result<Message> {
+pub fn parse_dlc_msg_event(event: &Event, secret_key: &SecretKey) -> Result<Message, NostrError> {
     let decrypt = nip04::decrypt(secret_key, &event.pubkey, &event.content)?;
 
-    let bytes = base64::decode(decrypt)?;
+    let bytes = base64::decode(decrypt).map_err(|e| NostrError::MessageParsing(e.to_string()))?;
 
     let mut cursor = lightning::io::Cursor::new(bytes);
 
-    let msg_type: u16 = Readable::read(&mut cursor).unwrap();
+    let msg_type: u16 =
+        Readable::read(&mut cursor).map_err(|e| NostrError::Generic(e.to_string()))?;
 
-    let Some(wire) = read_dlc_message(msg_type, &mut cursor).unwrap() else {
-        return Err(anyhow::anyhow!("Couldn't read DLC message."));
+    let Some(wire) = read_dlc_message(msg_type, &mut cursor)
+        .map_err(|e| NostrError::MessageParsing(e.to_string()))?
+    else {
+        return Err(NostrError::MessageParsing(
+            "Couldn't read DLC message.".to_string(),
+        ));
     };
 
     let message = match wire {
         WireMessage::Message(msg) => Ok(msg),
+        // We could stll do segment chunks. Nostr relays can handle the large sizes,
+        // but I'm running a custom relay so generic relays won't be able to handle.
         WireMessage::SegmentStart(_) | WireMessage::SegmentChunk(_) => {
-            Err(anyhow::anyhow!("Blah blah, something with a wire"))
+            Err(NostrError::MessageParsing(
+                "DLC message is not a valid message. Nostr should not be chunking messages."
+                    .to_string(),
+            ))
         }
     }?;
 
@@ -59,9 +70,11 @@ pub fn parse_dlc_msg_event(event: &Event, secret_key: &SecretKey) -> anyhow::Res
 pub fn handle_dlc_msg_event(
     event: &Event,
     secret_key: &SecretKey,
-) -> anyhow::Result<(SecpPublicKey, Message, Event)> {
+) -> Result<(SecpPublicKey, Message, Event), NostrError> {
     if event.kind != Kind::Custom(8_888) {
-        return Err(anyhow::anyhow!("Event reveived was not DLC Message event."));
+        return Err(NostrError::MessageParsing(
+            "Event reveived was not DLC Message event (kind 8_888).".to_string(),
+        ));
     }
     tracing::info!(
         kind = 8_888,
@@ -81,7 +94,7 @@ pub fn create_dlc_msg_event(
     event_id: Option<EventId>,
     msg: Message,
     keys: &Keys,
-) -> anyhow::Result<Event> {
+) -> Result<Event, NostrError> {
     let mut bytes = msg.type_id().encode();
     bytes.extend(msg.encode());
 
