@@ -23,6 +23,7 @@ use bitcoin::hashes::sha256::Hash as Sha256Hash;
 use bitcoin::hashes::sha256::HashEngine;
 use bitcoin::hashes::Hash;
 use bitcoin::key::rand::{thread_rng, Fill};
+use bitcoin::Psbt;
 use bitcoin::{secp256k1::SecretKey, Amount, FeeRate, ScriptBuf, Transaction};
 use ddk_manager::{error::Error as ManagerError, SimpleSigner};
 use lightning::chain::chaininterface::{ConfirmationTarget, FeeEstimator};
@@ -82,7 +83,7 @@ pub enum WalletCommand {
     SignPsbtInput(
         bitcoin::psbt::Psbt,
         usize,
-        oneshot::Sender<std::result::Result<(), ManagerError>>,
+        oneshot::Sender<std::result::Result<Psbt, ManagerError>>,
     ),
 }
 
@@ -303,7 +304,7 @@ impl DlcDevKitWallet {
                                 });
                         } else {
                             psbt.inputs[input_index] = signed_psbt.inputs[input_index].clone();
-                            let _ = sender.send(Ok(())).map_err(|e| {
+                            let _ = sender.send(Ok(psbt)).map_err(|e| {
                                 tracing::error!("Error sending sign psbt input command: {:?}", e);
                             });
                         }
@@ -402,8 +403,12 @@ impl DlcDevKitWallet {
             .send(WalletCommand::SignPsbtInput(psbt.clone(), input_index, tx))
             .await
             .map_err(|e| ManagerError::WalletError(Box::new(WalletError::Sender(e))))?;
-        rx.await
-            .map_err(|e| ManagerError::WalletError(Box::new(WalletError::Receiver(e))))?
+        let signed_psbt_received = rx
+            .await
+            .map_err(|e| ManagerError::WalletError(Box::new(WalletError::Receiver(e))))?;
+
+        *psbt = signed_psbt_received?;
+        Ok(())
     }
 }
 
