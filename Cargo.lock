@@ -951,7 +951,7 @@ checksum = "e8566979429cf69b49a5c740c60791108e86440e8be149bbea4fe54d2c32d6e2"
 
 [[package]]
 name = "ddk"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "async-trait",
  "base64 0.13.1",
@@ -1015,7 +1015,7 @@ dependencies = [
 
 [[package]]
 name = "ddk-node"
-version = "0.0.15"
+version = "0.0.16"
 dependencies = [
  "anyhow",
  "bitcoin",
