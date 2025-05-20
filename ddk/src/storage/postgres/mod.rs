@@ -1,11 +1,8 @@
-use std::str::FromStr;
-
-use super::sqlx::{ContractRowNoBytes, SqlxError};
+use super::sqlx::{ContractData, ContractMetadata, SqlxError};
 use crate::error::{StorageError, WalletError};
 use crate::Storage;
 use crate::{
     error::to_storage_error,
-    storage::sqlx::ContractRow,
     util::ser::{deserialize_contract, serialize_contract, ContractPrefix},
 };
 use bdk_chain::{
@@ -34,6 +31,7 @@ use serde_json::json;
 use sqlx::pool::PoolOptions;
 use sqlx::postgres::PgRow;
 use sqlx::{FromRow, Pool, Postgres, Row, Transaction};
+use std::str::FromStr;
 use std::sync::Arc;
 use tracing::info;
 
@@ -66,19 +64,19 @@ impl PostgresStore {
         Ok(Self { pool, wallet_name })
     }
 
-    pub async fn get_contract_rows(
+    pub async fn get_contract_metadata(
         &self,
         states: Option<Vec<ContractPrefix>>,
-    ) -> Result<Vec<ContractRowNoBytes>, StorageError> {
+    ) -> Result<Vec<ContractMetadata>, StorageError> {
         let rows = if let Some(states) = states {
             let placeholders = (1..=states.len())
                 .map(|i| format!("${i}"))
                 .collect::<Vec<_>>()
                 .join(", ");
 
-            let query = format!("SELECT id, state, is_offer_party, counter_party, offer_collateral, accept_collateral, total_collateral, fee_rate_per_vb, cet_locktime, refund_locktime, pnl FROM contracts WHERE state IN ({placeholders})");
+            let query = format!("SELECT * FROM contract_metadata WHERE state IN ({placeholders})");
 
-            let mut query = sqlx::query_as::<_, ContractRowNoBytes>(&query);
+            let mut query = sqlx::query_as::<_, ContractMetadata>(&query);
 
             for state in states {
                 query = query.bind(state as i16);
@@ -89,9 +87,7 @@ impl PostgresStore {
                 .await
                 .map_err(|e| StorageError::Sqlx(e.into()))?
         } else {
-            sqlx::query_as::<Postgres, ContractRowNoBytes>(
-                "SELECT id, state, is_offer_party, counter_party, offer_collateral, accept_collateral, total_collateral, fee_rate_per_vb, cet_locktime, refund_locktime, pnl FROM contracts"
-            )
+            sqlx::query_as::<Postgres, ContractMetadata>("SELECT * FROM contract_metadata")
                 .fetch_all(&self.pool)
                 .await
                 .map_err(|e| StorageError::Sqlx(e.into()))?
@@ -99,13 +95,27 @@ impl PostgresStore {
         Ok(rows)
     }
 
-    pub async fn get_offer_rows(&self) -> Result<Vec<ContractRowNoBytes>, StorageError> {
-        let rows = sqlx::query_as::<Postgres, ContractRowNoBytes>(
-            "SELECT id, state, is_offer_party, counter_party, offer_collateral, accept_collateral, total_collateral, fee_rate_per_vb, cet_locktime, refund_locktime, pnl FROM contracts WHERE state = 1"
+    pub async fn get_contract_metadata_by_id(
+        &self,
+        id: &str,
+    ) -> Result<ContractMetadata, StorageError> {
+        let row = sqlx::query_as::<Postgres, ContractMetadata>(
+            "SELECT * FROM contract_metadata WHERE id = $1",
         )
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|e| StorageError::Sqlx(e.into()))?;
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| StorageError::Sqlx(e.into()))?;
+        Ok(row)
+    }
+
+    pub async fn get_offer_metadata(&self) -> Result<Vec<ContractMetadata>, StorageError> {
+        let rows = sqlx::query_as::<Postgres, ContractMetadata>(
+            "SELECT * FROM contract_metadata WHERE state = 1",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| StorageError::Sqlx(e.into()))?;
         Ok(rows)
     }
 
@@ -263,9 +273,9 @@ impl ManagerStorage for PostgresStore {
     async fn get_contract(
         &self,
         id: &ddk_manager::ContractId,
-    ) -> Result<Option<ddk_manager::contract::Contract>, ddk_manager::error::Error> {
+    ) -> Result<Option<Contract>, ddk_manager::error::Error> {
         let contract =
-            sqlx::query_as::<Postgres, ContractRow>("SELECT * FROM contracts WHERE id = $1")
+            sqlx::query_as::<Postgres, ContractData>("SELECT * FROM contract_data WHERE id = $1")
                 .bind(hex::encode(id))
                 .fetch_optional(&self.pool)
                 .await
@@ -278,10 +288,8 @@ impl ManagerStorage for PostgresStore {
         }
     }
 
-    async fn get_contracts(
-        &self,
-    ) -> Result<Vec<ddk_manager::contract::Contract>, ddk_manager::error::Error> {
-        let contracts = sqlx::query_as::<Postgres, ContractRow>("SELECT * FROM contracts")
+    async fn get_contracts(&self) -> Result<Vec<Contract>, ddk_manager::error::Error> {
+        let contracts = sqlx::query_as::<Postgres, ContractData>("SELECT * FROM contract_data")
             .fetch_all(&self.pool)
             .await
             .map_err(to_storage_error)?;
@@ -296,15 +304,25 @@ impl ManagerStorage for PostgresStore {
         &self,
         contract: &OfferedContract,
     ) -> Result<(), ddk_manager::error::Error> {
-        sqlx::query_as::<Postgres, ContractRow>(
+        let mut tx = self.pool.begin().await.map_err(to_storage_error)?;
+        let oracle_pubkey = contract.contract_info[0].oracle_announcements[0].oracle_public_key;
+        let announcement_id = contract.contract_info[0].oracle_announcements[0]
+            .oracle_event
+            .event_id
+            .clone();
+
+        println!(
+            "inserting contract metadata {}{}",
+            oracle_pubkey, announcement_id
+        );
+        sqlx::query(
             r#"
-           INSERT INTO contracts (
+           INSERT INTO contract_metadata (
                id, state, is_offer_party, counter_party,
                offer_collateral, accept_collateral, total_collateral, fee_rate_per_vb, 
-               cet_locktime, refund_locktime, pnl, contract_data
+               cet_locktime, refund_locktime, pnl, funding_txid, cet_txid, announcement_id, oracle_pubkey
            )
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-           RETURNING *
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
            "#,
         )
         .bind(hex::encode(contract.id))
@@ -318,10 +336,26 @@ impl ManagerStorage for PostgresStore {
         .bind(contract.cet_locktime as i32)
         .bind(contract.refund_locktime as i32)
         .bind(None as Option<i64>)
-        .bind(serialize_contract(&Contract::Offered(contract.clone()))?)
-        .fetch_one(&self.pool)
+        .bind(None as Option<String>)
+        .bind(None as Option<String>)
+        .bind(announcement_id)
+        .bind(oracle_pubkey.to_string())
+        .execute(&mut *tx)
         .await
         .map_err(to_storage_error)?;
+
+        sqlx::query(
+            "INSERT INTO contract_data (id, state, contract_data, is_compressed) VALUES ($1, $2, $3, $4)"
+        )
+        .bind(hex::encode(contract.id))
+        .bind(1_i16)
+        .bind(serialize_contract(&Contract::Offered(contract.clone()))?)
+        .bind(false)
+        .execute(&mut *tx)
+        .await
+        .map_err(to_storage_error)?;
+
+        tx.commit().await.map_err(to_storage_error)?;
 
         Ok(())
     }
@@ -330,23 +364,28 @@ impl ManagerStorage for PostgresStore {
         &self,
         id: &ddk_manager::ContractId,
     ) -> Result<(), ddk_manager::error::Error> {
+        let mut tx = self.pool.begin().await.map_err(to_storage_error)?;
         let id = hex::encode(id);
-        sqlx::query_as::<Postgres, ContractRow>("DELETE FROM contracts WHERE id = $1")
-            .bind(id)
-            .fetch_one(&self.pool)
+        sqlx::query_as::<Postgres, ContractMetadata>("DELETE FROM contract_metadata WHERE id = $1")
+            .bind(id.clone())
+            .fetch_one(&mut *tx)
             .await
             .map_err(to_storage_error)?;
+
+        sqlx::query_as::<Postgres, ContractData>("DELETE FROM contract_data WHERE id = $1")
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(to_storage_error)?;
+
+        tx.commit().await.map_err(to_storage_error)?;
 
         Ok(())
     }
 
-    async fn update_contract(
-        &self,
-        contract: &ddk_manager::contract::Contract,
-    ) -> Result<(), ddk_manager::error::Error> {
-        tracing::info!("Updating contract. {:?}", contract.get_id());
+    async fn update_contract(&self, contract: &Contract) -> Result<(), ddk_manager::error::Error> {
+        tracing::info!("Updating contract: {}", hex::encode(contract.get_id()));
         let prefix = ContractPrefix::get_prefix(contract);
-        let serialized_contract = serialize_contract(contract)?;
         let contract_id = hex::encode(contract.get_id());
         let (offer_collateral, accept_collateral, total_collateral) = contract.get_collateral();
 
@@ -361,49 +400,122 @@ impl ManagerStorage for PostgresStore {
                     hex::encode(a.get_temporary_id())
                 );
                 let temp_id = hex::encode(a.get_temporary_id());
-                sqlx::query_as::<Postgres, ContractRow>("DELETE FROM contracts WHERE id = $1")
+                sqlx::query("DELETE FROM contract_data WHERE id = $1")
+                    .bind(temp_id.clone())
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(to_storage_error)?;
+                sqlx::query("DELETE FROM contract_metadata WHERE id = $1")
                     .bind(temp_id)
-                    .fetch_all(&mut *tx)
+                    .execute(&mut *tx)
                     .await
                     .map_err(to_storage_error)?;
             }
             _ => {}
         }
 
-        // Step 2: Upsert the contract by id
-        sqlx::query_as::<Postgres, ContractRow>(
-            r#"
-            INSERT INTO contracts (
-               id, state, is_offer_party, counter_party,
-               offer_collateral, accept_collateral, total_collateral, fee_rate_per_vb, 
-               cet_locktime, refund_locktime, pnl, contract_data
-           )
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-            ON CONFLICT (id)
-            DO UPDATE SET
-                id = EXCLUDED.id,
-                state = EXCLUDED.state,
-                contract_data = EXCLUDED.contract_data,
-                pnl = EXCLUDED.pnl
-            "#,
+        let funding_txid = contract.get_funding_txid().map(|txid| txid.to_string());
+        let cet_txid = contract.get_cet_txid().map(|txid| txid.to_string());
+        let oracle_pubkey = contract
+            .get_oracle_announcement()
+            .map(|ann| ann.oracle_public_key.to_string());
+        let announcement_id = contract
+            .get_oracle_announcement()
+            .map(|ann| ann.oracle_event.event_id.clone());
+
+        let existing_metadata = sqlx::query_as::<Postgres, ContractMetadata>(
+            "SELECT * FROM contract_metadata WHERE id = $1",
         )
-        .bind(contract_id)
-        .bind(prefix as i16)
-        .bind(false)
-        .bind(hex::encode(contract.get_counter_party_id().serialize()))
-        .bind(offer_collateral as i64)
-        .bind(accept_collateral as i64)
-        .bind(total_collateral as i64)
-        .bind(1_i64)
-        .bind(contract.get_cet_locktime() as i32)
-        .bind(contract.get_refund_locktime() as i32)
-        .bind(Some(contract.get_pnl()))
-        .bind(serialized_contract)
-        .fetch_all(&mut *tx)
+        .bind(&contract_id)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(to_storage_error)?;
 
-        // Commit the transaction
+        if existing_metadata.is_some() {
+            sqlx::query(
+                r#"
+            UPDATE contract_metadata SET
+                state = $2,
+                pnl = $3,
+                funding_txid = COALESCE($4, funding_txid),
+                cet_txid = COALESCE($5, cet_txid)
+            WHERE id = $1
+            "#,
+            )
+            .bind(&contract_id)
+            .bind(prefix as i16)
+            .bind(Some(contract.get_pnl()))
+            .bind(&funding_txid)
+            .bind(&cet_txid)
+            .execute(&mut *tx)
+            .await
+            .map_err(to_storage_error)?;
+        } else {
+            sqlx::query(
+                r#"
+                INSERT INTO contract_metadata (
+                id, state, is_offer_party, counter_party,
+                offer_collateral, accept_collateral, total_collateral, fee_rate_per_vb, 
+                cet_locktime, refund_locktime, pnl, funding_txid, cet_txid, announcement_id, oracle_pubkey
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                "#,
+            )
+            .bind(&contract_id)
+            .bind(prefix as i16)
+            // need to track this
+            .bind(false)
+            .bind(hex::encode(contract.get_counter_party_id().serialize()))
+            .bind(offer_collateral as i64)
+            .bind(accept_collateral as i64)
+            .bind(total_collateral as i64)
+            // need to track this
+            .bind(1_i64)
+            .bind(contract.get_cet_locktime() as i32)
+            .bind(contract.get_refund_locktime() as i32)
+            .bind(Some(contract.get_pnl()))
+            .bind(&funding_txid)
+            .bind(&cet_txid)
+            .bind(announcement_id)
+            .bind(&oracle_pubkey)
+            .execute(&mut *tx)
+            .await
+            .map_err(to_storage_error)?;
+        }
+
+        let existing_data =
+            sqlx::query_as::<Postgres, ContractData>("SELECT * FROM contract_data WHERE id = $1")
+                .bind(&contract_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(to_storage_error)?;
+
+        // Serialize the contract data
+        let serialized_contract = serialize_contract(contract)?;
+
+        if existing_data.is_some() {
+            // Update existing contract data
+            sqlx::query("UPDATE contract_data SET contract_data = $2, state = $3 WHERE id = $1")
+                .bind(&contract_id)
+                .bind(&serialized_contract)
+                .bind(prefix as i16)
+                .execute(&mut *tx)
+                .await
+                .map_err(to_storage_error)?;
+        } else {
+            // Insert new contract data
+            sqlx::query(
+                "INSERT INTO contract_data (id, contract_data, is_compressed, state) VALUES ($1, $2, $3, $4)",
+            )
+            .bind(&contract_id)
+            .bind(&serialized_contract)
+            .bind(false) // is_compressed
+            .bind(prefix as i16)
+            .execute(&mut *tx)
+            .await
+            .map_err(to_storage_error)?;
+        }
+
         tx.commit().await.map_err(to_storage_error)?;
 
         Ok(())
@@ -411,7 +523,7 @@ impl ManagerStorage for PostgresStore {
 
     async fn get_signed_contracts(&self) -> Result<Vec<SignedContract>, ddk_manager::error::Error> {
         let contracts =
-            sqlx::query_as::<Postgres, ContractRow>("SELECT * FROM contracts WHERE state = 3")
+            sqlx::query_as::<Postgres, ContractData>("SELECT * FROM contract_data WHERE state = 3")
                 .fetch_all(&self.pool)
                 .await
                 .map_err(to_storage_error)?;
@@ -429,8 +541,8 @@ impl ManagerStorage for PostgresStore {
     }
 
     async fn get_contract_offers(&self) -> Result<Vec<OfferedContract>, ddk_manager::error::Error> {
-        let contracts = sqlx::query_as::<Postgres, ContractRow>(
-            "SELECT * FROM contracts WHERE state = 1 AND is_offer_party = false",
+        let contracts = sqlx::query_as::<Postgres, ContractData>(
+            "SELECT * FROM contract_data WHERE state = 1 AND is_offer_party = false",
         )
         .fetch_all(&self.pool)
         .await
@@ -452,7 +564,7 @@ impl ManagerStorage for PostgresStore {
         &self,
     ) -> Result<Vec<SignedContract>, ddk_manager::error::Error> {
         let contracts =
-            sqlx::query_as::<Postgres, ContractRow>("SELECT * FROM contracts WHERE state = 4")
+            sqlx::query_as::<Postgres, ContractData>("SELECT * FROM contract_data WHERE state = 4")
                 .fetch_all(&self.pool)
                 .await
                 .map_err(to_storage_error)?;
@@ -473,7 +585,7 @@ impl ManagerStorage for PostgresStore {
         &self,
     ) -> Result<Vec<PreClosedContract>, ddk_manager::error::Error> {
         let contracts =
-            sqlx::query_as::<Postgres, ContractRow>("SELECT * FROM contracts WHERE state = 5")
+            sqlx::query_as::<Postgres, ContractData>("SELECT * FROM contract_data WHERE state = 5")
                 .fetch_all(&self.pool)
                 .await
                 .map_err(to_storage_error)?;
@@ -493,7 +605,7 @@ impl ManagerStorage for PostgresStore {
     async fn upsert_channel(
         &self,
         _channel: ddk_manager::channel::Channel,
-        _contract: Option<ddk_manager::contract::Contract>,
+        _contract: Option<Contract>,
     ) -> Result<(), ddk_manager::error::Error> {
         unimplemented!("Channels not supported.")
     }
@@ -834,19 +946,9 @@ struct KeychainEntry {
 
 #[cfg(test)]
 mod tests {
-    use ddk_manager::contract::{
-        accepted_contract::AcceptedContract, offered_contract::OfferedContract, ser::Serializable,
-    };
-
     use super::*;
-
-    fn deserialize_object<T>(serialized: &[u8]) -> T
-    where
-        T: Serializable,
-    {
-        let mut cursor = ::lightning::io::Cursor::new(&serialized);
-        T::deserialize(&mut cursor).unwrap()
-    }
+    use crate::util::ser::deserialize_contract;
+    use ddk_manager::Storage;
 
     async fn seed_db() -> PostgresStore {
         let store = PostgresStore::new(
@@ -857,36 +959,48 @@ mod tests {
         .await
         .unwrap();
 
-        let accept = include_bytes!("../../../tests/data/dlc_storage/Accepted");
-        let accepted_contract = deserialize_object::<AcceptedContract>(&accept.to_vec());
+        let offered = include_bytes!("../../../tests/data/contracts/OfferedContract-Offerer");
+        let offered_contract = deserialize_contract(&offered.to_vec()).unwrap();
+        match offered_contract {
+            Contract::Offered(offered_contract) => {
+                store
+                    .create_contract(&offered_contract)
+                    .await
+                    .expect("Failed to create offered contract");
+            }
+            _ => panic!("Offered contract is not an OfferedContract"),
+        }
+        let accept = include_bytes!("../../../tests/data/contracts/AcceptedContract");
+        let accepted_contract = deserialize_contract(&accept.to_vec()).unwrap();
         store
-            .update_contract(&Contract::Accepted(accepted_contract))
+            .update_contract(&accepted_contract)
             .await
             .expect("Failed to update accepted contract");
-        let signed = include_bytes!("../../../tests/data/dlc_storage/Signed");
-        let signed_contract = deserialize_object::<SignedContract>(&signed.to_vec());
+        let signed = include_bytes!("../../../tests/data/contracts/SignedContract");
+        let signed_contract = deserialize_contract(&signed.to_vec()).unwrap();
         store
-            .update_contract(&Contract::Signed(signed_contract))
+            .update_contract(&signed_contract)
             .await
             .expect("Failed to update signed contract");
-        let confirmed = include_bytes!("../../../tests/data/dlc_storage/Confirmed");
-        let confirmed_contract = deserialize_object::<SignedContract>(&confirmed.to_vec());
+        let confirmed = include_bytes!("../../../tests/data/contracts/ConfirmedContract");
+        let confirmed_contract = deserialize_contract(&confirmed.to_vec()).unwrap();
         store
-            .update_contract(&Contract::Confirmed(confirmed_contract))
+            .update_contract(&confirmed_contract)
             .await
             .expect("Failed to update confirmed contract");
-        let preclosed = include_bytes!("../../../tests/data/dlc_storage/PreClosed");
-        let preclosed_contract = deserialize_object::<PreClosedContract>(&preclosed.to_vec());
+        let preclosed = include_bytes!("../../../tests/data/contracts/PreClosedContract");
+        let preclosed_contract = deserialize_contract(&preclosed.to_vec()).unwrap();
         store
-            .update_contract(&Contract::PreClosed(preclosed_contract))
+            .update_contract(&preclosed_contract)
             .await
             .expect("Failed to update preclosed contract");
-        let offered = include_bytes!("../../../tests/data/dlc_storage/Offered");
-        let offered_contract = deserialize_object::<OfferedContract>(&offered.to_vec());
+
+        let closed = include_bytes!("../../../tests/data/contracts/ClosedContract");
+        let closed_contract = deserialize_contract(&closed.to_vec()).unwrap();
         store
-            .update_contract(&Contract::Offered(offered_contract))
+            .update_contract(&closed_contract)
             .await
-            .expect("Failed to update offered contract");
+            .expect("Failed to update closed contract");
 
         store
     }
@@ -895,18 +1009,23 @@ mod tests {
     async fn postgres() {
         let db = seed_db().await;
 
-        let offer_rows = db.get_offer_rows().await.unwrap();
-        assert_eq!(offer_rows.len(), 1);
-        assert_eq!(offer_rows[0].state, ContractPrefix::Offered as i16);
+        let confirmed_rows = db.get_contract_metadata(None).await.unwrap();
+        assert_eq!(confirmed_rows.len(), 1);
+        assert_eq!(confirmed_rows[0].state, ContractPrefix::Closed as i16);
+        let contracts = db.get_contracts().await.unwrap();
+        assert!(contracts.len() > 0);
+    }
 
-        let signed_prefix: ContractPrefix = "signed".to_string().into();
-        let confirmed_prefix: ContractPrefix = "confirmed".to_string().into();
-        let confirmed_rows = db
-            .get_contract_rows(Some(vec![signed_prefix, confirmed_prefix]))
-            .await
-            .unwrap();
-        assert_eq!(confirmed_rows.len(), 2);
-        assert_eq!(confirmed_rows[0].state, ContractPrefix::Signed as i16);
-        assert_eq!(confirmed_rows[1].state, ContractPrefix::Confirmed as i16);
+    #[tokio::test]
+    async fn get_contracts() {
+        let db = PostgresStore::new(
+            &std::env::var("DATABASE_URL").unwrap(),
+            false,
+            "test".to_string(),
+        )
+        .await
+        .unwrap();
+        let contracts = db.get_contracts().await;
+        assert!(contracts.is_ok());
     }
 }

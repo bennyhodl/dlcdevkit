@@ -29,8 +29,7 @@ pub enum SqlxError {
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
-/// todo: add fee rate and funding txid
-pub struct ContractRow {
+pub struct ContractMetadata {
     pub id: String,
     pub state: i16,
     pub is_offer_party: bool,
@@ -42,20 +41,16 @@ pub struct ContractRow {
     pub cet_locktime: i32,
     pub refund_locktime: i32,
     pub pnl: Option<i64>,
-    pub contract_data: Vec<u8>,
+    pub funding_txid: Option<String>,
+    pub cet_txid: Option<String>,
+    pub announcement_id: String,
+    pub oracle_pubkey: String,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
-pub struct ContractRowNoBytes {
+pub struct ContractData {
     pub id: String,
     pub state: i16,
-    pub is_offer_party: bool,
-    pub counter_party: String,
-    pub offer_collateral: i64,
-    pub total_collateral: i64,
-    pub accept_collateral: i64,
-    pub fee_rate_per_vb: i64,
-    pub cet_locktime: i32,
-    pub refund_locktime: i32,
-    pub pnl: Option<i64>,
+    pub contract_data: Vec<u8>,
+    pub is_compressed: bool,
 }

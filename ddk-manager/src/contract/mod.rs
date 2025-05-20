@@ -2,7 +2,7 @@
 
 use crate::error::Error;
 use crate::ContractId;
-use bitcoin::Transaction;
+use bitcoin::{Transaction, Txid};
 use dlc_messages::{
     oracle_msgs::{EventDescriptor, OracleAnnouncement, OracleAttestation},
     AcceptDlc, SignDlc,
@@ -255,12 +255,94 @@ impl Contract {
             Contract::Accepted(_) => 0,
             Contract::Signed(_) => 0,
             Contract::Confirmed(_) => 0,
-            Contract::PreClosed(_) => 0,
+            Contract::PreClosed(p) => p
+                .signed_contract
+                .accepted_contract
+                .compute_pnl(&p.signed_cet),
             Contract::Closed(c) => c.pnl,
             Contract::Refunded(_) => 0,
             Contract::FailedAccept(_) => 0,
             Contract::FailedSign(_) => 0,
             Contract::Rejected(_) => 0,
+        }
+    }
+
+    /// Get the funding txid for a contract.
+    pub fn get_funding_txid(&self) -> Option<Txid> {
+        match self {
+            Contract::Offered(_) => None,
+            Contract::Accepted(a) => Some(a.dlc_transactions.fund.compute_txid()),
+            Contract::Signed(s) => Some(s.accepted_contract.dlc_transactions.fund.compute_txid()),
+            Contract::Confirmed(c) => {
+                Some(c.accepted_contract.dlc_transactions.fund.compute_txid())
+            }
+            Contract::PreClosed(p) => Some(
+                p.signed_contract
+                    .accepted_contract
+                    .dlc_transactions
+                    .fund
+                    .compute_txid(),
+            ),
+            Contract::Closed(c) => Some(c.funding_txid),
+            Contract::Refunded(r) => Some(r.accepted_contract.dlc_transactions.fund.compute_txid()),
+            Contract::FailedAccept(_) => None,
+            Contract::FailedSign(_) => None,
+            Contract::Rejected(_) => None,
+        }
+    }
+
+    /// Get the oracle announcement for a contract.
+    pub fn get_oracle_announcement(&self) -> Option<OracleAnnouncement> {
+        match self {
+            Contract::Offered(o) => Some(o.contract_info[0].oracle_announcements[0].clone()),
+            Contract::Accepted(a) => {
+                Some(a.offered_contract.contract_info[0].oracle_announcements[0].clone())
+            }
+            Contract::Signed(s) => Some(
+                s.accepted_contract.offered_contract.contract_info[0].oracle_announcements[0]
+                    .clone(),
+            ),
+            Contract::Confirmed(c) => Some(
+                c.accepted_contract.offered_contract.contract_info[0].oracle_announcements[0]
+                    .clone(),
+            ),
+            Contract::PreClosed(p) => Some(
+                p.signed_contract
+                    .accepted_contract
+                    .offered_contract
+                    .contract_info[0]
+                    .oracle_announcements[0]
+                    .clone(),
+            ),
+            Contract::Closed(_) => None,
+            Contract::Refunded(r) => Some(
+                r.accepted_contract.offered_contract.contract_info[0].oracle_announcements[0]
+                    .clone(),
+            ),
+            Contract::FailedAccept(f) => {
+                Some(f.offered_contract.contract_info[0].oracle_announcements[0].clone())
+            }
+            Contract::FailedSign(f) => Some(
+                f.accepted_contract.offered_contract.contract_info[0].oracle_announcements[0]
+                    .clone(),
+            ),
+            Contract::Rejected(r) => Some(r.contract_info[0].oracle_announcements[0].clone()),
+        }
+    }
+
+    /// Get the CET transaction id.
+    pub fn get_cet_txid(&self) -> Option<Txid> {
+        match self {
+            Contract::Offered(_) => None,
+            Contract::Accepted(_) => None,
+            Contract::Signed(_) => None,
+            Contract::Confirmed(_) => None,
+            Contract::PreClosed(p) => Some(p.signed_cet.compute_txid()),
+            Contract::Closed(c) => c.signed_cet.as_ref().map(|cet| cet.compute_txid()),
+            Contract::Refunded(_) => None,
+            Contract::FailedAccept(_) => None,
+            Contract::FailedSign(_) => None,
+            Contract::Rejected(_) => None,
         }
     }
 }
@@ -311,6 +393,8 @@ pub struct ClosedContract {
     pub temporary_contract_id: ContractId,
     /// The public key of the counter-party's node.
     pub counter_party_id: PublicKey,
+    /// The funding txid of the contract.
+    pub funding_txid: Txid,
     /// The profit and loss for the given contract
     pub pnl: i64,
 }
