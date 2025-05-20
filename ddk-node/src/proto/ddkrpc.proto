@@ -18,6 +18,7 @@ service DdkRpc {
   rpc ListContracts (ListContractsRequest) returns (ListContractsResponse);
   rpc Send (SendRequest) returns (SendResponse);
   rpc OracleAnnouncements (OracleAnnouncementsRequest) returns (OracleAnnouncementsResponse);
+  rpc CreateEnum (CreateEnumRequest) returns (CreateEnumResponse);
 }
 
 message InfoRequest {}
@@ -121,10 +122,12 @@ message SendResponse {
   string txid = 1;
 }
 
-message OracleAnnouncementsRequest {}
+message OracleAnnouncementsRequest {
+  string event_id = 1;
+}
 
 message OracleAnnouncementsResponse {
-  repeated bytes announcements = 1;
+  bytes announcement = 1;
 }
 
 message WalletSyncRequest {}
@@ -134,3 +137,13 @@ message WalletSyncResponse {}
 message SyncRequest {}
 
 message SyncResponse {}
+
+message CreateEnumRequest {
+  uint32 maturity = 1;
+  repeated string outcomes = 2;
+}
+
+message CreateEnumResponse {
+  bytes announcement = 1;
+}
+
