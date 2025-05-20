@@ -431,7 +431,7 @@ impl ManagerStorage for PostgresStore {
         .await
         .map_err(to_storage_error)?;
 
-        if let Some(_) = existing_metadata {
+        if existing_metadata.is_some() {
             sqlx::query(
                 r#"
             UPDATE contract_metadata SET

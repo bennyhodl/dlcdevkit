@@ -93,6 +93,6 @@ pub struct Balance {
     pub foreign_unconfirmed: Amount,
     /// UTXOs in an active contract.
     pub contract: Amount,
-    /// Profit and loss in all closed contracts.
+    /// Profit and loss in all closed contracts denominated in sats.
     pub contract_pnl: i64,
 }

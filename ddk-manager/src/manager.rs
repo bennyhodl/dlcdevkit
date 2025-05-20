@@ -839,6 +839,12 @@ where
                     .accepted_contract
                     .offered_contract
                     .counter_party,
+                funding_txid: contract
+                    .signed_contract
+                    .accepted_contract
+                    .dlc_transactions
+                    .fund
+                    .compute_txid(),
                 pnl: contract
                     .signed_contract
                     .accepted_contract
@@ -897,6 +903,11 @@ where
             signed_cet: Some(signed_cet),
             contract_id: contract.accepted_contract.get_contract_id(),
             temporary_contract_id: contract.accepted_contract.offered_contract.id,
+            funding_txid: contract
+                .accepted_contract
+                .dlc_transactions
+                .fund
+                .compute_txid(),
             counter_party_id: contract.accepted_contract.offered_contract.counter_party,
         };
 
@@ -983,6 +994,11 @@ where
                 contract_id: contract.accepted_contract.get_contract_id(),
                 temporary_contract_id: contract.accepted_contract.offered_contract.id,
                 counter_party_id: contract.accepted_contract.offered_contract.counter_party,
+                funding_txid: contract
+                    .accepted_contract
+                    .dlc_transactions
+                    .fund
+                    .compute_txid(),
             })
         };
 
@@ -2756,6 +2772,11 @@ where
             contract_id: *contract_id,
             temporary_contract_id: contract.accepted_contract.offered_contract.id,
             counter_party_id: contract.accepted_contract.offered_contract.counter_party,
+            funding_txid: contract
+                .accepted_contract
+                .dlc_transactions
+                .fund
+                .compute_txid(),
             pnl,
         })
     }

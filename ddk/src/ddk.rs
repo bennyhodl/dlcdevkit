@@ -232,14 +232,7 @@ where
 
         let contract_pnl = &contracts
             .iter()
-            .map(|contract| match contract {
-                Contract::Closed(c) => c.pnl,
-                Contract::PreClosed(p) => p
-                    .signed_contract
-                    .accepted_contract
-                    .compute_pnl(&p.signed_cet),
-                _ => 0_i64,
-            })
+            .map(|contract| contract.get_pnl())
             .sum::<i64>();
 
         Ok(crate::Balance {
