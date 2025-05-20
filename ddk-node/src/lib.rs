@@ -18,13 +18,14 @@ use ddk_manager::Oracle as DlcOracle;
 use ddk_manager::Storage as DlcStorage;
 use ddkrpc::ddk_rpc_server::{DdkRpc, DdkRpcServer};
 use ddkrpc::{
-    AcceptOfferRequest, AcceptOfferResponse, ConnectRequest, ConnectResponse,
-    GetWalletTransactionsRequest, GetWalletTransactionsResponse, ListContractsRequest,
-    ListContractsResponse, ListOffersRequest, ListOffersResponse, ListOraclesRequest,
-    ListOraclesResponse, ListPeersRequest, ListPeersResponse, ListUtxosRequest, ListUtxosResponse,
-    NewAddressRequest, NewAddressResponse, OracleAnnouncementsRequest, OracleAnnouncementsResponse,
-    SendOfferRequest, SendOfferResponse, SendRequest, SendResponse, SyncRequest, SyncResponse,
-    WalletBalanceRequest, WalletBalanceResponse, WalletSyncRequest, WalletSyncResponse,
+    AcceptOfferRequest, AcceptOfferResponse, ConnectRequest, ConnectResponse, CreateEnumRequest,
+    CreateEnumResponse, GetWalletTransactionsRequest, GetWalletTransactionsResponse,
+    ListContractsRequest, ListContractsResponse, ListOffersRequest, ListOffersResponse,
+    ListOraclesRequest, ListOraclesResponse, ListPeersRequest, ListPeersResponse, ListUtxosRequest,
+    ListUtxosResponse, NewAddressRequest, NewAddressResponse, OracleAnnouncementsRequest,
+    OracleAnnouncementsResponse, SendOfferRequest, SendOfferResponse, SendRequest, SendResponse,
+    SyncRequest, SyncResponse, WalletBalanceRequest, WalletBalanceResponse, WalletSyncRequest,
+    WalletSyncResponse,
 };
 use ddkrpc::{InfoRequest, InfoResponse};
 use opts::NodeOpts;
@@ -277,18 +278,6 @@ impl DdkRpc for DdkNode {
     ) -> Result<Response<ListPeersResponse>, Status> {
         tracing::info!("List peers request");
         let peers = vec![];
-        // let peers = self.node.transport.peer_manager.list_peers();
-        // let peers = peers
-        //     .iter()
-        //     .map(|peer| {
-        //         let host = match &peer.socket_address {
-        //             Some(h) => h.to_string(),
-        //             None => "".to_string(),
-        //         };
-        //         let pubkey = peer.counterparty_node_id.to_string();
-        //         Peer { pubkey, host }
-        //     })
-        //     .collect::<Vec<Peer>>();
 
         Ok(Response::new(ListPeersResponse { peers }))
     }
@@ -360,10 +349,27 @@ impl DdkRpc for DdkNode {
 
     async fn oracle_announcements(
         &self,
-        _request: Request<OracleAnnouncementsRequest>,
+        request: Request<OracleAnnouncementsRequest>,
     ) -> Result<Response<OracleAnnouncementsResponse>, Status> {
-        let announcements: Vec<Vec<u8>> = vec![];
-        Ok(Response::new(OracleAnnouncementsResponse { announcements }))
+        let OracleAnnouncementsRequest { event_id } = request.into_inner();
+        let oracle_announcement = self.node.oracle.get_announcement(&event_id).await.unwrap();
+        let announcement = serde_json::to_vec(&oracle_announcement).unwrap();
+        Ok(Response::new(OracleAnnouncementsResponse { announcement }))
+    }
+
+    async fn create_enum(
+        &self,
+        request: Request<CreateEnumRequest>,
+    ) -> Result<Response<CreateEnumResponse>, Status> {
+        let CreateEnumRequest { maturity, outcomes } = request.into_inner();
+        let announcement = self
+            .node
+            .oracle
+            .create_enum_event(outcomes, maturity)
+            .await
+            .unwrap();
+        let announcement = serde_json::to_vec(&announcement).unwrap();
+        Ok(Response::new(CreateEnumResponse { announcement }))
     }
 
     async fn wallet_sync(

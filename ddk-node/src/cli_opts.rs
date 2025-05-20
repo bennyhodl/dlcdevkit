@@ -65,9 +65,18 @@ pub enum WalletCommand {
 #[derive(Clone, Debug, Subcommand)]
 pub enum OracleCommand {
     #[command(about = "Get all known oracle announcements.")]
-    Announcements,
+    Announcements {
+        #[arg(help = "The announcement id to get.")]
+        event_id: String,
+    },
+    #[command(about = "Create an enum oracle event.")]
+    CreateEnum {
+        #[arg(help = "The maturity of the event.")]
+        maturity: u32,
+        #[arg(help = "The outcomes of the event. Separate by spaces.")]
+        outcomes: Vec<String>,
+    },
 }
-
 #[derive(Parser, Clone, Debug)]
 pub struct Accept {
     // The contract id string to accept.
