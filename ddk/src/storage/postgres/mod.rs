@@ -294,10 +294,12 @@ impl ManagerStorage for PostgresStore {
             .await
             .map_err(to_storage_error)?;
 
-        Ok(contracts
+        let contracts = contracts
             .into_iter()
-            .map(|c| deserialize_contract(&c.contract_data).unwrap())
-            .collect())
+            .map(|c| deserialize_contract(&c.contract_data))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(contracts)
     }
 
     async fn create_contract(
