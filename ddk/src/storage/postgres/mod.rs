@@ -294,10 +294,12 @@ impl ManagerStorage for PostgresStore {
             .await
             .map_err(to_storage_error)?;
 
-        Ok(contracts
+        let contracts = contracts
             .into_iter()
-            .map(|c| deserialize_contract(&c.contract_data).unwrap())
-            .collect())
+            .map(|c| deserialize_contract(&c.contract_data))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(contracts)
     }
 
     async fn create_contract(
@@ -936,6 +938,7 @@ async fn easy_backup(db: Pool<Postgres>) -> Result<(), SqlxError> {
 
 /// Represents a row in the keychain table.
 #[derive(serde::Serialize, FromRow)]
+#[allow(dead_code)]
 struct KeychainEntry {
     wallet_name: String,
     keychainkind: String,

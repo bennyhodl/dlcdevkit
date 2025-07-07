@@ -148,10 +148,6 @@ jobs:
         with:
           path: target/debug/deps
           key: test-cache-${{ github.run_id }}-${{ github.run_number }}
-      - name: Debug file location
-        run: |
-          ls -la ./testconfig/scripts/
-          pwd
       - name: Start bitcoin node
         run: docker compose up -d
       - name: Wait for container to run
