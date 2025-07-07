@@ -215,7 +215,6 @@ impl DdkRpc for DdkNode {
     ) -> Result<Response<ListOffersResponse>, Status> {
         tracing::info!("Request for offers to the node.");
         let offers = self.node.storage.get_contract_offers().await.unwrap();
-        tracing::info!("Offers: {:?}", offers);
         let offers: Vec<Vec<u8>> = offers
             .iter()
             .map(|offer| serde_json::to_vec(offer).unwrap())

@@ -544,7 +544,10 @@ impl ManagerStorage for PostgresStore {
 
     async fn get_contract_offers(&self) -> Result<Vec<OfferedContract>, ddk_manager::error::Error> {
         let contracts = sqlx::query_as::<Postgres, ContractData>(
-            "SELECT * FROM contract_data WHERE state = 1 AND is_offer_party = false",
+            "SELECT cd.id, cd.state, cd.contract_data, cd.is_compressed 
+         FROM contract_data cd
+         INNER JOIN contract_metadata cm ON cd.id = cm.id
+         WHERE cm.state = 1 AND cm.is_offer_party = false",
         )
         .fetch_all(&self.pool)
         .await
