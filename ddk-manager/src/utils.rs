@@ -91,7 +91,7 @@ pub(crate) fn compute_id(
 
 pub(crate) async fn get_party_params<W: Deref, B: Deref, X: ContractSigner, C: Signing>(
     secp: &Secp256k1<C>,
-    own_collateral: u64,
+    own_collateral: Amount,
     fee_rate: u64,
     wallet: &W,
     signer: &X,
@@ -149,7 +149,7 @@ where
         payout_serial_id,
         inputs: funding_tx_info,
         collateral: own_collateral,
-        input_amount: total_input.to_sat(),
+        input_amount: total_input,
     };
 
     Ok((party_params, funding_inputs))
@@ -172,9 +172,9 @@ where
     })
 }
 
-pub(crate) fn get_half_common_fee(fee_rate: u64) -> Result<u64, Error> {
+pub(crate) fn get_half_common_fee(fee_rate: u64) -> Result<Amount, Error> {
     let common_fee = dlc::util::get_common_fee(fee_rate)?;
-    Ok((common_fee as f64 / 2_f64).ceil() as u64)
+    Ok(common_fee / 2)
 }
 
 pub(crate) fn get_range_info_and_oracle_sigs(
