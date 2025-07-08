@@ -1,5 +1,6 @@
 use crate::options::Direction;
 use crate::options::OptionType;
+use bitcoin::Amount;
 use ddk_manager::payout_curve::HyperbolaPayoutCurvePiece;
 use ddk_manager::payout_curve::PayoutFunction;
 use ddk_manager::payout_curve::PayoutFunctionPiece;
@@ -12,7 +13,7 @@ impl OptionBuilder {
     // Covered Call (Short Call)
     pub fn build_covered_call_payout(
         strike_price: u64,
-        contract_size: u64,
+        contract_size: Amount,
         oracle_base: u32,
         oracle_digits: u32,
     ) -> anyhow::Result<PayoutFunction> {
@@ -43,12 +44,12 @@ impl OptionBuilder {
                 },
                 PayoutPoint {
                     event_outcome: max_outcome,
-                    outcome_payout: 0,
+                    outcome_payout: Amount::ZERO,
                     extra_precision: 0,
                 },
                 true,
                 strike_price as f64,
-                total_collateral as f64,
+                total_collateral.to_sat() as f64,
                 1.0,
                 0.0,
                 -1.0,
@@ -64,7 +65,7 @@ impl OptionBuilder {
     // Short Put
     pub fn build_short_put_payout(
         strike_price: u64,
-        total_collateral: u64,
+        total_collateral: Amount,
         oracle_base: u32,
         oracle_digits: u32,
     ) -> anyhow::Result<PayoutFunction> {
@@ -74,7 +75,7 @@ impl OptionBuilder {
             PayoutFunctionPiece::HyperbolaPayoutCurvePiece(HyperbolaPayoutCurvePiece::new(
                 PayoutPoint {
                     event_outcome: 0,
-                    outcome_payout: 0,
+                    outcome_payout: Amount::ZERO,
                     extra_precision: 0,
                 },
                 PayoutPoint {
@@ -115,7 +116,7 @@ impl OptionBuilder {
     // Long Call
     pub fn build_long_call_payout(
         strike_price: u64,
-        total_collateral: u64,
+        total_collateral: Amount,
         oracle_base: u32,
         oracle_digits: u32,
     ) -> anyhow::Result<PayoutFunction> {
@@ -125,12 +126,12 @@ impl OptionBuilder {
             PolynomialPayoutCurvePiece::new(vec![
                 PayoutPoint {
                     event_outcome: 0,
-                    outcome_payout: 0,
+                    outcome_payout: Amount::ZERO,
                     extra_precision: 0,
                 },
                 PayoutPoint {
                     event_outcome: strike_price,
-                    outcome_payout: 0,
+                    outcome_payout: Amount::ZERO,
                     extra_precision: 0,
                 },
             ])?,
@@ -140,7 +141,7 @@ impl OptionBuilder {
             PayoutFunctionPiece::HyperbolaPayoutCurvePiece(HyperbolaPayoutCurvePiece::new(
                 PayoutPoint {
                     event_outcome: strike_price,
-                    outcome_payout: 0,
+                    outcome_payout: Amount::ZERO,
                     extra_precision: 0,
                 },
                 PayoutPoint {
@@ -166,7 +167,7 @@ impl OptionBuilder {
     // Long Put
     pub fn build_long_put_payout(
         strike_price: u64,
-        total_collateral: u64,
+        total_collateral: Amount,
         oracle_base: u32,
         oracle_digits: u32,
     ) -> anyhow::Result<PayoutFunction> {
@@ -181,12 +182,12 @@ impl OptionBuilder {
                 },
                 PayoutPoint {
                     event_outcome: strike_price,
-                    outcome_payout: 0,
+                    outcome_payout: Amount::ZERO,
                     extra_precision: 0,
                 },
                 true,
                 0.0,
-                total_collateral as f64,
+                total_collateral.to_sat() as f64,
                 1.0,
                 0.0,
                 -1.0,
@@ -197,12 +198,12 @@ impl OptionBuilder {
             PolynomialPayoutCurvePiece::new(vec![
                 PayoutPoint {
                     event_outcome: strike_price,
-                    outcome_payout: 0,
+                    outcome_payout: Amount::ZERO,
                     extra_precision: 0,
                 },
                 PayoutPoint {
                     event_outcome: max_outcome,
-                    outcome_payout: 0,
+                    outcome_payout: Amount::ZERO,
                     extra_precision: 0,
                 },
             ])?,
@@ -219,8 +220,8 @@ impl OptionBuilder {
         direction: Direction,
         option_type: OptionType,
         strike_price: u64,
-        contract_size: u64,
-        total_collateral: u64,
+        contract_size: Amount,
+        total_collateral: Amount,
         oracle_base: u32,
         oracle_digits: u32,
     ) -> anyhow::Result<PayoutFunction> {
@@ -260,7 +261,7 @@ mod tests {
     #[test]
     fn test_all_option_types() {
         let strike_price = 50000; // $50,000
-        let contract_size = 100000000; // 1 BTC in sats
+        let contract_size = Amount::ONE_BTC; // 1 BTC in sats
         let oracle_base = 10;
         let oracle_digits = 5;
 
@@ -270,7 +271,7 @@ mod tests {
             OptionType::Call,
             strike_price,
             contract_size,
-            1_000_000,
+            Amount::from_sat(1_000_000),
             oracle_base,
             oracle_digits,
         )
@@ -282,7 +283,7 @@ mod tests {
             OptionType::Put,
             strike_price,
             contract_size,
-            1_000_000,
+            Amount::from_sat(1_000_000),
             oracle_base,
             oracle_digits,
         )
@@ -294,7 +295,7 @@ mod tests {
             OptionType::Call,
             strike_price,
             contract_size,
-            1_000_000,
+            Amount::from_sat(1_000_000),
             oracle_base,
             oracle_digits,
         )
@@ -306,7 +307,7 @@ mod tests {
             OptionType::Put,
             strike_price,
             contract_size,
-            1_000_000,
+            Amount::from_sat(1_000_000),
             oracle_base,
             oracle_digits,
         )

@@ -1,4 +1,5 @@
 use crate::options_builder::OptionBuilder;
+use bitcoin::Amount;
 use ddk_manager::{
     contract::{
         contract_input::{ContractInput, ContractInputInfo, OracleInput},
@@ -25,8 +26,8 @@ pub enum Direction {
 
 fn build_order_offer(
     announcement: &OracleAnnouncement,
-    total_collateral: u64,
-    offer_collateral: u64,
+    total_collateral: Amount,
+    offer_collateral: Amount,
     payout_function: PayoutFunction,
     rounding_intervals: RoundingIntervals,
     fee_rate: u64,
@@ -64,14 +65,14 @@ fn build_order_offer(
 // Main option builder function
 pub fn build_option_order_offer(
     announcement: &OracleAnnouncement,
-    contract_size: u64,
+    contract_size: Amount,
     strike_price: u64,
-    premium: u64,
+    premium: Amount,
     fee_per_byte: u64,
     rounding: u64,
     option_type: OptionType,
     direction: Direction,
-    total_collateral: u64,
+    total_collateral: Amount,
     nb_oracle_digits: u32,
 ) -> anyhow::Result<ContractInput> {
     let payout_function = OptionBuilder::build_option_payout(
@@ -138,8 +139,8 @@ fn create_rounding_intervals(
     RoundingIntervals { intervals }
 }
 
-fn compute_rounding_modulus(rounding: u64, total_collateral: u64) -> u64 {
-    (rounding * total_collateral) / 100_000_000
+fn compute_rounding_modulus(rounding: u64, total_collateral: Amount) -> u64 {
+    (rounding * total_collateral.to_sat()) / 100_000_000
 }
 
 // Helper function to create rounding intervals

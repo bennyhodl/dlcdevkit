@@ -6,6 +6,7 @@ pub mod parlay;
 use std::str::FromStr;
 
 use bitcoin::key::XOnlyPublicKey;
+use bitcoin::Amount;
 use ddk_manager::contract::numerical_descriptor::NumericalDescriptor;
 use ddk_manager::{
     contract::{
@@ -22,8 +23,8 @@ use dlc_trie::OracleNumericInfo;
 pub fn generate_payout_curve(
     min_price: u64,
     max_price: u64,
-    offer_collateral: u64,
-    accept_collateral: u64,
+    offer_collateral: Amount,
+    accept_collateral: Amount,
     num_steps: u64,
     max_value: u64,
 ) -> anyhow::Result<PayoutFunction> {
@@ -41,14 +42,14 @@ pub fn generate_payout_curve(
         };
 
         let payout = if i == num_steps - 1 {
-            total_collateral // Ensure the last payout is the total collateral
+            total_collateral.to_sat() // Ensure the last payout is the total collateral
         } else {
-            (i * total_collateral) / (num_steps - 1)
+            (i * total_collateral.to_sat()) / (num_steps - 1)
         };
         points.push(PayoutPoint {
             event_outcome: price,
             extra_precision: 0,
-            outcome_payout: payout,
+            outcome_payout: Amount::from_sat(payout),
         });
     }
 
@@ -74,8 +75,8 @@ pub fn create_contract_input(
     min_price: u64,
     max_price: u64,
     num_steps: u64,
-    offer_collateral: u64,
-    accept_collateral: u64,
+    offer_collateral: Amount,
+    accept_collateral: Amount,
     fee_rate: u64,
     oracle_pubkey: String,
     event_id: String,
@@ -134,11 +135,20 @@ pub fn create_contract_input(
 
 #[cfg(test)]
 mod tests {
+    use bitcoin::Amount;
+
     use crate::{create_contract_input, generate_payout_curve};
 
     #[test]
     fn payout_curve() {
-        let curve = generate_payout_curve(13_000, 60_000, 50_000, 50_000, 10, 1045686);
+        let curve = generate_payout_curve(
+            13_000,
+            60_000,
+            Amount::from_sat(50_000),
+            Amount::from_sat(50_000),
+            10,
+            1045686,
+        );
         assert!(curve.is_ok())
     }
 
@@ -147,7 +157,16 @@ mod tests {
         let oracle_pk =
             "0d829c1cc556aa59060df5a9543c5357199ace5db9bcd5a8ddd6ee2fc7b6d174".to_string();
         let event_id = "event".to_string();
-        let contract = create_contract_input(0, 100_000, 3, 50_000, 50_000, 2, oracle_pk, event_id);
+        let contract = create_contract_input(
+            0,
+            100_000,
+            3,
+            Amount::from_sat(50_000),
+            Amount::from_sat(50_000),
+            2,
+            oracle_pk,
+            event_id,
+        );
 
         let json = serde_json::to_string(&contract).unwrap();
         println!("{}", json)
