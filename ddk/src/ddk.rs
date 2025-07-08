@@ -3,7 +3,7 @@ use crate::error::Error;
 use crate::wallet::DlcDevKitWallet;
 use crate::{Oracle, Storage, Transport};
 use bitcoin::secp256k1::PublicKey;
-use bitcoin::{Amount, Network};
+use bitcoin::{Amount, Network, SignedAmount};
 use ddk_manager::contract::Contract;
 use ddk_manager::error::Error as ManagerError;
 use ddk_manager::{
@@ -217,13 +217,11 @@ where
             .map(|contract| match contract {
                 Contract::Confirmed(c) => {
                     let accept_party_collateral = c.accepted_contract.accept_params.collateral;
+                    let total_collateral = c.accepted_contract.offered_contract.total_collateral;
                     if c.accepted_contract.offered_contract.is_offer_party {
-                        Amount::from_sat(
-                            c.accepted_contract.offered_contract.total_collateral
-                                - accept_party_collateral,
-                        )
+                        total_collateral - accept_party_collateral
                     } else {
-                        Amount::from_sat(c.accepted_contract.accept_params.collateral)
+                        accept_party_collateral
                     }
                 }
                 _ => Amount::ZERO,
@@ -233,14 +231,14 @@ where
         let contract_pnl = &contracts
             .iter()
             .map(|contract| contract.get_pnl())
-            .sum::<i64>();
+            .sum::<SignedAmount>();
 
         Ok(crate::Balance {
             confirmed: wallet_balance.confirmed,
             change_unconfirmed: wallet_balance.immature + wallet_balance.trusted_pending,
             foreign_unconfirmed: wallet_balance.untrusted_pending,
             contract: contract.to_owned(),
-            contract_pnl: contract_pnl.to_owned(),
+            contract_pnl: contract_pnl.to_owned().to_sat(),
         })
     }
 }

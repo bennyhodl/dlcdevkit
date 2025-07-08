@@ -4,7 +4,7 @@ use std::time::Duration;
 use crate::error::OracleError;
 use bitcoin::XOnlyPublicKey;
 use ddk_manager::error::Error as ManagerError;
-use kormir::{OracleAnnouncement, OracleAttestation};
+use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
 use lightning::io::Cursor;
 use lightning::util::ser::Readable;
 use nostr_database::MemoryDatabase;

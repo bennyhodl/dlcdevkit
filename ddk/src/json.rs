@@ -77,7 +77,7 @@ fn closed_contract_to_value(closed: &ClosedContract) -> Value {
         "state": "closed",
         "contract_id": hex::encode(closed.contract_id),
         "counterparty": closed.counter_party_id.to_string(),
-        "pnl": closed.pnl,
+        "pnl": closed.pnl.to_sat(),
         "signed_cet": closed.signed_cet,
         "attestations": closed.attestations,
     })

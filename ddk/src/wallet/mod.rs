@@ -522,7 +522,7 @@ impl ddk_manager::Wallet for DlcDevKitWallet {
     // return all utxos
     async fn get_utxos_for_amount(
         &self,
-        amount: u64,
+        amount: Amount,
         fee_rate: u64,
         _lock_utxos: bool,
     ) -> std::result::Result<Vec<ddk_manager::Utxo>, ManagerError> {
@@ -541,8 +541,8 @@ impl ddk_manager::Wallet for DlcDevKitWallet {
                 .coin_select(
                     vec![],
                     utxos,
-                    FeeRate::from_sat_per_vb(fee_rate).unwrap(),
-                    Amount::from_sat(amount),
+                    FeeRate::from_sat_per_vb_unchecked(fee_rate),
+                    amount,
                     ScriptBuf::new().as_script(),
                     &mut thread_rng(),
                 )
