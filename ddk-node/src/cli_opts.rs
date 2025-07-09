@@ -76,7 +76,34 @@ pub enum OracleCommand {
         #[arg(help = "The outcomes of the event. Separate by spaces.")]
         outcomes: Vec<String>,
     },
+    #[command(about = "Create a numeric oracle event.")]
+    CreateNumeric {
+        #[arg(help = "The maturity of the event.")]
+        maturity: u32,
+        #[arg(help = "Number of digits for the numeric event.")]
+        nb_digits: u32,
+    },
+    #[command(about = "Sign an oracle announcement.")]
+    Sign {
+        #[arg(
+            long,
+            help = "Specify if the event is enum.",
+            conflicts_with = "numeric"
+        )]
+        r#enum: bool,
+        #[arg(
+            long,
+            help = "Specify if the event is numeric.",
+            conflicts_with = "enum"
+        )]
+        numeric: bool,
+        #[arg(help = "The outcome to sign.")]
+        outcome: String,
+        #[arg(help = "The event id to sign.")]
+        event_id: String,
+    },
 }
+
 #[derive(Parser, Clone, Debug)]
 pub struct Accept {
     // The contract id string to accept.

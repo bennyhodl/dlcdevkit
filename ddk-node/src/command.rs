@@ -1,11 +1,11 @@
 use crate::cli_opts::{CliCommand, OracleCommand, WalletCommand};
-// use crate::convert::*;
 use crate::ddkrpc::ddk_rpc_client::DdkRpcClient;
 use crate::ddkrpc::{
-    AcceptOfferRequest, ConnectRequest, CreateEnumRequest, GetWalletTransactionsRequest,
-    InfoRequest, ListContractsRequest, ListOffersRequest, ListPeersRequest, ListUtxosRequest,
-    NewAddressRequest, OracleAnnouncementsRequest, SendOfferRequest, SendRequest, SyncRequest,
-    WalletBalanceRequest, WalletSyncRequest,
+    sign_request, AcceptOfferRequest, ConnectRequest, CreateEnumRequest, CreateNumericRequest,
+    GetWalletTransactionsRequest, InfoRequest, ListContractsRequest, ListOffersRequest,
+    ListPeersRequest, ListUtxosRequest, NewAddressRequest, OracleAnnouncementsRequest,
+    SendOfferRequest, SendRequest, SignRequest, SyncRequest, WalletBalanceRequest,
+    WalletSyncRequest,
 };
 use anyhow::anyhow;
 use bitcoin::Transaction;
@@ -41,7 +41,6 @@ pub async fn cli_command(
             } else {
                 interactive_contract_input(client).await?
             };
-
             let contract_input = serde_json::to_vec(&contract_input)?;
             let offer = client
                 .send_offer(SendOfferRequest {
@@ -133,7 +132,6 @@ pub async fn cli_command(
                     .iter()
                     .map(|utxo| serde_json::from_slice(utxo).unwrap())
                     .collect::<Vec<LocalOutput>>();
-
                 print!("{}", serde_json::to_string_pretty(&local_outputs).unwrap())
             }
             WalletCommand::Send {
@@ -181,6 +179,51 @@ pub async fn cli_command(
                     serde_json::to_string_pretty(&oracle_announcement).unwrap()
                 )
             }
+            OracleCommand::CreateNumeric {
+                maturity,
+                nb_digits,
+            } => {
+                let response = client
+                    .create_numeric(CreateNumericRequest {
+                        maturity,
+                        nb_digits,
+                    })
+                    .await?
+                    .into_inner();
+                let oracle_announcement: OracleAnnouncement =
+                    serde_json::from_slice(&response.announcement)?;
+                print!(
+                    "{}",
+                    serde_json::to_string_pretty(&oracle_announcement).unwrap()
+                )
+            }
+            OracleCommand::Sign {
+                r#enum: enum_flag,
+                numeric,
+                outcome,
+                event_id,
+            } => {
+                if enum_flag && numeric {
+                    return Err(anyhow!("Cannot specify both --enum and --numeric"));
+                }
+                if !enum_flag && !numeric {
+                    return Err(anyhow!("Must specify either --enum or --numeric"));
+                }
+                let outcome_variant = if enum_flag {
+                    sign_request::Outcome::EnumOutcome(outcome)
+                } else {
+                    let numeric_outcome = outcome.parse::<i64>().map_err(|_| {
+                        anyhow!("Outcome must be a valid integer for numeric events")
+                    })?;
+                    sign_request::Outcome::NumericOutcome(numeric_outcome)
+                };
+                let request = SignRequest {
+                    event_id,
+                    outcome: Some(outcome_variant),
+                };
+                let response = client.sign_announcement(request).await?.into_inner();
+                print!("{}", serde_json::to_string_pretty(&response.signature)?);
+            }
         },
         CliCommand::Peers => {
             let peers_response = client
@@ -205,7 +248,6 @@ pub async fn cli_command(
             println!("Synced.")
         }
     }
-
     Ok(())
 }
 
@@ -320,7 +362,6 @@ async fn interactive_contract_input(
                 outcome_payouts.push(outcome_payout);
             }
             let fee_rate: u64 = Text::new("Fee rate (sats/vbyte):").prompt()?.parse()?;
-            // TODO: list possible events.
             ddk_payouts::enumeration::create_contract_input(
                 outcome_payouts,
                 offer_collateral,
