@@ -362,6 +362,7 @@ async fn interactive_contract_input(
                 outcome_payouts.push(outcome_payout);
             }
             let fee_rate: u64 = Text::new("Fee rate (sats/vbyte):").prompt()?.parse()?;
+            // TODO: list possible events.
             ddk_payouts::enumeration::create_contract_input(
                 outcome_payouts,
                 offer_collateral,
