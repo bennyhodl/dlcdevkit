@@ -97,9 +97,9 @@ pub enum OracleCommand {
             conflicts_with = "enum"
         )]
         numeric: bool,
-        #[arg(help = "The outcome to sign.")]
+        #[arg(long, help = "The outcome to sign.")]
         outcome: String,
-        #[arg(help = "The event id to sign.")]
+        #[arg(long, help = "The event id to sign.")]
         event_id: String,
     },
 }
