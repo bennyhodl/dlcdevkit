@@ -19,15 +19,46 @@ use nostr_sdk::RelayPoolNotification;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
+/// A Nostr-based oracle implementation for DLCs that listens for and processes
+/// oracle announcements and attestations over the Nostr network.
+///
+/// This oracle maintains connections to Nostr relays, processes incoming events,
+/// and stores them in a memory database for quick retrieval.
+///
+/// # Components
+/// * `client` - Nostr client for connecting to relays and handling messages
+/// * `db` - In-memory database for caching oracle events
+/// * `xonly_oracle_pubkey` - Bitcoin-compatible x-only public key for DLC operations
+/// * `nostr_oracle_pubkey` - Nostr-format public key for message verification
 #[derive(Debug)]
 pub struct NostrOracle {
+    /// Nostr client for connecting to relays and handling message subscriptions
     client: Client,
+    /// In-memory database for storing oracle events (announcements and attestations)
     db: nostr_database::MemoryDatabase,
+    /// Bitcoin x-only public key used for DLC operations
     xonly_oracle_pubkey: XOnlyPublicKey,
+    /// Nostr public key for message verification and routing
     nostr_oracle_pubkey: NostrPublicKey,
 }
 
 impl NostrOracle {
+    /// Creates a new NostrOracle instance and establishes connections to the specified relays.
+    ///
+    /// This function:
+    /// 1. Converts the Nostr public key to Bitcoin format for DLC operations
+    /// 2. Initializes a Nostr client and connects to all provided relays
+    /// 3. Sets up a subscription for oracle announcements (kind 88) and attestations (kind 89)
+    /// 4. Initializes an in-memory database for event caching
+    ///
+    /// # Arguments
+    /// * `relays` - List of Nostr relay URLs to connect to
+    /// * `since` - Optional timestamp to filter events from (defaults to now if None)
+    /// * `nostr_oracle_pubkey` - The oracle's Nostr public key for message verification
+    ///
+    /// # Returns
+    /// * `Ok(NostrOracle)` - Successfully initialized oracle
+    /// * `Err(OracleError)` - If initialization fails (invalid key, connection issues, etc.)
     pub async fn new<U: TryIntoUrl>(
         relays: Vec<U>,
         since: Option<Timestamp>,
@@ -53,7 +84,7 @@ impl NostrOracle {
         client.connect().await;
 
         let since = since.unwrap_or(Timestamp::now());
-        let filter = crate::nostr::create_oracle_message_filter(since);
+        let filter = crate::nostr::messages::create_oracle_message_filter(since);
 
         client
             .subscribe(filter, None)
@@ -70,6 +101,28 @@ impl NostrOracle {
         })
     }
 
+    /// Starts the oracle's event processing loop in a separate task.
+    ///
+    /// This function spawns a new tokio task that:
+    /// 1. Listens for incoming Nostr events (announcements and attestations)
+    /// 2. Decodes and validates the events
+    /// 3. Stores valid events in the in-memory database
+    /// 4. Can be gracefully shut down using the stop signal
+    ///
+    /// # Arguments
+    /// * `stop_signal` - Watch channel receiver for graceful shutdown
+    ///
+    /// # Returns
+    /// * `JoinHandle` - Handle to the spawned task
+    ///
+    /// The task will run until the stop signal is set to true, at which point it will:
+    /// 1. Disconnect from all relays
+    /// 2. Stop processing events
+    /// 3. Clean up resources
+    ///
+    /// # Event Processing
+    /// - Kind 88: Oracle announcements (future events)
+    /// - Kind 89: Oracle attestations (event outcomes)
     pub fn start(
         &self,
         mut stop_signal: watch::Receiver<bool>,
