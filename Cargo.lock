@@ -1090,7 +1090,7 @@ dependencies = [
 [[package]]
 name = "dlc"
 version = "0.7.1"
-source = "git+https://github.com/bennyhodl/rust-dlc?branch=master#fe0e07642477a338dbb53adfd1c003d8715943d3"
+source = "git+https://github.com/bennyhodl/rust-dlc?branch=single-funded-dlc#e3896372c84d6c69c1ed30895e18b835ae93c71c"
 dependencies = [
  "bitcoin",
  "miniscript",
@@ -1102,7 +1102,7 @@ dependencies = [
 [[package]]
 name = "dlc-messages"
 version = "0.7.1"
-source = "git+https://github.com/bennyhodl/rust-dlc?branch=master#fe0e07642477a338dbb53adfd1c003d8715943d3"
+source = "git+https://github.com/bennyhodl/rust-dlc?branch=single-funded-dlc#e3896372c84d6c69c1ed30895e18b835ae93c71c"
 dependencies = [
  "bitcoin",
  "dlc",
@@ -1114,7 +1114,7 @@ dependencies = [
 [[package]]
 name = "dlc-trie"
 version = "0.7.1"
-source = "git+https://github.com/bennyhodl/rust-dlc?branch=master#fe0e07642477a338dbb53adfd1c003d8715943d3"
+source = "git+https://github.com/bennyhodl/rust-dlc?branch=single-funded-dlc#e3896372c84d6c69c1ed30895e18b835ae93c71c"
 dependencies = [
  "bitcoin",
  "dlc",
@@ -1998,7 +1998,7 @@ dependencies = [
 [[package]]
 name = "kormir"
 version = "0.4.4"
-source = "git+https://github.com/bennyhodl/kormir?branch=rust-dlc-bitcoin-amount#9037c748fa5283a03a5e07729d4cb2d40f827323"
+source = "git+https://github.com/bennyhodl/kormir?branch=rust-dlc-bitcoin-amount#6b179ea44757f8d03def7dac3e210cd598b64e78"
 dependencies = [
  "base64 0.13.1",
  "bitcoin",
