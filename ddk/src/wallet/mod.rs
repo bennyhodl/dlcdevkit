@@ -1,3 +1,26 @@
+//! # DDK Wallet Implementation
+//!
+//! This module provides the Bitcoin wallet functionality for DDK using BDK (Bitcoin Dev Kit)
+//! with an actor-based architecture for thread-safe, lock-free operations.
+//!
+//! ## Storage Integration
+//! The wallet uses a wrapper around DDK's Storage trait to provide BDK with the
+//! AsyncWalletPersister interface. This ensures thread safety and interior mutability
+//! requirements are met for BDK operations.
+//!
+//! ## Actor Model
+//! The wallet implements an actor pattern using message passing to avoid locks and
+//! ensure thread safety. All wallet operations are performed through commands sent
+//! over tokio channels, allowing concurrent access from multiple components.
+//!
+//! ## Key Features
+//! - Thread-safe wallet operations
+//! - BDK integration for Bitcoin functionality
+//! - Automatic chain synchronization
+//! - PSBT signing for DLC operations
+//! - Fee estimation
+//! - UTXO management
+
 mod command;
 
 use crate::error::{wallet_err_to_manager_err, WalletError};
@@ -41,13 +64,23 @@ use tokio::sync::{
 type FutureResult<'a, T, E> = Pin<Box<dyn Future<Output = std::result::Result<T, E>> + Send + 'a>>;
 type Result<T> = std::result::Result<T, WalletError>;
 
-/// Wrapper type to pass `crate::Storage` to a BDK wallet.
+/// Wrapper type that adapts DDK's Storage trait to BDK's AsyncWalletPersister interface.
+///
+/// This wrapper is necessary because BDK requires a persister that implements AsyncWalletPersister,
+/// but DDK's Storage trait provides a different interface. The wrapper provides thread safety
+/// and interior mutability required by BDK while delegating to the underlying DDK storage.
+///
+/// # Thread Safety
+/// The wrapper uses Arc<dyn Storage> to ensure the storage can be safely shared across threads
+/// and provides the necessary interior mutability for BDK operations.
 #[derive(Clone)]
 pub struct WalletStorage(Arc<dyn Storage>);
 
 impl AsyncWalletPersister for WalletStorage {
     type Error = WalletError;
 
+    /// Initializes the wallet storage by calling the underlying storage's initialize_bdk method.
+    /// This loads any existing wallet state from persistent storage.
     fn initialize<'a>(
         persister: &'a mut Self,
     ) -> FutureResult<'a, bdk_wallet::ChangeSet, Self::Error>
@@ -57,6 +90,8 @@ impl AsyncWalletPersister for WalletStorage {
         Box::pin(persister.0.initialize_bdk())
     }
 
+    /// Persists wallet changes to storage by calling the underlying storage's persist_bdk method.
+    /// This saves any wallet state changes to persistent storage.
     fn persist<'a>(
         persister: &'a mut Self,
         changeset: &'a bdk_wallet::ChangeSet,
@@ -69,17 +104,48 @@ impl AsyncWalletPersister for WalletStorage {
     }
 }
 
+/// Commands that can be sent to the wallet actor.
+///
+/// The wallet operates using an actor model where all operations are performed
+/// by sending commands through a message channel. Each command includes a oneshot
+/// channel for receiving the result, enabling async request/response patterns
+/// while maintaining thread safety.
+///
+/// # Actor Model Benefits
+/// - Lock-free operations
+/// - Thread-safe concurrent access
+/// - Isolation of wallet state
+/// - Async operation support
 #[derive(Debug)]
 pub enum WalletCommand {
+    /// Synchronize the wallet with the blockchain
     Sync(oneshot::Sender<Result<()>>),
+
+    /// Get the current wallet balance
     Balance(oneshot::Sender<Balance>),
+
+    /// Generate a new external (receiving) address
     NewExternalAddress(oneshot::Sender<Result<AddressInfo>>),
+
+    /// Generate a new internal (change) address
     NewChangeAddress(oneshot::Sender<Result<AddressInfo>>),
+
+    /// Send a specific amount to an address with the given fee rate
     SendToAddress(Address, Amount, FeeRate, oneshot::Sender<Result<Txid>>),
+
+    /// Send all available funds to an address with the given fee rate
     SendAll(Address, FeeRate, oneshot::Sender<Result<Txid>>),
+
+    /// Get all wallet transactions
     GetTransactions(oneshot::Sender<Result<Vec<Arc<Transaction>>>>),
+
+    /// List all unspent transaction outputs (UTXOs)
     ListUtxos(oneshot::Sender<Result<Vec<LocalOutput>>>),
+
+    /// Get the next derivation index for address generation
     NextDerivationIndex(oneshot::Sender<Result<u32>>),
+
+    /// Sign a specific input in a PSBT (Partially Signed Bitcoin Transaction)
     SignPsbtInput(
         bitcoin::psbt::Psbt,
         usize,
@@ -87,17 +153,62 @@ pub enum WalletCommand {
     ),
 }
 
-/// Internal [`bdk_wallet::PersistedWallet`] for ddk.
+/// The main wallet implementation that provides Bitcoin functionality for DDK.
+///
+/// This wallet uses BDK for Bitcoin operations and implements an actor pattern
+/// for thread-safe access. It integrates with DDK's storage system and provides
+/// all necessary functionality for DLC operations including PSBT signing.
+///
+/// # Architecture
+/// - Uses tokio channels for message passing
+/// - Spawns a background task to handle wallet operations  
+/// - Provides async API that sends commands to the background task
+/// - Integrates with Esplora for blockchain data
+/// - Uses BIP84 (native segwit) descriptors
+///
+/// # Thread Safety
+/// The wallet is designed to be thread-safe through the actor model:
+/// - All state is isolated in the background task
+/// - External access is only through message passing
+/// - No shared mutable state between threads
 pub struct DlcDevKitWallet {
+    /// Channel sender for wallet commands
     sender: Sender<WalletCommand>,
+    /// Bitcoin network (mainnet, testnet, regtest)
     network: Network,
+    /// Extended private key for the wallet
     xprv: Xpriv,
+    /// Secp256k1 context for cryptographic operations
     secp: Secp256k1<All>,
 }
 
 const MIN_FEERATE: u32 = 253;
 
 impl DlcDevKitWallet {
+    /// Creates a new DlcDevKitWallet instance.
+    ///
+    /// This method:
+    /// 1. Generates BIP84 descriptors from the seed
+    /// 2. Creates or loads the BDK wallet from storage
+    /// 3. Sets up Esplora client for blockchain communication
+    /// 4. Spawns the wallet actor task
+    /// 5. Returns the wallet handle for external use
+    ///
+    /// # Arguments
+    /// * `seed_bytes` - 32-byte seed for wallet derivation
+    /// * `esplora_url` - URL of the Esplora server for blockchain data
+    /// * `network` - Bitcoin network to use
+    /// * `storage` - Storage backend for persistence
+    ///
+    /// # Returns
+    /// A new DlcDevKitWallet instance ready for use
+    ///
+    /// # Actor Task
+    /// The method spawns a background task that:
+    /// - Processes incoming wallet commands
+    /// - Maintains wallet state
+    /// - Handles all BDK operations
+    /// - Manages blockchain synchronization
     pub async fn new(
         seed_bytes: &[u8; 32],
         esplora_url: &str,
@@ -321,23 +432,30 @@ impl DlcDevKitWallet {
         })
     }
 
+    /// Synchronizes the wallet with the blockchain.
+    /// This updates the wallet's UTXO set and transaction history.
     pub async fn sync(&self) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.sender.send(WalletCommand::Sync(tx)).await?;
         rx.await.map_err(WalletError::Receiver)?
     }
 
+    /// Returns the wallet's master public key.
+    /// Used for identification and key derivation.
     pub fn get_pubkey(&self) -> PublicKey {
         tracing::info!("Getting wallet public key.");
         PublicKey::from_secret_key(&self.secp, &self.xprv.private_key)
     }
 
+    /// Retrieves the current wallet balance including confirmed and unconfirmed amounts.
     pub async fn get_balance(&self) -> Result<Balance> {
         let (tx, rx) = oneshot::channel();
         self.sender.send(WalletCommand::Balance(tx)).await?;
         rx.await.map_err(WalletError::Receiver)
     }
 
+    /// Generates a new external (receiving) address.
+    /// These addresses are used for receiving funds from external sources.
     pub async fn new_external_address(&self) -> Result<AddressInfo> {
         let (tx, rx) = oneshot::channel();
         self.sender
@@ -346,6 +464,8 @@ impl DlcDevKitWallet {
         rx.await.map_err(WalletError::Receiver)?
     }
 
+    /// Generates a new change address.
+    /// These addresses are used internally for change outputs.
     pub async fn new_change_address(&self) -> Result<AddressInfo> {
         let (tx, rx) = oneshot::channel();
         self.sender
@@ -354,6 +474,15 @@ impl DlcDevKitWallet {
         rx.await.map_err(WalletError::Receiver)?
     }
 
+    /// Sends a specific amount to the given address.
+    ///
+    /// # Arguments
+    /// * `address` - Destination Bitcoin address
+    /// * `amount` - Amount to send in satoshis
+    /// * `fee_rate` - Fee rate for the transaction
+    ///
+    /// # Returns
+    /// Transaction ID of the sent transaction
     pub async fn send_to_address(
         &self,
         address: Address,
@@ -367,6 +496,14 @@ impl DlcDevKitWallet {
         rx.await.map_err(WalletError::Receiver)?
     }
 
+    /// Sends all available funds to the given address.
+    ///
+    /// # Arguments
+    /// * `address` - Destination Bitcoin address
+    /// * `fee_rate` - Fee rate for the transaction
+    ///
+    /// # Returns
+    /// Transaction ID of the sent transaction
     pub async fn send_all(&self, address: Address, fee_rate: FeeRate) -> Result<Txid> {
         let (tx, rx) = oneshot::channel();
         self.sender
@@ -375,18 +512,28 @@ impl DlcDevKitWallet {
         rx.await.map_err(WalletError::Receiver)?
     }
 
+    /// Retrieves all transactions known to the wallet.
     pub async fn get_transactions(&self) -> Result<Vec<Arc<Transaction>>> {
         let (tx, rx) = oneshot::channel();
         self.sender.send(WalletCommand::GetTransactions(tx)).await?;
         rx.await.map_err(WalletError::Receiver)?
     }
 
+    /// Lists all unspent transaction outputs (UTXOs) in the wallet.
     pub async fn list_utxos(&self) -> Result<Vec<LocalOutput>> {
         let (tx, rx) = oneshot::channel();
         self.sender.send(WalletCommand::ListUtxos(tx)).await?;
         rx.await.map_err(WalletError::Receiver)?
     }
 
+    /// Signs a specific input in a PSBT for DLC operations.
+    ///
+    /// This method is used internally by the DLC manager to sign
+    /// DLC-related transactions such as funding transactions.
+    ///
+    /// # Arguments
+    /// * `psbt` - The PSBT to sign
+    /// * `input_index` - Index of the input to sign
     async fn sign_psbt_input(
         &self,
         psbt: &mut bitcoin::psbt::Psbt,
@@ -412,7 +559,11 @@ impl DlcDevKitWallet {
     }
 }
 
+/// Implementation of Lightning's FeeEstimator trait for the wallet.
+/// Provides fee estimation for DLC operations based on confirmation targets.
 impl FeeEstimator for DlcDevKitWallet {
+    /// Returns the estimated fee rate in satoshis per 1000 weight units.
+    /// Used by the DLC manager to estimate fees for funding transactions.
     fn get_est_sat_per_1000_weight(&self, confirmation_target: ConfirmationTarget) -> u32 {
         let fees = fee_estimator();
         fees.get(&confirmation_target)
@@ -421,10 +572,23 @@ impl FeeEstimator for DlcDevKitWallet {
     }
 }
 
+/// Implementation of DDK manager's ContractSignerProvider trait.
+/// Provides cryptographic signing capabilities for DLC contracts.
 impl ddk_manager::ContractSignerProvider for DlcDevKitWallet {
     type Signer = SimpleSigner;
 
-    // Using the data deterministically generate a key id. From a child key.
+    /// Generates a deterministic key ID for contract signing.
+    ///
+    /// This method creates a unique key identifier for each contract by hashing
+    /// the temporary contract ID with random bytes. The resulting key ID is used
+    /// to derive signing keys for the specific contract.
+    ///
+    /// # Arguments
+    /// * `_is_offer_party` - Whether this party is the offer party (currently unused)
+    /// * `temp_id` - Temporary contract ID from the DLC protocol
+    ///
+    /// # Returns
+    /// A 32-byte key ID for the contract
     fn derive_signer_key_id(&self, _is_offer_party: bool, temp_id: [u8; 32]) -> [u8; 32] {
         let mut random_bytes = [0u8; 32];
         let _ = random_bytes.try_fill(&mut thread_rng()).map_err(|e| {
@@ -442,6 +606,16 @@ impl ddk_manager::ContractSignerProvider for DlcDevKitWallet {
         hash.to_byte_array()
     }
 
+    /// Creates a contract signer from a key ID.
+    ///
+    /// Takes the key ID generated by `derive_signer_key_id` and creates a
+    /// SimpleSigner that can sign transactions for the specific contract.
+    ///
+    /// # Arguments
+    /// * `key_id` - The key ID to derive the signer from
+    ///
+    /// # Returns
+    /// A SimpleSigner configured for the contract
     fn derive_contract_signer(
         &self,
         key_id: [u8; 32],
@@ -454,6 +628,8 @@ impl ddk_manager::ContractSignerProvider for DlcDevKitWallet {
         Ok(SimpleSigner::new(child_key))
     }
 
+    /// Gets a secret key for a given public key.
+    /// Currently unimplemented as it's only used for channel operations.
     fn get_secret_key_for_pubkey(
         &self,
         _pubkey: &PublicKey,
@@ -461,13 +637,19 @@ impl ddk_manager::ContractSignerProvider for DlcDevKitWallet {
         unreachable!("get_secret_key_for_pubkey is only used in channels.")
     }
 
+    /// Generates a new secret key.
+    /// Currently unimplemented as it's only used for channel operations.
     fn get_new_secret_key(&self) -> std::result::Result<SecretKey, ManagerError> {
         unreachable!("get_new_secret_key is only used for channels")
     }
 }
 
+/// Implementation of DDK manager's Wallet trait.
+/// Provides the wallet interface required by the DLC manager for contract operations.
 #[async_trait::async_trait]
 impl ddk_manager::Wallet for DlcDevKitWallet {
+    /// Gets a new external address for receiving funds.
+    /// Used by the DLC manager when creating funding transactions.
     async fn get_new_address(&self) -> std::result::Result<bitcoin::Address, ManagerError> {
         let address = self
             .new_external_address()
@@ -480,6 +662,8 @@ impl ddk_manager::Wallet for DlcDevKitWallet {
         Ok(address.address)
     }
 
+    /// Gets a new change address for transaction outputs.
+    /// Used by the DLC manager for change outputs in DLC transactions.
     async fn get_new_change_address(&self) -> std::result::Result<bitcoin::Address, ManagerError> {
         let address = self
             .new_change_address()
@@ -493,6 +677,8 @@ impl ddk_manager::Wallet for DlcDevKitWallet {
         Ok(address.address)
     }
 
+    /// Signs a specific input in a PSBT.
+    /// This is the main interface used by the DLC manager to sign DLC-related transactions.
     async fn sign_psbt_input(
         &self,
         psbt: &mut bitcoin::psbt::Psbt,
@@ -507,7 +693,8 @@ impl ddk_manager::Wallet for DlcDevKitWallet {
         self.sign_psbt_input(psbt, input_index).await
     }
 
-    // BDK does not have reserving UTXOs nor need it.
+    /// Unreserves UTXOs that were previously reserved for a transaction.
+    /// Currently a no-op as UTXO reservation is not implemented.
     fn unreserve_utxos(
         &self,
         _outpoints: &[bitcoin::OutPoint],
@@ -515,14 +702,28 @@ impl ddk_manager::Wallet for DlcDevKitWallet {
         Ok(())
     }
 
+    /// Imports an address into the wallet for monitoring.
+    /// Currently a no-op as address import is not needed.
     fn import_address(&self, _address: &bitcoin::Address) -> std::result::Result<(), ManagerError> {
         Ok(())
     }
 
-    // return all utxos
+    /// Selects UTXOs for a specific amount and fee rate.
+    ///
+    /// This method is used by the DLC manager to select appropriate UTXOs
+    /// for funding DLC transactions. It performs coin selection based on the
+    /// requested amount and fee rate.
+    ///
+    /// # Arguments
+    /// * `amount` - The amount of Bitcoin needed
+    /// * `fee_rate` - The fee rate for the transaction
+    /// * `_lock_utxos` - Whether to lock the selected UTXOs (currently unused)
+    ///
+    /// # Returns
+    /// A vector of UTXOs that can cover the required amount plus fees
     async fn get_utxos_for_amount(
         &self,
-        amount: u64,
+        amount: Amount,
         fee_rate: u64,
         _lock_utxos: bool,
     ) -> std::result::Result<Vec<ddk_manager::Utxo>, ManagerError> {
@@ -541,8 +742,8 @@ impl ddk_manager::Wallet for DlcDevKitWallet {
                 .coin_select(
                     vec![],
                     utxos,
-                    FeeRate::from_sat_per_vb(fee_rate).unwrap(),
-                    Amount::from_sat(amount),
+                    FeeRate::from_sat_per_vb_unchecked(fee_rate),
+                    amount,
                     ScriptBuf::new().as_script(),
                     &mut thread_rng(),
                 )
@@ -568,6 +769,14 @@ impl ddk_manager::Wallet for DlcDevKitWallet {
     }
 }
 
+/// Creates a fee estimator with predefined fee rates for different confirmation targets.
+///
+/// This function sets up fee estimation for different urgency levels:
+/// - High Priority: For immediate confirmation
+/// - Normal: For confirmation within a few blocks  
+/// - Background: For non-urgent transactions
+///
+/// Returns a HashMap mapping confirmation targets to atomic fee rates.
 fn fee_estimator() -> HashMap<ConfirmationTarget, AtomicU32> {
     let mut fees: HashMap<ConfirmationTarget, AtomicU32> = HashMap::new();
     fees.insert(ConfirmationTarget::UrgentOnChainSweep, AtomicU32::new(5000));

@@ -1,8 +1,9 @@
 use bitcoin::bip32::Xpriv;
 use bitcoin::key::rand::Rng;
 use bitcoin::secp256k1::schnorr::Signature;
+use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
 use kormir::storage::{MemoryStorage, Storage};
-use kormir::{Oracle as Kormir, OracleAttestation};
+use kormir::Oracle as Kormir;
 
 use crate::Oracle;
 
@@ -36,7 +37,7 @@ impl ddk_manager::Oracle for MemoryOracle {
     async fn get_announcement(
         &self,
         event_id: &str,
-    ) -> Result<kormir::OracleAnnouncement, ddk_manager::error::Error> {
+    ) -> Result<OracleAnnouncement, ddk_manager::error::Error> {
         Ok(self
             .oracle
             .storage
@@ -50,7 +51,7 @@ impl ddk_manager::Oracle for MemoryOracle {
     async fn get_attestation(
         &self,
         event_id: &str,
-    ) -> Result<kormir::OracleAttestation, ddk_manager::error::Error> {
+    ) -> Result<OracleAttestation, ddk_manager::error::Error> {
         let event = self
             .oracle
             .storage

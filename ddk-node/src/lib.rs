@@ -174,11 +174,13 @@ impl DdkRpc for DdkNode {
         let mut contract_id = [0u8; 32];
         let contract_id_bytes = hex::decode(&request.into_inner().contract_id).unwrap();
         contract_id.copy_from_slice(&contract_id_bytes);
-        let (contract_id, counter_party, accept_dlc) = self
-            .node
-            .accept_dlc_offer(contract_id)
-            .await
-            .map_err(|_| Status::new(Code::Cancelled, "Contract could not be accepted."))?;
+        let (contract_id, counter_party, accept_dlc) =
+            self.node.accept_dlc_offer(contract_id).await.map_err(|e| {
+                Status::new(
+                    Code::Cancelled,
+                    format!("Contract could not be accepted. error={e:?}"),
+                )
+            })?;
 
         let accept_dlc = serde_json::to_vec(&accept_dlc).map_err(|_| {
             Status::new(Code::Cancelled, "Accept DLC is malformed to create bytes.")
@@ -215,7 +217,6 @@ impl DdkRpc for DdkNode {
     ) -> Result<Response<ListOffersResponse>, Status> {
         tracing::info!("Request for offers to the node.");
         let offers = self.node.storage.get_contract_offers().await.unwrap();
-        tracing::info!("Offers: {:?}", offers);
         let offers: Vec<Vec<u8>> = offers
             .iter()
             .map(|offer| serde_json::to_vec(offer).unwrap())

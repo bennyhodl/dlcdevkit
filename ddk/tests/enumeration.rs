@@ -1,4 +1,5 @@
 mod test_util;
+use bitcoin::Amount;
 use chrono::{Local, TimeDelta};
 use ddk::Transport;
 use ddk_manager::contract::Contract;
@@ -34,20 +35,20 @@ async fn enumeration_contract() {
             EnumerationPayout {
                 outcome: "rust".to_string(),
                 payout: dlc::Payout {
-                    offer: 100_000,
-                    accept: 0,
+                    offer: Amount::from_sat(100_000),
+                    accept: Amount::ZERO,
                 },
             },
             EnumerationPayout {
                 outcome: "go".to_string(),
                 payout: dlc::Payout {
-                    offer: 0,
-                    accept: 100_000,
+                    offer: Amount::ZERO,
+                    accept: Amount::from_sat(100_000),
                 },
             },
         ],
-        50_000,
-        50_000,
+        Amount::from_sat(50_000),
+        Amount::from_sat(50_000),
         1,
         announcement.oracle_public_key.clone().to_string(),
         announcement.oracle_event.event_id.clone(),

@@ -3,6 +3,17 @@ use bdk_esplora::esplora_client::Error as EsploraError;
 use ddk_manager::error::Error as DlcManagerError;
 use thiserror::Error;
 
+/// The main error type for the DDK library that consolidates all possible errors
+/// that can occur throughout the project. This includes errors from:
+/// - Runtime management
+/// - Wallet operations
+/// - Transport layer
+/// - Oracle interactions
+/// - Storage operations
+/// - Actor communication
+/// - DLC manager operations
+/// - Builder process
+/// - External services (Esplora)
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("DDK runtime has already been initialized.")]
@@ -34,6 +45,11 @@ pub enum Error {
     Nostr(#[from] NostrError),
 }
 
+/// Errors related to storage operations in DDK.
+/// Handles failures in:
+/// - Storage initialization
+/// - Database operations (when using PostgreSQL)
+/// - Data persistence
 #[derive(Error, Debug)]
 pub enum StorageError {
     #[error("Storage initialization: {0}")]
@@ -43,6 +59,12 @@ pub enum StorageError {
     Sqlx(#[from] crate::storage::sqlx::SqlxError),
 }
 
+/// Errors related to oracle operations in DDK.
+/// Handles failures in:
+/// - Oracle initialization
+/// - Event announcements and attestations
+/// - Event creation and signing
+/// - HTTP requests (for P2P derivatives and Kormir)
 #[derive(Error, Debug)]
 pub enum OracleError {
     #[error("Oracle initialization: {0}")]
@@ -62,12 +84,19 @@ pub enum OracleError {
     Reqwest(#[from] reqwest::Error),
 }
 
+/// Errors from the DLC Manager component.
+/// Currently wraps the underlying Rust-DLC manager errors.
 #[derive(Error, Debug)]
 pub enum ManagerError {
     #[error("DlcManagerError: {0}")]
     DlcManager(#[from] DlcManagerError),
 }
 
+/// Errors related to the transport layer in DDK.
+/// Handles failures in:
+/// - Transport initialization
+/// - Connection listening
+/// - Message processing and routing
 #[derive(Error, Debug)]
 pub enum TransportError {
     #[error("Transport initialization: {0}")]
@@ -78,6 +107,12 @@ pub enum TransportError {
     MessageProcessing(String),
 }
 
+/// Errors specific to Nostr protocol operations.
+/// Only available when the "nostr" feature is enabled.
+/// Handles failures in:
+/// - NIP-04 encryption/decryption
+/// - Message parsing
+/// - Event signing
 #[cfg(feature = "nostr")]
 #[derive(Error, Debug)]
 pub enum NostrError {
@@ -91,7 +126,9 @@ pub enum NostrError {
     Generic(String),
 }
 
-/// An error that could be thrown while building [`crate::ddk::DlcDevKit`]
+/// Errors that can occur during the DlcDevKit builder process.
+/// These errors indicate missing required components when constructing
+/// a new DlcDevKit instance.
 #[derive(Debug, Clone, Copy, Error)]
 pub enum BuilderError {
     #[error("A transport was not provided.")]
@@ -102,7 +139,15 @@ pub enum BuilderError {
     NoOracle,
 }
 
-/// BDK and wallet storage errors
+/// Errors related to Bitcoin wallet operations.
+/// Handles failures in:
+/// - Wallet persistence
+/// - Seed operations
+/// - Transaction building and signing
+/// - Chain synchronization
+/// - UTXO management
+/// - Communication with Esplora
+/// - Actor message passing
 #[derive(Error, Debug)]
 pub enum WalletError {
     #[error("Wallet Persistance error: {0}")]
@@ -139,6 +184,7 @@ pub enum WalletError {
     Sender(#[from] tokio::sync::mpsc::error::SendError<WalletCommand>),
 }
 
+/// Converts a generic error to a DLC manager storage error
 pub fn to_storage_error<T>(e: T) -> ddk_manager::error::Error
 where
     T: std::fmt::Display,
@@ -146,10 +192,12 @@ where
     ddk_manager::error::Error::StorageError(e.to_string())
 }
 
+/// Converts an Esplora error to a DLC manager error
 pub fn esplora_err_to_manager_err(e: EsploraError) -> DlcManagerError {
     DlcManagerError::BlockchainError(e.to_string())
 }
 
+/// Converts a wallet error to a DLC manager error
 pub fn wallet_err_to_manager_err(e: WalletError) -> DlcManagerError {
     DlcManagerError::WalletError(Box::new(e))
 }

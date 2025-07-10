@@ -1,3 +1,4 @@
+use bitcoin::Amount;
 use ddk_manager::{
     contract::{
         contract_input::{ContractInput, ContractInputInfo, OracleInput},
@@ -14,8 +15,8 @@ use dlc_trie::OracleNumericInfo;
 /// Create a complete DLC Contract using oracle-normalized scores
 pub fn create_parlay_contract(
     max_normalized_value: u64,
-    offer_collateral: u64,
-    accept_collateral: u64,
+    offer_collateral: Amount,
+    accept_collateral: Amount,
     oracle_input: OracleInput,
     fee_rate: u64,
 ) -> ContractInput {
@@ -74,13 +75,13 @@ pub fn create_parlay_contract(
 /// Create a PayoutFunction for an oracle-normalized score
 fn create_normalized_payout_function(
     max_normalized_value: u64, // Typically 1000 or 10000 for 3 or 4 decimal precision
-    max_payout: u64,           // Maximum contract payout
+    max_payout: Amount,        // Maximum contract payout
 ) -> PayoutFunction {
     // Create a simple linear polynomial with just two points
     let payout_points = vec![
         PayoutPoint {
             event_outcome: 0,
-            outcome_payout: 0,
+            outcome_payout: Amount::ZERO,
             extra_precision: 0,
         },
         PayoutPoint {

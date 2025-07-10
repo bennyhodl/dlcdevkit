@@ -3,9 +3,12 @@
 use crate::error::Error;
 
 use super::ContractDescriptor;
+use bitcoin::Amount;
 use secp256k1_zkp::XOnlyPublicKey;
 #[cfg(feature = "use-serde")]
 use serde::{Deserialize, Serialize};
+
+const DUST_LIMIT: Amount = Amount::from_sat(1000);
 
 /// Oracle information required for the initial creation of a contract.
 #[derive(Debug, Clone)]
@@ -73,9 +76,9 @@ pub struct ContractInputInfo {
 /// Contains all the information necessary for the initialization of a DLC.
 pub struct ContractInput {
     /// The collateral for the offering party.
-    pub offer_collateral: u64,
+    pub offer_collateral: Amount,
     /// The collateral for the accepting party.
-    pub accept_collateral: u64,
+    pub accept_collateral: Amount,
     /// The fee rate used to construct the transactions.
     pub fee_rate: u64,
     /// The set of contract that make up the DLC (a single DLC can be based
@@ -86,6 +89,19 @@ pub struct ContractInput {
 impl ContractInput {
     /// Validate the contract input parameters
     pub fn validate(&self) -> Result<(), Error> {
+        if self.offer_collateral < DUST_LIMIT {
+            return Err(Error::InvalidParameters(
+                "Offer collateral must be greater than dust limit.".to_string(),
+            ));
+        }
+
+        let total_collateral = self.offer_collateral + self.accept_collateral;
+        if total_collateral < DUST_LIMIT {
+            return Err(Error::InvalidParameters(
+                "Total collateral must be greater than dust limit.".to_string(),
+            ));
+        }
+
         if self.contract_infos.is_empty() {
             return Err(Error::InvalidParameters(
                 "Need at least one contract info".to_string(),
@@ -112,8 +128,8 @@ mod tests {
 
     fn get_base_input() -> ContractInput {
         ContractInput {
-            offer_collateral: 1000000,
-            accept_collateral: 2000000,
+            offer_collateral: Amount::from_sat(1000000),
+            accept_collateral: Amount::from_sat(2000000),
             fee_rate: 1234,
             contract_infos: vec![ContractInputInfo {
                 contract_descriptor: ContractDescriptor::Enum(EnumDescriptor {
@@ -121,15 +137,15 @@ mod tests {
                         EnumerationPayout {
                             outcome: "A".to_string(),
                             payout: Payout {
-                                offer: 3000000,
-                                accept: 0,
+                                offer: Amount::from_sat(3000000),
+                                accept: Amount::ZERO,
                             },
                         },
                         EnumerationPayout {
                             outcome: "B".to_string(),
                             payout: Payout {
-                                offer: 0,
-                                accept: 3000000,
+                                offer: Amount::ZERO,
+                                accept: Amount::from_sat(3000000),
                             },
                         },
                     ],

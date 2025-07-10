@@ -2,7 +2,7 @@
 
 use crate::error::Error;
 use crate::ContractId;
-use bitcoin::{Transaction, Txid};
+use bitcoin::{Amount, SignedAmount, Transaction, Txid};
 use dlc_messages::{
     oracle_msgs::{EventDescriptor, OracleAnnouncement, OracleAttestation},
     AcceptDlc, SignDlc,
@@ -158,9 +158,9 @@ impl Contract {
     pub fn get_collateral(
         &self,
     ) -> (
-        u64, /* offer collateral */
-        u64, /* accept collateral */
-        u64, /* total collateral */
+        Amount, /* offer collateral */
+        Amount, /* accept collateral */
+        Amount, /* total collateral */
     ) {
         // TODO: We should assert that the offer + accept collateral is equal to the total collateral
         match self {
@@ -181,7 +181,7 @@ impl Contract {
             ),
             Contract::FailedAccept(f) => (
                 f.offered_contract.offer_params.collateral,
-                0,
+                Amount::ZERO,
                 f.offered_contract.total_collateral,
             ),
             Contract::FailedSign(f) => (
@@ -201,8 +201,8 @@ impl Contract {
                     .offered_contract
                     .total_collateral,
             ),
-            Contract::Closed(_) => (0, 0, 0),
-            Contract::Rejected(_) => (0, 0, 0),
+            Contract::Closed(_) => (Amount::ZERO, Amount::ZERO, Amount::ZERO),
+            Contract::Rejected(_) => (Amount::ZERO, Amount::ZERO, Amount::ZERO),
         }
     }
 
@@ -249,21 +249,21 @@ impl Contract {
     }
 
     /// Get the profit and loss for a contract.
-    pub fn get_pnl(&self) -> i64 {
+    pub fn get_pnl(&self) -> SignedAmount {
         match self {
-            Contract::Offered(_) => 0,
-            Contract::Accepted(_) => 0,
-            Contract::Signed(_) => 0,
-            Contract::Confirmed(_) => 0,
+            Contract::Offered(_) => SignedAmount::ZERO,
+            Contract::Accepted(_) => SignedAmount::ZERO,
+            Contract::Signed(_) => SignedAmount::ZERO,
+            Contract::Confirmed(_) => SignedAmount::ZERO,
             Contract::PreClosed(p) => p
                 .signed_contract
                 .accepted_contract
                 .compute_pnl(&p.signed_cet),
             Contract::Closed(c) => c.pnl,
-            Contract::Refunded(_) => 0,
-            Contract::FailedAccept(_) => 0,
-            Contract::FailedSign(_) => 0,
-            Contract::Rejected(_) => 0,
+            Contract::Refunded(_) => SignedAmount::ZERO,
+            Contract::FailedAccept(_) => SignedAmount::ZERO,
+            Contract::FailedSign(_) => SignedAmount::ZERO,
+            Contract::Rejected(_) => SignedAmount::ZERO,
         }
     }
 
@@ -396,7 +396,7 @@ pub struct ClosedContract {
     /// The funding txid of the contract.
     pub funding_txid: Txid,
     /// The profit and loss for the given contract
-    pub pnl: i64,
+    pub pnl: SignedAmount,
 }
 
 /// Information about the adaptor signatures and the CET for which they are

@@ -3,6 +3,7 @@
 use std::ops::Deref;
 
 use bitcoin::psbt::Psbt;
+use bitcoin::Amount;
 use bitcoin::{consensus::Decodable, Script, Transaction, Witness};
 use dlc::{DlcTransactions, PartyParams};
 use dlc_messages::FundingInput;
@@ -58,9 +59,11 @@ where
     let id = crate::utils::get_new_temporary_id();
     let keys_id = signer_provider.derive_signer_key_id(true, id);
     let signer = signer_provider.derive_contract_signer(keys_id)?;
+    let total_collateral = contract_input.offer_collateral + contract_input.accept_collateral;
     let (party_params, funding_inputs_info) = crate::utils::get_party_params(
         secp,
         contract_input.offer_collateral,
+        total_collateral,
         contract_input.fee_rate,
         wallet,
         &signer,
@@ -105,6 +108,7 @@ where
     let (accept_params, funding_inputs) = crate::utils::get_party_params(
         secp,
         total_collateral - offered_contract.offer_params.collateral,
+        total_collateral,
         offered_contract.fee_rate_per_vb,
         wallet,
         &signer,
@@ -137,7 +141,7 @@ where
         &accept_params,
         &funding_inputs,
         &signer.get_secret_key()?,
-        fund_output_value.to_sat(),
+        fund_output_value,
         None,
         &dlc_transactions,
     )?;
@@ -154,7 +158,7 @@ pub(crate) fn accept_contract_internal(
     accept_params: &PartyParams,
     funding_inputs: &[FundingInput],
     adaptor_secret_key: &SecretKey,
-    input_value: u64,
+    input_value: Amount,
     input_script_pubkey: Option<&Script>,
     dlc_transactions: &DlcTransactions,
 ) -> Result<(AcceptedContract, Vec<EcdsaAdaptorSignature>), crate::Error> {
@@ -307,7 +311,7 @@ where
         &accept_msg.funding_inputs,
         &accept_msg.refund_signature,
         &cet_adaptor_signatures,
-        fund_output_value.to_sat(),
+        fund_output_value,
         wallet,
         &signer,
         None,
@@ -356,7 +360,7 @@ pub(crate) async fn verify_accepted_and_sign_contract_internal<W: Deref, X: Cont
     funding_inputs_info: &[FundingInput],
     refund_signature: &Signature,
     cet_adaptor_signatures: &[EcdsaAdaptorSignature],
-    input_value: u64,
+    input_value: Amount,
     wallet: &W,
     signer: &X,
     input_script_pubkey: Option<&Script>,
@@ -562,11 +566,7 @@ where
         &sign_msg.refund_signature,
         &cet_adaptor_signatures,
         &sign_msg.funding_signatures,
-        accepted_contract
-            .dlc_transactions
-            .get_fund_output()
-            .value
-            .to_sat(),
+        accepted_contract.dlc_transactions.get_fund_output().value,
         None,
         None,
         wallet,
@@ -582,7 +582,7 @@ pub(crate) async fn verify_signed_contract_internal<W: Deref>(
     refund_signature: &Signature,
     cet_adaptor_signatures: &[EcdsaAdaptorSignature],
     funding_signatures: &FundingSignatures,
-    input_value: u64,
+    input_value: Amount,
     input_script_pubkey: Option<&Script>,
     counter_adaptor_pk: Option<PublicKey>,
     wallet: &W,
@@ -748,8 +748,7 @@ where
             .accepted_contract
             .dlc_transactions
             .get_fund_output()
-            .value
-            .to_sat(),
+            .value,
     )?;
 
     Ok(cet)
@@ -790,7 +789,7 @@ where
         other_fund_pubkey,
         &fund_priv_key,
         funding_script_pubkey,
-        fund_output_value.to_sat(),
+        fund_output_value,
         0,
     )?;
     Ok(refund)

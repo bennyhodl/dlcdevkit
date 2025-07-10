@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
 use bitcoin::key::XOnlyPublicKey;
+use bitcoin::Amount;
 use ddk_manager::contract::enum_descriptor::EnumDescriptor;
 use ddk_manager::contract::{
     contract_input::{ContractInput, ContractInputInfo, OracleInput},
@@ -10,8 +11,8 @@ use dlc::EnumerationPayout;
 
 pub fn create_contract_input(
     outcome_payouts: Vec<EnumerationPayout>,
-    offer_collateral: u64,
-    accept_collateral: u64,
+    offer_collateral: Amount,
+    accept_collateral: Amount,
     fee_rate: u64,
     oracle_pubkey: String,
     event_id: String,

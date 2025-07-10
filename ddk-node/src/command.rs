@@ -8,7 +8,7 @@ use crate::ddkrpc::{
     WalletBalanceRequest, WalletSyncRequest,
 };
 use anyhow::anyhow;
-use bitcoin::Transaction;
+use bitcoin::{Amount, Transaction};
 use chrono::TimeDelta;
 use ddk::json::*;
 use ddk::oracle::kormir::KormirOracleClient;
@@ -215,15 +215,15 @@ async fn generate_contract_input() -> anyhow::Result<ContractInput> {
             EnumerationPayout {
                 outcome: "CTV".to_string(),
                 payout: Payout {
-                    offer: 21_000_000,
-                    accept: 0,
+                    offer: Amount::from_sat(21_000_000),
+                    accept: Amount::ZERO,
                 },
             },
             EnumerationPayout {
                 outcome: "CAT".to_string(),
                 payout: Payout {
-                    offer: 0,
-                    accept: 21_000_000,
+                    offer: Amount::ZERO,
+                    accept: Amount::from_sat(21_000_000),
                 },
             },
         ],
@@ -247,8 +247,8 @@ async fn generate_contract_input() -> anyhow::Result<ContractInput> {
     };
 
     Ok(ContractInput {
-        offer_collateral: 10_500_000,
-        accept_collateral: 10_500_000,
+        offer_collateral: Amount::from_sat(10_500_000),
+        accept_collateral: Amount::from_sat(10_500_000),
         fee_rate: 1,
         contract_infos: vec![ContractInputInfo {
             contract_descriptor,
@@ -290,8 +290,8 @@ async fn interactive_contract_input(
                 min_price,
                 max_price,
                 num_steps,
-                offer_collateral,
-                accept_collateral,
+                Amount::from_sat(offer_collateral),
+                Amount::from_sat(accept_collateral),
                 fee_rate,
                 oracle_pubkey,
                 event_id,
@@ -315,7 +315,10 @@ async fn interactive_contract_input(
                 let accept: u64 = Text::new("Counterparty payout:").prompt()?.parse()?;
                 let outcome_payout = EnumerationPayout {
                     outcome,
-                    payout: Payout { offer, accept },
+                    payout: Payout {
+                        offer: Amount::from_sat(offer),
+                        accept: Amount::from_sat(accept),
+                    },
                 };
                 outcome_payouts.push(outcome_payout);
             }
@@ -323,8 +326,8 @@ async fn interactive_contract_input(
             // TODO: list possible events.
             ddk_payouts::enumeration::create_contract_input(
                 outcome_payouts,
-                offer_collateral,
-                accept_collateral,
+                Amount::from_sat(offer_collateral),
+                Amount::from_sat(accept_collateral),
                 fee_rate,
                 selected_announcement.oracle_public_key.to_string(),
                 selected_announcement.oracle_event.event_id.clone(),
