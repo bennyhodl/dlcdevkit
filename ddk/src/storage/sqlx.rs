@@ -50,7 +50,28 @@ pub struct ContractMetadata {
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct ContractData {
     pub id: String,
+    pub contract_data: Vec<u8>,
+    pub is_compressed: bool,
+}
+
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
+pub struct ContractMetadataRow {
+    pub id: String,
     pub state: i16,
+    pub is_offer_party: bool,
+    pub counter_party: String,
+    pub offer_collateral: i64,
+    pub accept_collateral: i64,
+    pub total_collateral: i64,
+    pub fee_rate_per_vb: i64,
+    pub cet_locktime: i32,
+    pub refund_locktime: i32,
+    pub pnl: Option<i64>,
+}
+
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
+pub struct ContractDataRow {
+    pub id: String,
     pub contract_data: Vec<u8>,
     pub is_compressed: bool,
 }
