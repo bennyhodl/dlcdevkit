@@ -1,4 +1,4 @@
-use super::sqlx::{ContractData, ContractMetadata, SqlxError};
+use super::sqlx::{ContractDataRow, ContractMetadata, ContractMetadataRow, SqlxError};
 use crate::error::{StorageError, WalletError};
 use crate::Storage;
 use crate::{
@@ -274,22 +274,36 @@ impl ManagerStorage for PostgresStore {
         &self,
         id: &ddk_manager::ContractId,
     ) -> Result<Option<Contract>, ddk_manager::error::Error> {
-        let contract =
-            sqlx::query_as::<Postgres, ContractData>("SELECT * FROM contract_data WHERE id = $1")
-                .bind(hex::encode(id))
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(to_storage_error)?;
+        let id_hex = hex::encode(id);
 
-        if let Some(contract) = contract {
-            Ok(Some(deserialize_contract(&contract.contract_data)?))
+        // Check if contract exists in metadata
+        let metadata = sqlx::query_as::<Postgres, ContractMetadataRow>(
+            "SELECT * FROM contract_metadata WHERE id = $1",
+        )
+        .bind(&id_hex)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(to_storage_error)?;
+
+        if let Some(_metadata) = metadata {
+            // If contract exists, fetch contract data
+            let data = sqlx::query_as::<Postgres, ContractDataRow>(
+                "SELECT * FROM contract_data WHERE id = $1",
+            )
+            .bind(&id_hex)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(to_storage_error)?;
+
+            // Compression is not enabled, so just deserialize
+            Ok(Some(deserialize_contract(&data.contract_data)?))
         } else {
             Ok(None)
         }
     }
 
     async fn get_contracts(&self) -> Result<Vec<Contract>, ddk_manager::error::Error> {
-        let contracts = sqlx::query_as::<Postgres, ContractData>("SELECT * FROM contract_data")
+        let contracts = sqlx::query_as::<Postgres, ContractDataRow>("SELECT * FROM contract_data")
             .fetch_all(&self.pool)
             .await
             .map_err(to_storage_error)?;
@@ -307,24 +321,20 @@ impl ManagerStorage for PostgresStore {
         contract: &OfferedContract,
     ) -> Result<(), ddk_manager::error::Error> {
         let mut tx = self.pool.begin().await.map_err(to_storage_error)?;
-        let oracle_pubkey = contract.contract_info[0].oracle_announcements[0].oracle_public_key;
-        let announcement_id = contract.contract_info[0].oracle_announcements[0]
+        let _oracle_pubkey = contract.contract_info[0].oracle_announcements[0].oracle_public_key;
+        let _announcement_id = contract.contract_info[0].oracle_announcements[0]
             .oracle_event
             .event_id
             .clone();
 
-        println!(
-            "inserting contract metadata {}{}",
-            oracle_pubkey, announcement_id
-        );
         sqlx::query(
             r#"
            INSERT INTO contract_metadata (
                id, state, is_offer_party, counter_party,
                offer_collateral, accept_collateral, total_collateral, fee_rate_per_vb, 
-               cet_locktime, refund_locktime, pnl, funding_txid, cet_txid, announcement_id, oracle_pubkey
+               cet_locktime, refund_locktime, pnl
            )
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
            "#,
         )
         .bind(hex::encode(contract.id))
@@ -338,19 +348,14 @@ impl ManagerStorage for PostgresStore {
         .bind(contract.cet_locktime as i32)
         .bind(contract.refund_locktime as i32)
         .bind(None as Option<i64>)
-        .bind(None as Option<String>)
-        .bind(None as Option<String>)
-        .bind(announcement_id)
-        .bind(oracle_pubkey.to_string())
         .execute(&mut *tx)
         .await
         .map_err(to_storage_error)?;
 
         sqlx::query(
-            "INSERT INTO contract_data (id, state, contract_data, is_compressed) VALUES ($1, $2, $3, $4)"
+            "INSERT INTO contract_data (id, contract_data, is_compressed) VALUES ($1, $2, $3)",
         )
         .bind(hex::encode(contract.id))
-        .bind(1_i16)
         .bind(serialize_contract(&Contract::Offered(contract.clone()))?)
         .bind(false)
         .execute(&mut *tx)
@@ -368,15 +373,17 @@ impl ManagerStorage for PostgresStore {
     ) -> Result<(), ddk_manager::error::Error> {
         let mut tx = self.pool.begin().await.map_err(to_storage_error)?;
         let id = hex::encode(id);
-        sqlx::query_as::<Postgres, ContractMetadata>("DELETE FROM contract_metadata WHERE id = $1")
+
+        // Delete from contract_data first due to foreign key constraint
+        sqlx::query("DELETE FROM contract_data WHERE id = $1")
             .bind(id.clone())
-            .fetch_one(&mut *tx)
+            .execute(&mut *tx)
             .await
             .map_err(to_storage_error)?;
 
-        sqlx::query_as::<Postgres, ContractData>("DELETE FROM contract_data WHERE id = $1")
+        sqlx::query("DELETE FROM contract_metadata WHERE id = $1")
             .bind(id)
-            .fetch_one(&mut *tx)
+            .execute(&mut *tx)
             .await
             .map_err(to_storage_error)?;
 
@@ -416,16 +423,16 @@ impl ManagerStorage for PostgresStore {
             _ => {}
         }
 
-        let funding_txid = contract.get_funding_txid().map(|txid| txid.to_string());
-        let cet_txid = contract.get_cet_txid().map(|txid| txid.to_string());
-        let oracle_pubkey = contract
+        let _funding_txid = contract.get_funding_txid().map(|txid| txid.to_string());
+        let _cet_txid = contract.get_cet_txid().map(|txid| txid.to_string());
+        let _oracle_pubkey = contract
             .get_oracle_announcement()
             .map(|ann| ann.oracle_public_key.to_string());
-        let announcement_id = contract
+        let _announcement_id = contract
             .get_oracle_announcement()
             .map(|ann| ann.oracle_event.event_id.clone());
 
-        let existing_metadata = sqlx::query_as::<Postgres, ContractMetadata>(
+        let existing_metadata = sqlx::query_as::<Postgres, ContractMetadataRow>(
             "SELECT * FROM contract_metadata WHERE id = $1",
         )
         .bind(&contract_id)
@@ -438,17 +445,13 @@ impl ManagerStorage for PostgresStore {
                 r#"
             UPDATE contract_metadata SET
                 state = $2,
-                pnl = $3,
-                funding_txid = COALESCE($4, funding_txid),
-                cet_txid = COALESCE($5, cet_txid)
+                pnl = $3
             WHERE id = $1
             "#,
             )
             .bind(&contract_id)
             .bind(prefix as i16)
             .bind(Some(contract.get_pnl()))
-            .bind(&funding_txid)
-            .bind(&cet_txid)
             .execute(&mut *tx)
             .await
             .map_err(to_storage_error)?;
@@ -458,9 +461,9 @@ impl ManagerStorage for PostgresStore {
                 INSERT INTO contract_metadata (
                 id, state, is_offer_party, counter_party,
                 offer_collateral, accept_collateral, total_collateral, fee_rate_per_vb, 
-                cet_locktime, refund_locktime, pnl, funding_txid, cet_txid, announcement_id, oracle_pubkey
+                cet_locktime, refund_locktime, pnl
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                 "#,
             )
             .bind(&contract_id)
@@ -476,43 +479,38 @@ impl ManagerStorage for PostgresStore {
             .bind(contract.get_cet_locktime() as i32)
             .bind(contract.get_refund_locktime() as i32)
             .bind(Some(contract.get_pnl()))
-            .bind(&funding_txid)
-            .bind(&cet_txid)
-            .bind(announcement_id)
-            .bind(&oracle_pubkey)
             .execute(&mut *tx)
             .await
             .map_err(to_storage_error)?;
         }
 
-        let existing_data =
-            sqlx::query_as::<Postgres, ContractData>("SELECT * FROM contract_data WHERE id = $1")
-                .bind(&contract_id)
-                .fetch_optional(&mut *tx)
-                .await
-                .map_err(to_storage_error)?;
+        let existing_data = sqlx::query_as::<Postgres, ContractDataRow>(
+            "SELECT * FROM contract_data WHERE id = $1",
+        )
+        .bind(&contract_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(to_storage_error)?;
 
         // Serialize the contract data
         let serialized_contract = serialize_contract(contract)?;
 
         if existing_data.is_some() {
             // Update existing contract data
-            sqlx::query("UPDATE contract_data SET contract_data = $2, state = $3 WHERE id = $1")
+            sqlx::query("UPDATE contract_data SET contract_data = $2 WHERE id = $1")
                 .bind(&contract_id)
                 .bind(&serialized_contract)
-                .bind(prefix as i16)
                 .execute(&mut *tx)
                 .await
                 .map_err(to_storage_error)?;
         } else {
             // Insert new contract data
             sqlx::query(
-                "INSERT INTO contract_data (id, contract_data, is_compressed, state) VALUES ($1, $2, $3, $4)",
+                "INSERT INTO contract_data (id, contract_data, is_compressed) VALUES ($1, $2, $3)",
             )
             .bind(&contract_id)
             .bind(&serialized_contract)
             .bind(false) // is_compressed
-            .bind(prefix as i16)
             .execute(&mut *tx)
             .await
             .map_err(to_storage_error)?;
@@ -524,11 +522,17 @@ impl ManagerStorage for PostgresStore {
     }
 
     async fn get_signed_contracts(&self) -> Result<Vec<SignedContract>, ddk_manager::error::Error> {
-        let contracts =
-            sqlx::query_as::<Postgres, ContractData>("SELECT * FROM contract_data WHERE state = 3")
-                .fetch_all(&self.pool)
-                .await
-                .map_err(to_storage_error)?;
+        let contracts = sqlx::query_as::<Postgres, ContractDataRow>(
+            r#"
+            SELECT cd.id, cd.contract_data, cd.is_compressed
+            FROM contract_data cd
+            INNER JOIN contract_metadata cm ON cd.id = cm.id
+            WHERE cm.state = 3
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(to_storage_error)?;
 
         let signed = contracts
             .into_iter()
@@ -543,8 +547,13 @@ impl ManagerStorage for PostgresStore {
     }
 
     async fn get_contract_offers(&self) -> Result<Vec<OfferedContract>, ddk_manager::error::Error> {
-        let contracts = sqlx::query_as::<Postgres, ContractData>(
-            "SELECT * FROM contract_data WHERE state = 1 AND is_offer_party = false",
+        let contracts = sqlx::query_as::<Postgres, ContractDataRow>(
+            r#"
+            SELECT cd.id, cd.contract_data, cd.is_compressed
+            FROM contract_data cd
+            INNER JOIN contract_metadata cm ON cd.id = cm.id
+            WHERE cm.state = 1 AND cm.is_offer_party = false
+            "#,
         )
         .fetch_all(&self.pool)
         .await
@@ -565,11 +574,17 @@ impl ManagerStorage for PostgresStore {
     async fn get_confirmed_contracts(
         &self,
     ) -> Result<Vec<SignedContract>, ddk_manager::error::Error> {
-        let contracts =
-            sqlx::query_as::<Postgres, ContractData>("SELECT * FROM contract_data WHERE state = 4")
-                .fetch_all(&self.pool)
-                .await
-                .map_err(to_storage_error)?;
+        let contracts = sqlx::query_as::<Postgres, ContractDataRow>(
+            r#"
+            SELECT cd.id, cd.contract_data, cd.is_compressed
+            FROM contract_data cd
+            INNER JOIN contract_metadata cm ON cd.id = cm.id
+            WHERE cm.state = 4
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(to_storage_error)?;
 
         let signed = contracts
             .into_iter()
@@ -586,11 +601,17 @@ impl ManagerStorage for PostgresStore {
     async fn get_preclosed_contracts(
         &self,
     ) -> Result<Vec<PreClosedContract>, ddk_manager::error::Error> {
-        let contracts =
-            sqlx::query_as::<Postgres, ContractData>("SELECT * FROM contract_data WHERE state = 5")
-                .fetch_all(&self.pool)
-                .await
-                .map_err(to_storage_error)?;
+        let contracts = sqlx::query_as::<Postgres, ContractDataRow>(
+            r#"
+            SELECT cd.id, cd.contract_data, cd.is_compressed
+            FROM contract_data cd
+            INNER JOIN contract_metadata cm ON cd.id = cm.id
+            WHERE cm.state = 5
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(to_storage_error)?;
 
         let preclosed = contracts
             .into_iter()
