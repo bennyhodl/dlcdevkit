@@ -12,10 +12,12 @@ ddk = { version = "0.0.18", path = "../ddk", features = ["postgres", "kormir", "
 ddk-manager = { version = "0.7.6", path = "../ddk-manager", features = ["use-serde"] }
 ddk-payouts = { version = "0.0.16", path = "../payouts" }
 
-dlc = { version = "0.7.1", features = ["use-serde"] }
-dlc-messages = { version = "0.7.1", features = [ "use-serde"] }
+# dlc = { version = "0.7.1", features = ["use-serde"] }
+# dlc-messages = { version = "0.7.1", features = [ "use-serde"] }
 # dlc = { path = "../../rust-dlc/dlc", features = ["use-serde"] }
 # dlc-messages = { path = "../../rust-dlc/dlc-messages", features = [ "use-serde"] }
+dlc = { git = "https://github.com/bennyhodl/rust-dlc", branch = "single-funded-dlc", features = ["use-serde"] }
+dlc-messages = { git = "https://github.com/bennyhodl/rust-dlc", branch = "single-funded-dlc", features = [ "use-serde"] }
 
 bitcoin = { version = "0.32.2", features = ["rand", "serde"] }
 

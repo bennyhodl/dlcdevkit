@@ -1,3 +1,22 @@
+//! JSON conversion utilities for DLC contracts
+//!
+//! This module provides functionality to convert Rust-DLC contract types into JSON
+//! representations, primarily for console output and API responses. The conversion
+//! is currently one-way (to JSON only) as the underlying Rust-DLC types don't
+//! implement Serialize/Deserialize.
+//!
+//! # Current Usage
+//! - Command line display of contract states
+//! - API responses for contract information
+//! - Debug output and logging
+//!
+//! # TODO: Future Improvements
+//! - Create proper serializable/deserializable types that mirror Rust-DLC contracts
+//! - Implement bidirectional conversion between JSON and contract types
+//! - Add validation for contract state transitions
+//! - Support custom serialization formats
+//! - Add schema validation for JSON output
+
 use ddk_manager::contract::{
     accepted_contract::AcceptedContract, offered_contract::OfferedContract,
     signed_contract::SignedContract, ClosedContract, Contract, FailedAcceptContract,
@@ -8,6 +27,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashSet;
 
+/// Represents an oracle event for JSON serialization.
+/// Used to track event IDs, oracle public keys, and event types.
 #[derive(Debug, Serialize, Deserialize, Hash, Eq, PartialEq)]
 pub struct OracleEvent {
     pub event_id: String,
@@ -15,6 +36,8 @@ pub struct OracleEvent {
     pub event_type: String,
 }
 
+/// Converts an offered contract to a JSON value with basic contract information.
+/// Includes contract ID, party information, collateral, and associated oracle events.
 pub fn offered_contract_to_value(offered_contract: &OfferedContract, state: &str) -> Value {
     let contract_id = hex::encode(offered_contract.id);
     let mut event_ids = HashSet::new();
@@ -44,6 +67,8 @@ pub fn offered_contract_to_value(offered_contract: &OfferedContract, state: &str
     })
 }
 
+/// Converts an accepted contract to a JSON value, adding acceptance-specific details
+/// such as transaction IDs and CET (Contract Execution Transaction) information.
 fn accepted_contract_to_value(accepted: &AcceptedContract) -> Value {
     let offered_contract = offered_contract_to_value(&accepted.offered_contract, "offered");
     json!({
@@ -60,6 +85,8 @@ fn accepted_contract_to_value(accepted: &AcceptedContract) -> Value {
     })
 }
 
+/// Converts a signed contract to a JSON value, including funding transaction
+/// and contract state information.
 pub fn signed_contract_to_value(signed: &SignedContract, state: &str) -> Value {
     let accepted_contract = accepted_contract_to_value(&signed.accepted_contract);
     json!({
@@ -72,17 +99,21 @@ pub fn signed_contract_to_value(signed: &SignedContract, state: &str) -> Value {
     })
 }
 
+/// Converts a closed contract to a JSON value, including final state,
+/// profit/loss information, and attestations.
 fn closed_contract_to_value(closed: &ClosedContract) -> Value {
     json!({
         "state": "closed",
         "contract_id": hex::encode(closed.contract_id),
         "counterparty": closed.counter_party_id.to_string(),
-        "pnl": closed.pnl,
+        "pnl": closed.pnl.to_sat(),
         "signed_cet": closed.signed_cet,
         "attestations": closed.attestations,
     })
 }
 
+/// Converts a pre-closed contract to a JSON value, including attestations
+/// and signed CET (Contract Execution Transaction) information.
 pub fn preclosed_contract_to_value(preclosed: &PreClosedContract) -> Value {
     let signed_contract = signed_contract_to_value(&preclosed.signed_contract, "confirmed");
     json!({
@@ -97,6 +128,8 @@ pub fn preclosed_contract_to_value(preclosed: &PreClosedContract) -> Value {
     })
 }
 
+/// Converts a failed sign attempt to a JSON value, including error information
+/// and the original accepted contract.
 fn failed_sign_contract_to_value(failed_sign: &FailedSignContract) -> Value {
     let accepted_contract = accepted_contract_to_value(&failed_sign.accepted_contract);
     json!({
@@ -107,6 +140,8 @@ fn failed_sign_contract_to_value(failed_sign: &FailedSignContract) -> Value {
     })
 }
 
+/// Converts a failed accept attempt to a JSON value, including error information
+/// and the original offered contract.
 fn failed_accept_contract_to_value(failed_accept: &FailedAcceptContract) -> Value {
     let offered_contract = offered_contract_to_value(&failed_accept.offered_contract, "offered");
     json!({
@@ -116,6 +151,8 @@ fn failed_accept_contract_to_value(failed_accept: &FailedAcceptContract) -> Valu
     })
 }
 
+/// Main conversion function that handles all contract states.
+/// Routes to the appropriate conversion function based on the contract's state.
 pub fn contract_to_value(contract: &Contract) -> Value {
     match contract {
         Contract::Offered(o) => offered_contract_to_value(o, "offered"),

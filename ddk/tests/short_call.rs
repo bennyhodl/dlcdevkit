@@ -1,5 +1,6 @@
 mod test_util;
 
+use bitcoin::Amount;
 use chrono::{Local, TimeDelta};
 use ddk::Transport;
 use ddk_manager::{contract::Contract, Storage};
@@ -30,14 +31,14 @@ async fn short_call() {
 
     let contract_input = ddk_payouts::options::build_option_order_offer(
         &announcement,
-        100_000_000,
+        Amount::ONE_BTC,
         50_000,
-        500_000,
+        Amount::from_sat(500_000),
         1,
         1_000,
         OptionType::Call,
         Direction::Short,
-        100_500_000,
+        Amount::from_sat(100_500_000),
         20,
     )
     .unwrap();

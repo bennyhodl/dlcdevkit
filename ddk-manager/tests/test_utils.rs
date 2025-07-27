@@ -37,7 +37,7 @@ pub const EVENT_MATURITY: u32 = 1623133104;
 pub const EVENT_ID: &str = "Test";
 pub const OFFER_COLLATERAL: u64 = 90000000;
 pub const ACCEPT_COLLATERAL: u64 = 11000000;
-pub const TOTAL_COLLATERAL: u64 = OFFER_COLLATERAL + ACCEPT_COLLATERAL;
+pub const TOTAL_COLLATERAL: Amount = Amount::from_sat(OFFER_COLLATERAL + ACCEPT_COLLATERAL);
 pub const MID_POINT: u64 = 5;
 pub const ROUNDING_MOD: u64 = 1;
 
@@ -232,11 +232,11 @@ pub fn get_enum_contract_descriptor() -> ContractDescriptor {
             let payout = if i % 2 == 0 {
                 Payout {
                     offer: TOTAL_COLLATERAL,
-                    accept: 0,
+                    accept: Amount::ZERO,
                 }
             } else {
                 Payout {
-                    offer: 0,
+                    offer: Amount::ZERO,
                     accept: TOTAL_COLLATERAL,
                 }
             };
@@ -305,8 +305,8 @@ pub async fn get_enum_test_params(
     };
 
     let contract_input = ContractInput {
-        offer_collateral: OFFER_COLLATERAL,
-        accept_collateral: ACCEPT_COLLATERAL,
+        offer_collateral: Amount::from_sat(OFFER_COLLATERAL),
+        accept_collateral: Amount::from_sat(ACCEPT_COLLATERAL),
         fee_rate: 2,
         contract_infos: vec![contract_info],
     };
@@ -323,12 +323,12 @@ pub fn get_polynomial_payout_curve_pieces(min_nb_digits: usize) -> Vec<PayoutFun
             PolynomialPayoutCurvePiece::new(vec![
                 PayoutPoint {
                     event_outcome: 0,
-                    outcome_payout: 0,
+                    outcome_payout: Amount::ZERO,
                     extra_precision: 0,
                 },
                 PayoutPoint {
                     event_outcome: 3,
-                    outcome_payout: OFFER_COLLATERAL,
+                    outcome_payout: Amount::from_sat(OFFER_COLLATERAL),
                     extra_precision: 0,
                 },
                 PayoutPoint {
@@ -362,12 +362,12 @@ pub fn get_hyperbola_payout_curve_pieces(min_nb_digits: usize) -> Vec<PayoutFunc
         HyperbolaPayoutCurvePiece::new(
             PayoutPoint {
                 event_outcome: 0,
-                outcome_payout: 0,
+                outcome_payout: Amount::ZERO,
                 extra_precision: 0,
             },
             PayoutPoint {
                 event_outcome: max_value_from_digits(min_nb_digits) as u64,
-                outcome_payout: 0,
+                outcome_payout: Amount::ZERO,
                 extra_precision: 0,
             },
             true,
@@ -497,8 +497,8 @@ pub async fn get_numerical_test_params(
     };
 
     let contract_input = ContractInput {
-        offer_collateral: OFFER_COLLATERAL,
-        accept_collateral: ACCEPT_COLLATERAL,
+        offer_collateral: Amount::from_sat(OFFER_COLLATERAL),
+        accept_collateral: Amount::from_sat(ACCEPT_COLLATERAL),
         fee_rate: 2,
         contract_infos: vec![contract_info],
     };
@@ -552,8 +552,8 @@ pub async fn get_enum_and_numerical_test_params(
     };
 
     let contract_input = ContractInput {
-        offer_collateral: OFFER_COLLATERAL,
-        accept_collateral: ACCEPT_COLLATERAL,
+        offer_collateral: Amount::from_sat(OFFER_COLLATERAL),
+        accept_collateral: Amount::from_sat(ACCEPT_COLLATERAL),
         fee_rate: 2,
         contract_infos,
     };

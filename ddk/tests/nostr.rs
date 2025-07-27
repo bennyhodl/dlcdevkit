@@ -3,6 +3,7 @@ mod test_util;
 #[cfg(feature = "nostr")]
 mod nostr_test {
     use super::*;
+    use bitcoin::Amount;
     use bitcoin::{key::rand::Fill, Network};
     use chrono::{Local, TimeDelta};
     use ddk::oracle::memory::MemoryOracle;
@@ -80,20 +81,20 @@ mod nostr_test {
                 EnumerationPayout {
                     outcome: "cat".to_string(),
                     payout: Payout {
-                        offer: 100_000_000,
-                        accept: 0,
+                        offer: Amount::ONE_BTC,
+                        accept: Amount::ZERO,
                     },
                 },
                 EnumerationPayout {
                     outcome: "ctv".to_string(),
                     payout: Payout {
-                        offer: 0,
-                        accept: 100_000_000,
+                        offer: Amount::ZERO,
+                        accept: Amount::ONE_BTC,
                     },
                 },
             ],
-            100_000_000,
-            100_000_000,
+            Amount::ONE_BTC,
+            Amount::ONE_BTC,
             1,
             oracle.oracle.public_key().to_string(),
             EVENT_ID.to_string(),

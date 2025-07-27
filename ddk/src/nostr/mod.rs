@@ -1,17 +1,45 @@
+//! # Bitcoin and Nostr Public Key Conversions
+//!
+//! This module handles the conversion between Bitcoin and Nostr public keys, which is necessary
+//! because DLC (Discreet Log Contract) operations use Bitcoin's secp256k1 keys while Nostr
+//! protocol communication uses its own public key format.
+//!
+//! ## Key Differences
+//! - Bitcoin public keys are typically 33-byte compressed keys with a prefix byte (0x02 or 0x03)
+//! - Nostr public keys are 32-byte x-only public keys (just the x coordinate)
+//!
+//! The conversion process involves handling these format differences while preserving the
+//! cryptographic properties of the keys.
+
 pub mod messages;
 
-use crate::error::Error;
 use bitcoin::key::Parity;
 use bitcoin::secp256k1::PublicKey as BitcoinPublicKey;
-use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
-use lightning::io::Cursor;
-use lightning::util::ser::Readable;
-use nostr_rs::{Filter, Kind, PublicKey, Timestamp};
+use nostr_rs::{Kind, PublicKey};
 
+/// Event kind for DLC protocol messages (NIP-88)
 pub const DLC_MESSAGE_KIND: Kind = Kind::Custom(8_888);
+
+/// Event kind for oracle announcements (NIP-88)
 pub const ORACLE_ANNOUNCMENT_KIND: Kind = Kind::Custom(88);
+
+/// Event kind for oracle attestations (NIP-88)
 pub const ORACLE_ATTESTATION_KIND: Kind = Kind::Custom(89);
 
+/// Converts a Bitcoin public key to a Nostr public key.
+///
+/// This conversion is necessary when we need to communicate DLC-related data over Nostr.
+/// The function extracts the x-only public key from the Bitcoin public key format,
+/// discarding the y-coordinate parity information.
+///
+/// # Arguments
+/// * `bitcoin_pk` - A Bitcoin secp256k1 public key (33 bytes, compressed format)
+///
+/// # Returns
+/// * `PublicKey` - A Nostr public key (32 bytes, x-only format)
+///
+/// # Panics
+/// * If the Bitcoin public key cannot be converted to a Nostr key format
 pub fn bitcoin_to_nostr_pubkey(bitcoin_pk: &BitcoinPublicKey) -> PublicKey {
     // Convert to XOnlyPublicKey first
     let (xonly, _parity) = bitcoin_pk.x_only_public_key();
@@ -21,34 +49,27 @@ pub fn bitcoin_to_nostr_pubkey(bitcoin_pk: &BitcoinPublicKey) -> PublicKey {
         .expect("Could not convert Bitcoin key to nostr key.")
 }
 
+/// Converts a Nostr public key to a Bitcoin public key.
+///
+/// This conversion is needed when receiving Nostr messages that need to be used in DLC operations.
+/// Since Nostr keys are x-only, we assume even y-coordinate parity when reconstructing
+/// the Bitcoin public key.
+///
+/// # Arguments
+/// * `nostr_pk` - A Nostr public key (32 bytes, x-only format)
+///
+/// # Returns
+/// * `BitcoinPublicKey` - A Bitcoin secp256k1 public key (33 bytes, compressed format)
+///
+/// # Panics
+/// * If the Nostr key cannot be converted to an x-only format
+///
+/// # Note
+/// The function always assumes even y-coordinate parity when reconstructing the Bitcoin public key.
+/// This is sufficient for DLC operations as the actual parity is handled within the DLC protocol.
 pub fn nostr_to_bitcoin_pubkey(nostr_pk: &PublicKey) -> BitcoinPublicKey {
     let xonly = nostr_pk.xonly().expect("Could not get xonly public key.");
     BitcoinPublicKey::from_x_only_public_key(xonly, Parity::Even)
-}
-
-pub fn create_dlc_message_filter(since: Timestamp, public_key: PublicKey) -> Filter {
-    Filter::new()
-        .kind(DLC_MESSAGE_KIND)
-        .since(since)
-        .pubkey(public_key)
-}
-
-pub fn create_oracle_message_filter(since: Timestamp) -> Filter {
-    Filter::new()
-        .kinds([ORACLE_ANNOUNCMENT_KIND, ORACLE_ATTESTATION_KIND])
-        .since(since)
-}
-
-pub fn oracle_announcement_from_str(content: &str) -> Result<OracleAnnouncement, Error> {
-    let bytes = base64::decode(content).map_err(|e| Error::Generic(e.to_string()))?;
-    let mut cursor = Cursor::new(bytes);
-    OracleAnnouncement::read(&mut cursor).map_err(|e| Error::Generic(e.to_string()))
-}
-
-pub fn oracle_attestation_from_str(content: &str) -> Result<OracleAttestation, Error> {
-    let bytes = base64::decode(content).map_err(|e| Error::Generic(e.to_string()))?;
-    let mut cursor = Cursor::new(bytes);
-    OracleAttestation::read(&mut cursor).map_err(|e| Error::Generic(e.to_string()))
 }
 
 #[cfg(test)]
