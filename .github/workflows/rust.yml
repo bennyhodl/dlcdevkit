@@ -159,6 +159,6 @@ jobs:
           chmod +x ./testconfig/scripts/wait_for_electrs.sh
           ./testconfig/scripts/wait_for_electrs.sh
       - name: Run test
-        run: RUST_BACKTRACE=1 ${{ matrix.tests }} --ignored
+        run: RUST_BACKTRACE=1 RUST_MIN_STACK=4194304 ${{ matrix.tests }} --ignored
       - name: Stop bitcoin node
         run: docker compose down -v

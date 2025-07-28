@@ -21,6 +21,7 @@ pub mod channel_updater;
 pub mod contract;
 pub mod contract_updater;
 mod conversion_utils;
+mod dlc_input;
 pub mod error;
 pub mod manager;
 pub mod payout_curve;

@@ -1,11 +1,11 @@
 //! #Utils
 use std::ops::Deref;
 
-use bitcoin::{consensus::Encodable, Amount, Txid};
-use dlc::{util::get_common_fee, PartyParams, TxInputInfo};
+use bitcoin::{consensus::Encodable, Amount, ScriptBuf, Txid};
+use dlc::{dlc_input::DlcInputInfo, util::get_common_fee, PartyParams, TxInputInfo};
 use dlc_messages::{
     oracle_msgs::{OracleAnnouncement, OracleAttestation},
-    FundingInput,
+    DlcInput, FundingInput,
 };
 use dlc_trie::RangeInfo;
 #[cfg(not(feature = "fuzztarget"))]
@@ -14,7 +14,7 @@ use secp256k1_zkp::{PublicKey, Secp256k1, Signing};
 
 use crate::{
     channel::party_points::PartyBasePoints,
-    contract::{contract_info::ContractInfo, AdaptorInfo},
+    contract::{contract_info::ContractInfo, ser::Serializable, AdaptorInfo},
     error::Error,
     Blockchain, ContractSigner, ContractSignerProvider, Wallet,
 };
@@ -93,6 +93,7 @@ pub(crate) async fn get_party_params<W: Deref, B: Deref, X: ContractSigner, C: S
     secp: &Secp256k1<C>,
     own_collateral: Amount,
     total_collateral: Amount,
+    dlc_inputs: Vec<DlcInputInfo>,
     fee_rate: u64,
     wallet: &W,
     signer: &X,
@@ -112,14 +113,21 @@ where
     let change_serial_id = get_new_serial_id();
 
     let appr_required_amount =
-        get_approximate_required_amount(total_collateral, own_collateral, fee_rate)?;
+        get_approximate_required_amount(&dlc_inputs, total_collateral, own_collateral, fee_rate)?;
+
+    // First get the amount in the DLC input. Subtract from own collateral to see if there is needed extra UTXO.
+    let dlc_input_amount = dlc_inputs.iter().map(|d| d.fund_amount).sum::<Amount>();
+
+    let potential_additional_collateral_needed = appr_required_amount
+        .checked_sub(dlc_input_amount)
+        .unwrap_or(Amount::ZERO);
     let utxos = wallet
-        .get_utxos_for_amount(appr_required_amount, fee_rate, true)
+        .get_utxos_for_amount(potential_additional_collateral_needed, fee_rate, true)
         .await?;
 
     let mut funding_inputs: Vec<FundingInput> = Vec::new();
     let mut funding_tx_info: Vec<TxInputInfo> = Vec::new();
-    let mut total_input = Amount::ZERO;
+    let mut total_input = dlc_input_amount;
     for utxo in utxos {
         let prev_tx = blockchain.get_transaction(&utxo.outpoint.txid).await?;
         let mut writer = Vec::new();
@@ -135,11 +143,30 @@ where
             sequence,
             max_witness_len,
             redeem_script: utxo.redeem_script,
+            dlc_input: None,
         };
         total_input += prev_tx.output[prev_tx_vout as usize].value;
         funding_tx_info.push((&funding_input).into());
         funding_inputs.push(funding_input);
     }
+
+    dlc_inputs.iter().for_each(|d| {
+        let funding_input = FundingInput {
+            input_serial_id: d.input_serial_id,
+            prev_tx: d.fund_tx.serialize().unwrap(),
+            prev_tx_vout: d.fund_vout,
+            sequence: 0xffffffff,
+            max_witness_len: d.max_witness_len as u16,
+            redeem_script: ScriptBuf::new(),
+            dlc_input: Some(DlcInput {
+                local_fund_pubkey: d.local_fund_pubkey,
+                remote_fund_pubkey: d.remote_fund_pubkey,
+                contract_id: d.contract_id,
+            }),
+        };
+        funding_tx_info.push((&funding_input).into());
+        funding_inputs.push(funding_input);
+    });
 
     let party_params = PartyParams {
         fund_pubkey: funding_pubkey,
@@ -148,6 +175,7 @@ where
         payout_script_pubkey: payout_spk,
         payout_serial_id,
         inputs: funding_tx_info,
+        dlc_inputs,
         collateral: own_collateral,
         input_amount: total_input,
     };
@@ -160,6 +188,7 @@ where
 // Otherwise, appr_required_amount is the half common fee.
 // Add base cost of fund tx + CET / 2 and a CET output to the collateral.
 fn get_approximate_required_amount(
+    dlc_inputs: &[DlcInputInfo],
     total_collateral: Amount,
     own_collateral: Amount,
     fee_rate: u64,
@@ -169,6 +198,8 @@ fn get_approximate_required_amount(
     // TODO: handle different address types for CET execution (multisig, p2wsh, p2tr, etc.)
     const ASSUME_P2WPKH_WEIGHT: usize = 124;
 
+    let dlc_weight = dlc::dlc_input::get_dlc_inputs_weight(dlc_inputs);
+
     let appr_required_amount = if own_collateral == Amount::ZERO {
         // No collateral = no fees
         Amount::ZERO
@@ -177,11 +208,13 @@ fn get_approximate_required_amount(
         own_collateral
             + get_common_fee(fee_rate)?
             + dlc::util::weight_to_fee(ASSUME_P2WPKH_WEIGHT, fee_rate)?
+            + dlc::util::weight_to_fee(dlc_weight, fee_rate)?
     } else {
         // Partial collateral = split fees
         own_collateral
             + get_half_common_fee(fee_rate)?
             + dlc::util::weight_to_fee(ASSUME_P2WPKH_WEIGHT, fee_rate)?
+            + dlc::util::weight_to_fee(dlc_weight, fee_rate)?
     };
     Ok(appr_required_amount)
 }
@@ -310,7 +343,8 @@ mod tests {
         let own_collateral = Amount::ONE_BTC;
         let fee_rate = 2;
         let appr_required_amount =
-            get_approximate_required_amount(total_collateral, own_collateral, fee_rate).unwrap();
+            get_approximate_required_amount(&[], total_collateral, own_collateral, fee_rate)
+                .unwrap();
         let expected_amount = Amount::ONE_BTC + Amount::from_sat(420);
         assert_eq!(appr_required_amount, expected_amount);
     }
@@ -321,7 +355,8 @@ mod tests {
         let own_collateral = Amount::ZERO;
         let fee_rate = 2;
         let appr_required_amount =
-            get_approximate_required_amount(total_collateral, own_collateral, fee_rate).unwrap();
+            get_approximate_required_amount(&[], total_collateral, own_collateral, fee_rate)
+                .unwrap();
         assert_eq!(appr_required_amount, Amount::ZERO);
     }
 
@@ -331,7 +366,8 @@ mod tests {
         let own_collateral = Amount::from_sat(50_000_000);
         let fee_rate = 2;
         let appr_required_amount =
-            get_approximate_required_amount(total_collateral, own_collateral, fee_rate).unwrap();
+            get_approximate_required_amount(&[], total_collateral, own_collateral, fee_rate)
+                .unwrap();
         assert_eq!(appr_required_amount, Amount::from_sat(50_000_000 + 241));
     }
 

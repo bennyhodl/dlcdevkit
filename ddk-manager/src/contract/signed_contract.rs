@@ -1,9 +1,11 @@
 //! #SignedContract
 
 use crate::conversion_utils::PROTOCOL_VERSION;
+use crate::utils::get_new_serial_id;
 use crate::ChannelId;
 
 use super::accepted_contract::AcceptedContract;
+use dlc::dlc_input::DlcInputInfo;
 use dlc_messages::CetAdaptorSignature;
 use dlc_messages::CetAdaptorSignatures;
 use dlc_messages::FundingSignatures;
@@ -44,6 +46,38 @@ impl SignedContract {
             },
             refund_signature: self.offer_refund_signature,
             funding_signatures: self.funding_signatures.clone(),
+        }
+    }
+
+    /// Use an existing contract to create a funding input for a spliced DLC.
+    pub(crate) fn get_dlc_input(&self) -> DlcInputInfo {
+        let fund_tx = self.accepted_contract.dlc_transactions.fund.clone();
+
+        let fund_vout = self
+            .accepted_contract
+            .dlc_transactions
+            .get_fund_output_index() as u32;
+        let local_fund_pubkey = self
+            .accepted_contract
+            .offered_contract
+            .offer_params
+            .fund_pubkey;
+        let remote_fund_pubkey = self.accepted_contract.accept_params.fund_pubkey;
+        let fund_amount = self
+            .accepted_contract
+            .dlc_transactions
+            .get_fund_output()
+            .value;
+
+        DlcInputInfo {
+            fund_tx,
+            fund_vout,
+            local_fund_pubkey,
+            remote_fund_pubkey,
+            fund_amount,
+            max_witness_len: 220,
+            input_serial_id: get_new_serial_id(),
+            contract_id: self.accepted_contract.get_contract_id(),
         }
     }
 }
