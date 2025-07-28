@@ -335,6 +335,7 @@ pub fn create_renewal_channel_transactions(
             cets,
             refund,
             funding_script_pubkey: funding_script_pubkey.to_owned(),
+            pending_close_txs: vec![],
         },
         buffer_transaction,
         buffer_script_pubkey: buffer_descriptor.script_code()?,
@@ -557,6 +558,10 @@ pub fn create_and_sign_punish_settle_transaction<C: Signing>(
 }
 
 /// Create a transaction for collaboratively closing a channel.
+///
+/// This function is primarily intended for on-chain DLC contracts where the offeror
+/// can provide additional inputs to prevent the free option problem. For off-chain
+/// channels, the additional_inputs parameter should typically be empty.
 pub fn create_collaborative_close_transaction(
     offer_params: &PartyParams,
     offer_payout: Amount,
@@ -564,13 +569,20 @@ pub fn create_collaborative_close_transaction(
     accept_payout: Amount,
     fund_outpoint: OutPoint,
     _fund_output_amount: Amount,
+    additional_inputs: &[OutPoint],
 ) -> Transaction {
-    let input = TxIn {
+    let mut inputs = vec![TxIn {
         previous_output: fund_outpoint,
         witness: Witness::default(),
         script_sig: ScriptBuf::default(),
         sequence: crate::util::DISABLE_LOCKTIME,
-    };
+    }];
+    inputs.extend(additional_inputs.iter().map(|input| TxIn {
+        previous_output: *input,
+        witness: Witness::default(),
+        script_sig: ScriptBuf::default(),
+        sequence: crate::util::DISABLE_LOCKTIME,
+    }));
 
     //TODO(tibo): add fee re-payment
     let offer_output = TxOut {
@@ -594,7 +606,7 @@ pub fn create_collaborative_close_transaction(
     Transaction {
         version: crate::TX_VERSION,
         lock_time: LockTime::ZERO,
-        input: vec![input],
+        input: inputs,
         output,
     }
 }

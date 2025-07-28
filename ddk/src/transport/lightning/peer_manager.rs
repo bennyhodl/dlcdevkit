@@ -127,7 +127,6 @@ impl LightningTransport {
                         }
                     },
                     accept_result = listener.accept() => {
-                        println!("acceptting connection");
                         match accept_result {
                             Ok((tcp_stream, socket)) => {
                                 let peer_mgr = Arc::clone(&peer_manager);
@@ -140,7 +139,6 @@ impl LightningTransport {
                                 });
                             }
                             Err(e) => {
-                                println!("error accepting connection: {}", e);
                                 tracing::error!("Error accepting connection: {}", e);
                             }
                         }

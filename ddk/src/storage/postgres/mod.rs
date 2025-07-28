@@ -313,10 +313,6 @@ impl ManagerStorage for PostgresStore {
             .event_id
             .clone();
 
-        println!(
-            "inserting contract metadata {}{}",
-            oracle_pubkey, announcement_id
-        );
         sqlx::query(
             r#"
            INSERT INTO contract_metadata (

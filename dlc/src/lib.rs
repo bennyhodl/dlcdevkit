@@ -135,6 +135,9 @@ pub struct DlcTransactions {
 
     /// The script pubkey of the fund output in the fund transaction
     pub funding_script_pubkey: ScriptBuf,
+
+    /// Pending cooperative close offers.
+    pub pending_close_txs: Vec<Transaction>,
 }
 
 impl DlcTransactions {
@@ -508,6 +511,7 @@ pub fn create_dlc_transactions(
         cets,
         refund: refund_tx,
         funding_script_pubkey,
+        pending_close_txs: vec![],
     })
 }
 
