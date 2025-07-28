@@ -1,0 +1,27 @@
+[package]
+authors = ["Crypto Garage"]
+description = "Creation, signing and verification of Discreet Log Contracts (DLC) transactions."
+homepage = "https://github.com/p2pderivatives/rust-dlc"
+license-file = "../LICENSE"
+name = "dlc"
+repository = "https://github.com/p2pderivatives/rust-dlc/tree/master/dlc"
+version = "0.7.1"
+
+[dependencies]
+bitcoin = { version = "0.32.2", default-features = false }
+miniscript = { version = "12.2", default-features = false }
+secp256k1-sys = "0.10.0"
+secp256k1-zkp = "0.11.0"
+serde = { version = "1.0", default-features = false, optional = true }
+
+[features]
+# for benchmarks
+unstable = []
+default = ["std"]
+std = ["bitcoin/std", "miniscript/std", "secp256k1-zkp/rand-std"]
+no-std = ["miniscript/no-std"]
+use-serde = ["serde", "secp256k1-zkp/serde", "bitcoin/serde"]
+
+[dev-dependencies]
+rayon = "1.5"
+secp256k1-zkp = { version = "0.11.0", features = ["hashes", "rand","serde", "global-context"] }
