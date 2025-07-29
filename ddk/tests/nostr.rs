@@ -23,7 +23,7 @@ mod nostr_test {
         let esplora_host = "http://127.0.0.1:30000".to_string();
 
         let transport = Arc::new(
-            NostrDlc::new(&seed, "wss://nostr.dlcdevkit.com", Network::Regtest)
+            NostrDlc::new(&seed, "ws://127.0.0.1:8081", Network::Regtest)
                 .await
                 .unwrap(),
         );
@@ -51,12 +51,12 @@ mod nostr_test {
         let alice = nostr_ddk("alice-nostr", oracle.clone()).await;
         let bob = nostr_ddk("bob-nostr", oracle.clone()).await;
 
-        alice.start().unwrap();
-        bob.start().unwrap();
-
         let alice_address = alice.wallet.new_external_address().await.unwrap().address;
         let bob_address = bob.wallet.new_external_address().await.unwrap().address;
         test_util::fund_addresses(&alice_address, &bob_address);
+
+        alice.wallet.sync().await.unwrap();
+        bob.wallet.sync().await.unwrap();
 
         let expiry = TimeDelta::seconds(15);
         let timestamp: u32 = Local::now()
@@ -81,7 +81,7 @@ mod nostr_test {
                 EnumerationPayout {
                     outcome: "cat".to_string(),
                     payout: Payout {
-                        offer: Amount::ONE_BTC,
+                        offer: Amount::from_btc(2.0).unwrap(),
                         accept: Amount::ZERO,
                     },
                 },
@@ -89,7 +89,7 @@ mod nostr_test {
                     outcome: "ctv".to_string(),
                     payout: Payout {
                         offer: Amount::ZERO,
-                        accept: Amount::ONE_BTC,
+                        accept: Amount::from_btc(2.0).unwrap(),
                     },
                 },
             ],
