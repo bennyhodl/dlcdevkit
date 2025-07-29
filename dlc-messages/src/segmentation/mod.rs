@@ -77,7 +77,7 @@ pub fn get_segments(mut data: Vec<u8>, msg_type: u16) -> (SegmentStart, Vec<Segm
     let len_minus_start = data.len() - MAX_START_DATA_SIZE + 2;
     let mut nb_segments = (len_minus_start / MAX_CHUNK_SIZE + 1) as u16;
 
-    if len_minus_start % MAX_CHUNK_SIZE != 0 {
+    if !len_minus_start.is_multiple_of(MAX_CHUNK_SIZE) {
         nb_segments += 1;
     }
 

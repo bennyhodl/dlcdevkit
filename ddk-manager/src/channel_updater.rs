@@ -466,6 +466,7 @@ where
 /// Verify that the given [`SignChannel`] message is valid with respect to the
 /// given [`AcceptedChannel`] and [`AcceptedContract`], transforming them
 /// to a [`SignedChannel`] and [`SignedContract`], and returning them.
+#[allow(clippy::too_many_arguments)]
 pub async fn verify_signed_channel<W: Deref, SP: Deref, S: Deref, X: ContractSigner>(
     secp: &Secp256k1<All>,
     accepted_channel: &AcceptedChannel,

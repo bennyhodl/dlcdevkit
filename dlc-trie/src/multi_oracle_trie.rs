@@ -333,7 +333,7 @@ impl Iterator for MultiOracleTrieIter<'_> {
             }
         };
         let min_nb_digits = self.oracle_numeric_infos.get_min_nb_digits();
-        let paths = &std::iter::repeat(res.path.clone())
+        let paths = &std::iter::repeat_n(res.path.clone(), indexes.len())
             .take(indexes.len())
             .zip(indexes.iter())
             .map(|(x, i)| {

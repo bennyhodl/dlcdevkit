@@ -405,6 +405,7 @@ impl PartyParams {
 /// Create the transactions for a DLC contract based on the provided parameters
 /// This function is used to create the transactions for a DLC contract when the
 /// offer and accept parameters are spliced together.
+#[allow(clippy::too_many_arguments)]
 pub fn create_spliced_dlc_transactions(
     offer_params: &PartyParams,
     accept_params: &PartyParams,
@@ -466,6 +467,7 @@ pub fn create_spliced_dlc_transactions(
 }
 
 /// Create the transactions for a DLC contract based on the provided parameters
+#[allow(clippy::too_many_arguments)]
 pub fn create_dlc_transactions(
     offer_params: &PartyParams,
     accept_params: &PartyParams,
@@ -701,6 +703,7 @@ pub fn create_cets(
 }
 
 /// Create a funding transaction
+#[allow(clippy::too_many_arguments)]
 pub fn create_funding_transaction(
     funding_script_pubkey: &Script,
     output_amount: Amount,
@@ -935,6 +938,7 @@ fn signatures_to_secret(signatures: &[Vec<SchnorrSignature>]) -> Result<SecretKe
 /// Sign the given cet using own private key, adapt the counter party signature
 /// and place both signatures and the funding multi sig script pubkey on the
 /// witness stack
+#[allow(clippy::too_many_arguments)]
 pub fn sign_cet<C: secp256k1_zkp::Signing>(
     secp: &secp256k1_zkp::Secp256k1<C>,
     cet: &mut Transaction,
@@ -980,6 +984,7 @@ pub fn verify_cet_adaptor_sig_from_point(
 
 /// Verify that a given adaptor signature for a given cet is valid with respect
 /// to an oracle public key, nonce and a given message.
+#[allow(clippy::too_many_arguments)]
 pub fn verify_cet_adaptor_sig_from_oracle_info(
     secp: &Secp256k1<secp256k1_zkp::All>,
     adaptor_sig: &EcdsaAdaptorSignature,

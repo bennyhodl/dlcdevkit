@@ -89,6 +89,7 @@ pub(crate) fn compute_id(
     res
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn get_party_params<W: Deref, B: Deref, X: ContractSigner, C: Signing>(
     secp: &Secp256k1<C>,
     own_collateral: Amount,

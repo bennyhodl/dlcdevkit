@@ -29,6 +29,7 @@ impl_dlc_writeable!(ContractOutcome, {(outcome, string), (offer_payout, writeabl
     serde(rename_all = "camelCase")
 )]
 /// Contains information about the contract outcomes, payouts and oracles.
+#[allow(clippy::large_enum_variant)]
 pub enum ContractInfo {
     /// A contract that is based on a single event.
     SingleContractInfo(SingleContractInfo),

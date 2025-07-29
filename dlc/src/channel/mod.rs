@@ -169,6 +169,7 @@ pub fn verify_tx_adaptor_signature<C: Verification>(
 }
 
 /// Returns a settle transaction.
+#[allow(clippy::too_many_arguments)]
 pub fn create_settle_transaction(
     fund_tx_in: &TxIn,
     offer_revoke_params: &RevokeParams,
@@ -229,6 +230,7 @@ pub fn create_settle_transaction(
 }
 
 /// Returns the transactions necessary to establish a DLC channel.
+#[allow(clippy::too_many_arguments)]
 pub fn create_channel_transactions(
     offer_params: &PartyParams,
     accept_params: &PartyParams,
@@ -270,6 +272,7 @@ pub fn create_channel_transactions(
 
 /// Returns the transactions necessary to renew the contract of a DLC
 /// channel.
+#[allow(clippy::too_many_arguments)]
 pub fn create_renewal_channel_transactions(
     offer_params: &PartyParams,
     accept_params: &PartyParams,
@@ -339,6 +342,7 @@ pub fn create_renewal_channel_transactions(
 }
 
 /// Sign a CET within a DLC channel.
+#[allow(clippy::too_many_arguments)]
 pub fn sign_cet<C: Signing>(
     secp: &Secp256k1<C>,
     cet: &mut Transaction,
@@ -393,6 +397,7 @@ pub fn sign_cet<C: Signing>(
 
 /// Returns a signed transaction to punish the publication of a revoked buffer
 /// transaction.
+#[allow(clippy::too_many_arguments)]
 pub fn create_and_sign_punish_buffer_transaction<C: Signing>(
     secp: &Secp256k1<C>,
     offer_params: &RevokeParams,
@@ -471,6 +476,7 @@ pub fn create_and_sign_punish_buffer_transaction<C: Signing>(
 }
 
 /// Create and sign a punishment transaction for a revoked settle transaction.
+#[allow(clippy::too_many_arguments)]
 pub fn create_and_sign_punish_settle_transaction<C: Signing>(
     secp: &Secp256k1<C>,
     offer_params: &RevokeParams,

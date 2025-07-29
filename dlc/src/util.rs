@@ -157,6 +157,7 @@ pub fn get_witness_for_p2wpkh_input<C: Signing>(
 /// key and info, and places the generated and provided signatures on the input's
 /// witness stack, ordering the signatures based on the ordering of the associated
 /// public keys.
+#[allow(clippy::too_many_arguments)]
 pub fn sign_multi_sig_input<C: Signing>(
     secp: &Secp256k1<C>,
     transaction: &mut Transaction,

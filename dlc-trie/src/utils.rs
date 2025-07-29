@@ -91,7 +91,7 @@ pub(crate) fn get_max_covering_paths(
                 .map(|(x, i)| {
                     // For oracles with `min_nb_digits` we just generate the max value.
                     let p = if *x == 0 {
-                        std::iter::repeat(1).take(min_nb_digits).collect()
+                        std::iter::repeat_n(1, min_nb_digits).collect()
                     } else {
                         // For others we generate the prefix based on their current
                         // counter value. We insert `counter - 1` zero and then a 1.

@@ -119,6 +119,7 @@ pub trait DlcTrie<'a, TrieIterator: Iterator<Item = TrieIterInfo>> {
     fn iter(&'a self) -> TrieIterator;
 
     /// Generate the trie while verifying the provided adaptor signatures.
+    #[allow(clippy::too_many_arguments)]
     fn generate_verify(
         &'a mut self,
         secp: &Secp256k1<secp256k1_zkp::All>,
@@ -145,6 +146,7 @@ pub trait DlcTrie<'a, TrieIterator: Iterator<Item = TrieIterInfo>> {
     }
 
     /// Generate the trie while creating the set of adaptor signatures.
+    #[allow(clippy::too_many_arguments)]
     fn generate_sign(
         &'a mut self,
         secp: &Secp256k1<All>,
@@ -170,6 +172,7 @@ pub trait DlcTrie<'a, TrieIterator: Iterator<Item = TrieIterInfo>> {
 
     /// Verify that the provided signatures are valid with respect to the
     /// information stored in the trie.
+    #[allow(clippy::too_many_arguments)]
     fn verify(
         &'a self,
         secp: &Secp256k1<All>,
@@ -290,6 +293,7 @@ fn sign_helper<T: Iterator<Item = TrieIterInfo>>(
 }
 
 #[cfg(not(feature = "parallel"))]
+#[allow(clippy::too_many_arguments)]
 fn verify_helper<T: Iterator<Item = TrieIterInfo>>(
     secp: &Secp256k1<All>,
     cets: &[Transaction],

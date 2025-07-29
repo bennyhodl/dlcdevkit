@@ -607,6 +607,7 @@ impl_type_writeable_for_enum!(Message,
 
 #[derive(Debug, Clone)]
 /// Wrapper for DLC related message and segmentation related messages.
+#[allow(clippy::large_enum_variant)]
 pub enum WireMessage {
     /// Message related to establishment of a DLC contract.
     Message(Message),

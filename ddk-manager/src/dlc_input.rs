@@ -38,7 +38,7 @@ where
     let dlc_input_info: DlcInputInfo = funding_input.into();
 
     let contract = storage
-        .get_contract(&contract_id)
+        .get_contract(contract_id)
         .await?
         .ok_or(Error::StorageError(
             "Contract not found to sign DLC input.".to_string(),
@@ -60,5 +60,5 @@ where
         &dlc_input_info,
         &dlc_input_signer.get_secret_key()?,
     )
-    .map_err(|e| Error::DlcError(e))
+    .map_err(Error::DlcError)
 }
