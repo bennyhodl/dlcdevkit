@@ -1,11 +1,12 @@
 [package]
-authors = ["Crypto Garage"]
+authors = ["benny b <ben@bitcoinbay.foundation>", "Crypto Garage"]
 description = "Creation, signing and verification of Discreet Log Contracts (DLC) transactions."
-homepage = "https://github.com/p2pderivatives/rust-dlc"
+homepage = "https://github.com/bennyhodl/dlcdevkit"
 license-file = "../LICENSE"
 name = "dlc"
-repository = "https://github.com/p2pderivatives/rust-dlc/tree/master/dlc"
+repository = "https://github.com/bennyhodl/dlcdevkit/tree/master/dlc"
 version = "0.7.1"
+edition = "2015"
 
 [dependencies]
 bitcoin = { version = "0.32.2", default-features = false }
