@@ -59,9 +59,7 @@ lightning-net-tokio = { version = "0.0.125", optional = true }
 
 # oracle feature
 reqwest = { version = "0.12.9", features = ["json"], optional = true }
-# kormir = "0.4.4"
-kormir = { path = "../../kormir/kormir" }
-# kormir = { git = "https://github.com/bennyhodl/kormir", branch = "rust-dlc-bitcoin-amount" }
+kormir = { path = "../kormir" }
 hmac = "0.12.1"
 sha2 = "0.10"
 nostr-database = { version = "0.40.0", optional = true }

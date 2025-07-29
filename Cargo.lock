@@ -963,9 +963,9 @@ dependencies = [
  "chrono",
  "ddk-manager",
  "ddk-payouts",
- "dlc 0.7.1",
- "dlc-messages 0.7.1",
- "dlc-trie 0.7.1",
+ "dlc",
+ "dlc-messages",
+ "dlc-trie",
  "hex",
  "hmac",
  "kormir",
@@ -998,9 +998,9 @@ dependencies = [
  "bitcoincore-rpc-json",
  "criterion",
  "ddk",
- "dlc 0.7.1 (git+https://github.com/bennyhodl/rust-dlc?branch=single-funded-dlc)",
- "dlc-messages 0.7.1 (git+https://github.com/bennyhodl/rust-dlc?branch=single-funded-dlc)",
- "dlc-trie 0.7.1 (git+https://github.com/bennyhodl/rust-dlc?branch=single-funded-dlc)",
+ "dlc",
+ "dlc-messages",
+ "dlc-trie",
  "env_logger 0.9.3",
  "futures",
  "hex-conservative 0.1.2",
@@ -1024,8 +1024,8 @@ dependencies = [
  "ddk",
  "ddk-manager",
  "ddk-payouts",
- "dlc 0.7.1",
- "dlc-messages 0.7.1",
+ "dlc",
+ "dlc-messages",
  "hex",
  "homedir",
  "inquire",
@@ -1047,9 +1047,9 @@ dependencies = [
  "anyhow",
  "bitcoin",
  "ddk-manager",
- "dlc 0.7.1",
- "dlc-messages 0.7.1",
- "dlc-trie 0.7.1",
+ "dlc",
+ "dlc-messages",
+ "dlc-trie",
  "serde",
  "serde_json",
  "thiserror 2.0.12",
@@ -1100,36 +1100,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "dlc"
-version = "0.7.1"
-source = "git+https://github.com/bennyhodl/dlcdevkit?branch=fork-rust-dlc-crates#1cdefcafc422ed0609327634a75bc00dc67d1fd7"
-dependencies = [
- "bitcoin",
- "miniscript",
- "secp256k1-sys",
- "secp256k1-zkp",
- "serde",
-]
-
-[[package]]
-name = "dlc"
-version = "0.7.1"
-source = "git+https://github.com/bennyhodl/rust-dlc?branch=single-funded-dlc#d215bc76bcaa14c5662e6a98b6ab14bf27925417"
-dependencies = [
- "bitcoin",
- "miniscript",
- "secp256k1-sys",
- "secp256k1-zkp",
- "serde",
-]
-
-[[package]]
 name = "dlc-messages"
 version = "0.7.1"
 dependencies = [
  "bitcoin",
- "dlc 0.7.1",
- "dlc-messages 0.7.1",
+ "dlc",
+ "dlc-messages",
  "lightning",
  "secp256k1-zkp",
  "serde",
@@ -1137,47 +1113,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "dlc-messages"
-version = "0.7.1"
-source = "git+https://github.com/bennyhodl/dlcdevkit?branch=fork-rust-dlc-crates#1cdefcafc422ed0609327634a75bc00dc67d1fd7"
-dependencies = [
- "bitcoin",
- "dlc 0.7.1 (git+https://github.com/bennyhodl/dlcdevkit?branch=fork-rust-dlc-crates)",
- "lightning",
- "secp256k1-zkp",
- "serde",
-]
-
-[[package]]
-name = "dlc-messages"
-version = "0.7.1"
-source = "git+https://github.com/bennyhodl/rust-dlc?branch=single-funded-dlc#d215bc76bcaa14c5662e6a98b6ab14bf27925417"
-dependencies = [
- "bitcoin",
- "dlc 0.7.1 (git+https://github.com/bennyhodl/rust-dlc?branch=single-funded-dlc)",
- "lightning",
- "secp256k1-zkp",
- "serde",
-]
-
-[[package]]
 name = "dlc-trie"
 version = "0.7.1"
 dependencies = [
  "bitcoin",
- "dlc 0.7.1",
- "rayon",
- "secp256k1-zkp",
- "serde",
-]
-
-[[package]]
-name = "dlc-trie"
-version = "0.7.1"
-source = "git+https://github.com/bennyhodl/rust-dlc?branch=single-funded-dlc#d215bc76bcaa14c5662e6a98b6ab14bf27925417"
-dependencies = [
- "bitcoin",
- "dlc 0.7.1 (git+https://github.com/bennyhodl/rust-dlc?branch=single-funded-dlc)",
+ "dlc",
  "rayon",
  "secp256k1-zkp",
  "serde",
@@ -2067,14 +2007,15 @@ version = "0.4.4"
 dependencies = [
  "base64 0.13.1",
  "bitcoin",
- "dlc 0.7.1 (git+https://github.com/bennyhodl/dlcdevkit?branch=fork-rust-dlc-crates)",
- "dlc-messages 0.7.1 (git+https://github.com/bennyhodl/dlcdevkit?branch=fork-rust-dlc-crates)",
+ "dlc",
+ "dlc-messages",
  "hex",
  "lightning",
  "log",
  "nostr",
  "secp256k1-zkp",
  "serde",
+ "tokio",
 ]
 
 [[package]]
