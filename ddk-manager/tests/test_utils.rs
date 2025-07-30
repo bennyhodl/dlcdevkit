@@ -6,7 +6,7 @@ use bitcoin::{
 };
 use bitcoincore_rpc::{Auth, Client, RpcApi};
 use bitcoincore_rpc_json::AddressType;
-use ddk::wallet::DlcDevKitWallet;
+use ddk::{chain::EsploraClient, wallet::DlcDevKitWallet};
 use ddk::{oracle::memory::MemoryOracle, storage::memory::MemoryStorage};
 use ddk_manager::payout_curve::{
     PayoutFunction, PayoutFunctionPiece, PayoutPoint, PolynomialPayoutCurvePiece, RoundingInterval,
@@ -45,6 +45,7 @@ pub const ROUNDING_MOD: u64 = 1;
 macro_rules! receive_loop {
     ($receive:expr, $manager:expr, $send:expr, $expect_err:expr, $sync_send:expr, $rcv_callback: expr, $msg_callback: expr) => {
         tokio::spawn(async move {
+            tokio::task::yield_now().await;
             loop {
                 match $receive.recv().await {
                     Some(Some(msg)) => match $manager
@@ -247,6 +248,29 @@ pub fn get_enum_contract_descriptor() -> ContractDescriptor {
         })
         .collect();
     ContractDescriptor::Enum(EnumDescriptor { outcome_payouts })
+}
+
+pub async fn generate_blocks(nb_blocks: u32, electrs: Arc<EsploraClient>, sink: Arc<Client>) {
+    let prev_blockchain_height = electrs.async_client.get_height().await.unwrap();
+    let sink_address = sink
+        .get_new_address(None, None)
+        .expect("RPC Error")
+        .assume_checked();
+    sink.generate_to_address(nb_blocks as u64, &sink_address)
+        .expect("RPC Error");
+
+    // Use a more stack-friendly polling approach
+    let target_height = prev_blockchain_height + nb_blocks;
+    loop {
+        let current_height = electrs.async_client.get_height().await.unwrap();
+        if current_height >= target_height {
+            break;
+        }
+
+        // Yield control to prevent stack buildup
+        tokio::task::yield_now().await;
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
 }
 
 pub async fn get_enum_oracle() -> MemoryOracle {
@@ -749,7 +773,7 @@ pub async fn init_clients() -> (
     let auth = Auth::UserPass("ddk".to_string(), "ddk".to_string());
     let sink_rpc = Client::new(&rpc_base(), auth.clone()).unwrap();
 
-    std::thread::sleep(std::time::Duration::from_millis(100));
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     let offer_rpc = create_and_fund_wallet().await;
     let accept_rpc = create_and_fund_wallet().await;
 
