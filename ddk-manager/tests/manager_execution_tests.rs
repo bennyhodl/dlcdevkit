@@ -883,6 +883,7 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
             bob_wallet.sync().await.unwrap();
             match path {
                 TestPath::Splice => {
+                    println!("Starting the splicing test.");
                     // Create splice DLC with maturity just in the future (1 second from current time)
                     // Original DLC stays far in the future, splice DLC can be closer
                     let splice_maturity = (EVENT_MATURITY + 1) as u32; // 1 second in the future
@@ -901,6 +902,7 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
                         .await
                     };
 
+                    println!("Sending splice offer.");
                     // Send splice offer using the current confirmed contract (Bob as original offeror)
                     let splice_offer_msg = bob_manager_send
                         .lock()
@@ -914,6 +916,8 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
                         )
                         .await
                         .expect("Send splice offer error");
+
+                    println!("Splice offer sent.");
 
                     let splice_temporary_contract_id = splice_offer_msg.temporary_contract_id;
 
@@ -932,6 +936,8 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
                         Offered
                     );
 
+                    println!("Splice offer accepted.");
+
                     // Accept the splice offer
                     let (splice_contract_id, _, splice_accept_msg) = alice_manager_send
                         .lock()
@@ -942,10 +948,14 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
 
                     assert_contract_state!(alice_manager_send, splice_contract_id, Accepted);
 
+                    println!("Sending splice accept.");
+
                     alice_send
                         .send(Some(Message::Accept(splice_accept_msg)))
                         .await
                         .unwrap();
+
+                    println!("Splice accept sent.");
 
                     sync_receive.recv().await.expect("Error synchronizing");
 
@@ -954,12 +964,16 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
                     // The old contract is pre-closed
                     assert_contract_state!(bob_manager_send, contract_id, PreClosed);
 
+                    println!("Splice contract signed.");
+
                     sync_receive.recv().await.expect("Error synchronizing");
 
                     // The new contract is signed, but not confirmed yet
                     assert_contract_state!(alice_manager_send, splice_contract_id, Signed);
                     // The old contract is pre-closed
                     assert_contract_state!(alice_manager_send, contract_id, PreClosed);
+
+                    println!("Splice contract confirmed.");
 
                     alice_wallet.sync().await.unwrap();
                     bob_wallet.sync().await.unwrap();
@@ -969,7 +983,10 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
                     periodic_check!(bob_manager_send, splice_contract_id, Confirmed);
                     periodic_check!(alice_manager_send, splice_contract_id, Confirmed);
 
+                    println!("Splice contract confirmed.");
+
                     if manual_close {
+                        println!("Manual close.");
                         periodic_check!(bob_manager_send, splice_contract_id, Confirmed);
                         periodic_check!(alice_manager_send, splice_contract_id, Confirmed);
 
@@ -977,7 +994,12 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
                         periodic_check!(bob_manager_send, contract_id, Closed);
                         periodic_check!(alice_manager_send, contract_id, Closed);
 
+                        println!("Getting attestations.");
+
                         let attestations = get_attestations(&splice_test_params).await;
+
+                        println!("Closing splice contract.");
+
                         let bob_close_contract = bob_manager_send
                             .lock()
                             .await
@@ -985,10 +1007,14 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
                             .await
                             .expect("Error closing splice contract");
 
+                        println!("Splice contract closed.");
+
                         let bob_close_contract = match bob_close_contract {
                             Contract::PreClosed(c) => c,
                             _ => panic!("Invalid contract state {:?}", bob_close_contract),
                         };
+
+                        println!("Registering counterparty close.");
 
                         let second_contract = alice_manager_send
                             .lock()
@@ -1010,7 +1036,10 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
                             .on_counterparty_close(&signed, bob_close_contract.signed_cet, 1)
                             .await
                             .expect("Error registering counterparty close");
+
+                        println!("Counterparty close registered.");
                     } else {
+                        println!("Automatic close.");
                         periodic_check!(alice_manager_send, splice_contract_id, Confirmed);
                         periodic_check!(bob_manager_send, splice_contract_id, Confirmed);
 
