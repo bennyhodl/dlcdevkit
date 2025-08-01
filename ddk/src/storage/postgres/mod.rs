@@ -923,6 +923,7 @@ async fn local_chain_changeset_persist_to_postgres(
 
 /// Collects information on all the wallets in the database and dumps it to stdout.
 #[tracing::instrument]
+#[allow(dead_code)]
 async fn easy_backup(db: Pool<Postgres>) -> Result<(), SqlxError> {
     info!("Starting easy backup");
 
