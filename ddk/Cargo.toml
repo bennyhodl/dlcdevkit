@@ -29,12 +29,11 @@ dlc = { path = "../dlc", features = ["use-serde"] }
 dlc-messages = { path = "../dlc-messages", features = [ "use-serde"] }
 dlc-trie = { path = "../dlc-trie", features = ["use-serde"] }
 
-bitcoin = { version = "0.32.2", features = ["rand", "serde"] }
-bdk_esplora = { version = "0.20.1", features = ["blocking-https", "async-https", "tokio"] }
-# bdk_wallet = { version = "1.0.0-beta.5", features = ["bdk_file_store"] }
-bdk_wallet = "1.0.0"
-bdk_chain = "0.21.1"
-lightning = { version = "0.0.125", default-features = false, features = ["grind_signatures", "std"] }
+bitcoin = { version = "0.32.6", features = ["rand", "serde"] }
+bdk_esplora = { version = "0.22.0", features = ["blocking-https", "async-https", "tokio"] }
+bdk_wallet = "2.0.0"
+bdk_chain = "0.23.0"
+lightning = { version = "0.1.5", default-features = false, features = ["grind_signatures", "std"] }
 serde = { version = "1.0.192", features = ["derive"] }
 serde_json = "1.0.108"
 thiserror = "1.0.50"
@@ -55,7 +54,7 @@ nostr-rs = { package = "nostr", version = "0.40.0", features = ["std", "nip04"],
 nostr-sdk = { version = "0.40.0", optional = true }
 
 # lightning transport
-lightning-net-tokio = { version = "0.0.125", optional = true }
+lightning-net-tokio = { version = "0.1.0", optional = true }
 
 # oracle feature
 reqwest = { version = "0.12.9", features = ["json"], optional = true }
@@ -66,7 +65,6 @@ nostr-database = { version = "0.40.0", optional = true }
 
 [dev-dependencies]
 test-log = { version = "0.2.16", features = ["trace"] }
-rstest = "0.22.0"
 ddk-payouts = { path = "../payouts/" }
 bitcoincore-rpc = "0.19.0"
 

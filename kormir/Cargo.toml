@@ -14,10 +14,10 @@ default = []
 nostr = ["dep:nostr", "dep:base64"]
 
 [dependencies]
-bitcoin = { version = "0.32.2", features = ["serde"] }
+bitcoin = { version = "0.32.6", features = ["serde"] }
 dlc = { path = "../dlc", features = ["use-serde"] }
 dlc-messages = { path = "../dlc-messages", features = [ "use-serde"] }
-lightning = "0.0.125"
+lightning = "0.1.5"
 log = "0.4.22"
 nostr = { version = "0.40.0", optional = true }
 base64 = { version = "0.13.1", optional = true }

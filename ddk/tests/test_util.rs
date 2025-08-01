@@ -24,7 +24,6 @@ use ddk::{
 
 type TestDlcDevKit = DlcDevKit<MemoryTransport, MemoryStorage, MemoryOracle>;
 
-#[rstest::fixture]
 pub async fn test_ddk() -> (TestSuite, TestSuite, Arc<MemoryOracle>) {
     let secp = Secp256k1::new();
     let oracle = Arc::new(MemoryOracle::default());
