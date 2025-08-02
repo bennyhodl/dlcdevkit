@@ -6,3 +6,4 @@
 /testconfig/kormir-server
 
 /ddk/.env
+.env

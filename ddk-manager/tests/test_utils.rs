@@ -6,7 +6,7 @@ use bitcoin::{
 };
 use bitcoincore_rpc::{Auth, Client, RpcApi};
 use bitcoincore_rpc_json::AddressType;
-use ddk::wallet::DlcDevKitWallet;
+use ddk::{chain::EsploraClient, wallet::DlcDevKitWallet};
 use ddk::{oracle::memory::MemoryOracle, storage::memory::MemoryStorage};
 use ddk_manager::payout_curve::{
     PayoutFunction, PayoutFunctionPiece, PayoutPoint, PolynomialPayoutCurvePiece, RoundingInterval,
@@ -308,6 +308,225 @@ pub async fn get_enum_test_params(
         offer_collateral: Amount::from_sat(OFFER_COLLATERAL),
         accept_collateral: Amount::from_sat(ACCEPT_COLLATERAL),
         fee_rate: 2,
+        contract_infos: vec![contract_info],
+    };
+
+    TestParams {
+        oracles,
+        contract_input,
+    }
+}
+
+pub fn get_splice_in_enum_contract_descriptor() -> ContractDescriptor {
+    let outcome_payouts: Vec<_> = enum_outcomes()
+        .iter()
+        .enumerate()
+        .map(|(i, x)| {
+            let payout = if i % 2 == 0 {
+                Payout {
+                    offer: TOTAL_COLLATERAL + Amount::from_sat(50_000_000),
+                    accept: Amount::ZERO,
+                }
+            } else {
+                Payout {
+                    offer: Amount::ZERO,
+                    accept: TOTAL_COLLATERAL + Amount::from_sat(50_000_000),
+                }
+            };
+            EnumerationPayout {
+                outcome: x.to_owned(),
+                payout,
+            }
+        })
+        .collect();
+    ContractDescriptor::Enum(EnumDescriptor { outcome_payouts })
+}
+
+pub fn get_splice_out_enum_contract_descriptor() -> ContractDescriptor {
+    let outcome_payouts: Vec<_> = enum_outcomes()
+        .iter()
+        .enumerate()
+        .map(|(i, x)| {
+            let payout = if i % 2 == 0 {
+                Payout {
+                    offer: TOTAL_COLLATERAL - Amount::from_sat(50_000_000),
+                    accept: Amount::ZERO,
+                }
+            } else {
+                Payout {
+                    offer: Amount::ZERO,
+                    accept: TOTAL_COLLATERAL - Amount::from_sat(50_000_000),
+                }
+            };
+            EnumerationPayout {
+                outcome: x.to_owned(),
+                payout,
+            }
+        })
+        .collect();
+    ContractDescriptor::Enum(EnumDescriptor { outcome_payouts })
+}
+
+pub async fn get_splice_in_test_params_with_maturity(
+    oracles: Vec<MemoryOracle>,
+    maturity: u32,
+    dust: bool,
+) -> TestParams {
+    let splice_event_id = format!("{}-splice-in", EVENT_ID);
+
+    // Create enum announcements for the splice event with future maturity
+    for oracle in &oracles {
+        oracle
+            .oracle
+            .create_enum_event(splice_event_id.clone(), enum_outcomes(), maturity)
+            .await
+            .unwrap();
+    }
+
+    // Sign the splice enum events (similar to get_enum_oracles)
+    let active_oracles = select_active_oracles(oracles.len(), 1); // threshold = 1 for splice
+    let outcomes = enum_outcomes();
+    let outcome = outcomes[(thread_rng().next_u32() as usize) % outcomes.len()].clone();
+    for index in active_oracles {
+        oracles
+            .get(index)
+            .unwrap()
+            .oracle
+            .sign_enum_event(splice_event_id.clone(), outcome.clone())
+            .await
+            .unwrap();
+    }
+
+    let contract_descriptor = get_splice_in_enum_contract_descriptor();
+    let contract_info = ContractInputInfo {
+        contract_descriptor,
+        oracles: OracleInput {
+            public_keys: oracles.iter().map(|x| x.get_public_key()).collect(),
+            event_id: splice_event_id,
+            threshold: 1,
+        },
+    };
+
+    let offer_collateral = TOTAL_COLLATERAL
+        + if dust {
+            Amount::from_sat(500)
+        } else {
+            Amount::from_sat(50_000_000)
+        };
+
+    let contract_input = ContractInput {
+        offer_collateral,
+        accept_collateral: Amount::ZERO,
+        fee_rate: 2,
+        contract_infos: vec![contract_info],
+    };
+
+    TestParams {
+        oracles,
+        contract_input,
+    }
+}
+
+pub async fn get_splice_out_test_params_with_maturity(
+    oracles: Vec<MemoryOracle>,
+    maturity: u32,
+    dust: bool,
+) -> TestParams {
+    let splice_event_id = format!("{}-splice-out", EVENT_ID);
+
+    // Create enum announcements for the splice event with future maturity
+    for oracle in &oracles {
+        oracle
+            .oracle
+            .create_enum_event(splice_event_id.clone(), enum_outcomes(), maturity)
+            .await
+            .unwrap();
+    }
+
+    // Sign the splice enum events (similar to get_enum_oracles)
+    let active_oracles = select_active_oracles(oracles.len(), 1); // threshold = 1 for splice
+    let outcomes = enum_outcomes();
+    let outcome = outcomes[(thread_rng().next_u32() as usize) % outcomes.len()].clone();
+    for index in active_oracles {
+        oracles
+            .get(index)
+            .unwrap()
+            .oracle
+            .sign_enum_event(splice_event_id.clone(), outcome.clone())
+            .await
+            .unwrap();
+    }
+
+    let contract_descriptor = get_splice_out_enum_contract_descriptor();
+    let contract_info = ContractInputInfo {
+        contract_descriptor,
+        oracles: OracleInput {
+            public_keys: oracles.iter().map(|x| x.get_public_key()).collect(),
+            event_id: splice_event_id,
+            threshold: 1,
+        },
+    };
+
+    let offer_collateral = TOTAL_COLLATERAL
+        - if dust {
+            TOTAL_COLLATERAL - Amount::from_sat(500)
+        } else {
+            Amount::from_sat(50000)
+        };
+
+    let contract_input = ContractInput {
+        offer_collateral,
+        accept_collateral: Amount::ZERO,
+        fee_rate: 2,
+        contract_infos: vec![contract_info],
+    };
+
+    TestParams {
+        oracles,
+        contract_input,
+    }
+}
+
+pub fn new_oracle_test_params(oracles: Vec<MemoryOracle>) -> TestParams {
+    let contract_descriptor = get_splice_in_enum_contract_descriptor();
+    let contract_info = ContractInputInfo {
+        contract_descriptor,
+        oracles: OracleInput {
+            public_keys: oracles.iter().map(|x| x.get_public_key()).collect(),
+            event_id: EVENT_ID.to_owned(),
+            threshold: 1,
+        },
+    };
+
+    let contract_input = ContractInput {
+        offer_collateral: TOTAL_COLLATERAL + Amount::from_sat(50_000_000),
+        accept_collateral: Amount::ZERO,
+        fee_rate: 2,
+        contract_infos: vec![contract_info],
+    };
+
+    TestParams {
+        oracles,
+        contract_input,
+    }
+}
+
+pub async fn get_single_funded_test_params(nb_oracles: usize, threshold: usize) -> TestParams {
+    let oracles = get_enum_oracles(nb_oracles, threshold).await;
+    let contract_descriptor = get_enum_contract_descriptor();
+    let contract_info = ContractInputInfo {
+        contract_descriptor,
+        oracles: OracleInput {
+            public_keys: oracles.iter().map(|x| x.get_public_key()).collect(),
+            event_id: EVENT_ID.to_owned(),
+            threshold: 1,
+        },
+    };
+
+    let contract_input = ContractInput {
+        offer_collateral: TOTAL_COLLATERAL,
+        accept_collateral: Amount::ZERO,
+        fee_rate: 5,
         contract_infos: vec![contract_info],
     };
 
@@ -671,6 +890,24 @@ pub async fn create_and_fund_wallet() -> (DlcDevKitWallet, Arc<MemoryStorage>) {
         }
     }
     (wallet, memory_storage)
+}
+
+pub async fn generate_blocks(nb_blocks: u64, electrs: Arc<EsploraClient>, sink: Arc<Client>) {
+    let sink_clone = sink.clone();
+    let prev_blockchain_height = electrs.async_client.get_height().await.unwrap();
+    let sink_address = sink_clone
+        .get_new_address(None, None)
+        .expect("RPC Error")
+        .assume_checked();
+    sink_clone
+        .generate_to_address(nb_blocks, &sink_address)
+        .expect("RPC Error");
+    // Wait for electrs to have processed the new blocks
+    let mut cur_blockchain_height = prev_blockchain_height;
+    while cur_blockchain_height < prev_blockchain_height + nb_blocks as u32 {
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        cur_blockchain_height = electrs.async_client.get_height().await.unwrap();
+    }
 }
 
 /// Utility function used to parse hex into a target u8 buffer. Returns

@@ -3,6 +3,7 @@
 use crate::conversion_utils::{
     get_contract_info_and_announcements, get_tx_input_infos, BITCOIN_CHAINHASH, PROTOCOL_VERSION,
 };
+use crate::dlc_input::get_dlc_inputs_from_funding_inputs;
 use crate::utils::get_new_serial_id;
 
 use super::contract_info::ContractInfo;
@@ -133,6 +134,7 @@ impl OfferedContract {
         let contract_info = get_contract_info_and_announcements(&offer_dlc.contract_info)?;
 
         let (inputs, input_amount) = get_tx_input_infos(&offer_dlc.funding_inputs)?;
+        let dlc_inputs = get_dlc_inputs_from_funding_inputs(&offer_dlc.funding_inputs);
 
         Ok(OfferedContract {
             id: offer_dlc.temporary_contract_id,
@@ -146,6 +148,7 @@ impl OfferedContract {
                 payout_serial_id: offer_dlc.payout_serial_id,
                 collateral: offer_dlc.offer_collateral,
                 inputs,
+                dlc_inputs,
                 input_amount,
             },
             cet_locktime: offer_dlc.cet_locktime,

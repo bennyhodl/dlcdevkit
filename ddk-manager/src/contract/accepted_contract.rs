@@ -101,16 +101,13 @@ impl AcceptedContract {
 
 #[cfg(test)]
 mod tests {
-    use lightning::io::Cursor;
-
-    use lightning::util::ser::Readable;
-
     use super::*;
+    use crate::contract::ser::Serializable;
 
     #[test]
     fn pnl_compute_test() {
         let buf = include_bytes!("../../../ddk/tests/data/dlc_storage/Accepted");
-        let accepted_contract: AcceptedContract = Readable::read(&mut Cursor::new(&buf)).unwrap();
+        let accepted_contract = AcceptedContract::deserialize(&mut buf.as_slice()).unwrap();
         let cets = &accepted_contract.dlc_transactions.cets;
         assert_eq!(
             accepted_contract.compute_pnl(&cets[0]),

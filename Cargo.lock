@@ -1090,10 +1090,10 @@ dependencies = [
 [[package]]
 name = "dlc"
 version = "0.7.1"
-source = "git+https://github.com/bennyhodl/rust-dlc?branch=single-funded-dlc#e3896372c84d6c69c1ed30895e18b835ae93c71c"
 dependencies = [
  "bitcoin",
  "miniscript",
+ "rayon",
  "secp256k1-sys",
  "secp256k1-zkp",
  "serde",
@@ -1102,19 +1102,19 @@ dependencies = [
 [[package]]
 name = "dlc-messages"
 version = "0.7.1"
-source = "git+https://github.com/bennyhodl/rust-dlc?branch=single-funded-dlc#e3896372c84d6c69c1ed30895e18b835ae93c71c"
 dependencies = [
  "bitcoin",
  "dlc",
+ "dlc-messages",
  "lightning",
  "secp256k1-zkp",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
 name = "dlc-trie"
 version = "0.7.1"
-source = "git+https://github.com/bennyhodl/rust-dlc?branch=single-funded-dlc#e3896372c84d6c69c1ed30895e18b835ae93c71c"
 dependencies = [
  "bitcoin",
  "dlc",
@@ -1533,6 +1533,12 @@ name = "hashbrown"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a9ee70c43aaf417c914396645a0fa852624801b24ebb7ae78fe8272889ac888"
+
+[[package]]
+name = "hashbrown"
+version = "0.13.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "43a3c133739dddd0d2990f9a4bdf8eb4b21ef50e4851ca85ab661199821d510e"
 
 [[package]]
 name = "hashbrown"
@@ -1998,7 +2004,6 @@ dependencies = [
 [[package]]
 name = "kormir"
 version = "0.4.4"
-source = "git+https://github.com/bennyhodl/kormir?branch=rust-dlc-bitcoin-amount#6b179ea44757f8d03def7dac3e210cd598b64e78"
 dependencies = [
  "base64 0.13.1",
  "bitcoin",
@@ -2010,6 +2015,7 @@ dependencies = [
  "nostr",
  "secp256k1-zkp",
  "serde",
+ "tokio",
 ]
 
 [[package]]
@@ -2051,8 +2057,11 @@ checksum = "767f388e50251da71f95a3737d6db32c9729f9de6427a54fa92bb994d04d793f"
 dependencies = [
  "bech32 0.9.1",
  "bitcoin",
+ "hashbrown 0.13.2",
+ "libm",
  "lightning-invoice",
  "lightning-types",
+ "possiblyrandom",
 ]
 
 [[package]]
@@ -2689,6 +2698,15 @@ dependencies = [
  "cpufeatures",
  "opaque-debug",
  "universal-hash",
+]
+
+[[package]]
+name = "possiblyrandom"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b122a615d72104fb3d8b26523fdf9232cd8ee06949fb37e4ce3ff964d15dffd"
+dependencies = [
+ "getrandom",
 ]
 
 [[package]]

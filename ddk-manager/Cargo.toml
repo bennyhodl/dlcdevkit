@@ -19,15 +19,9 @@ use-serde = ["serde", "dlc/use-serde", "dlc-messages/use-serde", "dlc-trie/use-s
 async-trait = "0.1.50"
 bitcoin = { version = "0.32.2", default-features = false }
 
-# dlc = { version = "0.7.1", features = ["use-serde"] }
-# dlc-messages = { version = "0.7.1", features = [ "use-serde"] }
-# dlc-trie = { version = "0.7.1", features = ["use-serde"] }
-# dlc = { path = "../../rust-dlc/dlc", features = ["use-serde"] }
-# dlc-messages = { path = "../../rust-dlc/dlc-messages", features = [ "use-serde"] }
-# dlc-trie = { path = "../../rust-dlc/dlc-trie", features = ["use-serde"] }
-dlc = { git = "https://github.com/bennyhodl/rust-dlc", branch = "single-funded-dlc", features = ["use-serde"] }
-dlc-messages = { git = "https://github.com/bennyhodl/rust-dlc", branch = "single-funded-dlc", features = [ "use-serde"] }
-dlc-trie = { git = "https://github.com/bennyhodl/rust-dlc", branch = "single-funded-dlc", features = ["use-serde"] }
+dlc = { path = "../dlc", features = ["use-serde"] }
+dlc-messages = { path = "../dlc-messages", features = [ "use-serde"] }
+dlc-trie = { path = "../dlc-trie", features = ["use-serde"] }
 
 futures = "0.3.31"
 hex = { package = "hex-conservative", version = "0.1" }

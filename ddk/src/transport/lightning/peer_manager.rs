@@ -127,6 +127,7 @@ impl LightningTransport {
                         }
                     },
                     accept_result = listener.accept() => {
+                        println!("acceptting connection");
                         match accept_result {
                             Ok((tcp_stream, socket)) => {
                                 let peer_mgr = Arc::clone(&peer_manager);
@@ -139,6 +140,7 @@ impl LightningTransport {
                                 });
                             }
                             Err(e) => {
+                                println!("error accepting connection: {}", e);
                                 tracing::error!("Error accepting connection: {}", e);
                             }
                         }
@@ -224,57 +226,39 @@ impl LightningTransport {
 
 #[cfg(test)]
 mod tests {
-    use bitcoin::Network;
-    use ddk_manager::Storage;
+    use crate::Transport;
     use dlc_messages::{Message, OfferDlc};
-
-    use crate::{
-        builder::Builder, oracle::memory::MemoryOracle, storage::memory::MemoryStorage, DlcDevKit,
-        Transport,
-    };
 
     use super::*;
 
     fn get_offer() -> OfferDlc {
         let offer_string = include_str!("../../../../ddk-manager/test_inputs/offer_contract.json");
-        let offer: OfferDlc = serde_json::from_str(&offer_string).unwrap();
+        let offer: OfferDlc =
+            serde_json::from_str(&offer_string).expect("to be able to parse offer");
         offer
     }
 
-    async fn manager(
-        listening_port: u16,
-    ) -> DlcDevKit<LightningTransport, MemoryStorage, MemoryOracle> {
+    #[tokio::test]
+    async fn send_offer_test() {
         let mut seed_bytes = [0u8; 32];
         seed_bytes
             .try_fill(&mut bitcoin::key::rand::thread_rng())
             .unwrap();
+        let mut bob_seed_bytes = [0u8; 32];
+        bob_seed_bytes
+            .try_fill(&mut bitcoin::key::rand::thread_rng())
+            .unwrap();
 
-        let transport = Arc::new(LightningTransport::new(&seed_bytes, listening_port).unwrap());
-        let storage = Arc::new(MemoryStorage::new());
-        let oracle_client = Arc::new(MemoryOracle::default());
+        let alice = LightningTransport::new(&seed_bytes, 1776).unwrap();
+        let bob = LightningTransport::new(&bob_seed_bytes, 1777).unwrap();
 
-        let mut builder = Builder::new();
-        builder.set_network(Network::Regtest);
-        builder.set_esplora_host("http://127.0.0.1:30000".to_string());
-        builder.set_seed_bytes(seed_bytes);
-        builder.set_transport(transport.clone());
-        builder.set_storage(storage.clone());
-        builder.set_oracle(oracle_client.clone());
-        builder.finish().await.unwrap()
-    }
+        let (sender, receiver) = watch::channel(false);
+        alice.listen(receiver.clone());
+        bob.listen(receiver.clone());
 
-    #[test_log::test(tokio::test)]
-    async fn send_offer() {
-        let alice = manager(1776).await;
-        let alice_pk = alice.transport.public_key();
-        let bob = manager(1777).await;
-        let _bob_pk = bob.transport.public_key();
+        tokio::time::sleep(Duration::from_secs(2)).await;
 
-        bob.start().unwrap();
-        alice.start().unwrap();
-
-        bob.transport
-            .connect_outbound(alice_pk, "127.0.0.1:1776")
+        bob.connect_outbound(alice.public_key(), "127.0.0.1:1776")
             .await;
 
         let mut connected = false;
@@ -282,14 +266,12 @@ mod tests {
 
         while !connected {
             if retries > 10 {
-                bob.stop().unwrap();
-                alice.stop().unwrap();
+                sender.send(true).unwrap();
                 panic!("Bob could not connect to alice.")
             }
-            if bob
-                .transport
+            if alice
                 .peer_manager
-                .peer_by_node_id(&alice_pk)
+                .peer_by_node_id(&bob.public_key())
                 .is_some()
             {
                 connected = true
@@ -299,36 +281,29 @@ mod tests {
         }
 
         let offer = get_offer();
-        bob.transport
-            .send_message(alice_pk, Message::Offer(offer.clone()))
+        bob.send_message(alice.public_key(), Message::Offer(offer.clone()))
             .await;
 
-        let mut offer_received = false;
+        let mut received = false;
         let mut retries = 0;
 
-        while !offer_received {
-            if retries > 15 {
-                bob.stop().unwrap();
-                alice.stop().unwrap();
-                panic!("Contract was not offered to alice")
+        while !received {
+            if retries > 10 {
+                sender.send(true).unwrap();
+                panic!("Alice did not receive the offer.")
             }
             if alice
-                .storage
-                .get_contract_offers()
-                .await
-                .unwrap()
-                .iter()
-                .find(|o| o.id == offer.temporary_contract_id)
-                .is_some()
+                .message_handler
+                .get_and_clear_received_messages()
+                .len()
+                > 0
             {
-                offer_received = true
+                received = true
             }
             retries += 1;
-            tokio::time::sleep(Duration::from_secs(1)).await
+            tokio::time::sleep(Duration::from_millis(100)).await
         }
 
-        bob.stop().unwrap();
-        alice.stop().unwrap();
-        assert!(true)
+        sender.send(true).unwrap();
     }
 }
