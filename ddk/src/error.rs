@@ -182,6 +182,10 @@ pub enum WalletError {
     Receiver(#[from] tokio::sync::oneshot::error::RecvError),
     #[error("Wallet sender error: {0}")]
     Sender(#[from] tokio::sync::mpsc::error::SendError<WalletCommand>),
+    #[error("Invalid derivation index")]
+    InvalidDerivationIndex,
+    #[error("Invalid secret key")]
+    InvalidSecretKey,
 }
 
 /// Converts a generic error to a DLC manager storage error
