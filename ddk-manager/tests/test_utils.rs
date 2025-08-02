@@ -367,16 +367,10 @@ pub fn get_splice_out_enum_contract_descriptor() -> ContractDescriptor {
     ContractDescriptor::Enum(EnumDescriptor { outcome_payouts })
 }
 
-pub async fn get_splice_in_test_params(oracles: Vec<MemoryOracle>) -> TestParams {
-    // Default to a maturity time shortly in the future
-    let current_time = MOCK_TIME.with(|f| *f.borrow());
-    let splice_maturity = (current_time + 60) as u32; // 60 seconds in the future
-    get_splice_in_test_params_with_maturity(oracles, splice_maturity).await
-}
-
 pub async fn get_splice_in_test_params_with_maturity(
     oracles: Vec<MemoryOracle>,
     maturity: u32,
+    dust: bool,
 ) -> TestParams {
     let splice_event_id = format!("{}-splice-in", EVENT_ID);
 
@@ -413,8 +407,15 @@ pub async fn get_splice_in_test_params_with_maturity(
         },
     };
 
+    let offer_collateral = TOTAL_COLLATERAL
+        + if dust {
+            Amount::from_sat(500)
+        } else {
+            Amount::from_sat(50_000_000)
+        };
+
     let contract_input = ContractInput {
-        offer_collateral: TOTAL_COLLATERAL + Amount::from_sat(50_000_000),
+        offer_collateral,
         accept_collateral: Amount::ZERO,
         fee_rate: 2,
         contract_infos: vec![contract_info],
@@ -426,16 +427,10 @@ pub async fn get_splice_in_test_params_with_maturity(
     }
 }
 
-pub async fn get_splice_out_test_params(oracles: Vec<MemoryOracle>) -> TestParams {
-    // Default to a maturity time shortly in the future
-    let current_time = MOCK_TIME.with(|f| *f.borrow());
-    let splice_maturity = (current_time + 60) as u32; // 60 seconds in the future
-    get_splice_out_test_params_with_maturity(oracles, splice_maturity).await
-}
-
 pub async fn get_splice_out_test_params_with_maturity(
     oracles: Vec<MemoryOracle>,
     maturity: u32,
+    dust: bool,
 ) -> TestParams {
     let splice_event_id = format!("{}-splice-out", EVENT_ID);
 
@@ -472,8 +467,15 @@ pub async fn get_splice_out_test_params_with_maturity(
         },
     };
 
+    let offer_collateral = TOTAL_COLLATERAL
+        - if dust {
+            TOTAL_COLLATERAL - Amount::from_sat(500)
+        } else {
+            Amount::from_sat(50000)
+        };
+
     let contract_input = ContractInput {
-        offer_collateral: TOTAL_COLLATERAL - Amount::from_sat(50_000_000),
+        offer_collateral,
         accept_collateral: Amount::ZERO,
         fee_rate: 2,
         contract_infos: vec![contract_info],
