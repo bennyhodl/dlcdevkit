@@ -42,18 +42,18 @@ use bdk_wallet::{
     AddressInfo, KeychainKind, SignOptions, Wallet,
 };
 use bdk_wallet::{Utxo, WeightedUtxo};
-use bitcoin::hashes::sha256::Hash as Sha256Hash;
-use bitcoin::hashes::sha256::HashEngine;
+use bitcoin::bip32::{ChildNumber, DerivationPath, Fingerprint};
+use bitcoin::hashes::sha256;
 use bitcoin::hashes::Hash;
-use bitcoin::key::rand::{thread_rng, Fill};
+use bitcoin::key::rand::thread_rng;
 use bitcoin::Psbt;
 use bitcoin::{secp256k1::SecretKey, Amount, FeeRate, ScriptBuf, Transaction};
 use ddk_manager::{error::Error as ManagerError, SimpleSigner};
 use lightning::chain::chaininterface::{ConfirmationTarget, FeeEstimator};
 use std::collections::HashMap;
 use std::future::Future;
-use std::io::Write;
 use std::pin::Pin;
+use std::str::FromStr;
 use std::sync::atomic::AtomicU32;
 use std::sync::{atomic::Ordering, Arc};
 use tokio::sync::{
@@ -63,6 +63,13 @@ use tokio::sync::{
 
 type FutureResult<'a, T, E> = Pin<Box<dyn Future<Output = std::result::Result<T, E>> + Send + 'a>>;
 type Result<T> = std::result::Result<T, WalletError>;
+
+/// We choost this number for the range of child numbers that are used for the DLC key path.
+/// This allows for 3400^3 = 39.3 billion possible paths.
+/// It is large enough to avoid collisions, but small enough to be practical for a doomsday scenario.
+///
+/// Recovery would be ~1 week for each contract key with the Xpriv.
+const CHILD_NUMBER_RANGE: u32 = 3_400;
 
 /// Wrapper type that adapts DDK's Storage trait to BDK's AsyncWalletPersister interface.
 ///
@@ -180,6 +187,10 @@ pub struct DlcDevKitWallet {
     xprv: Xpriv,
     /// Secp256k1 context for cryptographic operations
     secp: Secp256k1<All>,
+    /// Fingerprint of the wallet
+    fingerprint: Fingerprint,
+    /// Derivation path for DLC keys
+    dlc_path: DerivationPath,
 }
 
 const MIN_FEERATE: u32 = 253;
@@ -218,6 +229,7 @@ impl DlcDevKitWallet {
         let secp = Secp256k1::new();
 
         let xprv = Xpriv::new_master(network, seed_bytes)?;
+        let fingerprint = xprv.fingerprint(&secp);
 
         let external_descriptor =
             Bip84(xprv, KeychainKind::External).into_wallet_descriptor(&secp, network)?;
@@ -243,6 +255,8 @@ impl DlcDevKitWallet {
                 .await
                 .map_err(|e| WalletError::WalletPersistanceError(e.to_string()))?,
         };
+
+        let dlc_path = DerivationPath::from_str("m/9999'/0'/0'")?;
 
         let blockchain = Arc::new(
             EsploraClient::new(esplora_url, network)
@@ -429,6 +443,8 @@ impl DlcDevKitWallet {
             network,
             xprv,
             secp,
+            fingerprint,
+            dlc_path,
         })
     }
 
@@ -557,6 +573,77 @@ impl DlcDevKitWallet {
         *psbt = signed_psbt_received?;
         Ok(())
     }
+
+    /// Converts a 32-byte key ID into hierarchical indices for derivation paths.
+    ///
+    /// This function takes a 32-byte key ID and splits it into three 4-byte
+    /// arrays, which are then used to calculate indices for three levels of
+    /// derivation paths. The indices are calculated using modulo arithmetic
+    /// to ensure they fall within the range of 0 to 3399.
+    fn key_id_to_hierarchical_indices(&self, key_id: [u8; 32]) -> (u32, u32, u32) {
+        let level_1 = [key_id[0], key_id[1], key_id[2], key_id[3]];
+        let level_2 = [key_id[4], key_id[5], key_id[6], key_id[7]];
+        let level_3 = [key_id[8], key_id[9], key_id[10], key_id[11]];
+
+        let level_1_index = u32::from_be_bytes(level_1) % CHILD_NUMBER_RANGE;
+        let level_2_index = u32::from_be_bytes(level_2) % CHILD_NUMBER_RANGE;
+        let level_3_index = u32::from_be_bytes(level_3) % CHILD_NUMBER_RANGE;
+
+        // Total combination space: 3400 × 3400 × 3400 = ~39.3 billion possible paths
+        (level_1_index, level_2_index, level_3_index)
+    }
+
+    fn get_hierarchical_derivation_path(&self, key_id: [u8; 32]) -> Result<DerivationPath> {
+        let (level_1_index, level_2_index, level_3_index) =
+            self.key_id_to_hierarchical_indices(key_id);
+        let child_one = ChildNumber::from_normal_idx(level_1_index)
+            .map_err(|_| WalletError::InvalidDerivationIndex)?;
+        let child_two = ChildNumber::from_normal_idx(level_2_index)
+            .map_err(|_| WalletError::InvalidDerivationIndex)?;
+        let child_three = ChildNumber::from_normal_idx(level_3_index)
+            .map_err(|_| WalletError::InvalidDerivationIndex)?;
+
+        let path = self.dlc_path.clone();
+        let full_path = path.extend([child_one, child_two, child_three]);
+
+        Ok(full_path)
+    }
+
+    fn apply_hardening_to_base_key(
+        &self,
+        base_key: &SecretKey,
+        level_1: u32,
+        level_2: u32,
+        level_3: u32,
+    ) -> Result<SecretKey> {
+        let mut hardening_input = Vec::new();
+        hardening_input.extend_from_slice(self.fingerprint.as_bytes());
+        hardening_input.extend_from_slice(&base_key.secret_bytes());
+        hardening_input.extend_from_slice(&level_1.to_be_bytes());
+        hardening_input.extend_from_slice(&level_2.to_be_bytes());
+        hardening_input.extend_from_slice(&level_3.to_be_bytes());
+
+        let hardened_hash = sha256::Hash::hash(&hardening_input);
+
+        SecretKey::from_slice(hardened_hash.as_ref()).map_err(|_| WalletError::InvalidSecretKey)
+    }
+
+    fn derive_secret_key_from_key_id(&self, key_id: [u8; 32]) -> Result<SecretKey> {
+        let derivation_path = self.get_hierarchical_derivation_path(key_id)?;
+
+        let base_secret_key = self.xprv.derive_priv(&self.secp, &derivation_path)?;
+
+        let (level_1, level_2, level_3) = self.key_id_to_hierarchical_indices(key_id);
+
+        let hardened_key = self.apply_hardening_to_base_key(
+            &base_secret_key.private_key,
+            level_1,
+            level_2,
+            level_3,
+        )?;
+
+        Ok(hardened_key)
+    }
 }
 
 /// Implementation of Lightning's FeeEstimator trait for the wallet.
@@ -590,20 +677,14 @@ impl ddk_manager::ContractSignerProvider for DlcDevKitWallet {
     /// # Returns
     /// A 32-byte key ID for the contract
     fn derive_signer_key_id(&self, _is_offer_party: bool, temp_id: [u8; 32]) -> [u8; 32] {
-        let mut random_bytes = [0u8; 32];
-        let _ = random_bytes.try_fill(&mut thread_rng()).map_err(|e| {
-            tracing::error!(
-                "Did not create random bytes while generating key id. {:?}",
-                e
-            );
-        });
-        let mut hasher = HashEngine::default();
-        hasher.write_all(&temp_id).unwrap();
-        hasher.write_all(&random_bytes).unwrap();
-        let hash: Sha256Hash = Hash::from_engine(hasher);
+        let mut key_id_input = Vec::new();
 
-        // Might want to store this for safe backups.
-        hash.to_byte_array()
+        key_id_input.extend_from_slice(self.fingerprint.as_bytes());
+        key_id_input.extend_from_slice(&temp_id);
+        key_id_input.extend_from_slice(b"CONTRACT_SIGNER_KEY_ID_V1");
+
+        let key_id_hash = sha256::Hash::hash(&key_id_input);
+        key_id_hash.to_byte_array()
     }
 
     /// Creates a contract signer from a key ID.
@@ -620,12 +701,11 @@ impl ddk_manager::ContractSignerProvider for DlcDevKitWallet {
         &self,
         key_id: [u8; 32],
     ) -> std::result::Result<Self::Signer, ManagerError> {
-        let child_key = SecretKey::from_slice(&key_id).expect("correct size");
-        tracing::info!(
-            key_id = hex::encode(key_id),
-            "Derived secret key for contract."
-        );
-        Ok(SimpleSigner::new(child_key))
+        let secret_key = self
+            .derive_secret_key_from_key_id(key_id)
+            .map_err(|e| ManagerError::WalletError(Box::new(e)))?;
+
+        Ok(SimpleSigner::new(secret_key))
     }
 
     /// Gets a secret key for a given public key.
@@ -809,15 +889,18 @@ fn fee_estimator() -> HashMap<ConfirmationTarget, AtomicU32> {
 
 #[cfg(test)]
 mod tests {
-    use std::{str::FromStr, sync::Arc, time::Duration};
+    use std::{collections::HashSet, str::FromStr, sync::Arc, time::Duration};
 
     use crate::storage::memory::MemoryStorage;
     use bitcoin::{
-        address::NetworkChecked, bip32::Xpriv, key::rand::Fill, Address, AddressType, Amount,
-        FeeRate, Network,
+        address::NetworkChecked,
+        bip32::{ChildNumber, Xpriv},
+        key::rand::Fill,
+        secp256k1::{PublicKey, SecretKey},
+        Address, AddressType, Amount, FeeRate, Network,
     };
     use bitcoincore_rpc::RpcApi;
-    use ddk_manager::ContractSignerProvider;
+    use ddk_manager::{ContractSigner, ContractSignerProvider};
 
     use super::DlcDevKitWallet;
 
@@ -921,5 +1004,419 @@ mod tests {
         wallet.sync().await.unwrap();
         let balance = wallet.get_balance().await.unwrap();
         assert!(balance.confirmed == Amount::ZERO)
+    }
+
+    #[tokio::test]
+    async fn derive_secret_key_from_key_id() {
+        let wallet = create_wallet().await;
+        let mut temp_key_id = [0u8; 32];
+        temp_key_id
+            .try_fill(&mut bitcoin::key::rand::thread_rng())
+            .unwrap();
+
+        let key_id = wallet.derive_signer_key_id(true, temp_key_id);
+        let secret_key = wallet.derive_secret_key_from_key_id(key_id);
+        assert!(secret_key.is_ok());
+    }
+
+    #[tokio::test]
+    async fn key_id_to_hierarchical_indices_deterministic() {
+        let wallet = create_wallet().await;
+
+        // Test with a known key_id
+        let key_id = [
+            0x12, 0x34, 0x56, 0x78, // level_1: should give same result each time
+            0x9A, 0xBC, 0xDE, 0xF0, // level_2
+            0x11, 0x22, 0x33, 0x44, // level_3
+            0x55, 0x66, 0x77, 0x88, // unused bytes
+            0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
+            0x07, 0x08,
+        ];
+
+        let (level1_1, level2_1, level3_1) = wallet.key_id_to_hierarchical_indices(key_id);
+        let (level1_2, level2_2, level3_2) = wallet.key_id_to_hierarchical_indices(key_id);
+
+        // Should be deterministic - same input produces same output
+        assert_eq!(level1_1, level1_2);
+        assert_eq!(level2_1, level2_2);
+        assert_eq!(level3_1, level3_2);
+
+        // Verify indices are within expected range
+        assert!(level1_1 < 3400);
+        assert!(level2_1 < 3400);
+        assert!(level3_1 < 3400);
+
+        // Calculate expected values manually to verify correctness
+        let expected_level1 = u32::from_be_bytes([0x12, 0x34, 0x56, 0x78]) % 3400;
+        let expected_level2 = u32::from_be_bytes([0x9A, 0xBC, 0xDE, 0xF0]) % 3400;
+        let expected_level3 = u32::from_be_bytes([0x11, 0x22, 0x33, 0x44]) % 3400;
+
+        assert_eq!(level1_1, expected_level1);
+        assert_eq!(level2_1, expected_level2);
+        assert_eq!(level3_1, expected_level3);
+    }
+
+    #[tokio::test]
+    async fn key_id_to_hierarchical_indices_distribution() {
+        let wallet = create_wallet().await;
+        let mut level1_values = HashSet::new();
+        let mut level2_values = HashSet::new();
+        let mut level3_values = HashSet::new();
+
+        // Test with 1000 different key_ids to check distribution
+        for i in 0..1000u32 {
+            let mut key_id = [0u8; 32];
+            // Create variation in the first 12 bytes
+            key_id[0..4].copy_from_slice(&i.to_be_bytes());
+            key_id[4..8].copy_from_slice(&(i.wrapping_mul(7919)).to_be_bytes());
+            key_id[8..12].copy_from_slice(&(i.wrapping_mul(104729)).to_be_bytes());
+
+            let (level1, level2, level3) = wallet.key_id_to_hierarchical_indices(key_id);
+            level1_values.insert(level1);
+            level2_values.insert(level2);
+            level3_values.insert(level3);
+        }
+
+        // Should have good distribution - expect most values to be unique for small sample
+        assert!(
+            level1_values.len() > 900,
+            "Level 1 distribution too poor: {} unique values",
+            level1_values.len()
+        );
+        assert!(
+            level2_values.len() > 900,
+            "Level 2 distribution too poor: {} unique values",
+            level2_values.len()
+        );
+        assert!(
+            level3_values.len() > 900,
+            "Level 3 distribution too poor: {} unique values",
+            level3_values.len()
+        );
+    }
+
+    #[tokio::test]
+    async fn get_hierarchical_derivation_path() {
+        let wallet = create_wallet().await;
+
+        let key_id = [1u8; 32]; // Simple test key_id
+        let path = wallet
+            .get_hierarchical_derivation_path(key_id)
+            .expect("Should create valid derivation path");
+
+        // Verify the path has the correct structure
+        // Should be: m/9999'/0'/0'/level1/level2/level3 (6 components total)
+        assert_eq!(path.len(), 6);
+
+        // Verify base path components (hardened derivation)
+        assert_eq!(path[0], ChildNumber::from_hardened_idx(9999).unwrap());
+        assert_eq!(path[1], ChildNumber::from_hardened_idx(0).unwrap());
+        assert_eq!(path[2], ChildNumber::from_hardened_idx(0).unwrap());
+
+        // The last three should be normal (non-hardened) derivation
+        assert!(!path[3].is_hardened());
+        assert!(!path[4].is_hardened());
+        assert!(!path[5].is_hardened());
+
+        // Verify indices match what we expect from key_id_to_hierarchical_indices
+        let (expected_level1, expected_level2, expected_level3) =
+            wallet.key_id_to_hierarchical_indices(key_id);
+        assert_eq!(
+            path[3],
+            ChildNumber::from_normal_idx(expected_level1).unwrap()
+        );
+        assert_eq!(
+            path[4],
+            ChildNumber::from_normal_idx(expected_level2).unwrap()
+        );
+        assert_eq!(
+            path[5],
+            ChildNumber::from_normal_idx(expected_level3).unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn apply_hardening_to_base_key_deterministic() {
+        let wallet = create_wallet().await;
+
+        // Create a test base key
+        let base_key = SecretKey::from_slice(&[0x42; 32]).expect("Valid secret key");
+        let level1 = 123;
+        let level2 = 456;
+        let level3 = 789;
+
+        // Apply hardening multiple times
+        let hardened1 = wallet
+            .apply_hardening_to_base_key(&base_key, level1, level2, level3)
+            .expect("Hardening should succeed");
+        let hardened2 = wallet
+            .apply_hardening_to_base_key(&base_key, level1, level2, level3)
+            .expect("Hardening should succeed");
+
+        // Should be deterministic
+        assert_eq!(hardened1.secret_bytes(), hardened2.secret_bytes());
+
+        // Should be different from the base key
+        assert_ne!(hardened1.secret_bytes(), base_key.secret_bytes());
+    }
+
+    #[tokio::test]
+    async fn apply_hardening_different_inputs_produce_different_outputs() {
+        let wallet = create_wallet().await;
+        let base_key = SecretKey::from_slice(&[0x42; 32]).expect("Valid secret key");
+
+        // Test different level combinations produce different results
+        let hardened1 = wallet
+            .apply_hardening_to_base_key(&base_key, 100, 200, 300)
+            .unwrap();
+        let hardened2 = wallet
+            .apply_hardening_to_base_key(&base_key, 100, 200, 301)
+            .unwrap(); // level3 different
+        let hardened3 = wallet
+            .apply_hardening_to_base_key(&base_key, 100, 201, 300)
+            .unwrap(); // level2 different
+        let hardened4 = wallet
+            .apply_hardening_to_base_key(&base_key, 101, 200, 300)
+            .unwrap(); // level1 different
+
+        // All should be different
+        assert_ne!(hardened1.secret_bytes(), hardened2.secret_bytes());
+        assert_ne!(hardened1.secret_bytes(), hardened3.secret_bytes());
+        assert_ne!(hardened1.secret_bytes(), hardened4.secret_bytes());
+        assert_ne!(hardened2.secret_bytes(), hardened3.secret_bytes());
+        assert_ne!(hardened2.secret_bytes(), hardened4.secret_bytes());
+        assert_ne!(hardened3.secret_bytes(), hardened4.secret_bytes());
+    }
+
+    #[tokio::test]
+    async fn derive_secret_key_from_key_id_complete_flow() {
+        let wallet = create_wallet().await;
+
+        let key_id = [0x33; 32]; // Test key_id
+        let secret_key1 = wallet
+            .derive_secret_key_from_key_id(key_id)
+            .expect("Should derive secret key successfully");
+        let secret_key2 = wallet
+            .derive_secret_key_from_key_id(key_id)
+            .expect("Should derive secret key successfully");
+
+        // Should be deterministic
+        assert_eq!(secret_key1.secret_bytes(), secret_key2.secret_bytes());
+
+        // Verify the secret key is valid for secp256k1
+        let public_key = PublicKey::from_secret_key(&wallet.secp, &secret_key1);
+        assert!(public_key
+            .verify(
+                &wallet.secp,
+                &bitcoin::secp256k1::Message::from_digest([0u8; 32]),
+                &wallet.secp.sign_ecdsa(
+                    &bitcoin::secp256k1::Message::from_digest([0u8; 32]),
+                    &secret_key1
+                )
+            )
+            .is_ok());
+    }
+
+    #[tokio::test]
+    async fn derive_signer_key_id_deterministic() {
+        let wallet = create_wallet().await;
+
+        let temp_id = [0x55; 32];
+
+        // Test both offer party values produce same result (since _is_offer_party is unused)
+        let key_id1 = wallet.derive_signer_key_id(true, temp_id);
+        let key_id2 = wallet.derive_signer_key_id(false, temp_id);
+        let key_id3 = wallet.derive_signer_key_id(true, temp_id); // repeat with same params
+
+        assert_eq!(key_id1, key_id2); // is_offer_party doesn't affect result
+        assert_eq!(key_id1, key_id3); // deterministic
+    }
+
+    #[tokio::test]
+    async fn derive_signer_key_id_different_temps_produce_different_keys() {
+        let wallet = create_wallet().await;
+
+        let temp_id1 = [0x11; 32];
+        let temp_id2 = [0x22; 32];
+
+        let key_id1 = wallet.derive_signer_key_id(true, temp_id1);
+        let key_id2 = wallet.derive_signer_key_id(true, temp_id2);
+
+        // Different temp_ids should produce different key_ids
+        assert_ne!(key_id1, key_id2);
+    }
+
+    #[tokio::test]
+    async fn derive_signer_key_id_includes_fingerprint() {
+        let wallet1 = create_wallet().await;
+        let wallet2 = create_wallet().await;
+
+        let temp_id = [0x99; 32];
+
+        // Same temp_id should produce different key_ids for different wallets
+        let key_id1 = wallet1.derive_signer_key_id(true, temp_id);
+        let key_id2 = wallet2.derive_signer_key_id(true, temp_id);
+
+        assert_ne!(
+            key_id1, key_id2,
+            "Different wallets should produce different key_ids for same temp_id"
+        );
+    }
+
+    #[tokio::test]
+    async fn derive_contract_signer_creates_valid_signer() {
+        let wallet = create_wallet().await;
+
+        let temp_id = [0x77; 32];
+        let key_id = wallet.derive_signer_key_id(true, temp_id);
+        let signer = wallet
+            .derive_contract_signer(key_id)
+            .expect("Should create valid signer");
+
+        // Verify the signer has a valid public key
+        let public_key = signer.get_public_key(&wallet.secp).unwrap();
+
+        // The public key should be valid (this would panic if invalid)
+        assert!(public_key
+            .verify(
+                &wallet.secp,
+                &bitcoin::secp256k1::Message::from_digest([0u8; 32]),
+                &wallet.secp.sign_ecdsa(
+                    &bitcoin::secp256k1::Message::from_digest([0u8; 32]),
+                    &signer.get_secret_key().unwrap()
+                )
+            )
+            .is_ok());
+    }
+
+    #[tokio::test]
+    async fn full_workflow_deterministic() {
+        let wallet = create_wallet().await;
+
+        let temp_id = [0xAB; 32];
+
+        // Full workflow: temp_id -> key_id -> signer
+        let key_id = wallet.derive_signer_key_id(true, temp_id);
+        let signer1 = wallet.derive_contract_signer(key_id).unwrap();
+
+        // Repeat the workflow
+        let key_id2 = wallet.derive_signer_key_id(true, temp_id);
+        let signer2 = wallet.derive_contract_signer(key_id2).unwrap();
+
+        // Everything should be identical
+        assert_eq!(key_id, key_id2);
+        assert_eq!(
+            signer1.get_public_key(&wallet.secp).unwrap(),
+            signer2.get_public_key(&wallet.secp).unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn different_temp_ids_produce_different_signers() {
+        let wallet = create_wallet().await;
+
+        let temp_id1 = [0x01; 32];
+        let temp_id2 = [0x02; 32];
+
+        let key_id1 = wallet.derive_signer_key_id(true, temp_id1);
+        let key_id2 = wallet.derive_signer_key_id(true, temp_id2);
+        let signer1 = wallet.derive_contract_signer(key_id1).unwrap();
+        let signer2 = wallet.derive_contract_signer(key_id2).unwrap();
+
+        // Different temp_ids should produce different signers
+        assert_ne!(key_id1, key_id2);
+        assert_ne!(
+            signer1.get_public_key(&wallet.secp).unwrap(),
+            signer2.get_public_key(&wallet.secp).unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn hierarchical_indices_bounds() {
+        let wallet = create_wallet().await;
+
+        // Test edge cases with extreme values
+        let max_key_id = [0xFF; 32];
+        let min_key_id = [0x00; 32];
+
+        let (max_l1, max_l2, max_l3) = wallet.key_id_to_hierarchical_indices(max_key_id);
+        let (min_l1, min_l2, min_l3) = wallet.key_id_to_hierarchical_indices(min_key_id);
+
+        // All indices should be within bounds
+        assert!(max_l1 < 3400);
+        assert!(max_l2 < 3400);
+        assert!(max_l3 < 3400);
+        assert!(min_l1 < 3400);
+        assert!(min_l2 < 3400);
+        assert!(min_l3 < 3400);
+
+        // Min key_id should produce all zeros
+        assert_eq!(min_l1, 0);
+        assert_eq!(min_l2, 0);
+        assert_eq!(min_l3, 0);
+    }
+
+    #[tokio::test]
+    async fn collision_resistance_sample() {
+        let wallet = create_wallet().await;
+        let mut key_ids = HashSet::new();
+        let mut public_keys = HashSet::new();
+
+        // Generate 1000 contracts and verify no collisions
+        for i in 0..1000u32 {
+            let mut temp_id = [0u8; 32];
+            temp_id[0..4].copy_from_slice(&i.to_be_bytes());
+
+            let key_id = wallet.derive_signer_key_id(true, temp_id);
+            let signer = wallet.derive_contract_signer(key_id).unwrap();
+            let public_key = signer.get_public_key(&wallet.secp).unwrap();
+
+            // Verify no collisions in key_ids or public keys
+            assert!(
+                key_ids.insert(key_id),
+                "Key ID collision detected at iteration {}",
+                i
+            );
+            assert!(
+                public_keys.insert(public_key),
+                "Public key collision detected at iteration {}",
+                i
+            );
+        }
+
+        assert_eq!(key_ids.len(), 1000);
+        assert_eq!(public_keys.len(), 1000);
+    }
+
+    #[tokio::test]
+    async fn recovery_scenario_simulation() {
+        let wallet = create_wallet().await;
+
+        // Simulate creating a contract
+        let temp_id = [0xDE, 0xAD, 0xBE, 0xEF].repeat(8).try_into().unwrap();
+        let key_id = wallet.derive_signer_key_id(true, temp_id);
+        let original_signer = wallet.derive_contract_signer(key_id).unwrap();
+        let target_public_key = original_signer.get_public_key(&wallet.secp).unwrap();
+
+        // Simulate recovery: we know the target public key and need to find the secret key
+        // In practice, this would involve scanning, but for testing we'll verify direct recovery
+        let recovered_signer = wallet.derive_contract_signer(key_id).unwrap();
+
+        assert_eq!(
+            original_signer.get_public_key(&wallet.secp).unwrap(),
+            recovered_signer.get_public_key(&wallet.secp).unwrap()
+        );
+
+        // Also test that we can recover from just the temp_id
+        let recovered_key_id = wallet.derive_signer_key_id(true, temp_id);
+        let temp_id_recovered_signer = wallet.derive_contract_signer(recovered_key_id).unwrap();
+
+        assert_eq!(key_id, recovered_key_id);
+        assert_eq!(
+            target_public_key,
+            temp_id_recovered_signer
+                .get_public_key(&wallet.secp)
+                .unwrap()
+        );
     }
 }
