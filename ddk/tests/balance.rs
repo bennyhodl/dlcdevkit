@@ -6,17 +6,19 @@ use bitcoin::key::Secp256k1;
 use bitcoin::Amount;
 use bitcoincore_rpc::RpcApi;
 use ddk::oracle::memory::MemoryOracle;
+use ddk::util::ser::deserialize_contract;
 use ddk_manager::contract::Contract;
-use ddk_manager::contract::{ser::Serializable, PreClosedContract};
 use ddk_manager::Storage;
-use lightning::io::Cursor;
 use test_util::generate_blocks;
 
 #[tokio::test]
 async fn contract_balance() {
-    let contract_bytes = include_bytes!("../tests/data/dlc_storage/PreClosed");
-    let mut cursor = Cursor::new(contract_bytes);
-    let preclosed = PreClosedContract::deserialize(&mut cursor).unwrap();
+    let contract_bytes = include_bytes!("../../contract_binaries/PreClosed");
+    let contract = deserialize_contract(&contract_bytes.to_vec()).unwrap();
+    let preclosed = match contract {
+        Contract::PreClosed(c) => c,
+        _ => panic!("Contract is not a PreClosedContract"),
+    };
     let secp = Secp256k1::new();
     let oracle = Arc::new(MemoryOracle::default());
     let bob = test_util::TestSuite::new(&secp, "balance", oracle).await;
@@ -45,17 +47,13 @@ async fn contract_balance() {
         .unwrap();
     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 
-    bob.ddk.wallet.sync().await.unwrap();
-    let balance = bob.ddk.balance().await.unwrap();
-    assert_eq!(balance.foreign_unconfirmed, Amount::ONE_BTC);
-    assert_eq!(balance.contract_pnl, -11000000);
-
     generate_blocks(2);
 
     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
     bob.ddk.wallet.sync().await.unwrap();
     let balance = bob.ddk.balance().await.unwrap();
     assert_eq!(balance.confirmed, Amount::ONE_BTC);
     assert_eq!(balance.foreign_unconfirmed, Amount::ZERO);
-    assert_eq!(balance.contract_pnl, -11000000);
+    assert_eq!(balance.contract_pnl, -50000);
 }

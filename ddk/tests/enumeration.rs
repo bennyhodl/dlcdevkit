@@ -1,6 +1,7 @@
 mod test_util;
 use bitcoin::Amount;
 use chrono::{Local, TimeDelta};
+use ddk::util::ser::serialize_contract;
 use ddk::Transport;
 use ddk_manager::contract::Contract;
 use ddk_manager::Storage;
@@ -9,6 +10,33 @@ use dlc_messages::Message;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use test_util::{generate_blocks, test_ddk};
 use tokio::time::sleep;
+
+#[macro_export]
+macro_rules! write_contract {
+    ($contract: ident, $state: ident) => {
+        match &$contract {
+            Contract::$state(_) => {
+                let serialized =
+                    serialize_contract(&$contract).expect("to be able to serialize the contract.");
+                let dest_path = format!("{}", stringify!($state));
+                std::fs::write(dest_path, serialized)
+                    .expect("to be able to save the contract to file.");
+            }
+            _ => {}
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! assert_contract_state_and_serialize {
+    ($storage:expr, $id:expr, $state:ident) => {
+        let contract = $storage.get_contract(&$id).await.unwrap().unwrap();
+        assert!(matches!(contract, Contract::$state(_)));
+        if std::env::var("GENERATE_SERIALIZED_CONTRACT").is_ok() {
+            write_contract!(contract, $state);
+        }
+    };
+}
 
 #[test_log::test(tokio::test)]
 async fn enumeration_contract() {
@@ -68,6 +96,9 @@ async fn enumeration_contract() {
     let alice_pubkey = alice.ddk.transport.public_key();
     let bob_pubkey = bob.ddk.transport.public_key();
 
+    // Serialize Offered state
+    assert_contract_state_and_serialize!(alice.ddk.storage, contract_id, Offered);
+
     let bob_receives_offer = bob
         .ddk
         .manager
@@ -76,6 +107,9 @@ async fn enumeration_contract() {
 
     let bob_receive_offer = bob_receives_offer.expect("bob did not receive the offer");
     assert!(bob_receive_offer.is_none());
+
+    // Serialize Offered state from Bob's perspective
+    assert_contract_state_and_serialize!(bob.ddk.storage, contract_id, Offered);
 
     let bob_accept_offer = bob
         .ddk
@@ -95,12 +129,19 @@ async fn enumeration_contract() {
 
     assert!(alice_receive_accept.is_some());
 
+    // Serialize Accepted state
+    assert_contract_state_and_serialize!(bob.ddk.storage, contract_id, Accepted);
+
     let alice_sign_message = alice_receive_accept.unwrap();
     bob.ddk
         .manager
         .on_dlc_message(&alice_sign_message, alice_pubkey)
         .await
         .expect("bob did not receive sign message");
+
+    // Serialize Signed state
+    assert_contract_state_and_serialize!(alice.ddk.storage, contract_id, Signed);
+    assert_contract_state_and_serialize!(bob.ddk.storage, contract_id, Signed);
 
     generate_blocks(10);
 
@@ -119,6 +160,10 @@ async fn enumeration_contract() {
 
     let contract = alice.ddk.storage.get_contract(&contract_id).await.unwrap();
     assert!(matches!(contract.unwrap(), Contract::Confirmed(_)));
+
+    // Serialize Confirmed state
+    assert_contract_state_and_serialize!(alice.ddk.storage, contract_id, Confirmed);
+    assert_contract_state_and_serialize!(bob.ddk.storage, contract_id, Confirmed);
 
     bob.ddk.wallet.sync().await.unwrap();
     alice.ddk.wallet.sync().await.unwrap();
@@ -186,6 +231,9 @@ async fn enumeration_contract() {
         .unwrap();
     assert!(matches!(contract, Contract::PreClosed(_)));
 
+    // Serialize PreClosed state
+    assert_contract_state_and_serialize!(bob.ddk.storage, contract_id, PreClosed);
+
     generate_blocks(10);
 
     bob.ddk.manager.periodic_check(false).await.unwrap();
@@ -198,4 +246,7 @@ async fn enumeration_contract() {
         .unwrap()
         .unwrap();
     assert!(matches!(contract, Contract::Closed(_)));
+
+    // Serialize Closed state
+    assert_contract_state_and_serialize!(bob.ddk.storage, contract_id, Closed);
 }

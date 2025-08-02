@@ -965,7 +965,7 @@ mod tests {
         .await
         .unwrap();
 
-        let offered = include_bytes!("../../../tests/data/contracts/OfferedContract-Offerer");
+        let offered = include_bytes!("../../../../contract_binaries/Offered");
         let offered_contract = deserialize_contract(&offered.to_vec()).unwrap();
         match offered_contract {
             Contract::Offered(offered_contract) => {
@@ -976,32 +976,32 @@ mod tests {
             }
             _ => panic!("Offered contract is not an OfferedContract"),
         }
-        let accept = include_bytes!("../../../tests/data/contracts/AcceptedContract");
+        let accept = include_bytes!("../../../../contract_binaries/Accepted");
         let accepted_contract = deserialize_contract(&accept.to_vec()).unwrap();
         store
             .update_contract(&accepted_contract)
             .await
             .expect("Failed to update accepted contract");
-        let signed = include_bytes!("../../../tests/data/contracts/SignedContract");
+        let signed = include_bytes!("../../../../contract_binaries/Signed");
         let signed_contract = deserialize_contract(&signed.to_vec()).unwrap();
         store
             .update_contract(&signed_contract)
             .await
             .expect("Failed to update signed contract");
-        let confirmed = include_bytes!("../../../tests/data/contracts/ConfirmedContract");
+        let confirmed = include_bytes!("../../../../contract_binaries/Confirmed");
         let confirmed_contract = deserialize_contract(&confirmed.to_vec()).unwrap();
         store
             .update_contract(&confirmed_contract)
             .await
             .expect("Failed to update confirmed contract");
-        let preclosed = include_bytes!("../../../tests/data/contracts/PreClosedContract");
+        let preclosed = include_bytes!("../../../../contract_binaries/PreClosed");
         let preclosed_contract = deserialize_contract(&preclosed.to_vec()).unwrap();
         store
             .update_contract(&preclosed_contract)
             .await
             .expect("Failed to update preclosed contract");
 
-        let closed = include_bytes!("../../../tests/data/contracts/ClosedContract");
+        let closed = include_bytes!("../../../../contract_binaries/Closed");
         let closed_contract = deserialize_contract(&closed.to_vec()).unwrap();
         store
             .update_contract(&closed_contract)

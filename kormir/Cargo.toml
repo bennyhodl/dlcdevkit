@@ -1,0 +1,29 @@
+[package]
+name = "kormir"
+version = "0.4.4"
+edition = "2021"
+authors = ["benthecarman <ben@mutinywallet.com>", "benny b <ben@bitcoinbay.foundation>"]
+description = "Oracle implementation for DLCs"
+license = "MIT"
+documentation = "https://docs.rs/kormir"
+homepage = "https://github.com/bennyhodl/kormir"
+repository = "https://github.com/bennyhodl/kormir"
+
+[features]
+default = []
+nostr = ["dep:nostr", "dep:base64"]
+
+[dependencies]
+bitcoin = { version = "0.32.2", features = ["serde"] }
+dlc = { path = "../dlc", features = ["use-serde"] }
+dlc-messages = { path = "../dlc-messages", features = [ "use-serde"] }
+lightning = "0.0.125"
+log = "0.4.22"
+nostr = { version = "0.40.0", optional = true }
+base64 = { version = "0.13.1", optional = true }
+serde = "1.0"
+secp256k1-zkp = "0.11"
+hex = "0.4.3"
+
+[dev-dependencies]
+tokio = { version = "1.11.0", features = ["full"] }

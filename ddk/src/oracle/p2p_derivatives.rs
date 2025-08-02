@@ -23,31 +23,6 @@ struct PublicKeyResponse {
 
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-struct EventDescriptor {
-    base: u16,
-    is_signed: bool,
-    unit: String,
-    precision: i32,
-}
-
-#[derive(serde::Deserialize, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct Event {
-    nonces: Vec<XOnlyPublicKey>,
-    event_maturity: DateTime<Utc>,
-    event_id: String,
-    event_descriptor: EventDescriptor,
-}
-
-#[derive(serde::Deserialize, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct AnnoucementResponse {
-    oracle_public_key: XOnlyPublicKey,
-    oracle_event: Event,
-}
-
-#[derive(serde::Deserialize, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
 struct AttestationResponse {
     event_id: String,
     signatures: Vec<Signature>,

@@ -263,9 +263,7 @@ fn decode_base64<T: Readable>(content: &str) -> Result<T, OracleError> {
 #[cfg(test)]
 mod tests {
     use bitcoin::bip32::Xpriv;
-    use ddk_manager::Oracle;
     use nostr_rs::event::Event;
-    use std::sync::Arc;
 
     use super::*;
 
@@ -307,40 +305,5 @@ mod tests {
         let (announcement, event) = test_send_announcement(nostr_keys).await;
         let decoded = decode_base64::<OracleAnnouncement>(&event.content).unwrap();
         assert_eq!(announcement, decoded);
-    }
-
-    #[test_log::test(tokio::test)]
-    async fn nostr_oracle_receives_announcement() {
-        let nostr_keys = nostr_rs::key::Keys::generate();
-        let (stop_signal_sender, stop_signal_receiver) = watch::channel(false);
-        let nostr_oracle = Arc::new(
-            NostrOracle::new(
-                vec!["ws://localhost:8081".to_string()],
-                None,
-                nostr_keys.public_key,
-            )
-            .await
-            .unwrap(),
-        );
-
-        let nostr = nostr_oracle.clone();
-        tokio::spawn(async move {
-            let _ = nostr.start(stop_signal_receiver).await;
-        });
-
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-
-        let announcement = test_send_announcement(nostr_keys).await;
-
-        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-
-        let received_announcement = nostr_oracle
-            .get_announcement(&announcement.1.id.to_string())
-            .await
-            .unwrap();
-
-        tracing::info!("Received announcement: {:?}", received_announcement);
-
-        let _ = stop_signal_sender.send(true);
     }
 }

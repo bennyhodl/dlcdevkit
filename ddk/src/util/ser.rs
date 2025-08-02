@@ -133,7 +133,7 @@ convertible_enum!(
     SignedChannelStateType
 );
 
-pub fn serialize_contract(contract: &Contract) -> Result<Vec<u8>, ::lightning::io::Error> {
+pub fn serialize_contract(contract: &Contract) -> Result<Vec<u8>, Error> {
     let serialized = match contract {
         Contract::Offered(o) | Contract::Rejected(o) => o.serialize(),
         Contract::Accepted(o) => o.serialize(),
@@ -143,7 +143,7 @@ pub fn serialize_contract(contract: &Contract) -> Result<Vec<u8>, ::lightning::i
         Contract::PreClosed(c) => c.serialize(),
         Contract::Closed(c) => c.serialize(),
     };
-    let mut serialized = serialized?;
+    let mut serialized = serialized.map_err(to_storage_error)?;
     let mut res = Vec::with_capacity(serialized.len() + 1);
     res.push(ContractPrefix::get_prefix(contract));
     res.append(&mut serialized);

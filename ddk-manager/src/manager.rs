@@ -270,6 +270,58 @@ where
         }
     }
 
+    /// Create a new spliced offer
+    pub async fn send_splice_offer(
+        &self,
+        contract_input: &ContractInput,
+        counter_party: PublicKey,
+        contract_id: &ContractId,
+    ) -> Result<OfferDlc, Error> {
+        let oracle_announcements = self.oracle_announcements(contract_input).await?;
+
+        self.send_splice_offer_with_announcements(
+            contract_input,
+            counter_party,
+            contract_id,
+            oracle_announcements,
+        )
+        .await
+    }
+
+    /// Creates a new offer DLC using an existing DLC as an input.
+    /// The new DLC MUST use a Confirmed contract as an input.
+    pub async fn send_splice_offer_with_announcements(
+        &self,
+        contract_input: &ContractInput,
+        counter_party: PublicKey,
+        contract_id: &ContractId,
+        oracle_announcements: Vec<Vec<OracleAnnouncement>>,
+    ) -> Result<OfferDlc, Error> {
+        let confirmed_contract =
+            get_contract_in_state!(self, contract_id, Confirmed, Some(counter_party))?;
+
+        let dlc_input = confirmed_contract.get_dlc_input();
+        let (offered_contract, offer_msg) = crate::contract_updater::offer_contract(
+            &self.secp,
+            contract_input,
+            oracle_announcements,
+            vec![dlc_input],
+            REFUND_DELAY,
+            &counter_party,
+            &self.wallet,
+            &self.blockchain,
+            &self.time,
+            &self.signer_provider,
+        )
+        .await?;
+
+        offered_contract.validate()?;
+
+        self.store.create_contract(&offered_contract).await?;
+
+        Ok(offer_msg)
+    }
+
     /// Function called to create a new DLC. The offered contract will be stored
     /// and an OfferDlc message returned.
     ///
@@ -301,6 +353,7 @@ where
             &self.secp,
             contract_input,
             oracle_announcements,
+            vec![],
             REFUND_DELAY,
             &counter_party,
             &self.wallet,
@@ -383,7 +436,8 @@ where
     /// update them if possible.
     pub async fn periodic_check(&self, check_channels: bool) -> Result<(), Error> {
         tracing::debug!("Periodic check.");
-        self.check_signed_contracts().await?;
+        let signed_contracts = self.check_for_spliced_contract().await?;
+        self.check_signed_contracts(&signed_contracts).await?;
         self.check_confirmed_contracts().await?;
         self.check_preclosed_contracts().await?;
 
@@ -436,6 +490,7 @@ where
             accept_msg,
             &self.wallet,
             &self.signer_provider,
+            &self.store,
         )
         .await
         {
@@ -475,6 +530,8 @@ where
             &accepted_contract,
             sign_message,
             &self.wallet,
+            &self.store,
+            &self.signer_provider,
         )
         .await
         {
@@ -487,10 +544,49 @@ where
         };
 
         self.store
-            .update_contract(&Contract::Signed(signed_contract))
+            .update_contract(&Contract::Signed(signed_contract.clone()))
             .await?;
 
         self.blockchain.send_transaction(&fund_tx).await?;
+
+        // Check if there are any DLC inputs in the funding inputs of the contract.
+        // If there are, mark the contract as pre-closed.
+        if accepted_contract
+            .offered_contract
+            .funding_inputs
+            .iter()
+            .any(|c| c.dlc_input.is_some())
+        {
+            let Some(dlc_input) = accepted_contract
+                .offered_contract
+                .funding_inputs
+                .iter()
+                .find(|c| c.dlc_input.is_some())
+            else {
+                return Ok(());
+            };
+
+            let preclosed_contract = get_contract_in_state!(
+                self,
+                &dlc_input.dlc_input.as_ref().unwrap().contract_id,
+                Confirmed,
+                None as Option<PublicKey>
+            )?;
+
+            let preclosed_contract = PreClosedContract {
+                signed_contract: preclosed_contract.clone(),
+                attestations: None,
+                signed_cet: signed_contract
+                    .accepted_contract
+                    .dlc_transactions
+                    .fund
+                    .clone(),
+            };
+
+            self.store
+                .update_contract(&Contract::PreClosed(preclosed_contract.clone()))
+                .await?;
+        }
 
         Ok(())
     }
@@ -577,9 +673,12 @@ where
         Ok(())
     }
 
-    async fn check_signed_contracts(&self) -> Result<(), Error> {
-        for c in self.store.get_signed_contracts().await? {
-            if let Err(e) = self.check_signed_contract(&c).await {
+    async fn check_signed_contracts(
+        &self,
+        signed_contracts: &[SignedContract],
+    ) -> Result<(), Error> {
+        for c in signed_contracts {
+            if let Err(e) = self.check_signed_contract(c).await {
                 tracing::error!(
                     "Error checking confirmed contract {}: {}",
                     c.accepted_contract.get_contract_id_string(),
@@ -589,6 +688,49 @@ where
         }
 
         Ok(())
+    }
+
+    async fn check_for_spliced_contract(&self) -> Result<Vec<SignedContract>, Error> {
+        let contracts = self.get_store().get_signed_contracts().await?;
+        for contract in &contracts {
+            let dlc_input = contract
+                .accepted_contract
+                .offered_contract
+                .funding_inputs
+                .iter()
+                .find(|d| d.dlc_input.is_some());
+
+            let Some(funding_input) = dlc_input else {
+                continue;
+            };
+
+            let contract_id = funding_input.dlc_input.as_ref().unwrap().contract_id;
+
+            let confirmed_contract_in_splice = match get_contract_in_state!(
+                self,
+                &contract_id,
+                Confirmed,
+                None as Option<PublicKey>
+            ) {
+                Ok(c) => Ok(c),
+                Err(Error::InvalidState(_)) => continue,
+                Err(e) => {
+                    tracing::debug!("The previouse contract referenced in a splice transaction failed to retrieve. error={}", e.to_string());
+                    Err(e)
+                }
+            }?;
+
+            let preclosed_contract = PreClosedContract {
+                signed_contract: confirmed_contract_in_splice.clone(),
+                attestations: None,
+                signed_cet: contract.accepted_contract.dlc_transactions.fund.clone(),
+            };
+
+            self.store
+                .update_contract(&Contract::PreClosed(preclosed_contract.clone()))
+                .await?;
+        }
+        Ok(contracts)
     }
 
     async fn check_confirmed_contracts(&self) -> Result<(), Error> {
@@ -1562,6 +1704,7 @@ where
                 CET_NSEQUENCE,
                 &self.wallet,
                 &self.signer_provider,
+                &self.store,
                 &self.chain_monitor,
             )
             .await;
@@ -1642,6 +1785,8 @@ where
                 sign_channel,
                 &self.wallet,
                 &self.chain_monitor,
+                &self.store,
+                &self.signer_provider,
             )
             .await;
 
@@ -1913,6 +2058,7 @@ where
             &self.wallet,
             &self.signer_provider,
             &self.time,
+            &self.store,
         )
         .await?;
 
@@ -2000,6 +2146,7 @@ where
             &self.wallet,
             &self.signer_provider,
             &self.chain_monitor,
+            &self.store,
         )
         .await?;
 

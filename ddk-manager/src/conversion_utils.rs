@@ -76,6 +76,11 @@ pub fn get_tx_input_infos(
     let mut inputs = Vec::new();
 
     for fund_input in funding_inputs {
+        let max_witness_len = if fund_input.dlc_input.is_some() {
+            220
+        } else {
+            107
+        };
         let tx = Transaction::consensus_decode(&mut fund_input.prev_tx.as_slice())?;
         let vout = fund_input.prev_tx_vout;
         let tx_out = tx
@@ -88,7 +93,7 @@ pub fn get_tx_input_infos(
                 txid: tx.compute_txid(),
                 vout,
             },
-            max_witness_len: 107,
+            max_witness_len,
             redeem_script: fund_input.redeem_script.clone(),
             serial_id: fund_input.input_serial_id,
         });

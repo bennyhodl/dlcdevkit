@@ -8,7 +8,7 @@ use secp256k1_zkp::PublicKey;
 
 use crate::{
     contract::offered_contract::OfferedContract, conversion_utils::get_tx_input_infos,
-    error::Error, ChannelId, ContractId, KeysId,
+    dlc_input::get_dlc_inputs_from_funding_inputs, error::Error, ChannelId, ContractId, KeysId,
 };
 
 use super::party_points::PartyBasePoints;
@@ -97,6 +97,7 @@ impl OfferedChannel {
         };
 
         let (inputs, input_amount) = get_tx_input_infos(&offer_channel.funding_inputs)?;
+        let dlc_inputs = get_dlc_inputs_from_funding_inputs(&offer_channel.funding_inputs);
 
         let contract = OfferedContract {
             id: offer_channel.temporary_contract_id,
@@ -113,6 +114,7 @@ impl OfferedChannel {
                 payout_serial_id: offer_channel.payout_serial_id,
                 collateral: offer_channel.offer_collateral,
                 inputs,
+                dlc_inputs,
                 input_amount,
             },
             cet_locktime: offer_channel.cet_locktime,

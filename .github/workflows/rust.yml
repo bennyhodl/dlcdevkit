@@ -159,6 +159,42 @@ jobs:
           chmod +x ./testconfig/scripts/wait_for_electrs.sh
           ./testconfig/scripts/wait_for_electrs.sh
       - name: Run test
-        run: RUST_BACKTRACE=1 ${{ matrix.tests }} --ignored
+        run: RUST_BACKTRACE=1 RUST_MIN_STACK=4194304 ${{ matrix.tests }} --ignored
+      - name: Stop bitcoin node
+        run: docker compose down -v
+
+  test_splicing:
+    name: test splicing
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:latest
+        env:
+          POSTGRES_DB: testdb
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/testdb
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start bitcoin node
+        run: docker compose up -d
+      - name: Wait for container to run
+        run: |
+          chmod +x ./testconfig/scripts/wait_for_container.sh
+          ./testconfig/scripts/wait_for_container.sh bitcoin
+      - name: Wait for electrs to be ready
+        run: |
+          chmod +x ./testconfig/scripts/wait_for_electrs.sh
+          ./testconfig/scripts/wait_for_electrs.sh
+      - name: Run test
+        run: RUST_MIN_STACK=4194304 cargo test -p ddk-manager single_oracle_numerical_splice_test -- --ignored --nocapture
       - name: Stop bitcoin node
         run: docker compose down -v
