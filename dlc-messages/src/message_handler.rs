@@ -6,7 +6,7 @@ use std::{
     sync::Mutex,
 };
 
-use lightning::ln::features::{InitFeatures, NodeFeatures};
+use lightning::types::features::{InitFeatures, NodeFeatures};
 use lightning::{
     io::Cursor,
     ln::{
@@ -149,22 +149,22 @@ impl CustomMessageReader for MessageHandler {
 impl CustomMessageHandler for MessageHandler {
     fn peer_connected(
         &self,
-        _their_node_id: &PublicKey,
+        _their_node_id: PublicKey,
         _msg: &lightning::ln::msgs::Init,
         _inbound: bool,
     ) -> Result<(), ()> {
         Ok(())
     }
 
-    fn peer_disconnected(&self, _their_node_id: &PublicKey) {}
+    fn peer_disconnected(&self, _their_node_id: PublicKey) {}
 
     fn handle_custom_message(
         &self,
         msg: WireMessage,
-        org: &PublicKey,
+        org: PublicKey,
     ) -> Result<(), LightningError> {
         let mut segment_readers = self.segment_readers.lock().unwrap();
-        let segment_reader = segment_readers.entry(*org).or_default();
+        let segment_reader = segment_readers.entry(org).or_default();
 
         if segment_reader.expecting_chunk() {
             match msg {
@@ -184,7 +184,7 @@ impl CustomMessageHandler for MessageHandler {
                             })?
                             .expect("to have a message")
                         {
-                            self.msg_received.lock().unwrap().push((*org, m));
+                            self.msg_received.lock().unwrap().push((org, m));
                         } else {
                             return Err(to_ln_error(
                                 "Unexpected message type",
@@ -203,7 +203,7 @@ impl CustomMessageHandler for MessageHandler {
         }
 
         match msg {
-            WireMessage::Message(m) => self.msg_received.lock().unwrap().push((*org, m)),
+            WireMessage::Message(m) => self.msg_received.lock().unwrap().push((org, m)),
             WireMessage::SegmentStart(s) => segment_reader
                 .process_segment_start(s)
                 .map_err(|e| to_ln_error(e, "Error processing segment start"))?,
@@ -225,7 +225,7 @@ impl CustomMessageHandler for MessageHandler {
         NodeFeatures::empty()
     }
 
-    fn provided_init_features(&self, _their_node_id: &PublicKey) -> InitFeatures {
+    fn provided_init_features(&self, _their_node_id: PublicKey) -> InitFeatures {
         InitFeatures::empty()
     }
 }
@@ -370,10 +370,10 @@ mod tests {
 
         let handler = MessageHandler::new();
         handler
-            .handle_custom_message(WireMessage::SegmentStart(segment_start), &some_pk())
+            .handle_custom_message(WireMessage::SegmentStart(segment_start), some_pk())
             .expect("to be able to process segment start");
         handler
-            .handle_custom_message(WireMessage::SegmentChunk(segment_chunk), &some_pk())
+            .handle_custom_message(WireMessage::SegmentChunk(segment_chunk), some_pk())
             .expect("to be able to process segment start");
         let msg = handler.get_and_clear_received_messages();
         assert_eq!(1, msg.len());

@@ -11,18 +11,18 @@ edition = "2015"
 [features]
 default = ["std"]
 std = ["dlc/std", "bitcoin/std", "lightning/std"]
-no-std = ["dlc/no-std", "lightning/no-std"]
+no-std = ["dlc/no-std"]
 use-serde = ["serde", "secp256k1-zkp/serde", "bitcoin/serde"]
 
 [dependencies]
-bitcoin = { version = "0.32.2", default-features = false }
-dlc = { version = "0.7.1", path = "../dlc", default-features = false }
-lightning = { version = "0.0.125", default-features = false }
-secp256k1-zkp = {version = "0.11.0"}
+bitcoin = { version = "0.32.6", default-features = false }
+dlc = { path = "../dlc", default-features = false }
+lightning = { version = "0.1.5", default-features = false }
+secp256k1-zkp = { version = "0.11.0" }
 serde = {version = "1.0", features = ["derive"], optional = true}
 
 [dev-dependencies]
-bitcoin = { version = "0.32.2", default-features = false, features = ["serde"] }
+bitcoin = { version = "0.32.6", default-features = false, features = ["serde"] }
 dlc-messages = {path = "./", default-features = false, features = ["use-serde"]}
 secp256k1-zkp = {version = "0.11.0", features = ["serde", "global-context"]}
 serde = {version = "1.0", features = ["derive"]}
