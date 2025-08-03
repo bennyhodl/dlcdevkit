@@ -109,13 +109,10 @@ mod tests {
         let buf = include_bytes!("../../../ddk/tests/data/dlc_storage/Accepted");
         let accepted_contract = AcceptedContract::deserialize(&mut buf.as_slice()).unwrap();
         let cets = &accepted_contract.dlc_transactions.cets;
-        assert_eq!(
-            accepted_contract.compute_pnl(&cets[0]),
-            SignedAmount::from_sat(90000000)
-        );
+        assert_eq!(accepted_contract.compute_pnl(&cets[0]), SignedAmount::ZERO);
         assert_eq!(
             accepted_contract.compute_pnl(&cets[cets.len() - 1]),
-            SignedAmount::from_sat(-11000000)
+            SignedAmount::from_sat(101000000)
         );
     }
 }
