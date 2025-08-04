@@ -121,6 +121,7 @@ pub enum DlcManagerMessage {
 ///
 /// The struct is designed to be thread-safe and can be shared across
 /// multiple threads using Arc.
+#[derive(Debug)]
 pub struct DlcDevKit<T: Transport, S: Storage, O: Oracle> {
     /// Tokio runtime for async operations
     pub runtime: Arc<RwLock<Option<Runtime>>>,

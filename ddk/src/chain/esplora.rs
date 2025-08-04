@@ -13,6 +13,7 @@ use lightning::chain::chaininterface::{ConfirmationTarget, FeeEstimator};
 ///
 /// Used by rust-dlc for getting transactions related to DLC contracts.
 /// Used by bdk to sync the wallet and track transaction.
+#[derive(Debug)]
 pub struct EsploraClient {
     pub blocking_client: BlockingClient,
     pub async_client: AsyncClient,

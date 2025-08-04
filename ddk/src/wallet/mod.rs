@@ -71,6 +71,8 @@ type Result<T> = std::result::Result<T, WalletError>;
 /// Recovery would be ~1 week for each contract key with the Xpriv.
 const CHILD_NUMBER_RANGE: u32 = 3_400;
 
+const MIN_CHANGE_SIZE: u64 = 50_000;
+
 /// Wrapper type that adapts DDK's Storage trait to BDK's AsyncWalletPersister interface.
 ///
 /// This wrapper is necessary because BDK requires a persister that implements AsyncWalletPersister,
@@ -178,6 +180,7 @@ pub enum WalletCommand {
 /// - All state is isolated in the background task
 /// - External access is only through message passing
 /// - No shared mutable state between threads
+#[derive(Debug)]
 pub struct DlcDevKitWallet {
     /// Channel sender for wallet commands
     sender: Sender<WalletCommand>,
@@ -817,17 +820,16 @@ impl ddk_manager::Wallet for DlcDevKitWallet {
             })
             .collect::<Vec<WeightedUtxo>>();
 
-        let selected_utxos =
-            BranchAndBoundCoinSelection::new(Amount::MAX_MONEY.to_sat(), SingleRandomDraw)
-                .coin_select(
-                    vec![],
-                    utxos,
-                    FeeRate::from_sat_per_vb_unchecked(fee_rate),
-                    amount,
-                    ScriptBuf::new().as_script(),
-                    &mut thread_rng(),
-                )
-                .map_err(|e| ManagerError::WalletError(Box::new(e)))?;
+        let selected_utxos = BranchAndBoundCoinSelection::new(MIN_CHANGE_SIZE, SingleRandomDraw)
+            .coin_select(
+                vec![],
+                utxos,
+                FeeRate::from_sat_per_vb_unchecked(fee_rate),
+                amount,
+                ScriptBuf::new().as_script(),
+                &mut thread_rng(),
+            )
+            .map_err(|e| ManagerError::WalletError(Box::new(e)))?;
 
         let dlc_utxos = selected_utxos
             .selected
