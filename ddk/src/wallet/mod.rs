@@ -171,6 +171,7 @@ pub enum WalletCommand {
 /// - All state is isolated in the background task
 /// - External access is only through message passing
 /// - No shared mutable state between threads
+#[derive(Debug)]
 pub struct DlcDevKitWallet {
     /// Channel sender for wallet commands
     sender: Sender<WalletCommand>,
