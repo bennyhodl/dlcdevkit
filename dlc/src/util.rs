@@ -18,7 +18,7 @@ pub(crate) const ENABLE_LOCKTIME: Sequence = Sequence(0xfffffffe);
 /// Get a BIP143 (https://github.com/bitcoin/bips/blob/master/bip-0143.mediawiki)
 /// signature hash with sighash all flag for a segwit transaction input as
 /// a Message instance
-pub(crate) fn get_sig_hash_msg(
+pub fn get_sig_hash_msg(
     tx: &Transaction,
     input_index: usize,
     script_pubkey: &Script,
@@ -36,7 +36,7 @@ pub(crate) fn get_sig_hash_msg(
 
 /// Convert a raw signature to DER encoded and append the sighash type, to use
 /// a signature in a signature script
-pub(crate) fn finalize_sig(sig: &Signature, sig_hash_type: EcdsaSighashType) -> Vec<u8> {
+pub fn finalize_sig(sig: &Signature, sig_hash_type: EcdsaSighashType) -> Vec<u8> {
     [
         sig.serialize_der().as_ref(),
         &[sig_hash_type.to_u32() as u8],
@@ -213,7 +213,7 @@ pub(crate) fn redeem_script_to_script_sig(redeem: &Script) -> ScriptBuf {
 }
 
 /// Sorts the given inputs in following the order of the ids.
-pub(crate) fn order_by_serial_ids<T>(inputs: Vec<T>, ids: &[u64]) -> Vec<T> {
+pub fn order_by_serial_ids<T>(inputs: Vec<T>, ids: &[u64]) -> Vec<T> {
     debug_assert!(inputs.len() == ids.len());
     let mut combined: Vec<(&u64, T)> = ids.iter().zip(inputs).collect();
     combined.sort_by(|a, b| a.0.partial_cmp(b.0).unwrap());
@@ -233,7 +233,7 @@ pub fn get_output_for_script_pubkey<'a>(
 }
 
 /// Filters the outputs that have a value lower than the given `dust_limit`.
-pub(crate) fn discard_dust(txs: Vec<TxOut>, dust_limit: Amount) -> Vec<TxOut> {
+pub fn discard_dust(txs: Vec<TxOut>, dust_limit: Amount) -> Vec<TxOut> {
     txs.into_iter().filter(|x| x.value >= dust_limit).collect()
 }
 
