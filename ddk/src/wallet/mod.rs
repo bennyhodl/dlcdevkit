@@ -64,6 +64,8 @@ use tokio::sync::{
 type FutureResult<'a, T, E> = Pin<Box<dyn Future<Output = std::result::Result<T, E>> + Send + 'a>>;
 type Result<T> = std::result::Result<T, WalletError>;
 
+const MIN_CHANGE_SIZE: u64 = 50_000;
+
 /// Wrapper type that adapts DDK's Storage trait to BDK's AsyncWalletPersister interface.
 ///
 /// This wrapper is necessary because BDK requires a persister that implements AsyncWalletPersister,
@@ -811,17 +813,16 @@ impl ddk_manager::Wallet for DlcDevKitWallet {
             })
             .collect::<Vec<WeightedUtxo>>();
 
-        let selected_utxos =
-            BranchAndBoundCoinSelection::new(Amount::MAX_MONEY.to_sat(), SingleRandomDraw)
-                .coin_select(
-                    vec![],
-                    utxos,
-                    FeeRate::from_sat_per_vb_unchecked(fee_rate),
-                    amount,
-                    ScriptBuf::new().as_script(),
-                    &mut thread_rng(),
-                )
-                .map_err(|e| ManagerError::WalletError(Box::new(e)))?;
+        let selected_utxos = BranchAndBoundCoinSelection::new(MIN_CHANGE_SIZE, SingleRandomDraw)
+            .coin_select(
+                vec![],
+                utxos,
+                FeeRate::from_sat_per_vb_unchecked(fee_rate),
+                amount,
+                ScriptBuf::new().as_script(),
+                &mut thread_rng(),
+            )
+            .map_err(|e| ManagerError::WalletError(Box::new(e)))?;
 
         let dlc_utxos = selected_utxos
             .selected
