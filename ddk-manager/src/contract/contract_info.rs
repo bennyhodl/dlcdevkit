@@ -4,15 +4,13 @@ use super::AdaptorInfo;
 use super::ContractDescriptor;
 use crate::error::Error;
 use crate::ContractSigner;
-use bitcoin::hashes::Hash;
 use bitcoin::Amount;
 use bitcoin::{Script, Transaction};
 use dlc::{OracleInfo, Payout};
+use dlc_messages::oracle_msgs;
 use dlc_messages::oracle_msgs::{EventDescriptor, OracleAnnouncement};
 use dlc_trie::{DlcTrie, RangeInfo};
-use secp256k1_zkp::{
-    All, EcdsaAdaptorSignature, Message, PublicKey, Secp256k1, SecretKey, Verification,
-};
+use secp256k1_zkp::{All, EcdsaAdaptorSignature, PublicKey, Secp256k1, SecretKey, Verification};
 use std::ops::Deref;
 
 pub(super) type OracleIndexAndPrefixLength = Vec<(usize, usize)>;
@@ -298,10 +296,7 @@ impl ContractInfo {
                         for nonce in nonces {
                             let mut points = Vec::with_capacity(base);
                             for j in 0..base {
-                                let hash =
-                                    bitcoin::hashes::sha256::Hash::hash(j.to_string().as_bytes())
-                                        .to_byte_array();
-                                let msg = Message::from_digest(hash);
+                                let msg = oracle_msgs::tagged_attestation_msg(&j.to_string());
                                 let sig_point = dlc::secp_utils::schnorrsig_compute_sig_point(
                                     secp, pubkey, nonce, &msg,
                                 )?;

@@ -1029,8 +1029,8 @@ mod tests {
     use bitcoin::blockdata::script::ScriptBuf;
     use bitcoin::blockdata::transaction::OutPoint;
     use bitcoin::consensus::encode::Encodable;
-    use bitcoin::hashes::sha256;
     use bitcoin::hashes::Hash;
+    use bitcoin::hashes::HashEngine;
     use bitcoin::sighash::EcdsaSighashType;
     use bitcoin::{Address, CompressedPublicKey, Network, Txid};
     use secp256k1_zkp::{
@@ -1516,9 +1516,17 @@ mod tests {
                     .map(|y| {
                         (0..NB_DIGITS)
                             .map(|z| {
-                                let message = &[(x + y + z) as u8];
-                                let hash = sha256::Hash::hash(message).to_byte_array();
-                                Message::from_digest(hash)
+                                let tag_hash = bitcoin::hashes::sha256::Hash::hash(
+                                    b"DLC/oracle/attestation/v0",
+                                );
+                                let outcome_hash =
+                                    bitcoin::hashes::sha256::Hash::hash(&[(x + y + z) as u8]);
+                                let mut hash_engine = bitcoin::hashes::sha256::Hash::engine();
+                                hash_engine.input(&tag_hash[..]);
+                                hash_engine.input(&tag_hash[..]);
+                                hash_engine.input(&outcome_hash[..]);
+                                let hash = bitcoin::hashes::sha256::Hash::from_engine(hash_engine);
+                                Message::from_digest(hash.to_byte_array())
                             })
                             .collect()
                     })

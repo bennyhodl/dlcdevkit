@@ -64,25 +64,23 @@
             "threshold": 2,
             "oracleAnnouncements": [
               {
-                "announcementSignature": "b6a9f79a3c352ffda73ef8db9c37dca6b7310ea4ad96094c7d29f276d72e89c8caebb8b80daa1a69360a5366280e519a58e328d1e3ee89f32716e4ce336607e2",
-                "oraclePublicKey": "66c05e5845f330791028c62aa2cb5cc9b88145f8295f7ae9e5f044a537b2a560",
+                "announcementSignature": "73c2527f0f3e4242d1760c5a820f0105c82a4ff29f202f5ad8855fb18687f75b7033b04770045a6c9706f359c43bd20cfe5aac02758f4461fe60e0fa12b2bcf5",
+                "oraclePublicKey": "06e18c3cd49e7e88d005939851fc0ddfa86a29cfc9558209eca5e7b215e4383d",
                 "oracleEvent": {
                   "oracleNonces": [
-                    "3b584a4049fb2e4f51a0a55e371bc72a55ece6678c89414450f26543bba800bf",
-                    "cd9433d185d08452302e24019134089c38c5b35ce2709398fb2793079ba3be4a",
-                    "e9f506c24e86106ca7e67fa7b38576e868fba87b805386cca622ec7fc67cc781",
-                    "1d23bda4d41bc3829a5dbbacdb94395cf95700ad3e9d84c2ccdbd016699b5aad",
-                    "7631072764bce0db2de17273d48b084e67a5e47531bcc8da4444dd5a41f42c15",
-                    "0876f61639e0cb6845008a43a24eb5110482096de6db5d1e9f03712fa92a0eec",
-                    "cc669fc02f8b1005b92d5a292bde27488fad4d38f61087ed3e2731a62b65b801",
-                    "768145f4edea846adc2a519add9f52b343f31afed366074ef7140b5d272a1a04",
-                    "ae4278283bb7a27c841ad2083a9af1d8e6de0734c756319558bbe18878e01f65",
-                    "df37b1b84d03bc4addf0c902c3d25311a55ce8cca1bdb298292e57e62eb3a51b",
-                    "3afb1b0bdca1e8caff93f984f2ee640c8f766007cf843fbea49386cd97fa27b7",
-                    "b597125db6d01b899ad1b383ba26741766754befd0ed7ff18ed9e2dcf84ed757",
-                    "2bb73e1389ca2bbcb360d52b303d54968b9b614e5e730294fab13cbe39872733",
-                    "2bfbdd9d12e9d7b98c34664bd87d53ca80cf21abfd2e0abc18d9ecaa6a1311d6",
-                    "e586d07ff98f47d1d4e871b7dd2df84c91bd84d352d0fc357cd49b54476bf155"
+                    "e3b3de00f863b7fb3b96b3a8adf467c62fb49e124ceb5fa6a1c79367bce29a44",
+                    "defa8e0871fbd252932b55f86e93d0120d96637f31a473e9eb6035a485d4fe39",
+                    "22bdc3445196e8a9fc265d7396114ad83dd2a24fdf7dd74712e819eb3a278253",
+                    "321aff557147cc4183b1cbff165ffb6c78c7bc578bfcbe6c4c326cbd7a3c0454",
+                    "bec7a3d6b29dd9ae657a058a81f179cf9289531cfae136a6436459a41830fc02",
+                    "0f84f13c5b8503d5185075fa0bc71114a78f00584916690709cc76967e9b7c39",
+                    "23eec1564021188145014b67b9e73c0c45e8258c151b3802075fc9cfc43efae5",
+                    "5a9564e744944c4b3b8c26e4c05faaeaa2af848bbd72dd3fb603db70582031ca",
+                    "8551dbebe5a6190e461289d1386a31afc284d240edc658524c20a198f8a74075",
+                    "27e1d53c62bb8bc479098fbeb32c2377f10faea3f5765991db4139635b433c61",
+                    "093950d372759aaf717b1d8720d7393963846c347f8ead33b4b5da94b38a323b",
+                    "0c904b72cf75f5b4b08e4da246895eb6bbce4b03677f7cbe26764e3b99c22085",
+                    "a2f7647133f8bd04d0a9395110b7d05aa59a36a2ed97313b6d5a20017a277e27"
                   ],
                   "eventMaturityEpoch": 1623133104,
                   "eventDescriptor": {
@@ -91,30 +89,30 @@
                       "isSigned": false,
                       "unit": "sats/sec",
                       "precision": 0,
-                      "nbDigits": 15
+                      "nbDigits": 13
                     }
                   },
                   "eventId": "Test"
                 }
               },
               {
-                "announcementSignature": "e3b1d3c8c874c339141fe0209dd48c01c62a2fad5668093e2e96be0a88be37a5e7163f7d4e0c9f9111fba60503b775e464d1c798d843ab80a9f1ceacf52a2aeb",
-                "oraclePublicKey": "97e61039bfdaf898391b8b9825934802b7960a01162d9b4f8a000ae8ce9e1fa6",
+                "announcementSignature": "73c2527f0f3e4242d1760c5a820f0105c82a4ff29f202f5ad8855fb18687f75b7033b04770045a6c9706f359c43bd20cfe5aac02758f4461fe60e0fa12b2bcf5",
+                "oraclePublicKey": "06e18c3cd49e7e88d005939851fc0ddfa86a29cfc9558209eca5e7b215e4383d",
                 "oracleEvent": {
                   "oracleNonces": [
-                    "baaa6464e8cfede79012a02723301d7595cb506ea846ac2f5da45c726b003766",
-                    "5970ae9ec1b131ff157da44c204ce1fdd70ad670ece8c704cea32ef7b0ebf462",
-                    "62b5a76b68629d963bb4718ca713e8171365ce51c29941befe0e3dca99cea126",
-                    "5dc0318d4195801ed9b5b86afa12e744ccf7e15e68bc46ef7a30ddb5652d8264",
-                    "18346b71e012f91ac41f222817722717e33c351e19ccf7c9f4378d8e3fd56881",
-                    "4254d6e692e620c080fb29a4e9c67d35e62feb7629d964bed71ac6679414bdd5",
-                    "36d610e88e1fe491fc1055497017e5babc45f17f7aadf9c35800f529a93fa2a6",
-                    "60ff8f86ff75d191bc7cc74dbc31d9f031c54654406fe8ef5f802c9622afcdc4",
-                    "890bd95edc36570b61d3750f89bbb0b6e5a10f12692431e57d7f9362c3f31436",
-                    "3ef80333f95f0277206dd693d5c9362b6326b991c44b7d21f3a63dd8931314a2",
-                    "4b209c8b2e0fdb1b910a57135e146bc0cef46d21915e0bf17cfedb5c7c2296a3",
-                    "49ce4c0b32fdc717d941c87137b9c7b26726236f256a2abf28de9e4870e79d08",
-                    "a9ded37ffee3d0d35d9fb3ae8e0984c250fbbc1db32c08baafee3154bb6e0f51"
+                    "e3b3de00f863b7fb3b96b3a8adf467c62fb49e124ceb5fa6a1c79367bce29a44",
+                    "defa8e0871fbd252932b55f86e93d0120d96637f31a473e9eb6035a485d4fe39",
+                    "22bdc3445196e8a9fc265d7396114ad83dd2a24fdf7dd74712e819eb3a278253",
+                    "321aff557147cc4183b1cbff165ffb6c78c7bc578bfcbe6c4c326cbd7a3c0454",
+                    "bec7a3d6b29dd9ae657a058a81f179cf9289531cfae136a6436459a41830fc02",
+                    "0f84f13c5b8503d5185075fa0bc71114a78f00584916690709cc76967e9b7c39",
+                    "23eec1564021188145014b67b9e73c0c45e8258c151b3802075fc9cfc43efae5",
+                    "5a9564e744944c4b3b8c26e4c05faaeaa2af848bbd72dd3fb603db70582031ca",
+                    "8551dbebe5a6190e461289d1386a31afc284d240edc658524c20a198f8a74075",
+                    "27e1d53c62bb8bc479098fbeb32c2377f10faea3f5765991db4139635b433c61",
+                    "093950d372759aaf717b1d8720d7393963846c347f8ead33b4b5da94b38a323b",
+                    "0c904b72cf75f5b4b08e4da246895eb6bbce4b03677f7cbe26764e3b99c22085",
+                    "a2f7647133f8bd04d0a9395110b7d05aa59a36a2ed97313b6d5a20017a277e27"
                   ],
                   "eventMaturityEpoch": 1623133104,
                   "eventDescriptor": {
