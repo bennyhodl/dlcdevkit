@@ -21,9 +21,11 @@
 //! - Fee estimation
 //! - UTXO management
 
+pub mod address;
 mod command;
 
 use crate::error::{wallet_err_to_manager_err, WalletError};
+use crate::wallet::address::AddressGenerator;
 use crate::{chain::EsploraClient, Storage};
 use bdk_chain::Balance;
 use bdk_wallet::coin_selection::{
@@ -51,6 +53,7 @@ use bitcoin::{secp256k1::SecretKey, Amount, FeeRate, ScriptBuf, Transaction};
 use ddk_manager::{error::Error as ManagerError, SimpleSigner};
 use lightning::chain::chaininterface::{ConfirmationTarget, FeeEstimator};
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::future::Future;
 use std::pin::Pin;
 use std::str::FromStr;
@@ -64,7 +67,7 @@ use tokio::sync::{
 type FutureResult<'a, T, E> = Pin<Box<dyn Future<Output = std::result::Result<T, E>> + Send + 'a>>;
 type Result<T> = std::result::Result<T, WalletError>;
 
-/// We choost this number for the range of child numbers that are used for the DLC key path.
+/// We choose this number for the range of child numbers that are used for the DLC key path.
 /// This allows for 3400^3 = 39.3 billion possible paths.
 /// It is large enough to avoid collisions, but small enough to be practical for a doomsday scenario.
 ///
@@ -181,7 +184,6 @@ pub enum WalletCommand {
 /// - All state is isolated in the background task
 /// - External access is only through message passing
 /// - No shared mutable state between threads
-#[derive(Debug)]
 pub struct DlcDevKitWallet {
     /// Channel sender for wallet commands
     sender: Sender<WalletCommand>,
@@ -195,6 +197,8 @@ pub struct DlcDevKitWallet {
     fingerprint: Fingerprint,
     /// Derivation path for DLC keys
     dlc_path: DerivationPath,
+    /// Function to generate external addresses
+    address_generator: Option<Arc<dyn AddressGenerator + Send + Sync>>,
 }
 
 const MIN_FEERATE: u32 = 253;
@@ -229,6 +233,7 @@ impl DlcDevKitWallet {
         esplora_url: &str,
         network: Network,
         storage: Arc<dyn Storage>,
+        address_generator: Option<Arc<dyn AddressGenerator + Send + Sync>>,
     ) -> Result<DlcDevKitWallet> {
         let secp = Secp256k1::new();
 
@@ -260,7 +265,7 @@ impl DlcDevKitWallet {
                 .map_err(|e| WalletError::WalletPersistanceError(e.to_string()))?,
         };
 
-        let dlc_path = DerivationPath::from_str("m/9999'/0'/0'")?;
+        let dlc_path = DerivationPath::from_str("m/420'/0'/0'")?;
 
         let blockchain = Arc::new(
             EsploraClient::new(esplora_url, network)
@@ -449,6 +454,7 @@ impl DlcDevKitWallet {
             secp,
             fingerprint,
             dlc_path,
+            address_generator,
         })
     }
 
@@ -476,6 +482,9 @@ impl DlcDevKitWallet {
 
     /// Generates a new external (receiving) address.
     /// These addresses are used for receiving funds from external sources.
+    ///
+    /// WARNING: If you want your custom address generator call
+    /// [`address::AddressGenerator::custom_external_address`] instead.
     pub async fn new_external_address(&self) -> Result<AddressInfo> {
         let (tx, rx) = oneshot::channel();
         self.sender
@@ -486,6 +495,9 @@ impl DlcDevKitWallet {
 
     /// Generates a new change address.
     /// These addresses are used internally for change outputs.
+    ///
+    /// WARNING: If you want your custom address generator call
+    /// [`address::AddressGenerator::custom_change_address`] instead.
     pub async fn new_change_address(&self) -> Result<AddressInfo> {
         let (tx, rx) = oneshot::channel();
         self.sender
@@ -735,10 +747,19 @@ impl ddk_manager::Wallet for DlcDevKitWallet {
     /// Gets a new external address for receiving funds.
     /// Used by the DLC manager when creating funding transactions.
     async fn get_new_address(&self) -> std::result::Result<bitcoin::Address, ManagerError> {
+        if let Some(address_generator) = &self.address_generator {
+            let address = address_generator
+                .custom_external_address()
+                .await
+                .map_err(wallet_err_to_manager_err)?;
+            return Ok(address);
+        }
+
         let address = self
             .new_external_address()
             .await
             .map_err(wallet_err_to_manager_err)?;
+
         tracing::info!(
             address = address.address.to_string(),
             "Revealed new address for contract."
@@ -749,6 +770,14 @@ impl ddk_manager::Wallet for DlcDevKitWallet {
     /// Gets a new change address for transaction outputs.
     /// Used by the DLC manager for change outputs in DLC transactions.
     async fn get_new_change_address(&self) -> std::result::Result<bitcoin::Address, ManagerError> {
+        if let Some(address_generator) = &self.address_generator {
+            let address = address_generator
+                .custom_change_address()
+                .await
+                .map_err(wallet_err_to_manager_err)?;
+            return Ok(address);
+        }
+
         let address = self
             .new_change_address()
             .await
@@ -890,6 +919,15 @@ fn fee_estimator() -> HashMap<ConfirmationTarget, AtomicU32> {
     fees
 }
 
+impl Debug for DlcDevKitWallet {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "DlcDevKitWallet")?;
+        write!(f, " fingerprint: {:?}", self.fingerprint)?;
+        write!(f, " network: {:?}", self.network)?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{collections::HashSet, str::FromStr, sync::Arc, time::Duration};
@@ -920,6 +958,7 @@ mod tests {
             &esplora,
             Network::Regtest,
             storage.clone(),
+            None,
         )
         .await
         .unwrap()
@@ -1421,5 +1460,71 @@ mod tests {
                 .get_public_key(&wallet.secp)
                 .unwrap()
         );
+    }
+
+    struct DummyAddressGenerator;
+    #[async_trait::async_trait]
+    impl super::address::AddressGenerator for DummyAddressGenerator {
+        async fn custom_external_address(&self) -> Result<Address, crate::error::WalletError> {
+            Ok(
+                Address::from_str("bcrt1qgnflehdvm85l5qmhf887lklda43ynh6tlx4ly0")
+                    .unwrap()
+                    .assume_checked(),
+            )
+        }
+
+        async fn custom_change_address(&self) -> Result<Address, crate::error::WalletError> {
+            Ok(
+                Address::from_str("bcrt1qqhxq8mgmlx3njn3kcx3zmxzuyarcrh5huhm55t")
+                    .unwrap()
+                    .assume_checked(),
+            )
+        }
+    }
+
+    #[tokio::test]
+    async fn custom_address_generator() {
+        use ddk_manager::Wallet;
+
+        let address = Address::from_str("bcrt1qgnflehdvm85l5qmhf887lklda43ynh6tlx4ly0")
+            .unwrap()
+            .assume_checked();
+
+        let change_address = Address::from_str("bcrt1qqhxq8mgmlx3njn3kcx3zmxzuyarcrh5huhm55t")
+            .unwrap()
+            .assume_checked();
+
+        let mut seed = [0u8; 32];
+        seed.try_fill(&mut bitcoin::key::rand::thread_rng())
+            .unwrap();
+
+        let memory_storage = Arc::new(MemoryStorage::new());
+        let wallet = DlcDevKitWallet::new(
+            &seed,
+            "http://localhost:30000",
+            Network::Regtest,
+            memory_storage.clone(),
+            Some(Arc::new(DummyAddressGenerator)),
+        )
+        .await
+        .unwrap();
+
+        let generate_address = wallet.get_new_address().await.unwrap();
+        assert_eq!(generate_address, address);
+
+        let generate_change_address = wallet.get_new_change_address().await.unwrap();
+        assert_eq!(generate_change_address, change_address);
+
+        let internal_wallet_address = wallet.new_external_address().await.unwrap();
+        assert_ne!(internal_wallet_address.address, address);
+
+        let internal_wallet_change_address = wallet.new_change_address().await.unwrap();
+        assert_ne!(internal_wallet_change_address.address, change_address);
+
+        let check_again = wallet.get_new_address().await.unwrap();
+        assert_eq!(check_again, address);
+
+        let check_again_change = wallet.get_new_change_address().await.unwrap();
+        assert_eq!(check_again_change, change_address);
     }
 }
