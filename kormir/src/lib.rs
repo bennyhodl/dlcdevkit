@@ -10,7 +10,7 @@ use crate::storage::Storage;
 use bitcoin::bip32::{ChildNumber, DerivationPath, Xpriv};
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::key::XOnlyPublicKey;
-use bitcoin::secp256k1::{All, Message, Secp256k1, SecretKey};
+use bitcoin::secp256k1::{All, Secp256k1, SecretKey};
 use bitcoin::Network;
 use secp256k1_zkp::Keypair;
 use std::str::FromStr;
@@ -116,10 +116,7 @@ impl<S: Storage> Oracle<S> {
         oracle_event.validate().map_err(|_| Error::Internal)?;
 
         // create signature
-        let mut data = Vec::new();
-        oracle_event.write(&mut data).map_err(|_| Error::Internal)?;
-        let hash = sha256::Hash::hash(&data);
-        let msg = Message::from_digest(hash.to_byte_array());
+        let msg = dlc_messages::oracle_msgs::tagged_announcement_msg(&oracle_event);
         let announcement_signature = self.secp.sign_schnorr_no_aux_rand(&msg, &self.key_pair);
 
         let ann = OracleAnnouncement {
@@ -128,7 +125,6 @@ impl<S: Storage> Oracle<S> {
             announcement_signature,
         };
         ann.validate(&self.secp).map_err(|_| Error::Internal)?;
-
         let _ = self.storage.save_announcement(ann.clone(), indexes).await?;
 
         Ok(ann)
@@ -159,8 +155,7 @@ impl<S: Storage> Oracle<S> {
         let nonce_index = data.indexes.first().expect("Already checked length");
         let nonce_key = self.get_nonce_key(*nonce_index);
 
-        let hash = sha256::Hash::hash(outcome.as_bytes());
-        let msg = Message::from_digest(hash.to_byte_array());
+        let msg = dlc_messages::oracle_msgs::tagged_attestation_msg(&outcome);
 
         let sig = dlc::secp_utils::schnorrsig_sign_with_nonce(
             &self.secp,
@@ -243,10 +238,7 @@ impl<S: Storage> Oracle<S> {
         oracle_event.validate().map_err(|_| Error::Internal)?;
 
         // create signature
-        let mut data = Vec::new();
-        oracle_event.write(&mut data).map_err(|_| Error::Internal)?;
-        let hash = sha256::Hash::hash(&data);
-        let msg = Message::from_digest(hash.to_byte_array());
+        let msg = dlc_messages::oracle_msgs::tagged_announcement_msg(&oracle_event);
         let announcement_signature = self.secp.sign_schnorr_no_aux_rand(&msg, &self.key_pair);
 
         let ann = OracleAnnouncement {
@@ -319,8 +311,7 @@ impl<S: Storage> Oracle<S> {
             .zip(nonce_keys)
             .enumerate()
             .map(|(idx, (outcome, nonce_key))| {
-                let hash = sha256::Hash::hash(outcome.as_bytes());
-                let msg = Message::from_digest(hash.to_byte_array());
+                let msg = dlc_messages::oracle_msgs::tagged_attestation_msg(outcome);
                 let sig = dlc::secp_utils::schnorrsig_sign_with_nonce(
                     &self.secp,
                     &msg,
