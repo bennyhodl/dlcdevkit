@@ -71,7 +71,8 @@ type Result<T> = std::result::Result<T, WalletError>;
 /// Recovery would be ~1 week for each contract key with the Xpriv.
 const CHILD_NUMBER_RANGE: u32 = 3_400;
 
-const MIN_CHANGE_SIZE: u64 = 50_000;
+/// The minimum change size for the wallet to create in coin selection.
+const MIN_CHANGE_SIZE: u64 = 25_000;
 
 /// Wrapper type that adapts DDK's Storage trait to BDK's AsyncWalletPersister interface.
 ///
@@ -684,7 +685,7 @@ impl ddk_manager::ContractSignerProvider for DlcDevKitWallet {
 
         key_id_input.extend_from_slice(self.fingerprint.as_bytes());
         key_id_input.extend_from_slice(&temp_id);
-        key_id_input.extend_from_slice(b"CONTRACT_SIGNER_KEY_ID_V1");
+        key_id_input.extend_from_slice(b"CONTRACT_SIGNER_KEY_ID_V0");
 
         let key_id_hash = sha256::Hash::hash(&key_id_input);
         key_id_hash.to_byte_array()
