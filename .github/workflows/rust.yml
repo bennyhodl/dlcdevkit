@@ -64,7 +64,7 @@ jobs:
           toolchain: nightly
           override: true
       - name: Install sqlx-cli
-        run: cargo install sqlx-cli
+        run: cargo install sqlx-cli@0.8.3
       - name: Run database migrations
         run: cargo sqlx migrate run --source ddk/src/storage/postgres/migrations
         env:
@@ -101,7 +101,7 @@ jobs:
           components: rustfmt
           override: true
       - name: Install sqlx-cli
-        run: cargo install sqlx-cli
+        run: cargo install sqlx-cli@0.8.3
       - name: Run database migrations
         run: cargo sqlx migrate run --source ddk/src/storage/postgres/migrations
         env:
