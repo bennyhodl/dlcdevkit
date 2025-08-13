@@ -9,7 +9,7 @@ version = "0.7.1"
 edition = "2015"
 
 [dependencies]
-bitcoin = { version = "0.32.2", default-features = false }
+bitcoin = { version = "0.32.6", default-features = false }
 miniscript = { version = "12.2", default-features = false }
 secp256k1-sys = "0.10.0"
 secp256k1-zkp = "0.11.0"

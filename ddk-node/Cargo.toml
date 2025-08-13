@@ -8,13 +8,13 @@ repository = "https://github.com/bennyhodl/dlcdevkit"
 edition = "2021"
 
 [dependencies]
-ddk = { version = "0.0.18", path = "../ddk", features = ["postgres", "kormir", "nostr"] }
-ddk-manager = { version = "0.7.6", path = "../ddk-manager", features = ["use-serde"] }
-ddk-payouts = { version = "0.0.16", path = "../payouts" }
+ddk = { path = "../ddk", features = ["postgres", "kormir", "nostr"] }
+ddk-manager = { path = "../ddk-manager", features = ["use-serde"] }
+ddk-payouts = { path = "../payouts" }
 dlc = { path = "../dlc", features = ["use-serde"] }
 dlc-messages = { path = "../dlc-messages", features = [ "use-serde"] }
 
-bitcoin = { version = "0.32.2", features = ["rand", "serde"] }
+bitcoin = { version = "0.32.6", features = ["rand", "serde"] }
 
 anyhow = "1.0.86"
 clap = { version = "4.5.9", features = ["derive"] }
