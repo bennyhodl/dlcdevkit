@@ -63,6 +63,7 @@ pub trait Time {
 }
 
 /// Provide current time through `SystemTime`.
+#[derive(Debug)]
 pub struct SystemTimeProvider {}
 
 impl Time for SystemTimeProvider {
@@ -260,6 +261,7 @@ impl_dlc_writeable!(Utxo, {
 });
 
 /// A ContractSignerProvider that caches the signers
+#[derive(Debug)]
 pub struct CachedContractSignerProvider<SP: Deref, X>
 where
     SP::Target: ContractSignerProvider<Signer = X>,

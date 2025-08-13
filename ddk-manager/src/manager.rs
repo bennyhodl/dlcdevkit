@@ -66,6 +66,7 @@ type ClosableContractInfo<'a> = Option<(
 )>;
 
 /// Used to create and update DLCs.
+#[derive(Debug)]
 pub struct Manager<
     W: Deref,
     SP: Deref,
@@ -1137,6 +1138,7 @@ where
         Ok(Contract::Closed(closed_contract))
     }
 
+    // TODO: Make this public to refund
     async fn check_refund(&self, contract: &SignedContract) -> Result<(), Error> {
         // TODO(tibo): should check for confirmation of refund before updating state
         if contract

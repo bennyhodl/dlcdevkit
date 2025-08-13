@@ -186,7 +186,7 @@ pub struct TxInputInfo {
 }
 
 /// Structure containing oracle information for a single event.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct OracleInfo {
     /// The public key of the oracle.
     pub public_key: XOnlyPublicKey,
@@ -300,7 +300,7 @@ impl PartyParams {
     /// The change output value already accounts for the required fees.
     /// If input amount (sum of all input values) is lower than the sum of the collateral
     /// plus the required fees, an error is returned.
-    pub(crate) fn get_change_output_and_fees(
+    pub fn get_change_output_and_fees(
         &self,
         total_collateral: Amount,
         fee_rate_per_vb: u64,
@@ -515,7 +515,8 @@ pub fn create_dlc_transactions(
     })
 }
 
-pub(crate) fn create_fund_transaction_with_fees(
+/// Create a funding transaction with fees.
+pub fn create_fund_transaction_with_fees(
     offer_params: &PartyParams,
     accept_params: &PartyParams,
     fee_rate_per_vb: u64,
@@ -579,7 +580,8 @@ pub(crate) fn create_fund_transaction_with_fees(
     Ok((fund_tx, funding_script_pubkey))
 }
 
-pub(crate) fn create_cets_and_refund_tx(
+/// Create the contract execution transactions and refund transaction.
+pub fn create_cets_and_refund_tx(
     offer_params: &PartyParams,
     accept_params: &PartyParams,
     prev_outpoint: OutPoint,
