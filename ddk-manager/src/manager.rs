@@ -30,7 +30,7 @@ use dlc_messages::channel::{
     SettleOffer, SignChannel,
 };
 use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
-use dlc_messages::{AcceptDlc, Message as DlcMessage, OfferDlc, SignDlc};
+use dlc_messages::{AcceptDlc, CloseDlc, Message as DlcMessage, OfferDlc, SignDlc};
 use futures::stream;
 use futures::stream::FuturesUnordered;
 use futures::{StreamExt, TryStreamExt};
@@ -216,6 +216,10 @@ where
                 self.on_sign_message(s, &counter_party).await?;
                 Ok(None)
             }
+            DlcMessage::Close(c) => {
+                self.on_close_message(c, &counter_party).await?;
+                Ok(None)
+            }
             DlcMessage::OfferChannel(o) => {
                 self.on_offer_channel(o, counter_party).await?;
                 Ok(None)
@@ -301,6 +305,7 @@ where
             get_contract_in_state!(self, contract_id, Confirmed, Some(counter_party))?;
 
         let dlc_input = confirmed_contract.get_dlc_input();
+
         let (offered_contract, offer_msg) = crate::contract_updater::offer_contract(
             &self.secp,
             contract_input,
@@ -469,6 +474,33 @@ where
 
         self.store.create_contract(&contract).await?;
 
+        Ok(())
+    }
+
+    async fn on_close_message(
+        &self,
+        close_msg: &CloseDlc,
+        counter_party: &PublicKey,
+    ) -> Result<(), Error> {
+        // Validate that the contract exists and is in the correct state
+        let signed_contract = get_contract_in_state!(
+            self,
+            &close_msg.contract_id,
+            Confirmed,
+            Some(*counter_party)
+        )?;
+
+        // Validate the close message by attempting to construct the close transaction
+        // This verifies the signature and transaction structure without broadcasting
+        let _close_tx = crate::contract_updater::complete_cooperative_close(
+            &self.secp,
+            &signed_contract,
+            close_msg,
+            &self.signer_provider,
+        )?;
+
+        // Message is valid - the application layer should call accept_cooperative_close()
+        // if they want to accept the offered terms
         Ok(())
     }
 
@@ -866,6 +898,53 @@ where
             }
         }
 
+        // Check each pending close transaction
+        for pending_close_tx in &contract
+            .accepted_contract
+            .dlc_transactions
+            .pending_close_txs
+        {
+            let confirmations = self
+                .blockchain
+                .get_transaction_confirmations(&pending_close_tx.compute_txid())
+                .await?;
+
+            if confirmations >= NB_CONFIRMATIONS {
+                // Found a fully confirmed pending close - move directly to Closed
+                let pnl = contract.accepted_contract.compute_pnl(pending_close_tx);
+                let closed_contract = ClosedContract {
+                    attestations: None, // Cooperative close has no attestations
+                    signed_cet: Some(pending_close_tx.clone()), // Cooperative close doesn't use a CET
+                    contract_id: contract.accepted_contract.get_contract_id(),
+                    temporary_contract_id: contract.accepted_contract.offered_contract.id,
+                    counter_party_id: contract.accepted_contract.offered_contract.counter_party,
+                    pnl,
+                    funding_txid: contract
+                        .accepted_contract
+                        .dlc_transactions
+                        .fund
+                        .compute_txid(),
+                };
+
+                self.store
+                    .update_contract(&Contract::Closed(closed_contract))
+                    .await?;
+                break; // Only one close can be confirmed
+            } else if confirmations >= 1 {
+                // Found a confirmed but not fully confirmed pending close - move to PreClosed
+                let preclosed_contract = PreClosedContract {
+                    signed_contract: contract.clone(),
+                    attestations: None, // Cooperative close has no attestations
+                    signed_cet: pending_close_tx.clone(),
+                };
+
+                self.store
+                    .update_contract(&Contract::PreClosed(preclosed_contract))
+                    .await?;
+                break; // Only one close can be confirmed
+            }
+        }
+
         self.check_refund(contract).await?;
 
         Ok(())
@@ -967,6 +1046,11 @@ where
             .get_transaction_confirmations(&broadcasted_txid)
             .await?;
         if confirmations >= NB_CONFIRMATIONS {
+            let pnl = contract
+                .signed_contract
+                .accepted_contract
+                .compute_pnl(&contract.signed_cet);
+
             let closed_contract = ClosedContract {
                 attestations: contract.attestations.clone(),
                 signed_cet: Some(contract.signed_cet.clone()),
@@ -987,10 +1071,7 @@ where
                     .dlc_transactions
                     .fund
                     .compute_txid(),
-                pnl: contract
-                    .signed_contract
-                    .accepted_contract
-                    .compute_pnl(&contract.signed_cet),
+                pnl,
             };
             self.store
                 .update_contract(&Contract::Closed(closed_contract))
@@ -1147,6 +1228,88 @@ where
         self.store.update_contract(&contract).await?;
 
         Ok(contract)
+    }
+
+    /// Initiates a cooperative close of a contract by creating and signing a closing transaction.
+    /// Returns a CloseDlc message to be sent to the counter party.
+    /// The contract remains in Confirmed state until the close transaction is broadcast.
+    pub async fn cooperative_close_contract(
+        &self,
+        contract_id: &ContractId,
+        counter_payout: Amount,
+    ) -> Result<(CloseDlc, PublicKey), Error> {
+        let signed_contract =
+            get_contract_in_state!(self, contract_id, Confirmed, None as Option<PublicKey>)?;
+
+        let (close_message, close_tx) = crate::contract_updater::create_cooperative_close(
+            &self.secp,
+            &signed_contract,
+            counter_payout,
+            &self.signer_provider,
+        )?;
+
+        // Create updated contract with pending close transaction
+        let mut updated_dlc_transactions =
+            signed_contract.accepted_contract.dlc_transactions.clone();
+        updated_dlc_transactions
+            .pending_close_txs
+            .push(close_tx.clone());
+
+        let updated_accepted_contract = AcceptedContract {
+            dlc_transactions: updated_dlc_transactions,
+            ..signed_contract.accepted_contract.clone()
+        };
+
+        let updated_signed_contract = SignedContract {
+            accepted_contract: updated_accepted_contract,
+            ..signed_contract.clone()
+        };
+
+        // Update contract state to track pending close
+        self.store
+            .update_contract(&Contract::Confirmed(updated_signed_contract))
+            .await?;
+
+        let counter_party = signed_contract
+            .accepted_contract
+            .offered_contract
+            .counter_party;
+
+        Ok((close_message, counter_party))
+    }
+
+    /// Accepts a cooperative close request by completing the close transaction
+    /// and broadcasting it to the network.
+    pub async fn accept_cooperative_close(
+        &self,
+        contract_id: &ContractId,
+        close_message: &CloseDlc,
+    ) -> Result<(), Error> {
+        let signed_contract =
+            get_contract_in_state!(self, contract_id, Confirmed, None as Option<PublicKey>)?;
+
+        let close_tx = crate::contract_updater::complete_cooperative_close(
+            &self.secp,
+            &signed_contract,
+            close_message,
+            &self.signer_provider,
+        )?;
+
+        // Broadcast the closing transaction
+        self.blockchain.send_transaction(&close_tx).await?;
+
+        // Create PreClosed contract (transaction broadcast but not confirmed yet)
+        let preclosed_contract = PreClosedContract {
+            signed_contract,
+            attestations: None,
+            signed_cet: close_tx,
+        };
+
+        self.store
+            .update_contract(&Contract::PreClosed(preclosed_contract))
+            .await?;
+
+        Ok(())
     }
 }
 
@@ -1498,6 +1661,7 @@ where
         &self,
         channel_id: &ChannelId,
         counter_payout: Amount,
+        additional_inputs: Vec<OutPoint>,
     ) -> Result<CollaborativeCloseOffer, Error> {
         let mut signed_channel =
             get_channel_in_state!(self, channel_id, Signed, None as Option<PublicKey>)?;
@@ -1506,6 +1670,7 @@ where
             &self.secp,
             &mut signed_channel,
             counter_payout,
+            additional_inputs,
             &self.signer_provider,
             &self.time,
         )?;

@@ -6,7 +6,7 @@ set -e
 CONTRACT_STATES=("OfferedContract" "AcceptedContract" "SignedContract" "ConfirmedContract" "PreClosedContract" "ClosedContract")
 
 # Destination folder at top level
-DEST=${PWD}/contract_binaries/
+DEST=${PWD}/test_config/contract_binaries/
 
 # Create the destination directory if it doesn't exist
 mkdir -p ${DEST}

@@ -36,11 +36,11 @@ pub enum Contract {
     Accepted(accepted_contract::AcceptedContract),
     /// A contract for which signatures have been produced.
     Signed(signed_contract::SignedContract),
-    /// A contract whose funding transaction was included in the blockchain.
+    /// A contract whose funding transaction was included in the blockchain with sufficient confirmations.
     Confirmed(signed_contract::SignedContract),
-    /// A contract for which a CET was broadcasted, but not neccesarily confirmed to blockchain
+    /// A contract for which a CET was broadcasted, but not fully confirmed to the blockchain.
     PreClosed(PreClosedContract),
-    /// A contract for which a CET was confirmed to blockchain
+    /// A contract for which a CET was fully confirmed to blockchain
     Closed(ClosedContract),
     /// A contract whose refund transaction was broadcast.
     Refunded(signed_contract::SignedContract),

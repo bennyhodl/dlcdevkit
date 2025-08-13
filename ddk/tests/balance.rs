@@ -13,7 +13,7 @@ use test_util::generate_blocks;
 
 #[tokio::test]
 async fn contract_balance() {
-    let contract_bytes = include_bytes!("../../contract_binaries/PreClosed");
+    let contract_bytes = include_bytes!("../../testconfig/contract_binaries/PreClosed");
     let contract = deserialize_contract(&contract_bytes.to_vec()).unwrap();
     let preclosed = match contract {
         Contract::PreClosed(c) => c,

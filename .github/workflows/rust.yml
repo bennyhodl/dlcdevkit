@@ -98,7 +98,7 @@ jobs:
           chmod +x ./testconfig/scripts/wait_for_electrs.sh
           ./testconfig/scripts/wait_for_electrs.sh
       - name: Run test
-        run: RUST_BACKTRACE=1 RUST_MIN_STACK=4194304 ${{ matrix.tests }} --ignored
+        run: RUST_BACKTRACE=1 RUST_MIN_STACK=8388608 ${{ matrix.tests }} --ignored
       - name: Stop bitcoin node
         run: docker compose down -v
 
@@ -119,6 +119,6 @@ jobs:
           chmod +x ./testconfig/scripts/wait_for_electrs.sh
           ./testconfig/scripts/wait_for_electrs.sh
       - name: Run test
-        run: RUST_MIN_STACK=4194304 cargo test -p ddk-manager single_oracle_numerical_splice_test -- --ignored --nocapture
+        run: RUST_MIN_STACK=8388608 cargo test -p ddk-manager splice_test -- --ignored
       - name: Stop bitcoin node
         run: docker compose down -v
