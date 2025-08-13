@@ -239,10 +239,10 @@ impl From<miniscript::Error> for Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            Error::Secp256k1(ref e) => write!(f, "Secp256k1 error: {}", e),
+            Error::Secp256k1(ref e) => write!(f, "Secp256k1 error: {e}"),
             Error::InvalidArgument => write!(f, "Invalid argument"),
-            Error::P2wpkh(ref e) => write!(f, "Error while computing p2wpkh sighash: {}", e),
-            Error::InputsIndex(ref e) => write!(f, "Error ordering inputs: {}", e),
+            Error::P2wpkh(ref e) => write!(f, "Error while computing p2wpkh sighash: {e}"),
+            Error::InputsIndex(ref e) => write!(f, "Error ordering inputs: {e}"),
             Error::Miniscript(_) => write!(f, "Error within miniscript"),
         }
     }
