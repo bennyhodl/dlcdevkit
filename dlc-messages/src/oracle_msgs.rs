@@ -2,9 +2,9 @@
 
 use crate::ser_impls::{
     read_as_tlv, read_i32, read_schnorr_pubkey, read_schnorrsig, read_strings_u16, write_as_tlv,
-    write_i32, write_schnorr_pubkey, write_schnorrsig, write_strings_u16,
+    write_i32, write_schnorr_pubkey, write_schnorrsig, write_strings_u16, BigSize,
 };
-use bitcoin::hashes::Hash;
+use bitcoin::hashes::{Hash, HashEngine};
 use dlc::{Error, OracleInfo as DlcOracleInfo};
 use lightning::ln::msgs::DecodeError;
 use lightning::ln::wire::Type;
@@ -18,6 +18,11 @@ use serde::{Deserialize, Serialize};
 pub const ANNOUNCEMENT_TYPE: u16 = 55332;
 /// The type of the attestation struct.
 pub const ATTESTATION_TYPE: u16 = 55400;
+
+/// The tag of the oracle announcement struct.
+pub const ORACLE_ANNOUNCEMENT_TAG: &[u8] = b"DLC/oracle/announcement/v0";
+/// The tag of the oracle attestation struct.
+pub const ORACLE_ATTESTATION_TAG: &[u8] = b"DLC/oracle/attestation/v0";
 
 #[derive(Clone, Eq, PartialEq, Debug)]
 #[cfg_attr(
@@ -166,16 +171,56 @@ impl Type for OracleAnnouncement {
     }
 }
 
+/// TODO: this should be handled by the read/write macros. They do not append
+/// the tagged hash to the event. As well, [`crate::Message`]
+///
+/// It should end up being back to original:
+///
+/// self.event.write(&mut event_hex)?;
+///
+fn write_oracle_event(event: &OracleEvent) -> Result<Vec<u8>, lightning::io::Error> {
+    let mut event_hex = Vec::new();
+    BigSize(event.type_id() as u64).write(&mut event_hex)?;
+    BigSize(event.serialized_length() as u64).write(&mut event_hex)?;
+    event
+        .write(&mut event_hex)
+        .expect("Error writing oracle event");
+    Ok(event_hex)
+}
+
+/// Returns the message to be signed for an oracle announcement.
+///
+/// Follows the signing validation rules from the [DLC spec](https://github.com/discreetlogcontracts/dlcspecs/blob/master/Oracle.md#signing-algorithm).
+pub fn tagged_announcement_msg(event: &OracleEvent) -> Message {
+    let tag_hash = bitcoin::hashes::sha256::Hash::hash(ORACLE_ANNOUNCEMENT_TAG);
+    let event_hex = write_oracle_event(event).expect("Error writing oracle event");
+
+    let mut hash_engine = bitcoin::hashes::sha256::Hash::engine();
+    hash_engine.input(&tag_hash[..]);
+    hash_engine.input(&tag_hash[..]);
+    hash_engine.input(&event_hex);
+    let hash = bitcoin::hashes::sha256::Hash::from_engine(hash_engine);
+    Message::from_digest(hash.to_byte_array())
+}
+
+/// Returns the message to be signed for an oracle attestation.
+///
+/// Follows the signing validation rules from the [DLC spec](https://github.com/discreetlogcontracts/dlcspecs/blob/master/Oracle.md#signing-algorithm).
+pub fn tagged_attestation_msg(outcome: &str) -> Message {
+    let tag_hash = bitcoin::hashes::sha256::Hash::hash(ORACLE_ATTESTATION_TAG);
+    let outcome_hash = bitcoin::hashes::sha256::Hash::hash(outcome.as_bytes());
+    let mut hash_engine = bitcoin::hashes::sha256::Hash::engine();
+    hash_engine.input(&tag_hash[..]);
+    hash_engine.input(&tag_hash[..]);
+    hash_engine.input(&outcome_hash[..]);
+    let hash = bitcoin::hashes::sha256::Hash::from_engine(hash_engine);
+    Message::from_digest(hash.to_byte_array())
+}
+
 impl OracleAnnouncement {
     /// Returns whether the announcement satisfy validity checks.
     pub fn validate<C: Verification>(&self, secp: &Secp256k1<C>) -> Result<(), Error> {
-        let mut event_hex = Vec::new();
-        self.oracle_event
-            .write(&mut event_hex)
-            .expect("Error writing oracle event");
-
-        let hash = bitcoin::hashes::sha256::Hash::hash(&event_hex);
-        let msg = Message::from_digest(hash.to_byte_array());
+        let msg = tagged_announcement_msg(&self.oracle_event);
         secp.verify_schnorr(&self.announcement_signature, &msg, &self.oracle_public_key)?;
         self.oracle_event.validate()
     }
@@ -348,8 +393,7 @@ impl OracleAttestation {
             .iter()
             .zip(self.outcomes.iter())
             .try_for_each(|(sig, outcome)| {
-                let hash = bitcoin::hashes::sha256::Hash::hash(outcome.as_bytes());
-                let msg = Message::from_digest(hash.to_byte_array());
+                let msg = tagged_attestation_msg(outcome);
                 secp.verify_schnorr(sig, &msg, &self.oracle_public_key)
                     .map_err(|_| Error::InvalidArgument)?;
 
@@ -397,7 +441,7 @@ mod tests {
     use bitcoin::Network;
     use secp256k1_zkp::rand::Fill;
     use secp256k1_zkp::SecretKey;
-    use secp256k1_zkp::{rand::thread_rng, Message, SECP256K1};
+    use secp256k1_zkp::{rand::thread_rng, SECP256K1};
     use secp256k1_zkp::{schnorr::Signature as SchnorrSignature, Keypair, XOnlyPublicKey};
 
     fn enum_descriptor() -> EnumEventDescriptor {
@@ -478,12 +522,7 @@ mod tests {
         let oracle_pubkey = XOnlyPublicKey::from_keypair(&key_pair).0;
         let events = [digit_event(10), signed_digit_event(11), enum_event(1)];
         for event in events {
-            let mut event_hex = Vec::new();
-            event
-                .write(&mut event_hex)
-                .expect("Error writing oracle event");
-            let hash = bitcoin::hashes::sha256::Hash::hash(&event_hex);
-            let msg = Message::from_digest(hash.to_byte_array());
+            let msg = tagged_announcement_msg(&event);
             let sig = SECP256K1.sign_schnorr(&msg, &key_pair);
             let valid_announcement = OracleAnnouncement {
                 announcement_signature: sig,
@@ -503,12 +542,7 @@ mod tests {
         let oracle_pubkey = XOnlyPublicKey::from_keypair(&key_pair).0;
         let events = [digit_event(9), signed_digit_event(10), enum_event(2)];
         for event in events {
-            let mut event_hex = Vec::new();
-            event
-                .write(&mut event_hex)
-                .expect("Error writing oracle event");
-            let hash = bitcoin::hashes::sha256::Hash::hash(&event_hex);
-            let msg = Message::from_digest(hash.to_byte_array());
+            let msg = tagged_announcement_msg(&event);
             let sig = SECP256K1.sign_schnorr(&msg, &key_pair);
             let invalid_announcement = OracleAnnouncement {
                 announcement_signature: sig,
@@ -527,12 +561,7 @@ mod tests {
         let key_pair = Keypair::new(SECP256K1, &mut thread_rng());
         let oracle_pubkey = XOnlyPublicKey::from_keypair(&key_pair).0;
         let event = digit_event(10);
-        let mut event_hex = Vec::new();
-        event
-            .write(&mut event_hex)
-            .expect("Error writing oracle event");
-        let hash = bitcoin::hashes::sha256::Hash::hash(&event_hex);
-        let msg = Message::from_digest(hash.to_byte_array());
+        let msg = tagged_announcement_msg(&event);
         let sig = SECP256K1.sign_schnorr(&msg, &key_pair);
         let mut sig_hex = *sig.as_ref();
         sig_hex[10] = sig_hex[10].checked_add(1).unwrap_or(0);
@@ -559,12 +588,7 @@ mod tests {
             event_descriptor: EventDescriptor::EnumEvent(enum_descriptor()),
         };
 
-        let mut event_hex = Vec::new();
-        oracle_event
-            .write(&mut event_hex)
-            .expect("Error writing oracle event");
-        let hash = bitcoin::hashes::sha256::Hash::hash(&event_hex);
-        let msg = Message::from_digest(hash.to_byte_array());
+        let msg = tagged_announcement_msg(&oracle_event);
         let sig = SECP256K1.sign_schnorr(&msg, &key_pair);
 
         let valid_announcement = OracleAnnouncement {
@@ -573,8 +597,7 @@ mod tests {
             oracle_event,
         };
 
-        let hash = bitcoin::hashes::sha256::Hash::hash("1".as_bytes());
-        let msg = Message::from_digest(hash.to_byte_array());
+        let msg = tagged_attestation_msg("1");
         let sig = dlc::secp_utils::schnorrsig_sign_with_nonce(
             SECP256K1,
             &msg,
@@ -608,12 +631,7 @@ mod tests {
             event_descriptor: EventDescriptor::EnumEvent(enum_descriptor()),
         };
 
-        let mut event_hex = Vec::new();
-        oracle_event
-            .write(&mut event_hex)
-            .expect("Error writing oracle event");
-        let hash = bitcoin::hashes::sha256::Hash::hash(&event_hex);
-        let msg = Message::from_digest(hash.to_byte_array());
+        let msg = tagged_announcement_msg(&oracle_event);
         let sig = SECP256K1.sign_schnorr(&msg, &key_pair);
 
         let valid_announcement = OracleAnnouncement {
@@ -622,8 +640,7 @@ mod tests {
             oracle_event,
         };
 
-        let hash = bitcoin::hashes::sha256::Hash::hash("1".as_bytes());
-        let msg = Message::from_digest(hash.to_byte_array());
+        let msg = tagged_attestation_msg("1");
         let sig = dlc::secp_utils::schnorrsig_sign_with_nonce(
             SECP256K1,
             &msg,
