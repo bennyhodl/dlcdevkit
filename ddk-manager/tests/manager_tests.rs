@@ -37,6 +37,7 @@ async fn get_manager() -> TestManager {
             "http://localhost:30000",
             Network::Regtest,
             store.clone(),
+            None,
         )
         .await
         .unwrap(),

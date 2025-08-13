@@ -798,6 +798,12 @@ pub async fn refresh_wallet(wallet: &DlcDevKitWallet, expected_funds: u64) {
     }
 }
 
+pub fn rpc_client() -> Client {
+    let auth = Auth::UserPass("ddk".to_string(), "ddk".to_string());
+    let host = std::env::var("BITCOIND_HOST").unwrap_or_else(|_| "localhost".to_owned());
+    Client::new(&format!("http://{}:18443", host), auth).unwrap()
+}
+
 pub async fn init_clients() -> (
     DlcDevKitWallet,
     Arc<MemoryStorage>,
@@ -805,8 +811,7 @@ pub async fn init_clients() -> (
     Arc<MemoryStorage>,
     Client,
 ) {
-    let auth = Auth::UserPass("ddk".to_string(), "ddk".to_string());
-    let sink_rpc = Client::new(&rpc_base(), auth.clone()).unwrap();
+    let sink_rpc = rpc_client();
 
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     let offer_rpc = create_and_fund_wallet().await;
@@ -828,14 +833,8 @@ pub async fn init_clients() -> (
     )
 }
 
-fn rpc_base() -> String {
-    let host = std::env::var("BITCOIND_HOST").unwrap_or_else(|_| "localhost".to_owned());
-    format!("http://{}:18443", host)
-}
-
 pub async fn create_and_fund_wallet() -> (DlcDevKitWallet, Arc<MemoryStorage>) {
-    let auth = Auth::UserPass("ddk".to_string(), "ddk".to_string());
-    let sink_rpc = Client::new(&rpc_base(), auth.clone()).unwrap();
+    let sink_rpc = rpc_client();
     let sink_address = sink_rpc
         .get_new_address(None, None)
         .unwrap()
@@ -849,6 +848,7 @@ pub async fn create_and_fund_wallet() -> (DlcDevKitWallet, Arc<MemoryStorage>) {
         "http://localhost:30000",
         Network::Regtest,
         memory_storage.clone(),
+        None,
     )
     .await
     .unwrap();

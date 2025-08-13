@@ -7,6 +7,7 @@ use std::sync::{Arc, RwLock};
 use crate::chain::EsploraClient;
 use crate::ddk::{DlcDevKit, DlcManagerMessage};
 use crate::error::{BuilderError, Error};
+use crate::wallet::address::AddressGenerator;
 use crate::wallet::DlcDevKitWallet;
 use crate::{Oracle, Storage, Transport};
 
@@ -14,12 +15,13 @@ const DEFAULT_ESPLORA_HOST: &str = "https://mutinynet.com/api";
 const DEFAULT_NETWORK: Network = Network::Signet;
 
 /// Builder pattern for creating a [`crate::ddk::DlcDevKit`] process.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Builder<T, S, O> {
     name: Option<String>,
     transport: Option<Arc<T>>,
     storage: Option<Arc<S>>,
     oracle: Option<Arc<O>>,
+    contract_address_generator: Option<Arc<dyn AddressGenerator + Send + Sync + 'static>>,
     esplora_host: String,
     network: Network,
     seed_bytes: [u8; 32],
@@ -37,6 +39,7 @@ impl<T: Transport, S: Storage, O: Oracle> Default for Builder<T, S, O> {
             transport: None,
             storage: None,
             oracle: None,
+            contract_address_generator: None,
             esplora_host: DEFAULT_ESPLORA_HOST.to_string(),
             network: DEFAULT_NETWORK,
             seed_bytes: [0u8; 32],
@@ -67,17 +70,27 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
         self
     }
 
-    /// DLC contract storage. Storage is used by the [ddk_manager::manager::Manager] to create, update, retrieve, and
-    /// delete contracts. MUST implement [crate::Storage]
+    /// DLC contract storage. Storage is used by the [`ddk_manager::manager::Manager`] to create, update, retrieve, and
+    /// delete contracts. MUST implement [`crate::Storage`].
     pub fn set_storage(&mut self, storage: Arc<S>) -> &mut Self {
         self.storage = Some(storage);
         self
     }
 
     /// Oracle implementation for the [ddk_manager::manager::Manager] to retrieve oracle attestations and announcements.
-    /// MUST implement [crate::Oracle].
+    /// MUST implement [`crate::Oracle`].
     pub fn set_oracle(&mut self, oracle: Arc<O>) -> &mut Self {
         self.oracle = Some(oracle);
+        self
+    }
+
+    /// Wallet implementation for the [ddk_manager::manager::Manager] to retrieve wallet keys and sign transactions.
+    /// For now, just uses the [`DlcDevKitWallet`] implementation. Optionally can use a custom address generation.
+    pub fn set_contract_address_generator(
+        &mut self,
+        contract_address_generator: Arc<dyn AddressGenerator + Send + Sync + 'static>,
+    ) -> &mut Self {
+        self.contract_address_generator = Some(contract_address_generator);
         self
     }
 
@@ -127,15 +140,29 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
             .clone()
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-        let wallet = Arc::new(
-            DlcDevKitWallet::new(
-                &self.seed_bytes,
-                &self.esplora_host,
-                self.network,
-                storage.clone(),
-            )
-            .await?,
-        );
+        let wallet = match &self.contract_address_generator {
+            Some(w) => {
+                let wallet = DlcDevKitWallet::new(
+                    &self.seed_bytes,
+                    &self.esplora_host,
+                    self.network,
+                    storage.clone(),
+                    Some(w.clone()),
+                )
+                .await?;
+                Arc::new(wallet)
+            }
+            None => Arc::new(
+                DlcDevKitWallet::new(
+                    &self.seed_bytes,
+                    &self.esplora_host,
+                    self.network,
+                    storage.clone(),
+                    None,
+                )
+                .await?,
+            ),
+        };
 
         let mut oracles = HashMap::new();
         oracles.insert(oracle.get_public_key(), oracle.clone());
