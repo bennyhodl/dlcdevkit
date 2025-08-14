@@ -194,7 +194,6 @@ fn write_oracle_event(event: &OracleEvent) -> Result<Vec<u8>, lightning::io::Err
 pub fn tagged_announcement_msg(event: &OracleEvent) -> Message {
     let tag_hash = bitcoin::hashes::sha256::Hash::hash(ORACLE_ANNOUNCEMENT_TAG);
     let event_hex = write_oracle_event(event).expect("Error writing oracle event");
-
     let mut hash_engine = bitcoin::hashes::sha256::Hash::engine();
     hash_engine.input(&tag_hash[..]);
     hash_engine.input(&tag_hash[..]);
@@ -208,11 +207,10 @@ pub fn tagged_announcement_msg(event: &OracleEvent) -> Message {
 /// Follows the signing validation rules from the [DLC spec](https://github.com/discreetlogcontracts/dlcspecs/blob/master/Oracle.md#signing-algorithm).
 pub fn tagged_attestation_msg(outcome: &str) -> Message {
     let tag_hash = bitcoin::hashes::sha256::Hash::hash(ORACLE_ATTESTATION_TAG);
-    let outcome_hash = bitcoin::hashes::sha256::Hash::hash(outcome.as_bytes());
     let mut hash_engine = bitcoin::hashes::sha256::Hash::engine();
     hash_engine.input(&tag_hash[..]);
     hash_engine.input(&tag_hash[..]);
-    hash_engine.input(&outcome_hash[..]);
+    hash_engine.input(outcome.as_bytes());
     let hash = bitcoin::hashes::sha256::Hash::from_engine(hash_engine);
     Message::from_digest(hash.to_byte_array())
 }
