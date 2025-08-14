@@ -1,7 +1,7 @@
 //! # Module containing structures and methods for working with DLC channels.
 
 use bitcoin::{hashes::Hash, Transaction, Txid};
-use dlc_messages::channel::{AcceptChannel, SignChannel};
+use ddk_messages::channel::{AcceptChannel, SignChannel};
 use secp256k1_zkp::PublicKey;
 
 use crate::{ChannelId, ContractId};

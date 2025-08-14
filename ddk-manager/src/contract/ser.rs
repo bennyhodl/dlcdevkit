@@ -15,17 +15,17 @@ use crate::payout_curve::{
     HyperbolaPayoutCurvePiece, PayoutFunction, PayoutFunctionPiece, PayoutPoint,
     PolynomialPayoutCurvePiece, RoundingInterval, RoundingIntervals,
 };
-use dlc::DlcTransactions;
-use dlc_messages::impl_dlc_writeable;
-use dlc_messages::ser_impls::{
+use ddk_dlc::DlcTransactions;
+use ddk_messages::impl_dlc_writeable;
+use ddk_messages::ser_impls::{
     read_ecdsa_adaptor_signatures, read_option_cb, read_usize, read_vec, read_vec_cb,
     write_ecdsa_adaptor_signatures, write_option_cb, write_usize, write_vec, write_vec_cb,
 };
-use dlc_trie::digit_trie::{DigitNodeData, DigitTrieDump};
-use dlc_trie::multi_oracle_trie::{MultiOracleTrie, MultiOracleTrieDump};
-use dlc_trie::multi_oracle_trie_with_diff::{MultiOracleTrieWithDiff, MultiOracleTrieWithDiffDump};
-use dlc_trie::multi_trie::{MultiTrieDump, MultiTrieNodeData, TrieNodeInfo};
-use dlc_trie::{OracleNumericInfo, RangeInfo};
+use ddk_trie::digit_trie::{DigitNodeData, DigitTrieDump};
+use ddk_trie::multi_oracle_trie::{MultiOracleTrie, MultiOracleTrieDump};
+use ddk_trie::multi_oracle_trie_with_diff::{MultiOracleTrieWithDiff, MultiOracleTrieWithDiffDump};
+use ddk_trie::multi_trie::{MultiTrieDump, MultiTrieNodeData, TrieNodeInfo};
+use ddk_trie::{OracleNumericInfo, RangeInfo};
 use lightning::io::Read;
 use lightning::ln::msgs::DecodeError;
 use lightning::util::ser::{Readable, Writeable, Writer};
@@ -84,14 +84,14 @@ impl_dlc_writeable!(ContractInfo, { (contract_descriptor, writeable), (oracle_an
 impl_dlc_writeable!(EnumDescriptor, {
     (
         outcome_payouts,
-        {vec_cb, dlc_messages::ser_impls::enum_payout::write, dlc_messages::ser_impls::enum_payout::read}
+        {vec_cb, ddk_messages::ser_impls::enum_payout::write, ddk_messages::ser_impls::enum_payout::read}
     )
 });
 impl_dlc_writeable!(OfferedContract, {
     (id, writeable),
     (is_offer_party, writeable),
     (contract_info, vec),
-    (offer_params, { cb_writeable, dlc_messages::ser_impls::party_params::write, dlc_messages::ser_impls::party_params::read }),
+    (offer_params, { cb_writeable, ddk_messages::ser_impls::party_params::write, ddk_messages::ser_impls::party_params::read }),
     (total_collateral, writeable),
     (funding_inputs, vec),
     (fund_output_serial_id, writeable),
@@ -113,7 +113,7 @@ impl_dlc_writeable_external!(
 );
 impl_dlc_writeable!(AcceptedContract, {
     (offered_contract, writeable),
-    (accept_params, { cb_writeable, dlc_messages::ser_impls::party_params::write, dlc_messages::ser_impls::party_params::read }),
+    (accept_params, { cb_writeable, ddk_messages::ser_impls::party_params::write, ddk_messages::ser_impls::party_params::read }),
     (funding_inputs, vec),
     (adaptor_infos, vec),
     (adaptor_signatures, {option_cb, write_ecdsa_adaptor_signatures, read_ecdsa_adaptor_signatures }),

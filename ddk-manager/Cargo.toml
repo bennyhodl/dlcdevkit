@@ -10,18 +10,18 @@ version = "0.7.6"
 
 [features]
 default= ["std"]
-std = ["dlc/std", "dlc-messages/std", "dlc-trie/std", "bitcoin/std", "lightning/std"]
+std = ["ddk-dlc/std", "ddk-messages/std", "ddk-trie/std", "bitcoin/std", "lightning/std"]
 fuzztarget = ["rand_chacha"]
-parallel = ["dlc-trie/parallel"]
-use-serde = ["serde", "dlc/use-serde", "dlc-messages/use-serde", "dlc-trie/use-serde"]
+parallel = ["ddk-trie/parallel"]
+use-serde = ["serde", "ddk-dlc/use-serde", "ddk-messages/use-serde", "ddk-trie/use-serde"]
 
 [dependencies]
 async-trait = "0.1.50"
 bitcoin = { version = "0.32.6", default-features = false }
 
-dlc = { path = "../dlc", features = ["use-serde"] }
-dlc-messages = { path = "../dlc-messages", features = [ "use-serde"] }
-dlc-trie = { path = "../dlc-trie", features = ["use-serde"] }
+ddk-dlc = { path = "../dlc", features = ["use-serde"] }
+ddk-messages = { path = "../dlc-messages", features = [ "use-serde"] }
+ddk-trie = { path = "../dlc-trie", features = ["use-serde"] }
 
 futures = "0.3.31"
 hex = { package = "hex-conservative", version = "0.1" }

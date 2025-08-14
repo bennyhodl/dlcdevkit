@@ -3,9 +3,9 @@ authors = ["benny b <ben@bitcoinbay.foundation>", "Crypto Garage"]
 description = "Creation, signing and verification of Discreet Log Contracts (DLC) transactions."
 homepage = "https://github.com/bennyhodl/dlcdevkit"
 license-file = "../LICENSE"
-name = "dlc"
+name = "ddk-dlc"
 repository = "https://github.com/bennyhodl/dlcdevkit/tree/master/dlc"
-version = "0.7.1"
+version = "0.0.21"
 edition = "2015"
 
 [dependencies]

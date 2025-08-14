@@ -5,13 +5,13 @@ use std::ops::Deref;
 use bitcoin::psbt::Psbt;
 use bitcoin::Amount;
 use bitcoin::{consensus::Decodable, Script, Transaction, Witness};
-use dlc::dlc_input::DlcInputInfo;
-use dlc::{DlcTransactions, PartyParams};
-use dlc_messages::{
+use ddk_dlc::dlc_input::DlcInputInfo;
+use ddk_dlc::{DlcTransactions, PartyParams};
+use ddk_messages::{
     oracle_msgs::{OracleAnnouncement, OracleAttestation},
     AcceptDlc, FundingSignature, FundingSignatures, OfferDlc, SignDlc, WitnessElement,
 };
-use dlc_messages::{CloseDlc, FundingInput};
+use ddk_messages::{CloseDlc, FundingInput};
 use secp256k1_zkp::{
     ecdsa::Signature, All, EcdsaAdaptorSignature, PublicKey, Secp256k1, SecretKey, Signing,
 };
@@ -124,7 +124,7 @@ where
     .await?;
 
     let now = Instant::now();
-    let dlc_transactions = dlc::create_dlc_transactions(
+    let dlc_transactions = ddk_dlc::create_dlc_transactions(
         &offered_contract.offer_params,
         &accept_params,
         &offered_contract.contract_info[0].get_payouts(total_collateral)?,
@@ -201,7 +201,7 @@ pub(crate) fn accept_contract_internal(
     for contract_info in offered_contract.contract_info.iter().skip(1) {
         let payouts = contract_info.get_payouts(total_collateral)?;
 
-        let tmp_cets = dlc::create_cets(
+        let tmp_cets = ddk_dlc::create_cets(
             &cet_input,
             &offered_contract.offer_params.payout_script_pubkey,
             offered_contract.offer_params.payout_serial_id,
@@ -227,7 +227,7 @@ pub(crate) fn accept_contract_internal(
         adaptor_sigs.extend(adaptor_sig);
     }
 
-    let refund_signature = dlc::util::get_raw_sig_for_tx_input(
+    let refund_signature = ddk_dlc::util::get_raw_sig_for_tx_input(
         secp,
         refund,
         0,
@@ -297,7 +297,7 @@ where
 
     let total_collateral = offered_contract.total_collateral;
     let dlc_transactions = if !dlc_inputs.is_empty() {
-        dlc::create_spliced_dlc_transactions(
+        ddk_dlc::create_spliced_dlc_transactions(
             &offered_contract.offer_params,
             &accept_params,
             &offered_contract.contract_info[0].get_payouts(total_collateral)?,
@@ -308,7 +308,7 @@ where
             offered_contract.fund_output_serial_id,
         )?
     } else {
-        dlc::create_dlc_transactions(
+        ddk_dlc::create_dlc_transactions(
             &offered_contract.offer_params,
             &accept_params,
             &offered_contract.contract_info[0].get_payouts(total_collateral)?,
@@ -417,7 +417,7 @@ where
     let input_script_pubkey = input_script_pubkey.unwrap_or_else(|| funding_script_pubkey);
     let counter_adaptor_pk = counter_adaptor_pk.unwrap_or(accept_params.fund_pubkey);
 
-    dlc::verify_tx_input_sig(
+    ddk_dlc::verify_tx_input_sig(
         secp,
         refund_signature,
         refund,
@@ -448,7 +448,7 @@ where
     for contract_info in offered_contract.contract_info.iter().skip(1) {
         let payouts = contract_info.get_payouts(total_collateral)?;
 
-        let tmp_cets = dlc::create_cets(
+        let tmp_cets = ddk_dlc::create_cets(
             &cet_input,
             &offered_contract.offer_params.payout_script_pubkey,
             offered_contract.offer_params.payout_serial_id,
@@ -565,7 +565,7 @@ where
         })
         .collect::<Result<Vec<_>, Error>>()?;
 
-    let offer_refund_signature = dlc::util::get_raw_sig_for_tx_input(
+    let offer_refund_signature = ddk_dlc::util::get_raw_sig_for_tx_input(
         secp,
         refund,
         0,
@@ -668,7 +668,7 @@ where
     let counter_adaptor_pk =
         counter_adaptor_pk.unwrap_or(accepted_contract.offered_contract.offer_params.fund_pubkey);
 
-    dlc::verify_tx_input_sig(
+    ddk_dlc::verify_tx_input_sig(
         secp,
         refund_signature,
         &accepted_contract.dlc_transactions.refund,
@@ -733,7 +733,7 @@ where
             let dlc_input_info: DlcInputInfo = funding_input.into();
 
             // Verify the signature from the offer party is valid for the DLC input.
-            dlc::dlc_input::verify_dlc_funding_input_signature(
+            ddk_dlc::dlc_input::verify_dlc_funding_input_signature(
                 secp,
                 fund_tx,
                 input_index,
@@ -755,7 +755,7 @@ where
             .await?;
 
             // Build the redeem script for the DLC input.
-            let completed_witness = dlc::dlc_input::combine_dlc_input_signatures(
+            let completed_witness = ddk_dlc::dlc_input::combine_dlc_input_signatures(
                 &dlc_input_info,
                 &my_dlc_input_signature,
                 &funding_signatures.witness_elements[0].witness,
@@ -843,7 +843,7 @@ where
     let funding_sk = signer.get_secret_key()?;
 
     tracing::info!(contract_id, "Getting signed CET.");
-    dlc::sign_cet(
+    ddk_dlc::sign_cet(
         secp,
         &mut cet,
         &adaptor_sigs[range_info.adaptor_index],
@@ -892,7 +892,7 @@ where
 
     let fund_priv_key = signer.get_secret_key()?;
     let mut refund = accepted_contract.dlc_transactions.refund.clone();
-    dlc::util::sign_multi_sig_input(
+    ddk_dlc::util::sign_multi_sig_input(
         secp,
         &mut refund,
         other_sig,
@@ -930,7 +930,7 @@ where
     let fund_outpoint = accepted_contract.dlc_transactions.get_fund_outpoint();
 
     // Create the cooperative close transaction
-    let close_tx = dlc::channel::create_collaborative_close_transaction(
+    let close_tx = ddk_dlc::channel::create_collaborative_close_transaction(
         &offered_contract.offer_params,
         offer_payout,
         &accepted_contract.accept_params,
@@ -944,7 +944,7 @@ where
     let signer = signer_provider.derive_contract_signer(offered_contract.keys_id)?;
     let fund_private_key = signer.get_secret_key()?;
 
-    let close_signature = dlc::util::get_raw_sig_for_tx_input(
+    let close_signature = ddk_dlc::util::get_raw_sig_for_tx_input(
         secp,
         &close_tx,
         0,
@@ -987,7 +987,7 @@ where
     let offer_payout = total_collateral - close_message.accept_payout;
 
     // Recreate the close transaction to verify
-    let mut close_tx = dlc::channel::create_collaborative_close_transaction(
+    let mut close_tx = ddk_dlc::channel::create_collaborative_close_transaction(
         &offered_contract.offer_params,
         offer_payout,
         &accepted_contract.accept_params,
@@ -1009,7 +1009,7 @@ where
     };
 
     // Sign and combine signatures
-    dlc::util::sign_multi_sig_input(
+    ddk_dlc::util::sign_multi_sig_input(
         secp,
         &mut close_tx,
         &close_message.close_signature,

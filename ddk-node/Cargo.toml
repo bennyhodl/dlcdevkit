@@ -1,6 +1,6 @@
 [package]
 name = "ddk-node"
-version = "0.0.16"
+version = "0.0.21"
 authors = ["benny b <ben@bitcoinbay.foundation>"]
 description = "DDK node to facilitate DLC contracts."
 license = "MIT"
@@ -11,8 +11,8 @@ edition = "2021"
 ddk = { path = "../ddk", features = ["postgres", "kormir", "nostr"] }
 ddk-manager = { path = "../ddk-manager", features = ["use-serde"] }
 ddk-payouts = { path = "../payouts" }
-dlc = { path = "../dlc", features = ["use-serde"] }
-dlc-messages = { path = "../dlc-messages", features = [ "use-serde"] }
+ddk-dlc = { path = "../dlc", features = ["use-serde"] }
+ddk-messages = { path = "../dlc-messages", features = [ "use-serde"] }
 
 bitcoin = { version = "0.32.6", features = ["rand", "serde"] }
 

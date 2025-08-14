@@ -37,8 +37,8 @@ use ddk_manager::{
     contract::contract_input::ContractInput, CachedContractSignerProvider, ContractId,
     SimpleSigner, SystemTimeProvider,
 };
-use dlc_messages::oracle_msgs::OracleAnnouncement;
-use dlc_messages::{AcceptDlc, Message, OfferDlc};
+use ddk_messages::oracle_msgs::OracleAnnouncement;
+use ddk_messages::{AcceptDlc, Message, OfferDlc};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio::runtime::Runtime;

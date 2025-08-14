@@ -1,9 +1,8 @@
 //! # A channel is offered when an offer was made or received. This module contains
 //! the model for it and method for working with it.
 
-use dlc::PartyParams;
-use dlc_messages::channel::OfferChannel;
-// use dlc_messages::channel::OfferChannel;
+use ddk_dlc::PartyParams;
+use ddk_messages::channel::OfferChannel;
 use secp256k1_zkp::PublicKey;
 
 use crate::{

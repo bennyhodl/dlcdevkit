@@ -11,7 +11,7 @@
 #![deny(missing_docs)]
 
 extern crate bitcoin;
-extern crate dlc;
+extern crate ddk_dlc;
 extern crate lightning;
 extern crate secp256k1_zkp;
 #[macro_use]
@@ -44,8 +44,8 @@ use channel::{
     SettleOffer, SignChannel,
 };
 use contract_msgs::ContractInfo;
-use dlc::dlc_input::DlcInputInfo;
-use dlc::{Error, TxInputInfo};
+use ddk_dlc::dlc_input::DlcInputInfo;
+use ddk_dlc::{Error, TxInputInfo};
 use lightning::ln::msgs::DecodeError;
 use lightning::ln::wire::Type;
 use lightning::util::ser::{Readable, Writeable, Writer};

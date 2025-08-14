@@ -5,7 +5,7 @@ use crate::ser_impls::{
     write_i32, write_schnorr_pubkey, write_schnorrsig, write_strings_u16, BigSize,
 };
 use bitcoin::hashes::{Hash, HashEngine};
-use dlc::{Error, OracleInfo as DlcOracleInfo};
+use ddk_dlc::{Error, OracleInfo as DlcOracleInfo};
 use lightning::ln::msgs::DecodeError;
 use lightning::ln::wire::Type;
 use lightning::util::ser::{Readable, Writeable, Writer};
@@ -397,7 +397,7 @@ impl OracleAttestation {
                 secp.verify_schnorr(sig, &msg, &self.oracle_public_key)
                     .map_err(|_| Error::InvalidArgument)?;
 
-                Ok::<(), dlc::Error>(())
+                Ok::<(), ddk_dlc::Error>(())
             })?;
 
         if !self
@@ -598,7 +598,7 @@ mod tests {
         };
 
         let msg = tagged_attestation_msg("1");
-        let sig = dlc::secp_utils::schnorrsig_sign_with_nonce(
+        let sig = ddk_dlc::secp_utils::schnorrsig_sign_with_nonce(
             SECP256K1,
             &msg,
             &key_pair,
@@ -641,7 +641,7 @@ mod tests {
         };
 
         let msg = tagged_attestation_msg("1");
-        let sig = dlc::secp_utils::schnorrsig_sign_with_nonce(
+        let sig = ddk_dlc::secp_utils::schnorrsig_sign_with_nonce(
             SECP256K1,
             &msg,
             &key_pair,

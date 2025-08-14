@@ -3,21 +3,21 @@ authors = ["benny b <ben@bitcoinbay.foundation>", "Crypto Garage"]
 description = "Data structures for storage and retrival of numerical Discreet Log Contracts (DLC)."
 homepage = "https://github.com/bennyhodl/dlcdevkit"
 license-file = "../LICENSE"
-name = "dlc-trie"
+name = "ddk-trie"
 repository = "https://github.com/bennyhodl/dlcdevkit/tree/master/dlc-trie"
-version = "0.7.1"
+version = "0.0.21"
 edition = "2015"
 
 [features]
 default = ["std"]
-std = ["dlc/std", "bitcoin/std"]
-no-std = ["dlc/no-std"]
+std = ["ddk-dlc/std", "bitcoin/std"]
+no-std = ["ddk-dlc/no-std"]
 parallel = ["rayon"]
-use-serde = ["serde", "dlc/use-serde"]
+use-serde = ["serde", "ddk-dlc/use-serde"]
 
 [dependencies]
 bitcoin = { version = "0.32.6", default-features = false }
-dlc = { path = "../dlc", default-features = false }
+ddk-dlc = { path = "../dlc", default-features = false }
 rayon = {version = "1.5", optional = true}
 secp256k1-zkp = {version = "0.11.0" }
 serde = {version = "1.0", optional = true, default-features = false, features = ["derive"]}

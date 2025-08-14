@@ -13,7 +13,7 @@
 #![deny(missing_docs)]
 
 #[macro_use]
-extern crate dlc_messages;
+extern crate ddk_messages;
 
 pub mod chain_monitor;
 pub mod channel;
@@ -35,9 +35,9 @@ use channel::signed_channel::{SignedChannel, SignedChannelStateType};
 use channel::Channel;
 use contract::PreClosedContract;
 use contract::{offered_contract::OfferedContract, signed_contract::SignedContract, Contract};
-use dlc_messages::impl_dlc_writeable;
-use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
-use dlc_messages::ser_impls::{read_address, write_address};
+use ddk_messages::impl_dlc_writeable;
+use ddk_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
+use ddk_messages::ser_impls::{read_address, write_address};
 use error::Error;
 use lightning::ln::msgs::DecodeError;
 use lightning::util::ser::{Readable, Writeable, Writer};

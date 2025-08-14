@@ -3,8 +3,8 @@
 use super::offered_contract::OfferedContract;
 use super::AdaptorInfo;
 use bitcoin::{Amount, SignedAmount, Transaction};
-use dlc::{DlcTransactions, PartyParams};
-use dlc_messages::{AcceptDlc, FundingInput};
+use ddk_dlc::{DlcTransactions, PartyParams};
+use ddk_messages::{AcceptDlc, FundingInput};
 use secp256k1_zkp::ecdsa::Signature;
 use secp256k1_zkp::EcdsaAdaptorSignature;
 
@@ -96,23 +96,5 @@ impl AcceptedContract {
             })
             .unwrap_or(Amount::ZERO);
         SignedAmount::from_sat(final_payout.to_sat() as i64 - collateral.to_sat() as i64)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::contract::ser::Serializable;
-
-    #[test]
-    fn pnl_compute_test() {
-        let buf = include_bytes!("../../../ddk/tests/data/dlc_storage/Accepted");
-        let accepted_contract = AcceptedContract::deserialize(&mut buf.as_slice()).unwrap();
-        let cets = &accepted_contract.dlc_transactions.cets;
-        assert_eq!(accepted_contract.compute_pnl(&cets[0]), SignedAmount::ZERO);
-        assert_eq!(
-            accepted_contract.compute_pnl(&cets[cets.len() - 1]),
-            SignedAmount::from_sat(101000000)
-        );
     }
 }

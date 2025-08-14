@@ -10,7 +10,7 @@ use ddk_manager::{
         RoundingInterval, RoundingIntervals,
     },
 };
-use dlc_trie::OracleNumericInfo;
+use ddk_trie::OracleNumericInfo;
 
 /// Create a complete DLC Contract using oracle-normalized scores
 pub fn create_parlay_contract(

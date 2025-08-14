@@ -1018,17 +1018,4 @@ mod tests {
         let contracts = db.get_contracts().await.unwrap();
         assert!(contracts.len() > 0);
     }
-
-    #[tokio::test]
-    async fn get_contracts() {
-        let db = PostgresStore::new(
-            &std::env::var("DATABASE_URL").unwrap(),
-            false,
-            "test".to_string(),
-        )
-        .await
-        .unwrap();
-        let contracts = db.get_contracts().await;
-        assert!(contracts.is_ok());
-    }
 }

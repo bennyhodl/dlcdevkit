@@ -2,12 +2,12 @@
 use std::ops::Deref;
 
 use bitcoin::{consensus::Encodable, Amount, ScriptBuf, Txid};
-use dlc::{dlc_input::DlcInputInfo, util::get_common_fee, PartyParams, TxInputInfo};
-use dlc_messages::{
+use ddk_dlc::{dlc_input::DlcInputInfo, util::get_common_fee, PartyParams, TxInputInfo};
+use ddk_messages::{
     oracle_msgs::{OracleAnnouncement, OracleAttestation},
     DlcInput, FundingInput,
 };
-use dlc_trie::RangeInfo;
+use ddk_trie::RangeInfo;
 #[cfg(not(feature = "fuzztarget"))]
 use secp256k1_zkp::rand::{thread_rng, Rng, RngCore};
 use secp256k1_zkp::{PublicKey, Secp256k1, Signing};
@@ -199,7 +199,7 @@ fn get_approximate_required_amount(
     // TODO: handle different address types for CET execution (multisig, p2wsh, p2tr, etc.)
     const ASSUME_P2WPKH_WEIGHT: usize = 124;
 
-    let dlc_weight = dlc::dlc_input::get_dlc_inputs_weight(dlc_inputs);
+    let dlc_weight = ddk_dlc::dlc_input::get_dlc_inputs_weight(dlc_inputs);
 
     let appr_required_amount = if own_collateral == Amount::ZERO {
         // No collateral = no fees
@@ -208,14 +208,14 @@ fn get_approximate_required_amount(
         // Full collateral = full fees
         own_collateral
             + get_common_fee(fee_rate)?
-            + dlc::util::weight_to_fee(ASSUME_P2WPKH_WEIGHT, fee_rate)?
-            + dlc::util::weight_to_fee(dlc_weight, fee_rate)?
+            + ddk_dlc::util::weight_to_fee(ASSUME_P2WPKH_WEIGHT, fee_rate)?
+            + ddk_dlc::util::weight_to_fee(dlc_weight, fee_rate)?
     } else {
         // Partial collateral = split fees
         own_collateral
             + get_half_common_fee(fee_rate)?
-            + dlc::util::weight_to_fee(ASSUME_P2WPKH_WEIGHT, fee_rate)?
-            + dlc::util::weight_to_fee(dlc_weight, fee_rate)?
+            + ddk_dlc::util::weight_to_fee(ASSUME_P2WPKH_WEIGHT, fee_rate)?
+            + ddk_dlc::util::weight_to_fee(dlc_weight, fee_rate)?
     };
     Ok(appr_required_amount)
 }
@@ -238,7 +238,7 @@ where
 }
 
 pub(crate) fn get_half_common_fee(fee_rate: u64) -> Result<Amount, Error> {
-    let common_fee = dlc::util::get_common_fee(fee_rate)?;
+    let common_fee = ddk_dlc::util::get_common_fee(fee_rate)?;
     Ok(common_fee / 2)
 }
 
@@ -286,7 +286,7 @@ mod tests {
     use std::str::FromStr;
 
     use bitcoin::{consensus::Decodable, Transaction};
-    use dlc_messages::oracle_msgs::{EnumEventDescriptor, EventDescriptor, OracleEvent};
+    use ddk_messages::oracle_msgs::{EnumEventDescriptor, EventDescriptor, OracleEvent};
     use secp256k1_zkp::{
         rand::{thread_rng, RngCore},
         schnorr::Signature,

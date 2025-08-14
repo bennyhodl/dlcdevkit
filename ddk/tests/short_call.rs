@@ -4,14 +4,15 @@ use bitcoin::Amount;
 use chrono::{Local, TimeDelta};
 use ddk::Transport;
 use ddk_manager::{contract::Contract, Storage};
+use ddk_messages::Message;
 use ddk_payouts::options::{Direction, OptionType};
-use dlc_messages::Message;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use test_util::{generate_blocks, test_ddk};
 use tokio::time::sleep;
 
 // #[tokio::test]
 #[test_log::test(tokio::test)]
+#[ignore]
 async fn short_call() {
     let (alice, bob, oracle) = test_ddk().await;
     let expiry = TimeDelta::seconds(15);

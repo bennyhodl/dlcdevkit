@@ -1,5 +1,5 @@
 use bitcoin::{key::rand::Fill, secp256k1::PublicKey};
-use dlc_messages::message_handler::MessageHandler as DlcMessageHandler;
+use ddk_messages::message_handler::MessageHandler as DlcMessageHandler;
 use lightning::{
     ln::peer_handler::{
         ErroringMessageHandler, IgnoringMessageHandler, MessageHandler,
@@ -225,7 +225,7 @@ impl LightningTransport {
 #[cfg(test)]
 mod tests {
     use crate::Transport;
-    use dlc_messages::{Message, OfferDlc};
+    use ddk_messages::{Message, OfferDlc};
 
     use super::*;
 

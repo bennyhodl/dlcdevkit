@@ -8,7 +8,7 @@ use ddk::oracle::memory::MemoryOracle;
 use ddk::storage::memory::MemoryStorage;
 use ddk::wallet::DlcDevKitWallet;
 use ddk_manager::{manager::Manager, CachedContractSignerProvider, Oracle, SimpleSigner};
-use dlc_messages::Message;
+use ddk_messages::Message;
 use secp256k1_zkp::{rand::Fill, PublicKey, XOnlyPublicKey};
 use std::{collections::HashMap, sync::Arc};
 use test_utils::{set_time, MockTime};

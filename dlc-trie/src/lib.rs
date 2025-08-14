@@ -1,7 +1,7 @@
 //! # Dlc-trie
 //! Package for storing and retrieving DLC data using tries.
 
-#![crate_name = "dlc_trie"]
+#![crate_name = "ddk_trie"]
 // Coding conventions
 #![forbid(unsafe_code)]
 #![deny(non_upper_case_globals)]
@@ -13,7 +13,7 @@
 #![deny(missing_docs)]
 
 extern crate bitcoin;
-extern crate dlc;
+extern crate ddk_dlc;
 #[cfg(feature = "parallel")]
 extern crate rayon;
 extern crate secp256k1_zkp;
@@ -21,7 +21,7 @@ extern crate secp256k1_zkp;
 extern crate serde;
 
 use bitcoin::{Amount, Script, Transaction};
-use dlc::{Error, RangePayout};
+use ddk_dlc::{Error, RangePayout};
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 use secp256k1_zkp::{All, EcdsaAdaptorSignature, PublicKey, Secp256k1, SecretKey};
@@ -243,7 +243,7 @@ fn sign_helper<T: Iterator<Item = TrieIterInfo>>(
                 &x.paths,
                 precomputed_points,
             )?;
-            let adaptor_sig = dlc::create_cet_adaptor_sig_from_point(
+            let adaptor_sig = ddk_dlc::create_cet_adaptor_sig_from_point(
                 secp,
                 &cets[x.value.cet_index],
                 &adaptor_point,
@@ -277,7 +277,7 @@ fn sign_helper<T: Iterator<Item = TrieIterInfo>>(
                 &x.paths,
                 precomputed_points,
             )?;
-            let adaptor_sig = dlc::create_cet_adaptor_sig_from_point(
+            let adaptor_sig = ddk_dlc::create_cet_adaptor_sig_from_point(
                 secp,
                 &cets[x.value.cet_index],
                 &adaptor_point,
@@ -313,7 +313,7 @@ fn verify_helper<T: Iterator<Item = TrieIterInfo>>(
         if x.value.adaptor_index > max_adaptor_index {
             max_adaptor_index = x.value.adaptor_index;
         }
-        dlc::verify_cet_adaptor_sig_from_point(
+        ddk_dlc::verify_cet_adaptor_sig_from_point(
             secp,
             &adaptor_sig,
             cet,
@@ -347,7 +347,7 @@ fn verify_helper<T: Iterator<Item = TrieIterInfo>>(
             utils::get_adaptor_point_for_indexed_paths(&x.indexes, &x.paths, precomputed_points)?;
         let adaptor_sig = adaptor_sigs[x.value.adaptor_index];
         let cet = &cets[x.value.cet_index];
-        dlc::verify_cet_adaptor_sig_from_point(
+        ddk_dlc::verify_cet_adaptor_sig_from_point(
             secp,
             &adaptor_sig,
             cet,

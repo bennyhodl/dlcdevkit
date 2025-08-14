@@ -35,7 +35,7 @@ use bdk_wallet::ChangeSet;
 use bitcoin::secp256k1::{PublicKey, SecretKey};
 use bitcoin::Amount;
 use ddk::DlcDevKitDlcManager;
-use dlc_messages::Message;
+use ddk_messages::Message;
 use error::TransportError;
 use error::WalletError;
 use std::sync::Arc;

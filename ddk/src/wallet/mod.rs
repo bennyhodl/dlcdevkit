@@ -1151,7 +1151,7 @@ mod tests {
         assert_eq!(path.len(), 6);
 
         // Verify base path components (hardened derivation)
-        assert_eq!(path[0], ChildNumber::from_hardened_idx(9999).unwrap());
+        assert_eq!(path[0], ChildNumber::from_hardened_idx(420).unwrap());
         assert_eq!(path[1], ChildNumber::from_hardened_idx(0).unwrap());
         assert_eq!(path[2], ChildNumber::from_hardened_idx(0).unwrap());
 

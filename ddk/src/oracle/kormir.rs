@@ -1,5 +1,5 @@
 use bitcoin::key::XOnlyPublicKey;
-use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
+use ddk_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
 use hmac::{Hmac, Mac};
 use kormir::storage::OracleEventData;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
@@ -270,7 +270,7 @@ impl ddk_manager::Oracle for KormirOracleClient {
     async fn get_attestation(
         &self,
         event_id: &str,
-    ) -> Result<dlc_messages::oracle_msgs::OracleAttestation, ddk_manager::error::Error> {
+    ) -> Result<ddk_messages::oracle_msgs::OracleAttestation, ddk_manager::error::Error> {
         tracing::info!(event_id, "Getting attestation to close contract.");
         let attestation = get::<OracleAttestation>(&self.host, &format!("attestation/{event_id}"))
             .await
@@ -285,7 +285,7 @@ impl ddk_manager::Oracle for KormirOracleClient {
     async fn get_announcement(
         &self,
         event_id: &str,
-    ) -> Result<dlc_messages::oracle_msgs::OracleAnnouncement, ddk_manager::error::Error> {
+    ) -> Result<ddk_messages::oracle_msgs::OracleAnnouncement, ddk_manager::error::Error> {
         tracing::info!(event_id, "Getting oracle announcement.");
         let announcement =
             get::<OracleAnnouncement>(&self.host, &format!("announcement/{event_id}"))

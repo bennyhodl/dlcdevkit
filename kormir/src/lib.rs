@@ -17,8 +17,8 @@ use std::str::FromStr;
 
 pub use bitcoin;
 pub use bitcoin::secp256k1::schnorr::Signature;
-use dlc_messages::oracle_msgs::DigitDecompositionEventDescriptor;
-pub use dlc_messages::oracle_msgs::{
+use ddk_messages::oracle_msgs::DigitDecompositionEventDescriptor;
+pub use ddk_messages::oracle_msgs::{
     EnumEventDescriptor, EventDescriptor, OracleAnnouncement, OracleAttestation, OracleEvent,
 };
 pub use lightning;
@@ -116,7 +116,7 @@ impl<S: Storage> Oracle<S> {
         oracle_event.validate().map_err(|_| Error::Internal)?;
 
         // create signature
-        let msg = dlc_messages::oracle_msgs::tagged_announcement_msg(&oracle_event);
+        let msg = ddk_messages::oracle_msgs::tagged_announcement_msg(&oracle_event);
         let announcement_signature = self.secp.sign_schnorr_no_aux_rand(&msg, &self.key_pair);
 
         let ann = OracleAnnouncement {
@@ -155,9 +155,9 @@ impl<S: Storage> Oracle<S> {
         let nonce_index = data.indexes.first().expect("Already checked length");
         let nonce_key = self.get_nonce_key(*nonce_index);
 
-        let msg = dlc_messages::oracle_msgs::tagged_attestation_msg(&outcome);
+        let msg = ddk_messages::oracle_msgs::tagged_attestation_msg(&outcome);
 
-        let sig = dlc::secp_utils::schnorrsig_sign_with_nonce(
+        let sig = ddk_dlc::secp_utils::schnorrsig_sign_with_nonce(
             &self.secp,
             &msg,
             &self.key_pair,
@@ -238,7 +238,7 @@ impl<S: Storage> Oracle<S> {
         oracle_event.validate().map_err(|_| Error::Internal)?;
 
         // create signature
-        let msg = dlc_messages::oracle_msgs::tagged_announcement_msg(&oracle_event);
+        let msg = ddk_messages::oracle_msgs::tagged_announcement_msg(&oracle_event);
         let announcement_signature = self.secp.sign_schnorr_no_aux_rand(&msg, &self.key_pair);
 
         let ann = OracleAnnouncement {
@@ -311,8 +311,8 @@ impl<S: Storage> Oracle<S> {
             .zip(nonce_keys)
             .enumerate()
             .map(|(idx, (outcome, nonce_key))| {
-                let msg = dlc_messages::oracle_msgs::tagged_attestation_msg(outcome);
-                let sig = dlc::secp_utils::schnorrsig_sign_with_nonce(
+                let msg = ddk_messages::oracle_msgs::tagged_attestation_msg(outcome);
+                let sig = ddk_dlc::secp_utils::schnorrsig_sign_with_nonce(
                     &self.secp,
                     &msg,
                     &self.key_pair,
@@ -465,6 +465,25 @@ mod test {
                 nb_digits: 20,
             })
         );
+    }
+
+    #[tokio::test]
+    async fn create_oracle_test_vectors() {
+        let oracle = create_oracle();
+        let ann = oracle
+            .create_enum_event(
+                "Test".to_string(),
+                vec![
+                    "a".to_string(),
+                    "b".to_string(),
+                    "c".to_string(),
+                    "d".to_string(),
+                ],
+                1623133104,
+            )
+            .await
+            .unwrap();
+        println!("{}", serde_json::to_string_pretty(&ann).unwrap())
     }
 
     #[tokio::test]

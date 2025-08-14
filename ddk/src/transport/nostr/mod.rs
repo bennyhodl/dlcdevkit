@@ -7,8 +7,8 @@ use crate::error::TransportError;
 use crate::nostr;
 use crate::{DlcDevKitDlcManager, Oracle, Storage, Transport};
 use async_trait::async_trait;
-use dlc::secp256k1_zkp::PublicKey as BitcoinPublicKey;
-use dlc_messages::Message;
+use ddk_dlc::secp256k1_zkp::PublicKey as BitcoinPublicKey;
+use ddk_messages::Message;
 use std::sync::Arc;
 
 #[async_trait]

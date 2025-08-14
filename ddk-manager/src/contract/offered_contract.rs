@@ -11,9 +11,9 @@ use super::contract_input::ContractInput;
 use super::ContractDescriptor;
 use crate::{ContractId, KeysId};
 use bitcoin::Amount;
-use dlc::PartyParams;
-use dlc_messages::oracle_msgs::OracleAnnouncement;
-use dlc_messages::{FundingInput, OfferDlc};
+use ddk_dlc::PartyParams;
+use ddk_messages::oracle_msgs::OracleAnnouncement;
+use ddk_messages::{FundingInput, OfferDlc};
 use secp256k1_zkp::PublicKey;
 
 /// Contains information about a contract that was offered.
@@ -55,7 +55,7 @@ impl OfferedContract {
     /// Validate that the contract info covers all the possible outcomes that
     /// can be attested by the oracle(s).
     pub fn validate(&self) -> Result<(), crate::error::Error> {
-        dlc::util::validate_fee_rate(self.fee_rate_per_vb).map_err(|_| {
+        ddk_dlc::util::validate_fee_rate(self.fee_rate_per_vb).map_err(|_| {
             crate::error::Error::InvalidParameters("Fee rate is too high".to_string())
         })?;
 

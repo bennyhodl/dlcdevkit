@@ -8,6 +8,7 @@ use bitcoincore_rpc::{Auth, Client, RpcApi};
 use bitcoincore_rpc_json::AddressType;
 use ddk::{chain::EsploraClient, wallet::DlcDevKitWallet};
 use ddk::{oracle::memory::MemoryOracle, storage::memory::MemoryStorage};
+use ddk_dlc::{EnumerationPayout, Payout};
 use ddk_manager::payout_curve::{
     PayoutFunction, PayoutFunctionPiece, PayoutPoint, PolynomialPayoutCurvePiece, RoundingInterval,
     RoundingIntervals,
@@ -23,8 +24,7 @@ use ddk_manager::{
     },
     payout_curve::HyperbolaPayoutCurvePiece,
 };
-use dlc::{EnumerationPayout, Payout};
-use dlc_trie::OracleNumericInfo;
+use ddk_trie::OracleNumericInfo;
 use secp256k1_zkp::rand::{seq::SliceRandom, thread_rng, Fill, RngCore};
 use std::fmt::Write;
 use std::{cell::RefCell, sync::Arc};
@@ -800,8 +800,9 @@ pub async fn refresh_wallet(wallet: &DlcDevKitWallet, expected_funds: u64) {
 
 pub fn rpc_client() -> Client {
     let auth = Auth::UserPass("ddk".to_string(), "ddk".to_string());
-    let host = std::env::var("BITCOIND_HOST").unwrap_or_else(|_| "localhost".to_owned());
-    Client::new(&format!("http://{}:18443", host), auth).unwrap()
+    let host =
+        std::env::var("BITCOIND_HOST").unwrap_or_else(|_| "http://localhost:18443".to_owned());
+    Client::new(&host, auth).unwrap()
 }
 
 pub async fn init_clients() -> (

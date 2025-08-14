@@ -3,12 +3,12 @@
 use crate::error::Error;
 use crate::ContractId;
 use bitcoin::{Amount, SignedAmount, Transaction, Txid};
-use dlc_messages::{
+use ddk_messages::{
     oracle_msgs::{EventDescriptor, OracleAnnouncement, OracleAttestation},
     AcceptDlc, SignDlc,
 };
-use dlc_trie::multi_oracle_trie::MultiOracleTrie;
-use dlc_trie::multi_oracle_trie_with_diff::MultiOracleTrieWithDiff;
+use ddk_trie::multi_oracle_trie::MultiOracleTrie;
+use ddk_trie::multi_oracle_trie_with_diff::MultiOracleTrieWithDiff;
 use secp256k1_zkp::PublicKey;
 #[cfg(feature = "use-serde")]
 use serde::{Deserialize, Serialize};

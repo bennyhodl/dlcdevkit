@@ -10,12 +10,12 @@ use crate::payout_curve::{
     PolynomialPayoutCurvePiece, RoundingInterval, RoundingIntervals,
 };
 use bitcoin::{consensus::encode::Decodable, Amount, OutPoint, Transaction};
-use dlc::{EnumerationPayout, Payout, TxInputInfo};
-use dlc_messages::oracle_msgs::{
+use ddk_dlc::{EnumerationPayout, Payout, TxInputInfo};
+use ddk_messages::oracle_msgs::{
     MultiOracleInfo, OracleInfo as SerOracleInfo, OracleParams, SingleOracleInfo,
 };
-use dlc_messages::FundingInput;
-use dlc_messages::{
+use ddk_messages::FundingInput;
+use ddk_messages::{
     contract_msgs::{
         ContractDescriptor as SerContractDescriptor, ContractInfo as SerContractInfo,
         ContractInfoInner, ContractOutcome, DisjointContractInfo, EnumeratedContractDescriptor,
@@ -28,7 +28,7 @@ use dlc_messages::{
     },
     oracle_msgs::EventDescriptor,
 };
-use dlc_trie::OracleNumericInfo;
+use ddk_trie::OracleNumericInfo;
 use std::fmt;
 
 pub(crate) const BITCOIN_CHAINHASH: [u8; 32] = [

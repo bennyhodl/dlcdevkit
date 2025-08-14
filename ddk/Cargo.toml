@@ -1,6 +1,6 @@
 [package]
 name = "ddk"
-version = "0.0.18"
+version = "0.0.21"
 edition = "2021"
 license = "MIT"
 description = "application tooling for DLCs 🌊"
@@ -25,9 +25,9 @@ postgres = ["dep:sqlx", "sqlx/postgres"]
 
 [dependencies]
 ddk-manager = { path = "../ddk-manager", version = "0.7.6", features = ["use-serde"] }
-dlc = { path = "../dlc", features = ["use-serde"] }
-dlc-messages = { path = "../dlc-messages", features = [ "use-serde"] }
-dlc-trie = { path = "../dlc-trie", features = ["use-serde"] }
+ddk-dlc = { path = "../dlc", features = ["use-serde"] }
+ddk-messages = { path = "../dlc-messages", features = [ "use-serde"] }
+ddk-trie = { path = "../dlc-trie", features = ["use-serde"] }
 
 bitcoin = { version = "0.32.6", features = ["rand", "serde"] }
 bdk_esplora = { version = "0.22.0", features = ["blocking-https", "async-https", "tokio"] }

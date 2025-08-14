@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use bitcoin::{Block, OutPoint, Transaction, Txid};
-use dlc_messages::ser_impls::{
+use ddk_messages::ser_impls::{
     read_ecdsa_adaptor_signature, read_hash_map, write_ecdsa_adaptor_signature, write_hash_map,
 };
 use lightning::ln::msgs::DecodeError;

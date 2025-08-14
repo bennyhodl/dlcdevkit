@@ -939,7 +939,7 @@ checksum = "2a2330da5de22e8a3cb63252ce2abb30116bf5265e89c0e01bc17015ce30a476"
 
 [[package]]
 name = "ddk"
-version = "0.0.18"
+version = "0.0.21"
 dependencies = [
  "async-trait",
  "base64 0.13.1",
@@ -949,11 +949,11 @@ dependencies = [
  "bitcoin",
  "bitcoincore-rpc",
  "chrono",
+ "ddk-dlc",
  "ddk-manager",
+ "ddk-messages",
  "ddk-payouts",
- "dlc",
- "dlc-messages",
- "dlc-trie",
+ "ddk-trie",
  "hex",
  "hmac",
  "kormir",
@@ -976,6 +976,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ddk-dlc"
+version = "0.0.21"
+dependencies = [
+ "bitcoin",
+ "miniscript",
+ "rayon",
+ "secp256k1-sys",
+ "secp256k1-zkp",
+ "serde",
+]
+
+[[package]]
 name = "ddk-manager"
 version = "0.7.6"
 dependencies = [
@@ -985,9 +997,9 @@ dependencies = [
  "bitcoincore-rpc-json",
  "criterion",
  "ddk",
- "dlc",
- "dlc-messages",
- "dlc-trie",
+ "ddk-dlc",
+ "ddk-messages",
+ "ddk-trie",
  "env_logger 0.9.3",
  "futures",
  "hex-conservative 0.1.2",
@@ -1001,18 +1013,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "ddk-messages"
+version = "0.0.21"
+dependencies = [
+ "bitcoin",
+ "ddk-dlc",
+ "ddk-messages",
+ "lightning",
+ "secp256k1-zkp",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "ddk-node"
-version = "0.0.16"
+version = "0.0.21"
 dependencies = [
  "anyhow",
  "bitcoin",
  "chrono",
  "clap 4.5.42",
  "ddk",
+ "ddk-dlc",
  "ddk-manager",
+ "ddk-messages",
  "ddk-payouts",
- "dlc",
- "dlc-messages",
  "hex",
  "homedir",
  "inquire",
@@ -1029,17 +1054,28 @@ dependencies = [
 
 [[package]]
 name = "ddk-payouts"
-version = "0.0.16"
+version = "0.0.21"
 dependencies = [
  "anyhow",
  "bitcoin",
+ "ddk-dlc",
  "ddk-manager",
- "dlc",
- "dlc-messages",
- "dlc-trie",
+ "ddk-messages",
+ "ddk-trie",
  "serde",
  "serde_json",
  "thiserror 2.0.12",
+]
+
+[[package]]
+name = "ddk-trie"
+version = "0.0.21"
+dependencies = [
+ "bitcoin",
+ "ddk-dlc",
+ "rayon",
+ "secp256k1-zkp",
+ "serde",
 ]
 
 [[package]]
@@ -1083,42 +1119,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "dlc"
-version = "0.7.1"
-dependencies = [
- "bitcoin",
- "miniscript",
- "rayon",
- "secp256k1-sys",
- "secp256k1-zkp",
- "serde",
-]
-
-[[package]]
-name = "dlc-messages"
-version = "0.7.1"
-dependencies = [
- "bitcoin",
- "dlc",
- "dlc-messages",
- "lightning",
- "secp256k1-zkp",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "dlc-trie"
-version = "0.7.1"
-dependencies = [
- "bitcoin",
- "dlc",
- "rayon",
- "secp256k1-zkp",
- "serde",
 ]
 
 [[package]]
@@ -2114,18 +2114,19 @@ dependencies = [
 
 [[package]]
 name = "kormir"
-version = "0.4.4"
+version = "0.5.0"
 dependencies = [
  "base64 0.13.1",
  "bitcoin",
- "dlc",
- "dlc-messages",
+ "ddk-dlc",
+ "ddk-messages",
  "hex",
  "lightning",
  "log",
  "nostr",
  "secp256k1-zkp",
  "serde",
+ "serde_json",
  "tokio",
 ]
 

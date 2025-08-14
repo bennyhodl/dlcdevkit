@@ -24,7 +24,7 @@ pub enum Error {
     /// The oracle component encountered an error.
     OracleError(String),
     /// An error occurred in the DLC library.
-    DlcError(dlc::Error),
+    DlcError(ddk_dlc::Error),
     /// An error occurred in the Secp library.
     SecpError(secp256k1_zkp::Error),
 }
@@ -53,8 +53,8 @@ impl From<lightning::io::Error> for Error {
     }
 }
 
-impl From<dlc::Error> for Error {
-    fn from(e: dlc::Error) -> Error {
+impl From<ddk_dlc::Error> for Error {
+    fn from(e: ddk_dlc::Error) -> Error {
         Error::DlcError(e)
     }
 }

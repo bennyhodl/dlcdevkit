@@ -5,7 +5,7 @@ use super::party_points::PartyBasePoints;
 use super::signed_channel::{SignedChannel, SignedChannelState};
 use super::{ClosedChannel, ClosedPunishedChannel, ClosingChannel, FailedAccept, FailedSign};
 
-use dlc_messages::ser_impls::{
+use ddk_messages::ser_impls::{
     read_ecdsa_adaptor_signature, read_string, write_ecdsa_adaptor_signature, write_string,
 };
 use lightning::ln::msgs::DecodeError;
@@ -33,11 +33,11 @@ impl_dlc_writeable!(SignedChannel, {
     (temporary_channel_id, writeable),
     (fund_output_index, usize),
     (own_points, writeable),
-    (own_params, { cb_writeable, dlc_messages::ser_impls::party_params::write, dlc_messages::ser_impls::party_params::read }),
+    (own_params, { cb_writeable, ddk_messages::ser_impls::party_params::write, ddk_messages::ser_impls::party_params::read }),
     (own_per_update_point, writeable),
     (counter_points, writeable),
     (counter_per_update_point, writeable),
-    (counter_params, { cb_writeable, dlc_messages::ser_impls::party_params::write, dlc_messages::ser_impls::party_params::read }),
+    (counter_params, { cb_writeable, ddk_messages::ser_impls::party_params::write, ddk_messages::ser_impls::party_params::read }),
     (state, writeable),
     (update_idx, writeable),
     (fund_tx, writeable),
