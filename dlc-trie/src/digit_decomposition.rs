@@ -1,6 +1,6 @@
 //! Utility functions to decompose numeric outcome values
 
-use dlc::{Payout, RangePayout};
+use ddk_dlc::{Payout, RangePayout};
 
 /// Decompose a numeric value into digits in the specified base. If the decomposed
 /// value contains less than `nb_digits`, zeroes will be prepended to reach `nb_digits`
@@ -202,7 +202,7 @@ pub fn group_by_ignoring_digits(
 #[cfg(test)]
 mod tests {
     use bitcoin::Amount;
-    use dlc::{Payout, RangePayout};
+    use ddk_dlc::{Payout, RangePayout};
     struct DecompositionTestCase {
         composed: usize,
         decomposed: Vec<usize>,

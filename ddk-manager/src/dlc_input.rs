@@ -2,8 +2,8 @@
 use std::ops::Deref;
 
 use bitcoin::Transaction;
-use dlc::dlc_input::DlcInputInfo;
-use dlc_messages::FundingInput;
+use ddk_dlc::dlc_input::DlcInputInfo;
+use ddk_messages::FundingInput;
 use secp256k1_zkp::{All, Secp256k1};
 
 use crate::{
@@ -53,7 +53,7 @@ where
 
     let dlc_input_signer = signer_provider.derive_contract_signer(key_id)?;
 
-    dlc::dlc_input::create_dlc_funding_input_signature(
+    ddk_dlc::dlc_input::create_dlc_funding_input_signature(
         secp,
         fund_transaction,
         input_index,

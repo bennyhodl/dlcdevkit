@@ -27,11 +27,11 @@ use crate::{
     Time, Wallet,
 };
 use bitcoin::{Amount, OutPoint, Script, ScriptBuf, Sequence, Transaction, TxIn, Witness};
-use dlc::{
+use ddk_dlc::{
     channel::{get_tx_adaptor_signature, verify_tx_adaptor_signature, DlcChannelTransactions},
     PartyParams,
 };
-use dlc_messages::{
+use ddk_messages::{
     channel::{
         AcceptChannel, CollaborativeCloseOffer, Reject, RenewAccept, RenewConfirm, RenewFinalize,
         RenewOffer, RenewRevoke, SettleAccept, SettleConfirm, SettleFinalize, SettleOffer,
@@ -209,7 +209,7 @@ where
         buffer_transaction,
         buffer_script_pubkey,
         dlc_transactions,
-    } = dlc::channel::create_channel_transactions(
+    } = ddk_dlc::channel::create_channel_transactions(
         &offered_contract.offer_params,
         &accept_params,
         &offer_revoke_params,
@@ -347,7 +347,7 @@ where
         buffer_transaction,
         dlc_transactions,
         buffer_script_pubkey,
-    } = dlc::channel::create_channel_transactions(
+    } = ddk_dlc::channel::create_channel_transactions(
         &offered_contract.offer_params,
         &accept_params,
         &offer_revoke_params,
@@ -1313,7 +1313,7 @@ where
         buffer_transaction,
         buffer_script_pubkey,
         dlc_transactions,
-    } = dlc::channel::create_renewal_channel_transactions(
+    } = ddk_dlc::channel::create_renewal_channel_transactions(
         &offered_contract.offer_params,
         &signed_channel.own_params,
         &offer_revoke_params,
@@ -1424,7 +1424,7 @@ where
         buffer_transaction,
         dlc_transactions,
         buffer_script_pubkey,
-    } = dlc::channel::create_renewal_channel_transactions(
+    } = ddk_dlc::channel::create_renewal_channel_transactions(
         &offered_contract.offer_params,
         &signed_channel.counter_params,
         &offer_revoke_params,
@@ -1841,7 +1841,7 @@ where
     let offer_payout = total_collateral - counter_payout;
     let fund_output_value = signed_channel.fund_tx.output[signed_channel.fund_output_index].value;
 
-    let close_tx = dlc::channel::create_collaborative_close_transaction(
+    let close_tx = ddk_dlc::channel::create_collaborative_close_transaction(
         &signed_channel.own_params,
         offer_payout,
         &signed_channel.counter_params,
@@ -1859,7 +1859,7 @@ where
         .ok_or(Error::InvalidState("No keys_id available".to_string()))?;
     let contract_signer = signer_provider.derive_contract_signer(keys_id)?;
 
-    let close_signature = dlc::util::get_raw_sig_for_tx_input(
+    let close_signature = ddk_dlc::util::get_raw_sig_for_tx_input(
         secp,
         &close_tx,
         0,
@@ -1917,7 +1917,7 @@ where
     let offer_payout = total_collateral - close_offer.counter_payout;
     let fund_output_value = signed_channel.fund_tx.output[signed_channel.fund_output_index].value;
 
-    let close_tx = dlc::channel::create_collaborative_close_transaction(
+    let close_tx = ddk_dlc::channel::create_collaborative_close_transaction(
         &signed_channel.counter_params,
         offer_payout,
         &signed_channel.own_params,
@@ -1969,7 +1969,7 @@ where
 
     let mut close_tx = close_tx.clone();
 
-    dlc::util::sign_multi_sig_input(
+    ddk_dlc::util::sign_multi_sig_input(
         secp,
         &mut close_tx,
         offer_signature,
@@ -2036,7 +2036,7 @@ fn get_settle_tx_and_adaptor_sig(
         accept_per_update_point,
     );
 
-    let settle_tx = dlc::channel::create_settle_transaction(
+    let settle_tx = ddk_dlc::channel::create_settle_transaction(
         &fund_tx_in,
         &offer_revoke_params,
         &accept_revoke_params,
@@ -2066,7 +2066,7 @@ fn get_settle_tx_and_adaptor_sig(
         offer_revoke_params.publish_pk.inner
     };
 
-    let settle_adaptor_signature = dlc::channel::get_tx_adaptor_signature(
+    let settle_adaptor_signature = ddk_dlc::channel::get_tx_adaptor_signature(
         secp,
         &settle_tx,
         fund_tx.output[fund_vout].value,
@@ -2135,7 +2135,7 @@ where
 
     let buffer_input_sk =
         signer.get_secret_key_for_pubkey(&signed_channel.own_params.fund_pubkey)?;
-    dlc::util::sign_multi_sig_input(
+    ddk_dlc::util::sign_multi_sig_input(
         secp,
         &mut buffer_transaction,
         &counter_buffer_signature,
@@ -2246,7 +2246,7 @@ where
     let base_secret = signer.get_secret_key_for_pubkey(own_basepoint)?;
     let own_sk = derive_private_key(secp, own_per_update_point, &base_secret);
 
-    dlc::channel::sign_cet(
+    ddk_dlc::channel::sign_cet(
         secp,
         &mut cet,
         buffer_transaction.output[0].value,
@@ -2302,7 +2302,7 @@ where
 
     let fund_sk = signer.get_secret_key_for_pubkey(&signed_channel.own_params.fund_pubkey)?;
 
-    dlc::util::sign_multi_sig_input(
+    ddk_dlc::util::sign_multi_sig_input(
         secp,
         &mut settle_tx,
         &counter_settle_signature,

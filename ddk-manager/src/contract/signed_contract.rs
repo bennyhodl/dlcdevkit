@@ -5,11 +5,11 @@ use crate::utils::get_new_serial_id;
 use crate::ChannelId;
 
 use super::accepted_contract::AcceptedContract;
-use dlc::dlc_input::DlcInputInfo;
-use dlc_messages::CetAdaptorSignature;
-use dlc_messages::CetAdaptorSignatures;
-use dlc_messages::FundingSignatures;
-use dlc_messages::SignDlc;
+use ddk_dlc::dlc_input::DlcInputInfo;
+use ddk_messages::CetAdaptorSignature;
+use ddk_messages::CetAdaptorSignatures;
+use ddk_messages::FundingSignatures;
+use ddk_messages::SignDlc;
 use secp256k1_zkp::ecdsa::Signature;
 use secp256k1_zkp::EcdsaAdaptorSignature;
 

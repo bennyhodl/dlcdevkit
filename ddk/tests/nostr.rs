@@ -11,7 +11,7 @@ mod nostr_test {
     use ddk::transport::nostr::NostrDlc;
     use ddk::DlcDevKit;
     use ddk::{builder::Builder, Transport};
-    use dlc::{EnumerationPayout, Payout};
+    use ddk_dlc::{EnumerationPayout, Payout};
     use std::sync::Arc;
 
     type NostrDlcDevKit = DlcDevKit<NostrDlc, MemoryStorage, MemoryOracle>;

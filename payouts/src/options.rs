@@ -8,8 +8,8 @@ use ddk_manager::{
     },
     payout_curve::{PayoutFunction, RoundingInterval, RoundingIntervals},
 };
-use dlc_messages::oracle_msgs::OracleAnnouncement;
-use dlc_trie::OracleNumericInfo;
+use ddk_messages::oracle_msgs::OracleAnnouncement;
+use ddk_trie::OracleNumericInfo;
 
 // Helper enums
 #[derive(Copy, Clone)]

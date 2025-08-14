@@ -24,13 +24,13 @@ use bitcoin::consensus::encode::serialize_hex;
 use bitcoin::consensus::Decodable;
 use bitcoin::{Address, Amount, SignedAmount};
 use bitcoin::{OutPoint, Transaction};
-use dlc_messages::channel::{
+use ddk_messages::channel::{
     AcceptChannel, CollaborativeCloseOffer, OfferChannel, Reject, RenewAccept, RenewConfirm,
     RenewFinalize, RenewOffer, RenewRevoke, SettleAccept, SettleConfirm, SettleFinalize,
     SettleOffer, SignChannel,
 };
-use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
-use dlc_messages::{AcceptDlc, CloseDlc, Message as DlcMessage, OfferDlc, SignDlc};
+use ddk_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
+use ddk_messages::{AcceptDlc, CloseDlc, Message as DlcMessage, OfferDlc, SignDlc};
 use futures::stream;
 use futures::stream::FuturesUnordered;
 use futures::{StreamExt, TryStreamExt};
@@ -2740,7 +2740,7 @@ where
 
                     let signed_tx = match revoked_tx_type {
                         RevokedTxType::Buffer => {
-                            dlc::channel::create_and_sign_punish_buffer_transaction(
+                            ddk_dlc::channel::create_and_sign_punish_buffer_transaction(
                                 &self.secp,
                                 offer_params,
                                 accept_params,
@@ -2754,7 +2754,7 @@ where
                             )?
                         }
                         RevokedTxType::Settle => {
-                            dlc::channel::create_and_sign_punish_settle_transaction(
+                            ddk_dlc::channel::create_and_sign_punish_settle_transaction(
                                 &self.secp,
                                 offer_params,
                                 accept_params,

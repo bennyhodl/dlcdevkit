@@ -9,7 +9,7 @@ use crate::digit_trie::{DigitTrie, DigitTrieDump, DigitTrieIter};
 use crate::multi_trie::{MultiTrie, MultiTrieDump, MultiTrieIterator};
 use crate::utils::{get_value_callback, pre_pad_vec};
 use crate::{DlcTrie, IndexedPath, LookupResult, OracleNumericInfo, RangeInfo, TrieIterInfo};
-use dlc::{Error, RangePayout};
+use ddk_dlc::{Error, RangePayout};
 
 /// Data structure used to store adaptor signature information for numerical
 /// outcome DLC with t of n oracles where at least t oracles need to sign the
@@ -359,7 +359,7 @@ impl Iterator for MultiOracleTrieIter<'_> {
 #[cfg(test)]
 mod tests {
     use bitcoin::Amount;
-    use dlc::{Payout, RangePayout};
+    use ddk_dlc::{Payout, RangePayout};
 
     use crate::{test_utils::get_variable_oracle_numeric_infos, DlcTrie};
 

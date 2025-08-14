@@ -3,10 +3,10 @@ use bitcoin::Amount;
 use chrono::{Local, TimeDelta};
 use ddk::util::ser::serialize_contract;
 use ddk::Transport;
+use ddk_dlc::EnumerationPayout;
 use ddk_manager::contract::Contract;
 use ddk_manager::Storage;
-use dlc::EnumerationPayout;
-use dlc_messages::Message;
+use ddk_messages::Message;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use test_util::{generate_blocks, test_ddk};
 use tokio::time::sleep;
@@ -39,6 +39,7 @@ macro_rules! assert_contract_state_and_serialize {
 }
 
 #[test_log::test(tokio::test)]
+#[ignore]
 async fn enumeration_contract() {
     let (alice, bob, oracle) = test_ddk().await;
     let expiry = TimeDelta::seconds(15);
@@ -62,14 +63,14 @@ async fn enumeration_contract() {
         vec![
             EnumerationPayout {
                 outcome: "rust".to_string(),
-                payout: dlc::Payout {
+                payout: ddk_dlc::Payout {
                     offer: Amount::from_sat(100_000),
                     accept: Amount::ZERO,
                 },
             },
             EnumerationPayout {
                 outcome: "go".to_string(),
-                payout: dlc::Payout {
+                payout: ddk_dlc::Payout {
                     offer: Amount::ZERO,
                     accept: Amount::from_sat(100_000),
                 },

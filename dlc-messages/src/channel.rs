@@ -1,7 +1,7 @@
 //! Contains messages used for the establishment and update of DLC channels.
 
 use bitcoin::{Amount, ScriptBuf};
-use dlc::Error;
+use ddk_dlc::Error;
 use lightning::ln::msgs::DecodeError;
 use lightning::util::ser::{Readable, Writeable, Writer};
 use secp256k1_zkp::{

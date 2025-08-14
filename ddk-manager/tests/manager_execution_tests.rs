@@ -10,9 +10,9 @@ use test_utils::*;
 use ddk_manager::contract::{numerical_descriptor::DifferenceParams, Contract};
 use ddk_manager::manager::Manager;
 use ddk_manager::{Blockchain, Oracle, Storage};
-use dlc_messages::oracle_msgs::OracleAttestation;
-use dlc_messages::{AcceptDlc, OfferDlc, SignDlc};
-use dlc_messages::{CetAdaptorSignatures, Message};
+use ddk_messages::oracle_msgs::OracleAttestation;
+use ddk_messages::{AcceptDlc, OfferDlc, SignDlc};
+use ddk_messages::{CetAdaptorSignatures, Message};
 use lightning::ln::wire::Type;
 use lightning::util::ser::Writeable;
 use secp256k1_zkp::rand::{thread_rng, RngCore};
@@ -32,8 +32,8 @@ struct TestVectorPart<T> {
     #[cfg_attr(
         feature = "use-serde",
         serde(
-            serialize_with = "dlc_messages::serde_utils::serialize_hex",
-            deserialize_with = "dlc_messages::serde_utils::deserialize_hex_string"
+            serialize_with = "ddk_messages::serde_utils::serialize_hex",
+            deserialize_with = "ddk_messages::serde_utils::deserialize_hex_string"
         )
     )]
     serialized: Vec<u8>,

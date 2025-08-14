@@ -5,9 +5,9 @@
 
 use crate::{error::OracleError, Oracle};
 use chrono::{DateTime, SecondsFormat, Utc};
+use ddk_dlc::secp256k1_zkp::{schnorr::Signature, XOnlyPublicKey};
 use ddk_manager::error::Error as DlcManagerError;
-use dlc::secp256k1_zkp::{schnorr::Signature, XOnlyPublicKey};
-use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
+use ddk_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
 
 /// Enables interacting with a DLC oracle.
 pub struct P2PDOracleClient {

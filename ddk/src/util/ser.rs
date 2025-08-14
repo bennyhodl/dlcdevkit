@@ -8,7 +8,7 @@ use ddk_manager::contract::{
     ClosedContract, Contract, FailedAcceptContract, FailedSignContract, PreClosedContract,
 };
 use ddk_manager::error::Error;
-use dlc_messages::Message;
+use ddk_messages::Message;
 use lightning::io::Read;
 
 use crate::error::to_storage_error;

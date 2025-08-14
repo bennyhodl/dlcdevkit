@@ -2,7 +2,7 @@
 //! Data structure to store and lookup digit decomposition data.
 
 use crate::{LookupResult, Node};
-use dlc::Error;
+use ddk_dlc::Error;
 
 /// Structure to store data inserted and looked-up based on digit paths.
 #[derive(Clone)]

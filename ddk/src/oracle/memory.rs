@@ -1,7 +1,7 @@
 use bitcoin::bip32::Xpriv;
 use bitcoin::key::rand::Rng;
 use bitcoin::secp256k1::schnorr::Signature;
-use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
+use ddk_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
 use kormir::storage::{MemoryStorage, Storage};
 use kormir::Oracle as Kormir;
 

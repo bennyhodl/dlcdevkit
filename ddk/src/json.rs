@@ -22,7 +22,7 @@ use ddk_manager::contract::{
     signed_contract::SignedContract, ClosedContract, Contract, FailedAcceptContract,
     FailedSignContract, PreClosedContract,
 };
-use dlc_messages::oracle_msgs::EventDescriptor;
+use ddk_messages::oracle_msgs::EventDescriptor;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashSet;

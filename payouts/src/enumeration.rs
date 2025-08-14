@@ -2,12 +2,12 @@ use std::str::FromStr;
 
 use bitcoin::key::XOnlyPublicKey;
 use bitcoin::Amount;
+use ddk_dlc::EnumerationPayout;
 use ddk_manager::contract::enum_descriptor::EnumDescriptor;
 use ddk_manager::contract::{
     contract_input::{ContractInput, ContractInputInfo, OracleInput},
     ContractDescriptor,
 };
-use dlc::EnumerationPayout;
 
 pub fn create_contract_input(
     outcome_payouts: Vec<EnumerationPayout>,

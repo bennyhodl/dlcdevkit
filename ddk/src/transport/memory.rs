@@ -5,7 +5,7 @@ use bitcoin::{
 };
 use std::{collections::HashMap, sync::Arc, time::Duration};
 // use crossbeam::channel::{unbounded, Receiver, Sender};
-use dlc_messages::Message;
+use ddk_messages::Message;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::watch;
 use tokio::sync::Mutex;

@@ -4,7 +4,7 @@ use std::ops::Deref;
 
 use crate::error::Error;
 use bitcoin::Amount;
-use dlc::{Payout, RangePayout};
+use ddk_dlc::{Payout, RangePayout};
 #[cfg(feature = "use-serde")]
 use serde::{Deserialize, Serialize};
 

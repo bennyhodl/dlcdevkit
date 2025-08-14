@@ -1,6 +1,6 @@
 //! Utility functions when working with DLC trie
 
-use dlc::Error;
+use ddk_dlc::Error;
 use secp256k1_zkp::PublicKey;
 
 use crate::{

@@ -4,6 +4,11 @@ use bitcoin::OutPoint;
 use bitcoin::ScriptBuf;
 use bitcoin::WPubkeyHash;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use ddk_dlc::create_dlc_transactions;
+use ddk_dlc::DlcTransactions;
+use ddk_dlc::PartyParams;
+use ddk_dlc::Payout;
+use ddk_dlc::TxInputInfo;
 use ddk_manager::contract::contract_info::ContractInfo;
 use ddk_manager::contract::numerical_descriptor::DifferenceParams;
 use ddk_manager::contract::numerical_descriptor::NumericalDescriptor;
@@ -14,15 +19,10 @@ use ddk_manager::payout_curve::PayoutPoint;
 use ddk_manager::payout_curve::PolynomialPayoutCurvePiece;
 use ddk_manager::payout_curve::RoundingInterval;
 use ddk_manager::payout_curve::RoundingIntervals;
-use dlc::create_dlc_transactions;
-use dlc::DlcTransactions;
-use dlc::PartyParams;
-use dlc::Payout;
-use dlc::TxInputInfo;
-use dlc_messages::oracle_msgs::DigitDecompositionEventDescriptor;
-use dlc_messages::oracle_msgs::EventDescriptor;
-use dlc_messages::oracle_msgs::OracleAnnouncement;
-use dlc_messages::oracle_msgs::OracleEvent;
+use ddk_messages::oracle_msgs::DigitDecompositionEventDescriptor;
+use ddk_messages::oracle_msgs::EventDescriptor;
+use ddk_messages::oracle_msgs::OracleAnnouncement;
+use ddk_messages::oracle_msgs::OracleEvent;
 use secp256k1_zkp::{
     global::SECP256K1, rand::thread_rng, schnorr::Signature, Keypair, SecretKey, XOnlyPublicKey,
 };
@@ -121,7 +121,7 @@ fn create_contract_descriptor() -> ContractDescriptor {
                 rounding_mod: ROUNDING_MOD,
             }],
         },
-        oracle_numeric_infos: dlc_trie::OracleNumericInfo {
+        oracle_numeric_infos: ddk_trie::OracleNumericInfo {
             base: BASE as usize,
             nb_digits: std::iter::repeat(NB_DIGITS)
                 .take(NB_ORACLES)

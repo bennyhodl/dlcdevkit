@@ -112,14 +112,14 @@ impl ContractInput {
             contract_info.oracles.validate()?;
         }
 
-        dlc::util::validate_fee_rate(self.fee_rate)
+        ddk_dlc::util::validate_fee_rate(self.fee_rate)
             .map_err(|_| Error::InvalidParameters("Fee rate too high.".to_string()))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use dlc::{EnumerationPayout, Payout};
+    use ddk_dlc::{EnumerationPayout, Payout};
     use secp256k1_zkp::{Keypair, SecretKey, SECP256K1};
 
     use crate::contract::enum_descriptor::EnumDescriptor;

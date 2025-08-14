@@ -3,7 +3,7 @@
 //! the possible states in which it can be as well as methods to work with it.
 
 use bitcoin::{Amount, ScriptBuf, Transaction};
-use dlc::PartyParams;
+use ddk_dlc::PartyParams;
 use lightning::ln::chan_utils::CounterpartyCommitmentSecrets;
 use secp256k1_zkp::{ecdsa::Signature, EcdsaAdaptorSignature, PublicKey};
 

@@ -1,4 +1,4 @@
-use dlc_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
+use ddk_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
 use lightning::util::ser::Writeable;
 use nostr::event::Error;
 use nostr::{Event, EventBuilder, EventId, Keys, Kind, Tag};

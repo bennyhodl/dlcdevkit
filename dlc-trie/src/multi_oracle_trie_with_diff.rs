@@ -8,7 +8,7 @@ use crate::multi_trie::{MultiTrie, MultiTrieDump, MultiTrieIterator};
 use crate::utils::get_value_callback;
 
 use crate::{DlcTrie, OracleNumericInfo, RangeInfo, TrieIterInfo};
-use dlc::{Error, RangePayout};
+use ddk_dlc::{Error, RangePayout};
 
 /// Data structure used to store adaptor signature information for numerical
 /// outcome DLC with multiple oracles where some difference between the outcomes
@@ -168,7 +168,7 @@ impl Iterator for MultiOracleTrieWithDiffIter<'_> {
 #[cfg(test)]
 mod tests {
     use bitcoin::Amount;
-    use dlc::{Payout, RangePayout};
+    use ddk_dlc::{Payout, RangePayout};
 
     use crate::{test_utils::get_variable_oracle_numeric_infos, DlcTrie};
 

@@ -1,7 +1,7 @@
 //! # Structure and methods for channels that have been accepted.
 
 use bitcoin::{ScriptBuf, Transaction};
-use dlc_messages::channel::AcceptChannel;
+use ddk_messages::channel::AcceptChannel;
 use secp256k1_zkp::{EcdsaAdaptorSignature, PublicKey};
 
 use crate::{contract::accepted_contract::AcceptedContract, ChannelId, ContractId};

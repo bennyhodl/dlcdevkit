@@ -6,10 +6,10 @@ use crate::error::Error;
 use crate::ContractSigner;
 use bitcoin::Amount;
 use bitcoin::{Script, Transaction};
-use dlc::{OracleInfo, Payout};
-use dlc_messages::oracle_msgs;
-use dlc_messages::oracle_msgs::{EventDescriptor, OracleAnnouncement};
-use dlc_trie::{DlcTrie, RangeInfo};
+use ddk_dlc::{OracleInfo, Payout};
+use ddk_messages::oracle_msgs;
+use ddk_messages::oracle_msgs::{EventDescriptor, OracleAnnouncement};
+use ddk_trie::{DlcTrie, RangeInfo};
 use secp256k1_zkp::{All, EcdsaAdaptorSignature, PublicKey, Secp256k1, SecretKey, Verification};
 use std::ops::Deref;
 
@@ -297,7 +297,7 @@ impl ContractInfo {
                             let mut points = Vec::with_capacity(base);
                             for j in 0..base {
                                 let msg = oracle_msgs::tagged_attestation_msg(&j.to_string());
-                                let sig_point = dlc::secp_utils::schnorrsig_compute_sig_point(
+                                let sig_point = ddk_dlc::secp_utils::schnorrsig_compute_sig_point(
                                     secp, pubkey, nonce, &msg,
                                 )?;
                                 points.push(sig_point);

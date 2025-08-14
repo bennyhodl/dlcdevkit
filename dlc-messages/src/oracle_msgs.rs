@@ -5,7 +5,7 @@ use crate::ser_impls::{
     write_i32, write_schnorr_pubkey, write_schnorrsig, write_strings_u16, BigSize,
 };
 use bitcoin::hashes::{Hash, HashEngine};
-use dlc::{Error, OracleInfo as DlcOracleInfo};
+use ddk_dlc::{Error, OracleInfo as DlcOracleInfo};
 use lightning::ln::msgs::DecodeError;
 use lightning::ln::wire::Type;
 use lightning::util::ser::{Readable, Writeable, Writer};
@@ -194,7 +194,6 @@ fn write_oracle_event(event: &OracleEvent) -> Result<Vec<u8>, lightning::io::Err
 pub fn tagged_announcement_msg(event: &OracleEvent) -> Message {
     let tag_hash = bitcoin::hashes::sha256::Hash::hash(ORACLE_ANNOUNCEMENT_TAG);
     let event_hex = write_oracle_event(event).expect("Error writing oracle event");
-
     let mut hash_engine = bitcoin::hashes::sha256::Hash::engine();
     hash_engine.input(&tag_hash[..]);
     hash_engine.input(&tag_hash[..]);
@@ -208,11 +207,10 @@ pub fn tagged_announcement_msg(event: &OracleEvent) -> Message {
 /// Follows the signing validation rules from the [DLC spec](https://github.com/discreetlogcontracts/dlcspecs/blob/master/Oracle.md#signing-algorithm).
 pub fn tagged_attestation_msg(outcome: &str) -> Message {
     let tag_hash = bitcoin::hashes::sha256::Hash::hash(ORACLE_ATTESTATION_TAG);
-    let outcome_hash = bitcoin::hashes::sha256::Hash::hash(outcome.as_bytes());
     let mut hash_engine = bitcoin::hashes::sha256::Hash::engine();
     hash_engine.input(&tag_hash[..]);
     hash_engine.input(&tag_hash[..]);
-    hash_engine.input(&outcome_hash[..]);
+    hash_engine.input(outcome.as_bytes());
     let hash = bitcoin::hashes::sha256::Hash::from_engine(hash_engine);
     Message::from_digest(hash.to_byte_array())
 }
@@ -397,7 +395,7 @@ impl OracleAttestation {
                 secp.verify_schnorr(sig, &msg, &self.oracle_public_key)
                     .map_err(|_| Error::InvalidArgument)?;
 
-                Ok::<(), dlc::Error>(())
+                Ok::<(), ddk_dlc::Error>(())
             })?;
 
         if !self
@@ -598,7 +596,7 @@ mod tests {
         };
 
         let msg = tagged_attestation_msg("1");
-        let sig = dlc::secp_utils::schnorrsig_sign_with_nonce(
+        let sig = ddk_dlc::secp_utils::schnorrsig_sign_with_nonce(
             SECP256K1,
             &msg,
             &key_pair,
@@ -641,7 +639,7 @@ mod tests {
         };
 
         let msg = tagged_attestation_msg("1");
-        let sig = dlc::secp_utils::schnorrsig_sign_with_nonce(
+        let sig = ddk_dlc::secp_utils::schnorrsig_sign_with_nonce(
             SECP256K1,
             &msg,
             &key_pair,

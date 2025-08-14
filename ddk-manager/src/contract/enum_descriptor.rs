@@ -5,11 +5,11 @@ use super::utils::{get_majority_combination, unordered_equal};
 use super::AdaptorInfo;
 use crate::error::Error;
 use bitcoin::{Amount, Script, Transaction};
-use dlc::OracleInfo;
-use dlc::{EnumerationPayout, Payout};
-use dlc_messages::oracle_msgs;
-use dlc_messages::oracle_msgs::EnumEventDescriptor;
-use dlc_trie::{combination_iterator::CombinationIterator, RangeInfo};
+use ddk_dlc::OracleInfo;
+use ddk_dlc::{EnumerationPayout, Payout};
+use ddk_messages::oracle_msgs;
+use ddk_messages::oracle_msgs::EnumEventDescriptor;
+use ddk_trie::{combination_iterator::CombinationIterator, RangeInfo};
 use secp256k1_zkp::{
     All, EcdsaAdaptorSignature, Message, PublicKey, Secp256k1, SecretKey, Verification,
 };
@@ -122,13 +122,13 @@ impl EnumDescriptor {
         cets: &[Transaction],
         adaptor_sigs: &[EcdsaAdaptorSignature],
         adaptor_sig_start: usize,
-    ) -> Result<usize, dlc::Error> {
+    ) -> Result<usize, ddk_dlc::Error> {
         let mut adaptor_sig_index = adaptor_sig_start;
         let mut callback =
-            |adaptor_point: &PublicKey, cet_index: usize| -> Result<(), dlc::Error> {
+            |adaptor_point: &PublicKey, cet_index: usize| -> Result<(), ddk_dlc::Error> {
                 let sig = adaptor_sigs[adaptor_sig_index];
                 adaptor_sig_index += 1;
-                dlc::verify_cet_adaptor_sig_from_point(
+                ddk_dlc::verify_cet_adaptor_sig_from_point(
                     secp,
                     &sig,
                     &cets[cet_index],
@@ -158,7 +158,7 @@ impl EnumDescriptor {
         cets: &[Transaction],
         adaptor_sigs: &[EcdsaAdaptorSignature],
         adaptor_sig_start: usize,
-    ) -> Result<(AdaptorInfo, usize), dlc::Error> {
+    ) -> Result<(AdaptorInfo, usize), ddk_dlc::Error> {
         let adaptor_sig_index = self.verify_adaptor_info(
             secp,
             oracle_infos,
@@ -213,8 +213,8 @@ impl EnumDescriptor {
     ) -> Result<Vec<EcdsaAdaptorSignature>, Error> {
         let mut adaptor_sigs = Vec::new();
         let mut callback =
-            |adaptor_point: &PublicKey, cet_index: usize| -> Result<(), dlc::Error> {
-                let sig = dlc::create_cet_adaptor_sig_from_point(
+            |adaptor_point: &PublicKey, cet_index: usize| -> Result<(), ddk_dlc::Error> {
+                let sig = ddk_dlc::create_cet_adaptor_sig_from_point(
                     secp,
                     &cets[cet_index],
                     adaptor_point,
@@ -237,9 +237,9 @@ impl EnumDescriptor {
         oracle_infos: &[OracleInfo],
         threshold: usize,
         callback: &mut F,
-    ) -> Result<(), dlc::Error>
+    ) -> Result<(), ddk_dlc::Error>
     where
-        F: FnMut(&PublicKey, usize) -> Result<(), dlc::Error>,
+        F: FnMut(&PublicKey, usize) -> Result<(), ddk_dlc::Error>,
     {
         let messages: Vec<Vec<Vec<Message>>> = self
             .outcome_payouts
@@ -265,7 +265,7 @@ impl EnumDescriptor {
                         }
                     })
                     .collect();
-                let adaptor_point = dlc::get_adaptor_point_from_oracle_info(
+                let adaptor_point = ddk_dlc::get_adaptor_point_from_oracle_info(
                     secp,
                     &cur_oracle_infos,
                     outcome_messages,

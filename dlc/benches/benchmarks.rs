@@ -1,7 +1,7 @@
 #![cfg_attr(all(test, feature = "unstable"), feature(test))]
 
 extern crate bitcoin;
-extern crate dlc;
+extern crate ddk_dlc;
 extern crate rayon;
 extern crate secp256k1_zkp;
 #[cfg(all(test, feature = "unstable"))]
@@ -11,7 +11,7 @@ extern crate test;
 mod benches {
 
     use bitcoin::{consensus::Decodable, ScriptBuf, Transaction};
-    use dlc::*;
+    use ddk_dlc::*;
     use rayon::prelude::*;
     use secp256k1_zkp::{
         global::SECP256K1, rand::thread_rng, rand::RngCore, Keypair, Message, PublicKey, SecretKey,

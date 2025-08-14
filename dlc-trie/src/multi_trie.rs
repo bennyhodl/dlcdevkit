@@ -6,8 +6,8 @@ use crate::{
     LookupResult, Node, OracleNumericInfo,
 };
 use combination_iterator::CombinationIterator;
+use ddk_dlc::Error;
 use digit_trie::{DigitTrie, DigitTrieDump, DigitTrieIter};
-use dlc::Error;
 use multi_oracle::compute_outcome_combinations;
 
 #[derive(Clone, Debug)]

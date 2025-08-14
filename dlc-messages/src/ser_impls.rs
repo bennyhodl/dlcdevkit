@@ -3,8 +3,8 @@
 use bitcoin::Address;
 use bitcoin::Network;
 use bitcoin::SignedAmount;
-use dlc::dlc_input::DlcInputInfo;
-use dlc::{EnumerationPayout, PartyParams, Payout, TxInputInfo};
+use ddk_dlc::dlc_input::DlcInputInfo;
+use ddk_dlc::{EnumerationPayout, PartyParams, Payout, TxInputInfo};
 use lightning::io::Read;
 use lightning::ln::msgs::DecodeError;
 use lightning::ln::wire::Type;
