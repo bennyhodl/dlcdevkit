@@ -122,6 +122,7 @@ impl TestSuite {
         let ddk: TestDlcDevKit = Builder::new()
             .set_network(Network::Regtest)
             .set_seed_bytes(SeedConfig::Bytes(seed))
+            .unwrap()
             .set_esplora_host(esplora_host)
             .set_name(name)
             .set_oracle(oracle)

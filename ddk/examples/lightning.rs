@@ -14,7 +14,7 @@ async fn main() -> Result<(), ddk::error::Error> {
     let oracle_client = Arc::new(KormirOracleClient::new("host", None).await?);
 
     let mut builder = Builder::new();
-    builder.set_seed_bytes(SeedConfig::Random);
+    builder.set_seed_bytes(SeedConfig::Random)?;
     builder.set_transport(transport.clone());
     builder.set_storage(storage.clone());
     builder.set_oracle(oracle_client.clone());

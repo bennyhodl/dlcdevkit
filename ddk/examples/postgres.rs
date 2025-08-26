@@ -27,7 +27,7 @@ async fn main() -> Result<(), ddk::error::Error> {
         .unwrap();
 
     let mut builder = Builder::new();
-    builder.set_seed_bytes(SeedConfig::Bytes(seed_bytes));
+    builder.set_seed_bytes(SeedConfig::Bytes(seed_bytes))?;
     builder.set_transport(transport.clone());
     builder.set_storage(storage.clone());
     builder.set_oracle(oracle_client.clone());

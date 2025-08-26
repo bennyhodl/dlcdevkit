@@ -75,7 +75,7 @@ impl DdkNode {
         let oracle = Arc::new(KormirOracleClient::new(&opts.oracle_host, None).await?);
 
         let mut builder = Builder::new();
-        builder.set_seed_bytes(SeedConfig::Bytes(seed_bytes));
+        builder.set_seed_bytes(SeedConfig::Bytes(seed_bytes))?;
         builder.set_esplora_host(opts.esplora_host);
         builder.set_network(network);
         builder.set_transport(transport.clone());
