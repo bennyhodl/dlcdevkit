@@ -1,3 +1,5 @@
+use bip39::{Language, Mnemonic};
+use bitcoin::key::rand::Fill;
 use bitcoin::Network;
 use ddk_manager::manager::Manager;
 use ddk_manager::SystemTimeProvider;
@@ -14,6 +16,17 @@ use crate::{Oracle, Storage, Transport};
 const DEFAULT_ESPLORA_HOST: &str = "https://mutinynet.com/api";
 const DEFAULT_NETWORK: Network = Network::Signet;
 
+/// Configuration for the seed bytes for the wallet.
+#[derive(Debug, Clone)]
+pub enum SeedConfig {
+    /// Generates a random seed everytime ddk is run.
+    Random,
+    /// The first string is the mnemonic, the second is the passphrase.
+    Mnemonic(String, String),
+    /// The bytes to use for the seed.
+    Bytes([u8; 64]),
+}
+
 /// Builder pattern for creating a [`crate::ddk::DlcDevKit`] process.
 #[derive(Clone)]
 pub struct Builder<T, S, O> {
@@ -24,7 +37,7 @@ pub struct Builder<T, S, O> {
     contract_address_generator: Option<Arc<dyn AddressGenerator + Send + Sync + 'static>>,
     esplora_host: String,
     network: Network,
-    seed_bytes: [u8; 32],
+    seed_bytes: [u8; 64],
 }
 
 /// Defaults when creating a DDK application
@@ -42,7 +55,7 @@ impl<T: Transport, S: Storage, O: Oracle> Default for Builder<T, S, O> {
             contract_address_generator: None,
             esplora_host: DEFAULT_ESPLORA_HOST.to_string(),
             network: DEFAULT_NETWORK,
-            seed_bytes: [0u8; 32],
+            seed_bytes: [0u8; 64],
         }
     }
 }
@@ -107,9 +120,21 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
     }
 
     /// Set the seed bytes for the wallet.
-    pub fn set_seed_bytes(&mut self, bytes: [u8; 32]) -> &mut Self {
-        self.seed_bytes = bytes;
-        self
+    pub fn set_seed_bytes(&mut self, seed_config: SeedConfig) -> Result<&mut Self, BuilderError> {
+        match seed_config {
+            SeedConfig::Random => {
+                let mut seed = [0u8; 64];
+                seed.try_fill(&mut bitcoin::key::rand::thread_rng())
+                    .map_err(|_| BuilderError::SeedGenerationFailed)?;
+                self.seed_bytes = seed
+            }
+            SeedConfig::Mnemonic(mnemonic, passphrase) => {
+                let mnemonic = Mnemonic::parse_in_normalized(Language::English, &mnemonic).unwrap();
+                self.seed_bytes = mnemonic.to_seed(passphrase)
+            }
+            SeedConfig::Bytes(bytes) => self.seed_bytes = bytes,
+        }
+        Ok(self)
     }
 
     /// Builds the `DlcDevKit` instance. Fails if any components are missing.

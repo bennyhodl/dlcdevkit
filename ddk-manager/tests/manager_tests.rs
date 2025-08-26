@@ -28,7 +28,7 @@ async fn get_manager() -> TestManager {
     let blockchain =
         Arc::new(EsploraClient::new("http://localhost:30000", Network::Regtest).unwrap());
     let store = Arc::new(MemoryStorage::new());
-    let mut seed = [0u8; 32];
+    let mut seed = [0u8; 64];
     seed.try_fill(&mut bitcoin::key::rand::thread_rng())
         .unwrap();
     let wallet = Arc::new(

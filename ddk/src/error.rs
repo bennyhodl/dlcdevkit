@@ -137,6 +137,8 @@ pub enum BuilderError {
     NoStorage,
     #[error("An oracle client was not provided.")]
     NoOracle,
+    #[error("Failed to generate random seed.")]
+    SeedGenerationFailed,
 }
 
 /// Errors related to Bitcoin wallet operations.

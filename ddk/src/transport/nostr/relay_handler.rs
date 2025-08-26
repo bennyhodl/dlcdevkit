@@ -20,7 +20,7 @@ pub struct NostrDlc {
 
 impl NostrDlc {
     pub async fn new(
-        seed_bytes: &[u8; 32],
+        seed_bytes: &[u8; 64],
         relay_host: &str,
         network: Network,
     ) -> Result<NostrDlc, TransportError> {

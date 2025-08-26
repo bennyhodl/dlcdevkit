@@ -840,7 +840,7 @@ pub async fn create_and_fund_wallet() -> (DlcDevKitWallet, Arc<MemoryStorage>) {
         .get_new_address(None, None)
         .unwrap()
         .assume_checked();
-    let mut seed = [0u8; 32];
+    let mut seed = [0u8; 64];
     seed.try_fill(&mut bitcoin::key::rand::thread_rng())
         .unwrap();
     let memory_storage = Arc::new(MemoryStorage::new());

@@ -62,6 +62,7 @@ kormir = { version = "0.5.0", path = "../kormir" }
 hmac = "0.12.1"
 sha2 = "0.10"
 nostr-database = { version = "0.40.0", optional = true }
+bip39 = "2.2.0"
 
 [dev-dependencies]
 test-log = { version = "0.2.16", features = ["trace"] }

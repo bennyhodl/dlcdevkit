@@ -6,7 +6,7 @@ mod seed;
 
 use bitcoin::secp256k1::PublicKey;
 use bitcoin::{Address, Amount, FeeRate, Network};
-use ddk::builder::Builder;
+use ddk::builder::{Builder, SeedConfig};
 use ddk::oracle::kormir::KormirOracleClient;
 use ddk::storage::postgres::PostgresStore;
 use ddk::transport::nostr::NostrDlc;
@@ -63,18 +63,11 @@ impl DdkNode {
         let network = Network::from_str(&opts.network)?;
         std::fs::create_dir_all(storage_path.clone())?;
 
-        let seed_bytes = crate::seed::xprv_from_path(storage_path.clone(), network)?;
+        let seed_bytes = crate::seed::xprv_from_path(storage_path.clone())?;
 
         tracing::info!("Starting DDK node.");
-
-        let transport = Arc::new(
-            NostrDlc::new(
-                &seed_bytes.private_key.secret_bytes(),
-                "wss://nostr.dlcdevkit.com",
-                network,
-            )
-            .await?,
-        );
+        let transport =
+            Arc::new(NostrDlc::new(&seed_bytes, "wss://nostr.dlcdevkit.com", network).await?);
 
         let storage = Arc::new(PostgresStore::new(&opts.postgres_url, true, opts.name).await?);
 
@@ -82,7 +75,7 @@ impl DdkNode {
         let oracle = Arc::new(KormirOracleClient::new(&opts.oracle_host, None).await?);
 
         let mut builder = Builder::new();
-        builder.set_seed_bytes(seed_bytes.private_key.secret_bytes());
+        builder.set_seed_bytes(SeedConfig::Bytes(seed_bytes));
         builder.set_esplora_host(opts.esplora_host);
         builder.set_network(network);
         builder.set_transport(transport.clone());
