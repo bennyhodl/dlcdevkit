@@ -3,7 +3,7 @@
 use std::ops::Deref;
 
 use bitcoin::psbt::Psbt;
-use bitcoin::Amount;
+use bitcoin::{Amount, EcdsaSighashType};
 use bitcoin::{consensus::Decodable, Script, Transaction, Witness};
 use ddk_dlc::dlc_input::DlcInputInfo;
 use ddk_dlc::{DlcTransactions, PartyParams};
@@ -227,14 +227,17 @@ pub(crate) fn accept_contract_internal(
         adaptor_sigs.extend(adaptor_sig);
     }
 
-    let refund_signature = ddk_dlc::util::get_raw_sig_for_tx_input(
+    let refund_signature = ddk_dlc::util::get_sig_for_tx_input(
         secp,
         refund,
         0,
         input_script_pubkey,
         input_value,
+        EcdsaSighashType::All,
         adaptor_secret_key,
     )?;
+
+    let refund_signature = Signature::from_der(refund_signature.as_slice())?;
 
     let dlc_transactions = DlcTransactions {
         fund: fund.clone(),
@@ -565,14 +568,17 @@ where
         })
         .collect::<Result<Vec<_>, Error>>()?;
 
-    let offer_refund_signature = ddk_dlc::util::get_raw_sig_for_tx_input(
+    let offer_refund_signature = ddk_dlc::util::get_sig_for_tx_input(
         secp,
         refund,
         0,
         input_script_pubkey,
         input_value,
+        EcdsaSighashType::All,
         &signer.get_secret_key()?,
     )?;
+
+    let offer_refund_signature = Signature::from_der(offer_refund_signature.as_slice())?;
 
     let dlc_transactions = DlcTransactions {
         fund: fund.clone(),
