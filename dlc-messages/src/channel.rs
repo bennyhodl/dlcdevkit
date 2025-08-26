@@ -12,6 +12,7 @@ use crate::FundingSignatures;
 use crate::{
     contract_msgs::ContractInfo,
     ser_impls::{read_ecdsa_adaptor_signature, write_ecdsa_adaptor_signature},
+    types::*,
     CetAdaptorSignatures, FundingInput, NegotiationFields,
 };
 
@@ -82,7 +83,7 @@ pub struct OfferChannel {
     pub cet_nsequence: u32,
 }
 
-impl_dlc_writeable!(OfferChannel, {
+impl_dlc_writeable!(OfferChannel, OFFER_CHANNEL_TYPE, {
         (protocol_version, writeable),
         (contract_flags, writeable),
         (chain_hash, writeable),
@@ -193,7 +194,7 @@ pub struct AcceptChannel {
     pub negotiation_fields: Option<NegotiationFields>,
 }
 
-impl_dlc_writeable!(AcceptChannel, {
+impl_dlc_writeable!(AcceptChannel, ACCEPT_CHANNEL_TYPE, {
     (temporary_channel_id, writeable),
     (accept_collateral, writeable),
     (funding_pubkey, writeable),
@@ -240,7 +241,7 @@ pub struct SignChannel {
     pub funding_signatures: FundingSignatures,
 }
 
-impl_dlc_writeable!(SignChannel, {
+impl_dlc_writeable!(SignChannel, SIGN_CHANNEL_TYPE, {
     (channel_id, writeable),
     (cet_adaptor_signatures, writeable),
     (buffer_adaptor_signature, {cb_writeable, write_ecdsa_adaptor_signature, read_ecdsa_adaptor_signature}),
@@ -272,7 +273,7 @@ pub struct SettleOffer {
     pub next_per_update_point: PublicKey,
 }
 
-impl_dlc_writeable!(SettleOffer, {
+impl_dlc_writeable!(SettleOffer, SETTLE_CHANNEL_OFFER_TYPE, {
     (channel_id, writeable),
     (counter_payout, writeable),
     (next_per_update_point, writeable)
@@ -303,7 +304,7 @@ pub struct SettleAccept {
     pub settle_adaptor_signature: EcdsaAdaptorSignature,
 }
 
-impl_dlc_writeable!(SettleAccept, {
+impl_dlc_writeable!(SettleAccept, SETTLE_CHANNEL_ACCEPT_TYPE, {
     (channel_id, writeable),
     (next_per_update_point, writeable),
     (settle_adaptor_signature, {cb_writeable, write_ecdsa_adaptor_signature, read_ecdsa_adaptor_signature})
@@ -334,7 +335,7 @@ pub struct SettleConfirm {
     pub settle_adaptor_signature: EcdsaAdaptorSignature,
 }
 
-impl_dlc_writeable!(SettleConfirm, {
+impl_dlc_writeable!(SettleConfirm, SETTLE_CHANNEL_CONFIRM_TYPE, {
     (channel_id, writeable),
     (prev_per_update_secret, writeable),
     (settle_adaptor_signature, {cb_writeable, write_ecdsa_adaptor_signature, read_ecdsa_adaptor_signature})
@@ -362,7 +363,7 @@ pub struct SettleFinalize {
     pub prev_per_update_secret: SecretKey,
 }
 
-impl_dlc_writeable!(SettleFinalize, {
+impl_dlc_writeable!(SettleFinalize, SETTLE_CHANNEL_FINALIZE_TYPE, {
     (channel_id, writeable),
     (prev_per_update_secret, writeable)
 });
@@ -402,7 +403,7 @@ pub struct RenewOffer {
     pub cet_nsequence: u32,
 }
 
-impl_dlc_writeable!(RenewOffer, {
+impl_dlc_writeable!(RenewOffer, RENEW_CHANNEL_OFFER_TYPE, {
     (channel_id, writeable),
     (temporary_contract_id, writeable),
     (counter_payout, writeable),
@@ -439,7 +440,7 @@ pub struct RenewAccept {
     pub refund_signature: Signature,
 }
 
-impl_dlc_writeable!(RenewAccept, {
+impl_dlc_writeable!(RenewAccept, RENEW_CHANNEL_ACCEPT_TYPE, {
     (channel_id, writeable),
     (next_per_update_point, writeable),
     (cet_adaptor_signatures, writeable),
@@ -472,7 +473,7 @@ pub struct RenewConfirm {
     pub refund_signature: Signature,
 }
 
-impl_dlc_writeable!(RenewConfirm, {
+impl_dlc_writeable!(RenewConfirm, RENEW_CHANNEL_CONFIRM_TYPE, {
     (channel_id, writeable),
     (buffer_adaptor_signature, {cb_writeable, write_ecdsa_adaptor_signature, read_ecdsa_adaptor_signature}),
     (cet_adaptor_signatures, writeable),
@@ -504,7 +505,7 @@ pub struct RenewFinalize {
     pub buffer_adaptor_signature: EcdsaAdaptorSignature,
 }
 
-impl_dlc_writeable!(RenewFinalize, {
+impl_dlc_writeable!(RenewFinalize, RENEW_CHANNEL_FINALIZE_TYPE, {
     (channel_id, writeable),
     (per_update_secret, writeable),
     (buffer_adaptor_signature, {cb_writeable, write_ecdsa_adaptor_signature, read_ecdsa_adaptor_signature})
@@ -533,7 +534,7 @@ pub struct RenewRevoke {
     pub per_update_secret: SecretKey,
 }
 
-impl_dlc_writeable!(RenewRevoke, {
+impl_dlc_writeable!(RenewRevoke, RENEW_CHANNEL_REVOKE_TYPE, {
     (channel_id, writeable),
     (per_update_secret, writeable)
 });
@@ -561,7 +562,7 @@ pub struct CollaborativeCloseOffer {
     pub close_signature: Signature,
 }
 
-impl_dlc_writeable!(CollaborativeCloseOffer, {
+impl_dlc_writeable!(CollaborativeCloseOffer, COLLABORATIVE_CLOSE_OFFER_TYPE, {
     (channel_id, writeable),
     (counter_payout, writeable),
     (close_signature, writeable)
@@ -586,4 +587,4 @@ pub struct Reject {
     pub channel_id: [u8; 32],
 }
 
-impl_dlc_writeable!(Reject, { (channel_id, writeable) });
+impl_dlc_writeable!(Reject, REJECT, { (channel_id, writeable) });

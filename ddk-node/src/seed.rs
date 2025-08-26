@@ -1,6 +1,4 @@
-use bitcoin::bip32::Xpriv;
 use bitcoin::key::rand;
-use bitcoin::Network;
 use rand::Fill;
 use std::{
     fs::File,
@@ -10,21 +8,19 @@ use std::{
 
 /// Helper function that reads `[bitcoin::bip32::Xpriv]` bytes from a file.
 /// If the file does not exist then it will create a file `seed.ddk` in the specified path.
-pub fn xprv_from_path(path: PathBuf, network: Network) -> anyhow::Result<Xpriv> {
+pub fn xprv_from_path(path: PathBuf) -> anyhow::Result<[u8; 64]> {
     let seed_path = path.join("seed.ddk");
     let seed = if Path::new(&seed_path).exists() {
         let seed = std::fs::read(&seed_path)?;
-        let mut key = [0; 32];
+        let mut key = [0; 64];
         key.copy_from_slice(&seed);
-        Xpriv::new_master(network, &seed)?
+        key
     } else {
         let mut file = File::create(&seed_path)?;
-        let mut entropy = [0u8; 32];
+        let mut entropy = [0u8; 64];
         entropy.try_fill(&mut rand::thread_rng())?;
-        // let _mnemonic = Mnemonic::from_entropy(&entropy)?;
-        let xprv = Xpriv::new_master(network, &entropy)?;
         file.write_all(&entropy)?;
-        xprv
+        entropy
     };
 
     Ok(seed)

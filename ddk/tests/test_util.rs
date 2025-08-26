@@ -18,8 +18,11 @@ use std::{
 
 use bitcoincore_rpc::RpcApi;
 use ddk::{
-    builder::Builder, oracle::memory::MemoryOracle, storage::memory::MemoryStorage,
-    transport::memory::MemoryTransport, DlcDevKit,
+    builder::{Builder, SeedConfig},
+    oracle::memory::MemoryOracle,
+    storage::memory::MemoryStorage,
+    transport::memory::MemoryTransport,
+    DlcDevKit,
 };
 
 type TestDlcDevKit = DlcDevKit<MemoryTransport, MemoryStorage, MemoryOracle>;
@@ -108,7 +111,7 @@ pub struct TestSuite {
 
 impl TestSuite {
     pub async fn new(secp: &Secp256k1<All>, name: &str, oracle: Arc<MemoryOracle>) -> TestSuite {
-        let mut seed = [0u8; 32];
+        let mut seed = [0u8; 64];
         seed.try_fill(&mut bitcoin::key::rand::thread_rng())
             .unwrap();
         let esplora_host = "http://127.0.0.1:30000".to_string();
@@ -118,7 +121,8 @@ impl TestSuite {
 
         let ddk: TestDlcDevKit = Builder::new()
             .set_network(Network::Regtest)
-            .set_seed_bytes(seed)
+            .set_seed_bytes(SeedConfig::Bytes(seed))
+            .unwrap()
             .set_esplora_host(esplora_host)
             .set_name(name)
             .set_oracle(oracle)

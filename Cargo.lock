@@ -946,6 +946,7 @@ dependencies = [
  "bdk_chain",
  "bdk_esplora",
  "bdk_wallet",
+ "bip39",
  "bitcoin",
  "bitcoincore-rpc",
  "chrono",

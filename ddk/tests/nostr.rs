@@ -6,6 +6,7 @@ mod nostr_test {
     use bitcoin::Amount;
     use bitcoin::{key::rand::Fill, Network};
     use chrono::{Local, TimeDelta};
+    use ddk::builder::SeedConfig;
     use ddk::oracle::memory::MemoryOracle;
     use ddk::storage::memory::MemoryStorage;
     use ddk::transport::nostr::NostrDlc;
@@ -17,7 +18,7 @@ mod nostr_test {
     type NostrDlcDevKit = DlcDevKit<NostrDlc, MemoryStorage, MemoryOracle>;
 
     async fn nostr_ddk(name: &str, oracle: Arc<MemoryOracle>) -> NostrDlcDevKit {
-        let mut seed = [0u8; 32];
+        let mut seed = [0u8; 64];
         seed.try_fill(&mut bitcoin::key::rand::thread_rng())
             .unwrap();
         let esplora_host = "http://127.0.0.1:30000".to_string();
@@ -31,7 +32,8 @@ mod nostr_test {
 
         let ddk: NostrDlcDevKit = Builder::new()
             .set_network(Network::Regtest)
-            .set_seed_bytes(seed)
+            .set_seed_bytes(SeedConfig::Bytes(seed))
+            .unwrap()
             .set_esplora_host(esplora_host)
             .set_name(name)
             .set_oracle(oracle)

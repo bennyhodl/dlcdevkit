@@ -7,3 +7,5 @@
 
 /ddk/.env
 .env
+
+/releases

@@ -29,6 +29,7 @@ pub mod contract_msgs;
 pub mod message_handler;
 pub mod oracle_msgs;
 pub mod segmentation;
+pub mod types;
 
 #[cfg(any(test, feature = "use-serde"))]
 pub mod serde_utils;
@@ -36,6 +37,7 @@ pub mod serde_utils;
 use std::fmt::Display;
 
 use crate::ser_impls::{read_ecdsa_adaptor_signature, write_ecdsa_adaptor_signature};
+use crate::types::*;
 use bitcoin::{consensus::Decodable, OutPoint, Transaction};
 use bitcoin::{Amount, ScriptBuf};
 use channel::{
@@ -52,42 +54,6 @@ use lightning::util::ser::{Readable, Writeable, Writer};
 use secp256k1_zkp::Verification;
 use secp256k1_zkp::{ecdsa::Signature, EcdsaAdaptorSignature, PublicKey, Secp256k1};
 use segmentation::{SegmentChunk, SegmentStart};
-
-macro_rules! impl_type {
-    ($const_name: ident, $type_name: ident, $type_val: expr) => {
-        /// The type prefix for an [`$type_name`] message.
-        pub const $const_name: u16 = $type_val;
-
-        impl Type for $type_name {
-            fn type_id(&self) -> u16 {
-                $const_name
-            }
-        }
-    };
-}
-
-impl_type!(OFFER_TYPE, OfferDlc, 42778);
-impl_type!(ACCEPT_TYPE, AcceptDlc, 42780);
-impl_type!(SIGN_TYPE, SignDlc, 42782);
-impl_type!(CLOSE_TYPE, CloseDlc, 42784);
-impl_type!(OFFER_CHANNEL_TYPE, OfferChannel, 43000);
-impl_type!(ACCEPT_CHANNEL_TYPE, AcceptChannel, 43002);
-impl_type!(SIGN_CHANNEL_TYPE, SignChannel, 43004);
-impl_type!(SETTLE_CHANNEL_OFFER_TYPE, SettleOffer, 43006);
-impl_type!(SETTLE_CHANNEL_ACCEPT_TYPE, SettleAccept, 43008);
-impl_type!(SETTLE_CHANNEL_CONFIRM_TYPE, SettleConfirm, 43010);
-impl_type!(SETTLE_CHANNEL_FINALIZE_TYPE, SettleFinalize, 43012);
-impl_type!(RENEW_CHANNEL_OFFER_TYPE, RenewOffer, 43014);
-impl_type!(RENEW_CHANNEL_ACCEPT_TYPE, RenewAccept, 43016);
-impl_type!(RENEW_CHANNEL_CONFIRM_TYPE, RenewConfirm, 43018);
-impl_type!(RENEW_CHANNEL_FINALIZE_TYPE, RenewFinalize, 43020);
-impl_type!(RENEW_CHANNEL_REVOKE_TYPE, RenewRevoke, 43026);
-impl_type!(
-    COLLABORATIVE_CLOSE_OFFER_TYPE,
-    CollaborativeCloseOffer,
-    43022
-);
-impl_type!(REJECT, Reject, 43024);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(
@@ -429,7 +395,7 @@ impl OfferDlc {
     }
 }
 
-impl_dlc_writeable!(OfferDlc, {
+impl_dlc_writeable!(OfferDlc, OFFER_TYPE, {
         (protocol_version, writeable),
         (contract_flags, writeable),
         (chain_hash, writeable),
@@ -492,7 +458,7 @@ pub struct AcceptDlc {
     pub negotiation_fields: Option<NegotiationFields>,
 }
 
-impl_dlc_writeable!(AcceptDlc, {
+impl_dlc_writeable!(AcceptDlc, ACCEPT_TYPE, {
     (protocol_version, writeable),
     (temporary_contract_id, writeable),
     (accept_collateral, writeable),
@@ -535,7 +501,7 @@ pub struct SignDlc {
     pub funding_signatures: FundingSignatures,
 }
 
-impl_dlc_writeable!(SignDlc, {
+impl_dlc_writeable!(SignDlc, SIGN_TYPE, {
     (protocol_version, writeable),
     (contract_id, writeable),
     (cet_adaptor_signatures, writeable),
@@ -576,7 +542,7 @@ pub struct CloseDlc {
     pub funding_signatures: FundingSignatures,
 }
 
-impl_dlc_writeable!(CloseDlc, {
+impl_dlc_writeable!(CloseDlc, CLOSE_TYPE, {
     (protocol_version, writeable),
     (contract_id, writeable),
     (close_signature, writeable),

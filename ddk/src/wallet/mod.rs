@@ -229,7 +229,7 @@ impl DlcDevKitWallet {
     /// - Handles all BDK operations
     /// - Manages blockchain synchronization
     pub async fn new(
-        seed_bytes: &[u8; 32],
+        seed_bytes: &[u8; 64],
         esplora_url: &str,
         network: Network,
         storage: Arc<dyn Storage>,
@@ -935,7 +935,7 @@ mod tests {
     use crate::storage::memory::MemoryStorage;
     use bitcoin::{
         address::NetworkChecked,
-        bip32::{ChildNumber, Xpriv},
+        bip32::ChildNumber,
         key::rand::Fill,
         secp256k1::{PublicKey, SecretKey},
         Address, AddressType, Amount, FeeRate, Network,
@@ -952,16 +952,9 @@ mod tests {
         entropy
             .try_fill(&mut bitcoin::key::rand::thread_rng())
             .unwrap();
-        let xpriv = Xpriv::new_master(Network::Regtest, &entropy).unwrap();
-        DlcDevKitWallet::new(
-            &xpriv.private_key.secret_bytes(),
-            &esplora,
-            Network::Regtest,
-            storage.clone(),
-            None,
-        )
-        .await
-        .unwrap()
+        DlcDevKitWallet::new(&entropy, &esplora, Network::Regtest, storage.clone(), None)
+            .await
+            .unwrap()
     }
 
     fn generate_blocks(num: u64) {
@@ -1494,7 +1487,7 @@ mod tests {
             .unwrap()
             .assume_checked();
 
-        let mut seed = [0u8; 32];
+        let mut seed = [0u8; 64];
         seed.try_fill(&mut bitcoin::key::rand::thread_rng())
             .unwrap();
 
