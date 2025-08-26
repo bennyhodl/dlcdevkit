@@ -100,6 +100,34 @@ macro_rules! impl_dlc_writeable {
             }
         }
     };
+    // Version with type_id - writes/reads type_id as first field
+    ($st:ident, $type_const:ident, {$(($field: ident, $fieldty: tt)), *} ) => {
+        impl Writeable for $st {
+			fn write<W: Writer>(&self, w: &mut W) -> Result<(), ::lightning::io::Error> {
+                // Write type_id first
+                $type_const.write(w)?;
+				$(
+                    field_write!(w, self.$field, $fieldty);
+                )*
+				Ok(())
+            }
+        }
+
+        impl Readable for $st {
+			fn read<R: lightning::io::Read>(r: &mut R) -> Result<Self, DecodeError> {
+                // Read and verify type_id first
+                let type_id: u16 = Readable::read(r)?;
+                if type_id != $type_const {
+                    return Err(DecodeError::UnknownRequiredFeature);
+                }
+                Ok(Self {
+                    $(
+                        $field: field_read!(r, $fieldty),
+                    )*
+                })
+            }
+        }
+    };
 }
 
 /// Implements the [`lightning::util::ser::Writeable`] trait for a struct external
