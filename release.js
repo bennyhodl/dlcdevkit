@@ -64,6 +64,7 @@ function updateCargoVersion(cratePath, newVersion, isDryRun = false) {
     "ddk-messages",
     "ddk-trie",
     "ddk-manager",
+    "ddk-payouts",
     "kormir",
     "payouts",
     "ddk-node",
@@ -413,20 +414,20 @@ async function createGitHubRelease(releaseNotes) {
 // Define crate dependencies and publish order
 const crateOrder = [
   // Level 0: No internal dependencies
-  { name: "ddk-dlc", path: "./dlc", package: "ddk-dlc" },
-
+  { name: "dlc", path: "./dlc", package: "ddk-dlc" },
+  
   // Level 1: Depends on level 0
-  { name: "ddk-trie", path: "./dlc-trie", package: "ddk-trie" },
-  { name: "ddk-messages", path: "./dlc-messages", package: "ddk-messages" },
+  { name: "dlc-trie", path: "./dlc-trie", package: "ddk-trie" },
+  { name: "dlc-messages", path: "./dlc-messages", package: "ddk-messages" },
   { name: "kormir", path: "./kormir", package: "kormir" },
-
+  
   // Level 2: Depends on levels 0 and 1
   { name: "ddk-manager", path: "./ddk-manager", package: "ddk-manager" },
-
+  
   // Level 3: Depends on level 2
   { name: "ddk", path: "./ddk", package: "ddk" },
-  { name: "payouts", path: "./payouts", package: "payouts" },
-
+  { name: "payouts", path: "./payouts", package: "ddk-payouts" },
+  
   // Level 4: Depends on level 3
   { name: "ddk-node", path: "./ddk-node", package: "ddk-node" },
 ];
@@ -542,14 +543,42 @@ async function release() {
     }
   }
 
-  // Step 9: Push changes and create GitHub release
+  // Step 9: Create PR and GitHub release
   if (!dryRun) {
-    console.log("\n📤 Pushing changes to origin...");
-    run("git push origin master --tags");
-    console.log("✅ Changes and tags pushed");
-
+    console.log("\n🔄 Creating release pull request...");
+    
+    // Create a new branch for the release
+    const releaseBranch = `release-${version}`;
+    run(`git checkout -b ${releaseBranch}`);
+    console.log(`✅ Created branch ${releaseBranch}`);
+    
+    // Push the branch
+    console.log("📤 Pushing release branch to origin...");
+    run(`git push -u origin ${releaseBranch}`);
+    console.log("✅ Branch pushed");
+    
+    // Push tags separately
+    console.log("🏷️  Pushing tags...");
+    run("git push origin --tags");
+    console.log("✅ Tags pushed");
+    
+    // Create PR using gh CLI
+    console.log("📝 Creating pull request...");
+    try {
+      const prUrl = run(
+        `gh pr create --title "chore: release ${version}" --body "Release version ${version}\n\n## Changes\n- Updated all crate versions to ${version}\n- Published crates to crates.io\n\n## Release Notes\nSee releases/${version}-RELEASE.md" --base master --head ${releaseBranch}`
+      );
+      console.log(`✅ Pull request created: ${prUrl}`);
+    } catch (error) {
+      console.warn("⚠️  Could not create PR automatically:", error.message);
+      console.log(`   Create it manually at: https://github.com/<owner>/<repo>/compare/master...${releaseBranch}`);
+    }
+    
     // Create GitHub release
     await createGitHubRelease(releaseNotes);
+    
+    // Switch back to original branch
+    run("git checkout master");
   }
 
   console.log(`\n🎉 Release ${dryRun ? "validation" : "process"} complete!`);
@@ -562,9 +591,11 @@ async function release() {
   } else {
     console.log("\n📋 Release completed successfully!");
     console.log("   - Version tags created and pushed");
+    console.log("   - Pull request created for version changes");
     console.log("   - GitHub release created");
     console.log("   - All crates published to crates.io");
     console.log(`   - Release notes saved in releases/${version}-RELEASE.md`);
+    console.log("\n⚠️  Next step: Review and merge the pull request to complete the release");
   }
 }
 
