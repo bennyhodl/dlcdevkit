@@ -22,6 +22,7 @@ use crate::{ChannelId, ContractId, ContractSignerProvider};
 use bitcoin::absolute::Height;
 use bitcoin::consensus::encode::serialize_hex;
 use bitcoin::consensus::Decodable;
+use bitcoin::hex::DisplayHex;
 use bitcoin::{Address, Amount, SignedAmount};
 use bitcoin::{OutPoint, Transaction};
 use ddk_messages::channel::{
@@ -34,7 +35,6 @@ use ddk_messages::{AcceptDlc, CloseDlc, Message as DlcMessage, OfferDlc, SignDlc
 use futures::stream;
 use futures::stream::FuturesUnordered;
 use futures::{StreamExt, TryStreamExt};
-use hex::DisplayHex;
 use lightning::chain::chaininterface::FeeEstimator;
 use lightning::ln::chan_utils::{
     build_commitment_secret, derive_private_key, derive_private_revocation_key,
@@ -454,7 +454,8 @@ where
         Ok(())
     }
 
-    async fn on_offer_message(
+    /// Function to call to offer a DLC.
+    pub async fn on_offer_message(
         &self,
         offered_message: &OfferDlc,
         counter_party: PublicKey,
@@ -478,7 +479,8 @@ where
         Ok(())
     }
 
-    async fn on_close_message(
+    /// Function to call to close a DLC.
+    pub async fn on_close_message(
         &self,
         close_msg: &CloseDlc,
         counter_party: &PublicKey,
@@ -505,7 +507,8 @@ where
         Ok(())
     }
 
-    async fn on_accept_message(
+    /// Function to call to accept a DLC for which an offer was received.
+    pub async fn on_accept_message(
         &self,
         accept_msg: &AcceptDlc,
         counter_party: &PublicKey,
@@ -550,14 +553,14 @@ where
         Ok(DlcMessage::Sign(signed_msg))
     }
 
-    async fn on_sign_message(
+    /// Function to call to sign a DLC for which an accept was received.
+    pub async fn on_sign_message(
         &self,
         sign_message: &SignDlc,
         peer_id: &PublicKey,
     ) -> Result<(), Error> {
         let accepted_contract =
             get_contract_in_state!(self, &sign_message.contract_id, Accepted, Some(*peer_id))?;
-
         let (signed_contract, fund_tx) = match crate::contract_updater::verify_signed_contract(
             &self.secp,
             &accepted_contract,
@@ -791,6 +794,7 @@ where
         let contract_infos = &contract.accepted_contract.offered_contract.contract_info;
         let adaptor_infos = &contract.accepted_contract.adaptor_infos;
         for (contract_info, adaptor_info) in contract_infos.iter().zip(adaptor_infos.iter()) {
+            tracing::info!("Checking contract for oracle maturation.");
             let matured: Vec<_> = contract_info
                 .oracle_announcements
                 .iter()
@@ -802,6 +806,7 @@ where
             if matured.len() >= contract_info.threshold {
                 let attestations = stream::iter(matured.iter())
                     .map(|(i, announcement)| async move {
+                        tracing::info!("Oracle announcement is matured check for attestation. even_id={}", announcement.oracle_event.event_id);
                         // First try to get the oracle
                         let oracle = match self.oracles.get(&announcement.oracle_public_key) {
                             Some(oracle) => oracle,
@@ -813,7 +818,6 @@ where
                                 return None;
                             }
                         };
-
                         // Then try to get the attestation
                         let attestation = match oracle
                             .get_attestation(&announcement.oracle_event.event_id)
@@ -829,7 +833,6 @@ where
                                 return None;
                             }
                         };
-
                         // Validate the attestation
                         if let Err(e) = attestation.validate(&self.secp, announcement) {
                             tracing::error!(
@@ -840,7 +843,7 @@ where
                             );
                             return None;
                         }
-
+                        tracing::info!("Oracle attestation is valid. event_id={}", announcement.oracle_event.event_id);
                         Some((*i, attestation))
                     })
                     .collect::<FuturesUnordered<_>>()
@@ -857,6 +860,10 @@ where
     }
 
     async fn check_confirmed_contract(&self, contract: &SignedContract) -> Result<(), Error> {
+        tracing::info!(
+            "Checking confirmed contract {}",
+            contract.accepted_contract.get_contract_id_string()
+        );
         let closable_contract_info = self.get_closable_contract_info(contract).await;
         if let Some((contract_info, adaptor_info, attestations)) = closable_contract_info {
             let offer = &contract.accepted_contract.offered_contract;
