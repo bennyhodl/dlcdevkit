@@ -939,7 +939,7 @@ checksum = "2a2330da5de22e8a3cb63252ce2abb30116bf5265e89c0e01bc17015ce30a476"
 
 [[package]]
 name = "ddk"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "async-trait",
  "base64 0.13.1",
@@ -978,7 +978,7 @@ dependencies = [
 
 [[package]]
 name = "ddk-dlc"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "bitcoin",
  "miniscript",
@@ -990,7 +990,7 @@ dependencies = [
 
 [[package]]
 name = "ddk-manager"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "async-trait",
  "bitcoin",
@@ -1015,7 +1015,7 @@ dependencies = [
 
 [[package]]
 name = "ddk-messages"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "bitcoin",
  "ddk-dlc",
@@ -1028,7 +1028,7 @@ dependencies = [
 
 [[package]]
 name = "ddk-node"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "bitcoin",
@@ -1055,7 +1055,7 @@ dependencies = [
 
 [[package]]
 name = "ddk-payouts"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "bitcoin",
@@ -1070,7 +1070,7 @@ dependencies = [
 
 [[package]]
 name = "ddk-trie"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "bitcoin",
  "ddk-dlc",
@@ -2115,7 +2115,7 @@ dependencies = [
 
 [[package]]
 name = "kormir"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "base64 0.13.1",
  "bitcoin",

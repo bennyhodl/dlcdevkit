@@ -314,7 +314,7 @@ Format as clean markdown suitable for a GitHub release. Be concise but informati
 
     // Call Claude with the prompt
     const claudeOutput = run(`claude -p "$(cat ${tempPromptFile})"`, {
-      allowFailure: false,
+      allowFailure: true,
       timeout: 60000, // 60 second timeout for Claude
     });
 
