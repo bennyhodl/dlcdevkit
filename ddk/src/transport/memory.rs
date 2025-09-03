@@ -1,11 +1,13 @@
-use crate::{ddk::DlcDevKitDlcManager, error::TransportError, Oracle, Storage, Transport};
+use crate::logger::{log_error, log_info, WriteLog};
+use crate::{
+    ddk::DlcDevKitDlcManager, error::TransportError, logger::Logger, Oracle, Storage, Transport,
+};
 use bitcoin::{
     key::{self, Keypair},
     secp256k1::{All, PublicKey, Secp256k1},
 };
-use std::{collections::HashMap, sync::Arc, time::Duration};
-// use crossbeam::channel::{unbounded, Receiver, Sender};
 use ddk_messages::Message;
+use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::watch;
 use tokio::sync::Mutex;
@@ -16,10 +18,11 @@ pub struct MemoryTransport {
     pub sender: Sender<(Message, PublicKey)>,
     pub counterparty_transport: CounterPartyTransport,
     pub keypair: Keypair,
+    pub logger: Arc<Logger>,
 }
 
 impl MemoryTransport {
-    pub fn new(secp: &Secp256k1<All>) -> Self {
+    pub fn new(secp: &Secp256k1<All>, logger: Arc<Logger>) -> Self {
         let (sender, receiver) = channel(100);
         let keypair = Keypair::new(secp, &mut key::rand::thread_rng());
         Self {
@@ -27,6 +30,7 @@ impl MemoryTransport {
             sender,
             counterparty_transport: Arc::new(Mutex::new(HashMap::new())),
             keypair,
+            logger,
         }
     }
 
@@ -60,7 +64,7 @@ impl Transport for MemoryTransport {
                 .await
                 .expect("could not send message to counterparty")
         } else {
-            tracing::error!("No counterparty connected.")
+            log_error!(self.logger, "No counterparty connected.");
         }
     }
 
@@ -85,12 +89,13 @@ impl Transport for MemoryTransport {
                                 if let Some(reply) = s {
                                     self.send_message(msg.1, reply).await;
                                 } else {
-                                    tracing::info!("Handled on_dlc_message.");
+                                    log_info!(self.logger, "Handled on_dlc_message.");
                                 }
                             }
-                            Err(e) => tracing::error!(
-                                error = e.to_string(),
-                                "In memory transport error on dlc message."
+                            Err(e) => log_error!(
+                                self.logger,
+                                "In memory transport error on dlc message. error={}",
+                                e.to_string()
                             ),
                         }
                     }

@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
 use crate::error::TransportError;
+use crate::logger::Logger;
+use crate::logger::{log_error, log_info, log_warn, WriteLog};
 use crate::nostr::messages::{create_dlc_msg_event, handle_dlc_msg_event};
 use crate::DlcDevKitDlcManager;
 use crate::{nostr, Transport};
@@ -16,15 +18,17 @@ pub struct NostrDlc {
     pub keys: Keys,
     pub relay_url: Url,
     pub client: Client,
+    pub logger: Arc<Logger>,
 }
 
 impl NostrDlc {
+    #[tracing::instrument(skip(seed_bytes, logger))]
     pub async fn new(
         seed_bytes: &[u8; 64],
         relay_host: &str,
         network: Network,
+        logger: Arc<Logger>,
     ) -> Result<NostrDlc, TransportError> {
-        tracing::info!("Creating Nostr Dlc handler.");
         let secp = Secp256k1::new();
         let seed = Xpriv::new_master(network, seed_bytes)
             .map_err(|e| TransportError::Init(e.to_string()))?;
@@ -44,6 +48,7 @@ impl NostrDlc {
             keys,
             relay_url,
             client,
+            logger,
         })
     }
 
@@ -52,13 +57,15 @@ impl NostrDlc {
         mut stop_signal: watch::Receiver<bool>,
         manager: Arc<DlcDevKitDlcManager<S, O>>,
     ) -> JoinHandle<Result<(), TransportError>> {
-        tracing::info!(
-            pubkey = self.keys.public_key().to_string(),
-            transport_public_key = self.public_key().to_string(),
-            "Starting Nostr DLC listener."
+        log_info!(
+            self.logger,
+            "Starting Nostr DLC listener. pubkey={} transport_public_key={}",
+            self.keys.public_key().to_string(),
+            self.public_key().to_string()
         );
         let nostr_client = self.client.clone();
         let keys = self.keys.clone();
+        let logger = self.logger.clone();
         tokio::spawn(async move {
             let since = Timestamp::now();
             let msg_subscription =
@@ -67,16 +74,18 @@ impl NostrDlc {
                 .subscribe(msg_subscription, None)
                 .await
                 .map_err(|e| TransportError::Listen(e.to_string()))?;
-            tracing::info!(
-                "Listening for messages on {}",
+            log_info!(
+                logger,
+                "Listening for messages over nostr. pubkey={}",
                 keys.public_key().to_string()
             );
             let mut notifications = nostr_client.notifications();
             loop {
+                let logger_clone = logger.clone();
                 tokio::select! {
                     _ = stop_signal.changed() => {
                         if *stop_signal.borrow() {
-                            tracing::warn!("Stopping nostr dlc message subscription.");
+                            log_warn!(logger_clone, "Stopping nostr dlc message subscription.");
                             nostr_client.disconnect().await;
                             break;
                         }
@@ -92,11 +101,11 @@ impl NostrDlc {
                                 keys.secret_key(),
                             ) {
                                 Ok(msg) => {
-                                    tracing::info!(pubkey=msg.0.to_string(), "Received DLC nostr message.");
+                                    log_info!(logger_clone, "Received DLC nostr message. pubkey={}", msg.0.to_string());
                                     (msg.0, msg.1, msg.2)
                                 },
-                                Err(_) => {
-                                    tracing::error!("Could not parse event {}", event.id);
+                                Err(e) => {
+                                    log_error!(logger_clone, "Could not parse event {}. error={}", event.id, e.to_string());
                                     continue;
                                 }
                             };

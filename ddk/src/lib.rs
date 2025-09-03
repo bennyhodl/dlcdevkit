@@ -11,6 +11,8 @@ mod ddk;
 pub mod error;
 /// JSON structs
 pub mod json;
+/// Logging infrastructure
+pub mod logger;
 /// Nostr related functions.
 #[cfg(feature = "nostr")]
 pub mod nostr;
@@ -120,7 +122,7 @@ pub trait Transport: Send + Sync + 'static {
 /// - Sled storage (persistent, embedded)
 /// - In-memory storage (temporary, testing)
 #[async_trait]
-pub trait Storage: ddk_manager::Storage + Send + Sync + 'static {
+pub trait Storage: ddk_manager::Storage + Send + Sync + std::fmt::Debug + 'static {
     /// Initializes the BDK wallet storage and returns initial state.
     ///
     /// This method is called during startup to:

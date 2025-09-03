@@ -6,6 +6,7 @@ use bitcoin::{
     secp256k1::All,
     Address, Amount, Network,
 };
+use ddk::logger::{log_info, Logger, WriteLog};
 use ddk_manager::{ContractId, Storage};
 use std::{
     fs::File,
@@ -16,7 +17,7 @@ use std::{
     time::Duration,
 };
 
-use bitcoincore_rpc::RpcApi;
+use bitcoincore_rpc::{Client, RpcApi};
 use ddk::{
     builder::{Builder, SeedConfig},
     oracle::memory::MemoryOracle,
@@ -27,12 +28,15 @@ use ddk::{
 
 type TestDlcDevKit = DlcDevKit<MemoryTransport, MemoryStorage, MemoryOracle>;
 
-pub async fn test_ddk() -> (TestSuite, TestSuite, Arc<MemoryOracle>) {
+pub async fn test_ddk(
+    logger_one: Arc<Logger>,
+    logger_two: Arc<Logger>,
+) -> (TestSuite, TestSuite, Arc<MemoryOracle>) {
     let secp = Secp256k1::new();
     let oracle = Arc::new(MemoryOracle::default());
 
-    let test = TestSuite::new(&secp, "send_offer", oracle.clone()).await;
-    let test_two = TestSuite::new(&secp, "sender_offer_two", oracle.clone()).await;
+    let test = TestSuite::new(&secp, "send_offer", oracle.clone(), logger_one).await;
+    let test_two = TestSuite::new(&secp, "sender_offer_two", oracle.clone(), logger_two).await;
 
     let node_one_address = test
         .ddk
@@ -57,12 +61,19 @@ pub async fn test_ddk() -> (TestSuite, TestSuite, Arc<MemoryOracle>) {
     (test, test_two, oracle)
 }
 
+pub fn get_bitcoind_client() -> Client {
+    let bitcoind_user = std::env::var("BITCOIND_USER").expect("BITCOIND_USER must be set");
+    let bitcoind_pass = std::env::var("BITCOIND_PASS").expect("BITCOIND_PASS must be set");
+    let bitcoind_host = std::env::var("BITCOIND_HOST").expect("BITCOIND_HOST must be set");
+    let auth = bitcoincore_rpc::Auth::UserPass(bitcoind_user, bitcoind_pass);
+    bitcoincore_rpc::Client::new(&bitcoind_host, auth).unwrap()
+}
+
 pub fn fund_addresses(
     node_one_address: &Address<NetworkChecked>,
     node_two_address: &Address<NetworkChecked>,
 ) {
-    let auth = bitcoincore_rpc::Auth::UserPass("ddk".to_string(), "ddk".to_string());
-    let client = bitcoincore_rpc::Client::new("http://127.0.0.1:18443", auth).unwrap();
+    let client = get_bitcoind_client();
     client
         .send_to_address(
             node_one_address,
@@ -91,9 +102,7 @@ pub fn fund_addresses(
 }
 
 pub fn generate_blocks(num: u64) {
-    tracing::warn!("Generating {} blocks.", num);
-    let auth = bitcoincore_rpc::Auth::UserPass("ddk".to_string(), "ddk".to_string());
-    let client = bitcoincore_rpc::Client::new("http://127.0.0.1:18443", auth).unwrap();
+    let client = get_bitcoind_client();
     let previous_height = client.get_block_count().unwrap();
 
     let address = client.get_new_address(None, None).unwrap().assume_checked();
@@ -110,27 +119,32 @@ pub struct TestSuite {
 }
 
 impl TestSuite {
-    pub async fn new(secp: &Secp256k1<All>, name: &str, oracle: Arc<MemoryOracle>) -> TestSuite {
+    pub async fn new(
+        secp: &Secp256k1<All>,
+        name: &str,
+        oracle: Arc<MemoryOracle>,
+        logger: Arc<Logger>,
+    ) -> TestSuite {
         let mut seed = [0u8; 64];
         seed.try_fill(&mut bitcoin::key::rand::thread_rng())
             .unwrap();
-        let esplora_host = "http://127.0.0.1:30000".to_string();
+        let esplora_host = std::env::var("ESPLORA_HOST").expect("ESPLORA_HOST must be set");
 
-        let transport = Arc::new(MemoryTransport::new(secp));
+        let transport = Arc::new(MemoryTransport::new(secp, logger.clone()));
         let storage = Arc::new(MemoryStorage::new());
 
-        let ddk: TestDlcDevKit = Builder::new()
-            .set_network(Network::Regtest)
-            .set_seed_bytes(SeedConfig::Bytes(seed))
-            .unwrap()
-            .set_esplora_host(esplora_host)
-            .set_name(name)
-            .set_oracle(oracle)
-            .set_transport(transport)
-            .set_storage(storage)
-            .finish()
-            .await
-            .unwrap();
+        let mut builder = Builder::new();
+        builder.set_network(Network::Regtest);
+        builder.set_seed_bytes(SeedConfig::Bytes(seed)).unwrap();
+        builder.set_esplora_host(esplora_host);
+        builder.set_name(name);
+        builder.set_oracle(oracle);
+        builder.set_transport(transport);
+        builder.set_storage(storage);
+        builder.set_logger(logger);
+
+        let ddk: TestDlcDevKit = builder.finish().await.unwrap();
+        log_info!(ddk.logger.clone(), "DDK created for {}", name);
 
         TestSuite { ddk }
     }

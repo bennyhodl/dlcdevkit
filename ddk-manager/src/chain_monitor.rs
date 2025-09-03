@@ -79,7 +79,6 @@ impl ChainMonitor {
     }
 
     pub(crate) fn add_tx(&mut self, txid: Txid, channel_info: ChannelInfo) {
-        tracing::debug!("Watching transaction {txid}: {channel_info:?}");
         self.watched_tx.insert(txid, WatchState::new(channel_info));
 
         // When we watch a buffer transaction we also want to watch
@@ -103,14 +102,11 @@ impl ChainMonitor {
     }
 
     fn add_txo(&mut self, outpoint: OutPoint, channel_info: ChannelInfo) {
-        tracing::debug!("Watching transaction output {outpoint}: {channel_info:?}");
         self.watched_txo
             .insert(outpoint, WatchState::new(channel_info));
     }
 
     pub(crate) fn cleanup_channel(&mut self, channel_id: ChannelId) {
-        tracing::debug!("Cleaning up data related to channel {channel_id:?}");
-
         self.watched_tx
             .retain(|_, state| state.channel_id() != channel_id);
 
@@ -119,7 +115,6 @@ impl ChainMonitor {
     }
 
     pub(crate) fn remove_tx(&mut self, txid: &Txid) {
-        tracing::debug!("Stopped watching transaction {txid}");
         self.watched_tx.remove(txid);
     }
 
@@ -188,25 +183,15 @@ impl WatchState {
     fn confirm(&mut self, transaction: Transaction) {
         match self {
             WatchState::Registered { ref channel_info } => {
-                tracing::info!(
-                    "Transaction {} confirmed: {channel_info:?}",
-                    transaction.compute_txid()
-                );
-
                 *self = WatchState::Confirmed {
                     channel_info: *channel_info,
                     transaction,
                 }
             }
             WatchState::Confirmed {
-                channel_info,
-                transaction,
-            } => {
-                tracing::error!(
-                    "Transaction {} already confirmed: {channel_info:?}",
-                    transaction.compute_txid()
-                );
-            }
+                channel_info: _,
+                transaction: _,
+            } => {}
         }
     }
 

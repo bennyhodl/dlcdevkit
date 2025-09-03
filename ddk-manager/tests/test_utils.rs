@@ -6,7 +6,7 @@ use bitcoin::{
 };
 use bitcoincore_rpc::{Auth, Client, RpcApi};
 use bitcoincore_rpc_json::AddressType;
-use ddk::{chain::EsploraClient, wallet::DlcDevKitWallet};
+use ddk::{chain::EsploraClient, logger::Logger, wallet::DlcDevKitWallet};
 use ddk::{oracle::memory::MemoryOracle, storage::memory::MemoryStorage};
 use ddk_dlc::{EnumerationPayout, Payout};
 use ddk_manager::payout_curve::{
@@ -799,13 +799,17 @@ pub async fn refresh_wallet(wallet: &DlcDevKitWallet, expected_funds: u64) {
 }
 
 pub fn rpc_client() -> Client {
-    let auth = Auth::UserPass("ddk".to_string(), "ddk".to_string());
+    let user = std::env::var("BITCOIND_USER").expect("BITCOIND_USER must be set");
+    let pass = std::env::var("BITCOIND_PASS").expect("BITCOIND_PASS must be set");
     let host =
         std::env::var("BITCOIND_HOST").unwrap_or_else(|_| "http://localhost:18443".to_owned());
-    Client::new(&host, auth).unwrap()
+    Client::new(&host, Auth::UserPass(user, pass)).unwrap()
 }
 
-pub async fn init_clients() -> (
+pub async fn init_clients(
+    logger: Arc<Logger>,
+    esplora: Arc<EsploraClient>,
+) -> (
     DlcDevKitWallet,
     Arc<MemoryStorage>,
     DlcDevKitWallet,
@@ -815,8 +819,8 @@ pub async fn init_clients() -> (
     let sink_rpc = rpc_client();
 
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    let offer_rpc = create_and_fund_wallet().await;
-    let accept_rpc = create_and_fund_wallet().await;
+    let offer_rpc = create_and_fund_wallet(logger.clone(), esplora.clone()).await;
+    let accept_rpc = create_and_fund_wallet(logger.clone(), esplora.clone()).await;
 
     let sink_address = sink_rpc
         .get_new_address(None, Some(AddressType::Bech32))
@@ -834,7 +838,10 @@ pub async fn init_clients() -> (
     )
 }
 
-pub async fn create_and_fund_wallet() -> (DlcDevKitWallet, Arc<MemoryStorage>) {
+pub async fn create_and_fund_wallet(
+    logger: Arc<Logger>,
+    esplora: Arc<EsploraClient>,
+) -> (DlcDevKitWallet, Arc<MemoryStorage>) {
     let sink_rpc = rpc_client();
     let sink_address = sink_rpc
         .get_new_address(None, None)
@@ -846,10 +853,11 @@ pub async fn create_and_fund_wallet() -> (DlcDevKitWallet, Arc<MemoryStorage>) {
     let memory_storage = Arc::new(MemoryStorage::new());
     let wallet = DlcDevKitWallet::new(
         &seed,
-        "http://localhost:30000",
+        esplora,
         Network::Regtest,
         memory_storage.clone(),
         None,
+        logger.clone(),
     )
     .await
     .unwrap();

@@ -7,6 +7,7 @@ mod nostr_test {
     use bitcoin::{key::rand::Fill, Network};
     use chrono::{Local, TimeDelta};
     use ddk::builder::SeedConfig;
+    use ddk::logger::{LogLevel, Logger};
     use ddk::oracle::memory::MemoryOracle;
     use ddk::storage::memory::MemoryStorage;
     use ddk::transport::nostr::NostrDlc;
@@ -17,16 +18,25 @@ mod nostr_test {
 
     type NostrDlcDevKit = DlcDevKit<NostrDlc, MemoryStorage, MemoryOracle>;
 
-    async fn nostr_ddk(name: &str, oracle: Arc<MemoryOracle>) -> NostrDlcDevKit {
+    async fn nostr_ddk(
+        name: &str,
+        oracle: Arc<MemoryOracle>,
+        logger: Arc<Logger>,
+    ) -> NostrDlcDevKit {
         let mut seed = [0u8; 64];
         seed.try_fill(&mut bitcoin::key::rand::thread_rng())
             .unwrap();
         let esplora_host = "http://127.0.0.1:30000".to_string();
 
         let transport = Arc::new(
-            NostrDlc::new(&seed, "ws://127.0.0.1:8081", Network::Regtest)
-                .await
-                .unwrap(),
+            NostrDlc::new(
+                &seed,
+                "ws://127.0.0.1:8081",
+                Network::Regtest,
+                logger.clone(),
+            )
+            .await
+            .unwrap(),
         );
         let storage = Arc::new(MemoryStorage::new());
 
@@ -39,6 +49,7 @@ mod nostr_test {
             .set_oracle(oracle)
             .set_transport(transport)
             .set_storage(storage)
+            .set_logger(logger)
             .finish()
             .await
             .unwrap();
@@ -50,8 +61,9 @@ mod nostr_test {
     #[test_log::test(tokio::test)]
     async fn nostr_contract() {
         let oracle = Arc::new(MemoryOracle::default());
-        let alice = nostr_ddk("alice-nostr", oracle.clone()).await;
-        let bob = nostr_ddk("bob-nostr", oracle.clone()).await;
+        let logger = Arc::new(Logger::console("nostr-test".to_string(), LogLevel::Info));
+        let alice = nostr_ddk("alice-nostr", oracle.clone(), logger.clone()).await;
+        let bob = nostr_ddk("bob-nostr", oracle.clone(), logger.clone()).await;
 
         let alice_address = alice.wallet.new_external_address().await.unwrap().address;
         let bob_address = bob.wallet.new_external_address().await.unwrap().address;

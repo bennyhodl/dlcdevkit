@@ -3,10 +3,10 @@
 mod test_utils;
 
 use bitcoin::Network;
-use ddk::chain::EsploraClient;
 use ddk::oracle::memory::MemoryOracle;
 use ddk::storage::memory::MemoryStorage;
 use ddk::wallet::DlcDevKitWallet;
+use ddk::{chain::EsploraClient, logger::Logger};
 use ddk_manager::{manager::Manager, CachedContractSignerProvider, Oracle, SimpleSigner};
 use ddk_messages::Message;
 use secp256k1_zkp::{rand::Fill, PublicKey, XOnlyPublicKey};
@@ -22,11 +22,13 @@ type TestManager = Manager<
     Arc<MockTime>,
     Arc<EsploraClient>,
     SimpleSigner,
+    Arc<Logger>,
 >;
 
-async fn get_manager() -> TestManager {
-    let blockchain =
-        Arc::new(EsploraClient::new("http://localhost:30000", Network::Regtest).unwrap());
+async fn get_manager(logger: Arc<Logger>) -> TestManager {
+    let blockchain = Arc::new(
+        EsploraClient::new("http://localhost:30000", Network::Regtest, logger.clone()).unwrap(),
+    );
     let store = Arc::new(MemoryStorage::new());
     let mut seed = [0u8; 64];
     seed.try_fill(&mut bitcoin::key::rand::thread_rng())
@@ -34,10 +36,11 @@ async fn get_manager() -> TestManager {
     let wallet = Arc::new(
         DlcDevKitWallet::new(
             &seed,
-            "http://localhost:30000",
+            blockchain.clone(),
             Network::Regtest,
             store.clone(),
             None,
+            logger.clone(),
         )
         .await
         .unwrap(),
@@ -60,6 +63,7 @@ async fn get_manager() -> TestManager {
         oracles,
         time,
         blockchain,
+        logger,
     )
     .await
     .unwrap()
@@ -73,11 +77,12 @@ fn pubkey() -> PublicKey {
 
 #[tokio::test]
 async fn reject_offer_with_existing_contract_id() {
+    let logger = Arc::new(Logger::disabled("test_manager".to_string()));
     let offer_message = Message::Offer(
         serde_json::from_str(include_str!("../test_inputs/offer_contract.json")).unwrap(),
     );
 
-    let manager = get_manager().await;
+    let manager = get_manager(logger).await;
 
     manager
         .on_dlc_message(&offer_message, pubkey())
@@ -92,11 +97,12 @@ async fn reject_offer_with_existing_contract_id() {
 
 #[tokio::test]
 async fn reject_channel_offer_with_existing_channel_id() {
+    let logger = Arc::new(Logger::disabled("test_manager".to_string()));
     let offer_message = Message::OfferChannel(
         serde_json::from_str(include_str!("../test_inputs/offer_channel.json")).unwrap(),
     );
 
-    let manager = get_manager().await;
+    let manager = get_manager(logger).await;
 
     manager
         .on_dlc_message(&offer_message, pubkey())

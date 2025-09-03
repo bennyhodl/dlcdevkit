@@ -182,10 +182,6 @@ fn derive_contract_signer(
     let secret_key = self
         .derive_secret_key_from_key_id(key_id)
         .map_err(|e| ManagerError::WalletError(Box::new(e)))?;
-    tracing::debug!(
-        key_id = hex::encode(key_id),
-        "Derived secret key for contract."
-    );
     Ok(SimpleSigner::new(secret_key))
 }
 ```

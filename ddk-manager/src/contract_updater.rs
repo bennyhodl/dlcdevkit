@@ -2,6 +2,7 @@
 
 use std::ops::Deref;
 
+use bitcoin::hex::DisplayHex;
 use bitcoin::psbt::Psbt;
 use bitcoin::Amount;
 use bitcoin::{consensus::Decodable, Script, Transaction, Witness};
@@ -12,10 +13,11 @@ use ddk_messages::{
     AcceptDlc, FundingSignature, FundingSignatures, OfferDlc, SignDlc, WitnessElement,
 };
 use ddk_messages::{CloseDlc, FundingInput};
+use lightning::util::logger::Logger;
+use lightning::{log_debug, log_info};
 use secp256k1_zkp::{
     ecdsa::Signature, All, EcdsaAdaptorSignature, PublicKey, Secp256k1, SecretKey, Signing,
 };
-use std::time::Instant;
 
 use crate::dlc_input::{get_dlc_inputs_from_funding_inputs, get_signature_for_dlc_input};
 use crate::Storage;
@@ -40,6 +42,7 @@ pub async fn offer_contract<
     X: ContractSigner,
     SP: Deref,
     C: Signing,
+    L: Deref,
 >(
     secp: &Secp256k1<C>,
     contract_input: &ContractInput,
@@ -51,12 +54,14 @@ pub async fn offer_contract<
     blockchain: &B,
     time: &T,
     signer_provider: &SP,
+    logger: &L,
 ) -> Result<(OfferedContract, OfferDlc), Error>
 where
     W::Target: Wallet,
     B::Target: Blockchain,
     T::Target: Time,
     SP::Target: ContractSignerProvider<Signer = X>,
+    L::Target: Logger,
 {
     contract_input.validate()?;
 
@@ -75,6 +80,19 @@ where
         blockchain,
     )
     .await?;
+
+    log_debug!(
+        logger,
+        "Created offer contract with offer party params. temp_id={} counter_party={} fund_pubkey={} change_spk={} payout_spk={} dlc_inputs={} input_amount={} collateral={}",
+        id.to_lower_hex_string(),
+        counter_party.to_string(),
+        party_params.fund_pubkey.to_string(),
+        party_params.change_script_pubkey.to_string(),
+        party_params.payout_script_pubkey.to_string(),
+        !party_params.dlc_inputs.is_empty(),
+        party_params.input_amount.to_sat(),
+        party_params.collateral.to_sat(),
+    );
 
     let offered_contract = OfferedContract::new(
         id,
@@ -95,17 +113,19 @@ where
 
 /// Creates an [`AcceptedContract`] and produces
 /// the accepting party's cet adaptor signatures.
-pub async fn accept_contract<W: Deref, X: ContractSigner, SP: Deref, B: Deref>(
+pub async fn accept_contract<W: Deref, X: ContractSigner, SP: Deref, B: Deref, L: Deref>(
     secp: &Secp256k1<All>,
     offered_contract: &OfferedContract,
     wallet: &W,
     signer_provider: &SP,
     blockchain: &B,
+    logger: &L,
 ) -> Result<(AcceptedContract, AcceptDlc), Error>
 where
     W::Target: Wallet,
     B::Target: Blockchain,
     SP::Target: ContractSignerProvider<Signer = X>,
+    L::Target: Logger,
 {
     let total_collateral = offered_contract.total_collateral;
 
@@ -123,7 +143,19 @@ where
     )
     .await?;
 
-    let now = Instant::now();
+    log_debug!(
+        logger,
+        "Created accept party params. temp_id={} counter_party={} fund_pubkey={} change_spk={} payout_spk={} dlc_inputs={} input_amount={} collateral={}",
+        offered_contract.id.to_lower_hex_string(),
+        offered_contract.counter_party.to_string(),
+        accept_params.fund_pubkey.to_string(),
+        accept_params.change_script_pubkey.to_string(),
+        accept_params.payout_script_pubkey.to_string(),
+        !accept_params.dlc_inputs.is_empty(),
+        accept_params.input_amount.to_sat(),
+        accept_params.collateral.to_sat(),
+    );
+
     let dlc_transactions = ddk_dlc::create_dlc_transactions(
         &offered_contract.offer_params,
         &accept_params,
@@ -134,10 +166,16 @@ where
         offered_contract.cet_locktime,
         offered_contract.fund_output_serial_id,
     )?;
-    tracing::info!(
-        "Creted {} CETs in {} milliseconds",
-        dlc_transactions.cets.len(),
-        now.elapsed().as_millis()
+
+    log_info!(
+        logger,
+        "Created DLC transactions. temp_id={} fund_txid={} funding_spk={} fund_output_value={} refund_txid={} num_cets={}",
+        offered_contract.id.to_lower_hex_string(),
+        dlc_transactions.fund.compute_txid().to_string(),
+        dlc_transactions.funding_script_pubkey.to_string(),
+        dlc_transactions.get_fund_output().value.to_sat(),
+        dlc_transactions.refund.compute_txid().to_string(),
+        dlc_transactions.cets.len()
     );
 
     let fund_output_value = dlc_transactions.get_fund_output().value;
@@ -152,6 +190,13 @@ where
         None,
         &dlc_transactions,
     )?;
+
+    log_info!(
+        logger,
+        "Created accept contract. temp_id={} contract_id={}",
+        offered_contract.id.to_lower_hex_string(),
+        accepted_contract.get_contract_id().to_lower_hex_string()
+    );
 
     let accept_msg: AcceptDlc = accepted_contract.get_accept_contract_msg(&adaptor_sigs);
 
@@ -260,18 +305,26 @@ pub(crate) fn accept_contract_internal(
 
 /// Verifies the information of the accepting party [`Accept` message](dlc_messages::AcceptDlc),
 /// creates a [`SignedContract`], and generates the offering party CET adaptor signatures.
-pub async fn verify_accepted_and_sign_contract<W: Deref, X: ContractSigner, SP: Deref, S: Deref>(
+pub async fn verify_accepted_and_sign_contract<
+    W: Deref,
+    X: ContractSigner,
+    SP: Deref,
+    S: Deref,
+    L: Deref,
+>(
     secp: &Secp256k1<All>,
     offered_contract: &OfferedContract,
     accept_msg: &AcceptDlc,
     wallet: &W,
     signer_provider: &SP,
     storage: &S,
+    logger: &L,
 ) -> Result<(SignedContract, SignDlc), Error>
 where
     W::Target: Wallet,
     SP::Target: ContractSignerProvider<Signer = X>,
     S::Target: Storage,
+    L::Target: Logger,
 {
     let (tx_input_infos, input_amount) = get_tx_input_infos(&accept_msg.funding_inputs)?;
     let dlc_inputs = get_dlc_inputs_from_funding_inputs(&accept_msg.funding_inputs);
@@ -288,6 +341,19 @@ where
         collateral: accept_msg.accept_collateral,
     };
 
+    log_debug!(
+        logger,
+        "Retrieved the party params for the accepting party. temp_id={} counter_party={} fund_pubkey={} change_spk={} payout_spk={} dlc_inputs={} input_amount={} collateral={}",
+        offered_contract.id.to_lower_hex_string(),
+        offered_contract.counter_party.to_string(),
+        accept_params.fund_pubkey.to_string(),
+        accept_params.change_script_pubkey.to_string(),
+        accept_params.payout_script_pubkey.to_string(),
+        !accept_params.dlc_inputs.is_empty(),
+        accept_params.input_amount.to_sat(),
+        accept_params.collateral.to_sat(),
+    );
+
     let cet_adaptor_signatures = accept_msg
         .cet_adaptor_signatures
         .ecdsa_adaptor_signatures
@@ -297,6 +363,11 @@ where
 
     let total_collateral = offered_contract.total_collateral;
     let dlc_transactions = if !dlc_inputs.is_empty() {
+        log_debug!(
+            logger,
+            "Creating spliced DLC transactions. num_dlc_inputs={}",
+            dlc_inputs.len()
+        );
         ddk_dlc::create_spliced_dlc_transactions(
             &offered_contract.offer_params,
             &accept_params,
@@ -320,6 +391,17 @@ where
         )?
     };
 
+    log_info!(
+        logger,
+        "Created DLC transactions. temp_id={} fund_txid={} funding_spk={} fund_output_value={} refund_txid={} num_cets={}",
+        offered_contract.id.to_lower_hex_string(),
+        dlc_transactions.fund.compute_txid().to_string(),
+        dlc_transactions.funding_script_pubkey.to_string(),
+        dlc_transactions.get_fund_output().value.to_sat(),
+        dlc_transactions.refund.compute_txid().to_string(),
+        dlc_transactions.cets.len()
+    );
+
     let fund_output_value = dlc_transactions.get_fund_output().value;
 
     let signer = signer_provider.derive_contract_signer(offered_contract.keys_id)?;
@@ -340,10 +422,19 @@ where
         None,
         storage,
         signer_provider,
+        logger,
     )
     .await?;
+
     let contract_id = signed_contract.accepted_contract.get_contract_id_string();
-    tracing::info!(contract_id, "Signed and verified contract.");
+
+    log_info!(
+        logger,
+        "Signed and verified accept message. tmp_id={} contract_id={} num_adaptor_sigs={}",
+        offered_contract.id.to_lower_hex_string(),
+        contract_id,
+        adaptor_sigs.len()
+    );
 
     let signed_msg: SignDlc = signed_contract.get_sign_dlc(adaptor_sigs);
 
@@ -351,10 +442,6 @@ where
 }
 
 fn populate_psbt(psbt: &mut Psbt, all_funding_inputs: &[&FundingInput]) -> Result<(), Error> {
-    tracing::info!(
-        funding_inputs = all_funding_inputs.len(),
-        "Populating PSBT."
-    );
     // add witness utxo to fund_psbt for all inputs
     for (input_index, x) in all_funding_inputs.iter().enumerate() {
         let tx = Transaction::consensus_decode(&mut x.prev_tx.as_slice()).map_err(|_| {
@@ -380,6 +467,7 @@ pub(crate) async fn verify_accepted_and_sign_contract_internal<
     X: ContractSigner,
     S: Deref,
     SP: Deref,
+    L: Deref,
 >(
     secp: &Secp256k1<All>,
     offered_contract: &OfferedContract,
@@ -396,11 +484,13 @@ pub(crate) async fn verify_accepted_and_sign_contract_internal<
     channel_id: Option<ChannelId>,
     storage: &S,
     signer_provider: &SP,
+    logger: &L,
 ) -> Result<(SignedContract, Vec<EcdsaAdaptorSignature>), Error>
 where
     W::Target: Wallet,
     S::Target: Storage,
     SP::Target: ContractSignerProvider<Signer = X>,
+    L::Target: Logger,
 {
     let DlcTransactions {
         fund,
@@ -426,6 +516,13 @@ where
         input_value,
         &counter_adaptor_pk,
     )?;
+
+    log_debug!(
+        logger,
+        "Verified refund signature. temp_id={} refund_txid={}",
+        offered_contract.id.to_lower_hex_string(),
+        refund.compute_txid().to_string(),
+    );
 
     let (adaptor_info, mut adaptor_index) = offered_contract.contract_info[0]
         .verify_and_get_adaptor_info(
@@ -503,6 +600,11 @@ where
     // sort by serial id
     all_funding_inputs.sort_by_key(|x| x.input_serial_id);
 
+    log_info!(
+        logger,
+        "Populating PSBT for signing funding inputs. num_funding_inputs={}",
+        all_funding_inputs.len(),
+    );
     populate_psbt(&mut fund_psbt, &all_funding_inputs)?;
 
     let mut witnesses: Vec<Witness> = Vec::new();
@@ -523,6 +625,15 @@ where
         // The funding pubkeys for both the offer and accepting party are deterministically derived from
         // the ContractSignerProvider. Becuase of this, we do not need to prompt the consumer for the signature.
         if let Some(dlc_input) = &funding_input.dlc_input {
+            log_debug!(
+                logger,
+                "Signing DLC input. temp_id={} splice_contract_id={} local_fund_pubkey={} remote_fund_pubkey={} input_index={}",
+                offered_contract.id.to_lower_hex_string(),
+                dlc_input.contract_id.to_lower_hex_string(),
+                dlc_input.local_fund_pubkey.to_string(),
+                dlc_input.remote_fund_pubkey.to_string(),
+                input_index,
+            );
             let dlc_input_signature = get_signature_for_dlc_input(
                 secp,
                 funding_input,
@@ -551,6 +662,13 @@ where
 
         witnesses.push(witness);
     }
+
+    log_debug!(
+        logger,
+        "Signed funding inputs. temp_id={} num_signatures={}",
+        offered_contract.id.to_lower_hex_string(),
+        witnesses.len()
+    );
 
     let funding_signatures: Vec<FundingSignature> = witnesses
         .into_iter()
@@ -606,18 +724,20 @@ where
 /// Verifies the information from the offer party [`Sign` message](dlc_messages::SignDlc),
 /// creates the accepting party's [`SignedContract`] and returns it along with the
 /// signed fund transaction.
-pub async fn verify_signed_contract<W: Deref, S: Deref, SP: Deref, X: ContractSigner>(
+pub async fn verify_signed_contract<W: Deref, S: Deref, SP: Deref, X: ContractSigner, L: Deref>(
     secp: &Secp256k1<All>,
     accepted_contract: &AcceptedContract,
     sign_msg: &SignDlc,
     wallet: &W,
     storage: &S,
     signer_provider: &SP,
+    logger: &L,
 ) -> Result<(SignedContract, Transaction), Error>
 where
     W::Target: Wallet,
     S::Target: Storage,
     SP::Target: ContractSignerProvider<Signer = X>,
+    L::Target: Logger,
 {
     let cet_adaptor_signatures: Vec<_> = (&sign_msg.cet_adaptor_signatures).into();
     verify_signed_contract_internal(
@@ -633,6 +753,7 @@ where
         None,
         storage,
         signer_provider,
+        logger,
     )
     .await
 }
@@ -643,6 +764,7 @@ pub(crate) async fn verify_signed_contract_internal<
     SP: Deref,
     S: Deref,
     X: ContractSigner,
+    L: Deref,
 >(
     secp: &Secp256k1<All>,
     accepted_contract: &AcceptedContract,
@@ -656,11 +778,13 @@ pub(crate) async fn verify_signed_contract_internal<
     channel_id: Option<ChannelId>,
     storage: &S,
     signer_provider: &SP,
+    logger: &L,
 ) -> Result<(SignedContract, Transaction), Error>
 where
     W::Target: Wallet,
     S::Target: Storage,
     SP::Target: ContractSignerProvider<Signer = X>,
+    L::Target: Logger,
 {
     let offered_contract = &accepted_contract.offered_contract;
     let input_script_pubkey = input_script_pubkey
@@ -678,6 +802,16 @@ where
         &counter_adaptor_pk,
     )?;
 
+    log_debug!(
+        logger,
+        "Verified refund signature. contract_id={} refund_txid={}",
+        accepted_contract.get_contract_id_string(),
+        accepted_contract
+            .dlc_transactions
+            .refund
+            .compute_txid()
+            .to_string(),
+    );
     let mut adaptor_sig_start = 0;
 
     for (adaptor_info, contract_info) in accepted_contract
@@ -697,6 +831,13 @@ where
         )?;
     }
 
+    log_debug!(
+        logger,
+        "Verified adaptor signatures. contract_id={} num_adaptor_infos={}",
+        accepted_contract.get_contract_id_string(),
+        accepted_contract.adaptor_infos.len(),
+    );
+
     let fund_tx = &accepted_contract.dlc_transactions.fund;
     let mut fund_psbt = Psbt::from_unsigned_tx(fund_tx.clone())
         .map_err(|_| Error::InvalidState("Tried to create PSBT from signed tx".to_string()))?;
@@ -710,6 +851,12 @@ where
     // sort by serial id
     all_funding_inputs.sort_by_key(|x| x.input_serial_id);
 
+    log_debug!(
+        logger,
+        "Populating PSBT for signing funding inputs. contract_id={} num_funding_inputs={}",
+        accepted_contract.get_contract_id_string(),
+        all_funding_inputs.len(),
+    );
     populate_psbt(&mut fund_psbt, &all_funding_inputs)?;
 
     for (funding_input, funding_signatures) in offered_contract
@@ -731,6 +878,14 @@ where
         // from the offer party is their half of the DLC input and we can build the valid redeem script.
         if let Some(dlc_input) = &funding_input.dlc_input {
             let dlc_input_info: DlcInputInfo = funding_input.into();
+            log_debug!(
+                logger,
+                "Verifying DLC input signature. contract_id={} input_index={} remote_fund_pubkey={} local_fund_pubkey={}",
+                accepted_contract.get_contract_id_string(),
+                input_index,
+                dlc_input.remote_fund_pubkey.to_string(),
+                dlc_input.local_fund_pubkey.to_string(),
+            );
 
             // Verify the signature from the offer party is valid for the DLC input.
             ddk_dlc::dlc_input::verify_dlc_funding_input_signature(
@@ -742,6 +897,12 @@ where
                 &dlc_input.local_fund_pubkey,
             )?;
 
+            log_debug!(
+                logger,
+                "Signing DLC input. contract_id={} input_index={}",
+                accepted_contract.get_contract_id_string(),
+                input_index,
+            );
             // Get the signature for the DLC input from the accepting party.
             let my_dlc_input_signature = get_signature_for_dlc_input(
                 secp,
@@ -761,6 +922,13 @@ where
                 &funding_signatures.witness_elements[0].witness,
                 &dlc_input.remote_fund_pubkey,
                 &dlc_input.local_fund_pubkey,
+            );
+
+            log_debug!(
+                logger,
+                "Completed the signatures for the DLC input. contract_id={} input_index={}",
+                accepted_contract.get_contract_id_string(),
+                input_index,
             );
 
             fund_psbt.inputs[input_index].final_script_witness = Some(completed_witness);
@@ -786,6 +954,12 @@ where
                 ))
             })?;
 
+        log_debug!(
+            logger,
+            "Signing funding input. contract_id={} input_index={}",
+            accepted_contract.get_contract_id_string(),
+            input_index,
+        );
         wallet.sign_psbt_input(&mut fund_psbt, input_index).await?;
     }
 
@@ -803,21 +977,29 @@ where
 }
 
 /// Signs and return the CET that can be used to close the given contract.
-pub fn get_signed_cet<C: Signing, S: Deref>(
+pub fn get_signed_cet<C: Signing, S: Deref, L: Deref>(
     secp: &Secp256k1<C>,
     contract: &SignedContract,
     contract_info: &ContractInfo,
     adaptor_info: &AdaptorInfo,
     attestations: &[(usize, OracleAttestation)],
     signer: S,
+    logger: &L,
 ) -> Result<Transaction, Error>
 where
     S::Target: ContractSigner,
+    L::Target: Logger,
 {
     let contract_id = contract.accepted_contract.get_contract_id_string();
-    tracing::info!(
+    log_info!(
+        logger,
+        "Getting the signed CET for the Oracle Attestation. contract_id={} outcomes={:?} event_id={}",
         contract_id,
-        "Getting the signed CET for the Oracle Attestation."
+        attestations
+            .iter()
+            .map(|(_, a)| &a.outcomes)
+            .collect::<Vec<_>>(),
+        attestations.first().unwrap().1.event_id,
     );
     let (range_info, sigs) =
         crate::utils::get_range_info_and_oracle_sigs(contract_info, adaptor_info, attestations)?;
@@ -842,7 +1024,6 @@ where
 
     let funding_sk = signer.get_secret_key()?;
 
-    tracing::info!(contract_id, "Getting signed CET.");
     ddk_dlc::sign_cet(
         secp,
         &mut cet,
@@ -865,15 +1046,21 @@ where
 }
 
 /// Signs and return the refund transaction to refund the contract.
-pub fn get_signed_refund<C: Signing, S: Deref>(
+pub fn get_signed_refund<C: Signing, S: Deref, L: Deref>(
     secp: &Secp256k1<C>,
     contract: &SignedContract,
     signer: S,
+    logger: &L,
 ) -> Result<Transaction, Error>
 where
     S::Target: ContractSigner,
+    L::Target: Logger,
 {
-    tracing::info!("Getting signed refund transaction.");
+    log_info!(
+        logger,
+        "Getting signed refund transaction. contract_id={}",
+        contract.accepted_contract.get_contract_id_string()
+    );
     let accepted_contract = &contract.accepted_contract;
     let offered_contract = &accepted_contract.offered_contract;
     let funding_script_pubkey = &accepted_contract.dlc_transactions.funding_script_pubkey;
@@ -906,14 +1093,16 @@ where
 }
 
 /// Creates a cooperative close transaction and signs it with the local party's key.
-pub fn create_cooperative_close<C: Signing, SP: Deref>(
+pub fn create_cooperative_close<C: Signing, SP: Deref, L: Deref>(
     secp: &Secp256k1<C>,
     signed_contract: &SignedContract,
     counter_payout: Amount,
     signer_provider: &SP,
+    logger: &L,
 ) -> Result<(CloseDlc, Transaction), Error>
 where
     SP::Target: ContractSignerProvider,
+    L::Target: Logger,
 {
     let accepted_contract = &signed_contract.accepted_contract;
     let offered_contract = &accepted_contract.offered_contract;
@@ -938,6 +1127,15 @@ where
         fund_outpoint,
         fund_output_value,
         &[], // TODO: Add additional inputs parameter to prevent free option problem
+    );
+
+    log_debug!(
+        logger,
+        "Created cooperative close transaction. contract_id={} close_txid={} offer_payout={} counter_payout={}",
+        accepted_contract.get_contract_id_string(),
+        close_tx.compute_txid().to_string(),
+        offer_payout,
+        counter_payout,
     );
 
     // Get our private key and sign the transaction
@@ -969,14 +1167,16 @@ where
 }
 
 /// Verifies and completes a cooperative close transaction using the counter party's signature.
-pub fn complete_cooperative_close<C: Signing, SP: Deref>(
+pub fn complete_cooperative_close<C: Signing, SP: Deref, L: Deref>(
     secp: &Secp256k1<C>,
     signed_contract: &SignedContract,
     close_message: &CloseDlc,
     signer_provider: &SP,
+    logger: &L,
 ) -> Result<Transaction, Error>
 where
     SP::Target: ContractSignerProvider,
+    L::Target: Logger,
 {
     let accepted_contract = &signed_contract.accepted_contract;
     let offered_contract = &accepted_contract.offered_contract;
@@ -995,6 +1195,15 @@ where
         fund_outpoint,
         fund_output_value,
         &[], // No additional inputs for contract cooperative close verification
+    );
+
+    log_debug!(
+        logger,
+        "Recreated close transaction for cooperative close verification. contract_id={} close_txid={} offer_payout={} counter_payout={}",
+        accepted_contract.get_contract_id_string(),
+        close_tx.compute_txid().to_string(),
+        offer_payout,
+        close_message.accept_payout,
     );
 
     // Get our private key

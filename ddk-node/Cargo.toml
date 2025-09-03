@@ -27,7 +27,7 @@ serde_json = "1.0.125"
 tokio = { version = "1.38.0", features = ["full"] }
 tonic = "0.10.2"
 tracing = "0.1.40"
-tracing-subscriber = "0.3.18"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 reqwest = { version = "0.12.12", features = ["json"] }
 chrono = "0.4.39"
 

@@ -1,6 +1,9 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::error::{esplora_err_to_manager_err, Error};
+use crate::logger::Logger;
+use crate::logger::{log_error, log_info, log_warn, WriteLog};
 use bdk_esplora::esplora_client::Error as EsploraError;
 use bdk_esplora::esplora_client::{AsyncClient, BlockingClient, Builder};
 use bitcoin::Network;
@@ -18,10 +21,15 @@ pub struct EsploraClient {
     pub blocking_client: BlockingClient,
     pub async_client: AsyncClient,
     network: Network,
+    logger: Arc<Logger>,
 }
 
 impl EsploraClient {
-    pub fn new(esplora_host: &str, network: Network) -> Result<EsploraClient, Error> {
+    pub fn new(
+        esplora_host: &str,
+        network: Network,
+        logger: Arc<Logger>,
+    ) -> Result<EsploraClient, Error> {
         let builder = Builder::new(esplora_host).timeout(Duration::from_secs(5).as_secs());
         let blocking_client = builder.clone().build_blocking();
         let async_client = builder.build_async()?;
@@ -29,6 +37,7 @@ impl EsploraClient {
             blocking_client,
             async_client,
             network,
+            logger,
         })
     }
 }
@@ -42,7 +51,11 @@ impl ddk_manager::Blockchain for EsploraClient {
     }
 
     async fn get_transaction(&self, tx_id: &Txid) -> Result<Transaction, ManagerError> {
-        tracing::info!(txid = tx_id.to_string(), "Querying for transaction.");
+        log_info!(
+            self.logger,
+            "Querying for transaction. txid={}",
+            tx_id.to_string()
+        );
         let txn = self
             .async_client
             .get_tx(tx_id)
@@ -61,11 +74,12 @@ impl ddk_manager::Blockchain for EsploraClient {
         &self,
         transaction: &bitcoin::Transaction,
     ) -> Result<(), ManagerError> {
-        tracing::info!(
-            txid = transaction.compute_txid().to_string(),
-            num_inputs = transaction.input.len(),
-            num_outputs = transaction.output.len(),
-            "Broadcasting transaction."
+        log_info!(
+            self.logger,
+            "Broadcasting transaction. txid={}, num_inputs={}, num_outputs={}",
+            transaction.compute_txid().to_string(),
+            transaction.input.len(),
+            transaction.output.len()
         );
 
         if let Ok(status) = self
@@ -73,9 +87,10 @@ impl ddk_manager::Blockchain for EsploraClient {
             .get_tx_status(&transaction.compute_txid())
             .await
         {
-            tracing::warn!(
-                txid = transaction.compute_txid().to_string(),
-                "Transaction already submitted",
+            log_warn!(
+                self.logger,
+                "Transaction already submitted. txid={}",
+                transaction.compute_txid().to_string()
             );
             if status.confirmed {
                 return Ok(());
@@ -83,10 +98,11 @@ impl ddk_manager::Blockchain for EsploraClient {
         };
 
         if let Err(e) = self.async_client.broadcast(transaction).await {
-            tracing::error!(
-                error =? e,
-                "Could not broadcast transaction {}",
-                transaction.compute_txid()
+            log_error!(
+                self.logger,
+                "Could not broadcast transaction. txid={} error={:?}",
+                transaction.compute_txid().to_string(),
+                e.to_string()
             );
 
             return Err(esplora_err_to_manager_err(e));
@@ -95,8 +111,8 @@ impl ddk_manager::Blockchain for EsploraClient {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     async fn get_block_at_height(&self, height: u64) -> Result<bitcoin::Block, ManagerError> {
-        tracing::info!(height, "Getting block at height.");
         let block_hash = self
             .async_client
             .get_block_hash(height as u32)
@@ -118,6 +134,7 @@ impl ddk_manager::Blockchain for EsploraClient {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     async fn get_blockchain_height(&self) -> Result<u64, ManagerError> {
         Ok(self
             .async_client
@@ -126,14 +143,11 @@ impl ddk_manager::Blockchain for EsploraClient {
             .map_err(esplora_err_to_manager_err)? as u64)
     }
 
+    #[tracing::instrument(skip(self), fields(txid = tx_id.to_string()))]
     async fn get_transaction_confirmations(
         &self,
         tx_id: &bitcoin::Txid,
     ) -> Result<u32, ManagerError> {
-        tracing::info!(
-            txid = tx_id.to_string(),
-            "Getting transaction confirmations."
-        );
         let txn = self
             .async_client
             .get_tx_status(tx_id)

@@ -39,6 +39,8 @@ use lightning::chain::chaininterface::FeeEstimator;
 use lightning::ln::chan_utils::{
     build_commitment_secret, derive_private_key, derive_private_revocation_key,
 };
+use lightning::util::logger::Logger;
+use lightning::{log_debug, log_error, log_info, log_trace, log_warn};
 use secp256k1_zkp::XOnlyPublicKey;
 use secp256k1_zkp::{
     ecdsa::Signature, All, EcdsaAdaptorSignature, PublicKey, Secp256k1, SecretKey,
@@ -76,6 +78,7 @@ pub struct Manager<
     T: Deref,
     F: Deref,
     X: ContractSigner,
+    L: Deref,
 > where
     W::Target: Wallet,
     SP::Target: ContractSignerProvider<Signer = X>,
@@ -84,6 +87,7 @@ pub struct Manager<
     O::Target: Oracle,
     T::Target: Time,
     F::Target: FeeEstimator,
+    L::Target: Logger,
 {
     oracles: HashMap<XOnlyPublicKey, O>,
     wallet: W,
@@ -94,6 +98,7 @@ pub struct Manager<
     chain_monitor: Mutex<ChainMonitor>,
     time: T,
     fee_estimator: F,
+    logger: L,
 }
 
 macro_rules! get_contract_in_state {
@@ -143,7 +148,9 @@ macro_rules! check_for_timed_out_channels {
                 let is_timed_out = timeout < $manager.time.unix_time_now();
                 if is_timed_out {
                     match $manager.force_close_channel_internal(channel, true).await {
-                        Err(e) => tracing::error!("Error force closing channel {}", e),
+                        Err(e) => {
+                            log_error!($manager.logger, "Error force closing channel. error={}", e)
+                        }
                         _ => {}
                     }
                 }
@@ -152,8 +159,17 @@ macro_rules! check_for_timed_out_channels {
     };
 }
 
-impl<W: Deref, SP: Deref, B: Deref, S: Deref, O: Deref, T: Deref, F: Deref, X: ContractSigner>
-    Manager<W, Arc<CachedContractSignerProvider<SP, X>>, B, S, O, T, F, X>
+impl<
+        W: Deref,
+        SP: Deref,
+        B: Deref,
+        S: Deref,
+        O: Deref,
+        T: Deref,
+        F: Deref,
+        X: ContractSigner,
+        L: Deref,
+    > Manager<W, Arc<CachedContractSignerProvider<SP, X>>, B, S, O, T, F, X, L>
 where
     W::Target: Wallet,
     SP::Target: ContractSignerProvider<Signer = X>,
@@ -162,8 +178,11 @@ where
     O::Target: Oracle,
     T::Target: Time,
     F::Target: FeeEstimator,
+    L::Target: Logger,
 {
     /// Create a new Manager struct.
+    #[allow(clippy::too_many_arguments)]
+    #[tracing::instrument(skip_all)]
     pub async fn new(
         wallet: W,
         signer_provider: SP,
@@ -172,6 +191,7 @@ where
         oracles: HashMap<XOnlyPublicKey, O>,
         time: T,
         fee_estimator: F,
+        logger: L,
     ) -> Result<Self, Error> {
         let init_height = blockchain.get_blockchain_height().await?;
         let chain_monitor = Mutex::new(
@@ -183,6 +203,8 @@ where
 
         let signer_provider = Arc::new(CachedContractSignerProvider::new(signer_provider));
 
+        log_info!(logger, "Manager initialized");
+
         Ok(Manager {
             secp: secp256k1_zkp::Secp256k1::new(),
             wallet,
@@ -193,6 +215,7 @@ where
             time,
             fee_estimator,
             chain_monitor,
+            logger,
         })
     }
 
@@ -202,6 +225,7 @@ where
     }
 
     /// Function called to pass a DlcMessage to the Manager.
+    #[tracing::instrument(skip_all)]
     pub async fn on_dlc_message(
         &self,
         msg: &DlcMessage,
@@ -209,66 +233,100 @@ where
     ) -> Result<Option<DlcMessage>, Error> {
         match msg {
             DlcMessage::Offer(o) => {
+                log_debug!(self.logger, "Received offer message");
                 self.on_offer_message(o, counter_party).await?;
                 Ok(None)
             }
-            DlcMessage::Accept(a) => Ok(Some(self.on_accept_message(a, &counter_party).await?)),
+            DlcMessage::Accept(a) => {
+                log_debug!(self.logger, "Received accept message");
+                Ok(Some(self.on_accept_message(a, &counter_party).await?))
+            }
             DlcMessage::Sign(s) => {
+                log_debug!(self.logger, "Received sign message");
                 self.on_sign_message(s, &counter_party).await?;
                 Ok(None)
             }
             DlcMessage::Close(c) => {
+                log_debug!(self.logger, "Received close message");
                 self.on_close_message(c, &counter_party).await?;
                 Ok(None)
             }
             DlcMessage::OfferChannel(o) => {
+                log_debug!(self.logger, "Received offer channel message");
                 self.on_offer_channel(o, counter_party).await?;
                 Ok(None)
             }
-            DlcMessage::AcceptChannel(a) => Ok(Some(DlcMessage::SignChannel(
-                self.on_accept_channel(a, &counter_party).await?,
-            ))),
+            DlcMessage::AcceptChannel(a) => {
+                log_debug!(self.logger, "Received accept channel message");
+                Ok(Some(DlcMessage::SignChannel(
+                    self.on_accept_channel(a, &counter_party).await?,
+                )))
+            }
             DlcMessage::SignChannel(s) => {
+                log_debug!(self.logger, "Received sign channel message");
                 self.on_sign_channel(s, &counter_party).await?;
                 Ok(None)
             }
-            DlcMessage::SettleOffer(s) => match self.on_settle_offer(s, &counter_party).await? {
-                Some(msg) => Ok(Some(DlcMessage::Reject(msg))),
-                None => Ok(None),
-            },
-            DlcMessage::SettleAccept(s) => Ok(Some(DlcMessage::SettleConfirm(
-                self.on_settle_accept(s, &counter_party).await?,
-            ))),
-            DlcMessage::SettleConfirm(s) => Ok(Some(DlcMessage::SettleFinalize(
-                self.on_settle_confirm(s, &counter_party).await?,
-            ))),
+            DlcMessage::SettleOffer(s) => {
+                log_debug!(self.logger, "Received settle offer message");
+                match self.on_settle_offer(s, &counter_party).await? {
+                    Some(msg) => Ok(Some(DlcMessage::Reject(msg))),
+                    None => Ok(None),
+                }
+            }
+            DlcMessage::SettleAccept(s) => {
+                log_debug!(self.logger, "Received settle accept message");
+                Ok(Some(DlcMessage::SettleConfirm(
+                    self.on_settle_accept(s, &counter_party).await?,
+                )))
+            }
+            DlcMessage::SettleConfirm(s) => {
+                log_debug!(self.logger, "Received settle confirm message");
+                Ok(Some(DlcMessage::SettleFinalize(
+                    self.on_settle_confirm(s, &counter_party).await?,
+                )))
+            }
             DlcMessage::SettleFinalize(s) => {
+                log_debug!(self.logger, "Received settle finalize message");
                 self.on_settle_finalize(s, &counter_party).await?;
                 Ok(None)
             }
-            DlcMessage::RenewOffer(r) => match self.on_renew_offer(r, &counter_party).await? {
-                Some(msg) => Ok(Some(DlcMessage::Reject(msg))),
-                None => Ok(None),
-            },
-            DlcMessage::RenewAccept(r) => Ok(Some(DlcMessage::RenewConfirm(
-                self.on_renew_accept(r, &counter_party).await?,
-            ))),
-            DlcMessage::RenewConfirm(r) => Ok(Some(DlcMessage::RenewFinalize(
-                self.on_renew_confirm(r, &counter_party).await?,
-            ))),
+            DlcMessage::RenewOffer(r) => {
+                log_debug!(self.logger, "Received renew offer message");
+                match self.on_renew_offer(r, &counter_party).await? {
+                    Some(msg) => Ok(Some(DlcMessage::Reject(msg))),
+                    None => Ok(None),
+                }
+            }
+            DlcMessage::RenewAccept(r) => {
+                log_debug!(self.logger, "Received renew accept message");
+                Ok(Some(DlcMessage::RenewConfirm(
+                    self.on_renew_accept(r, &counter_party).await?,
+                )))
+            }
+            DlcMessage::RenewConfirm(r) => {
+                log_debug!(self.logger, "Received renew confirm message");
+                Ok(Some(DlcMessage::RenewFinalize(
+                    self.on_renew_confirm(r, &counter_party).await?,
+                )))
+            }
             DlcMessage::RenewFinalize(r) => {
+                log_debug!(self.logger, "Received renew finalize message");
                 let revoke = self.on_renew_finalize(r, &counter_party).await?;
                 Ok(Some(DlcMessage::RenewRevoke(revoke)))
             }
             DlcMessage::RenewRevoke(r) => {
+                log_debug!(self.logger, "Received renew revoke message");
                 self.on_renew_revoke(r, &counter_party).await?;
                 Ok(None)
             }
             DlcMessage::CollaborativeCloseOffer(c) => {
+                log_debug!(self.logger, "Received collaborative close offer message");
                 self.on_collaborative_close_offer(c, &counter_party).await?;
                 Ok(None)
             }
             DlcMessage::Reject(r) => {
+                log_debug!(self.logger, "Received reject message");
                 self.on_reject(r, &counter_party).await?;
                 Ok(None)
             }
@@ -276,6 +334,7 @@ where
     }
 
     /// Create a new spliced offer
+    #[tracing::instrument(skip_all)]
     pub async fn send_splice_offer(
         &self,
         contract_input: &ContractInput,
@@ -295,6 +354,7 @@ where
 
     /// Creates a new offer DLC using an existing DLC as an input.
     /// The new DLC MUST use a Confirmed contract as an input.
+    #[tracing::instrument(skip_all)]
     pub async fn send_splice_offer_with_announcements(
         &self,
         contract_input: &ContractInput,
@@ -318,6 +378,7 @@ where
             &self.blockchain,
             &self.time,
             &self.signer_provider,
+            &self.logger,
         )
         .await?;
 
@@ -332,6 +393,7 @@ where
     /// and an OfferDlc message returned.
     ///
     /// This function will fetch the oracle announcements from the oracle.
+    #[tracing::instrument(skip_all)]
     pub async fn send_offer(
         &self,
         contract_input: &ContractInput,
@@ -349,6 +411,7 @@ where
     ///
     /// This function allows to pass the oracle announcements directly instead of
     /// fetching them from the oracle.
+    #[tracing::instrument(skip_all)]
     pub async fn send_offer_with_announcements(
         &self,
         contract_input: &ContractInput,
@@ -366,6 +429,7 @@ where
             &self.blockchain,
             &self.time,
             &self.signer_provider,
+            &self.logger,
         )
         .await?;
 
@@ -377,6 +441,7 @@ where
     }
 
     /// Function to call to accept a DLC for which an offer was received.
+    #[tracing::instrument(skip_all)]
     pub async fn accept_contract_offer(
         &self,
         contract_id: &ContractId,
@@ -392,6 +457,7 @@ where
             &self.wallet,
             &self.signer_provider,
             &self.blockchain,
+            &self.logger,
         )
         .await?;
 
@@ -406,6 +472,13 @@ where
             .update_contract(&Contract::Accepted(accepted_contract))
             .await?;
 
+        log_info!(
+            self.logger,
+            "Accepted and stored the contract. temp_id={} contract_id={}",
+            offered_contract.id.to_lower_hex_string(),
+            contract_id.to_lower_hex_string(),
+        );
+
         Ok((contract_id, counter_party, accept_msg))
     }
 
@@ -414,6 +487,7 @@ where
     ///
     /// Consumers **MUST** call this periodically in order to
     /// determine when pending transactions reach confirmation.
+    #[tracing::instrument(skip_all)]
     pub async fn periodic_chain_monitor(&self) -> Result<(), Error> {
         let cur_height = self.blockchain.get_blockchain_height().await?;
         let last_height = self.chain_monitor.lock().await.last_height;
@@ -440,8 +514,8 @@ where
 
     /// Function to call to check the state of the currently executing DLCs and
     /// update them if possible.
+    #[tracing::instrument(skip_all, level = "debug")]
     pub async fn periodic_check(&self, check_channels: bool) -> Result<(), Error> {
-        tracing::debug!("Periodic check.");
         let signed_contracts = self.check_for_spliced_contract().await?;
         self.check_signed_contracts(&signed_contracts).await?;
         self.check_confirmed_contracts().await?;
@@ -455,6 +529,7 @@ where
     }
 
     /// Function to call to offer a DLC.
+    #[tracing::instrument(skip_all)]
     pub async fn on_offer_message(
         &self,
         offered_message: &OfferDlc,
@@ -475,11 +550,16 @@ where
         }
 
         self.store.create_contract(&contract).await?;
-
+        log_info!(
+            self.logger,
+            "Created and stored the offered contract. temp_id={}",
+            contract.id.to_lower_hex_string(),
+        );
         Ok(())
     }
 
     /// Function to call to close a DLC.
+    #[tracing::instrument(skip_all)]
     pub async fn on_close_message(
         &self,
         close_msg: &CloseDlc,
@@ -500,6 +580,7 @@ where
             &signed_contract,
             close_msg,
             &self.signer_provider,
+            &self.logger,
         )?;
 
         // Message is valid - the application layer should call accept_cooperative_close()
@@ -508,6 +589,7 @@ where
     }
 
     /// Function to call to accept a DLC for which an offer was received.
+    #[tracing::instrument(skip_all)]
     pub async fn on_accept_message(
         &self,
         accept_msg: &AcceptDlc,
@@ -527,16 +609,32 @@ where
             &self.wallet,
             &self.signer_provider,
             &self.store,
+            &self.logger,
         )
         .await
         {
             Ok(contract) => contract,
             Err(e) => {
+                log_error!(
+                    self.logger,
+                    "Error in on_accept_message. tmp_contract_id={} error={}",
+                    offered_contract.id.to_lower_hex_string(),
+                    e.to_string()
+                );
                 return self
                     .accept_fail_on_error(offered_contract, accept_msg.clone(), e)
-                    .await
+                    .await;
             }
         };
+
+        log_info!(
+            self.logger,
+            "Verified the accept message and signed the contract. temp_id={} contract_id={}",
+            offered_contract.id.to_lower_hex_string(),
+            signed_contract.accepted_contract.get_contract_id_string(),
+        );
+
+        let contract_id = signed_contract.accepted_contract.get_contract_id_string();
 
         self.wallet.import_address(&Address::p2wsh(
             &signed_contract
@@ -550,10 +648,18 @@ where
             .update_contract(&Contract::Signed(signed_contract))
             .await?;
 
+        log_info!(
+            self.logger,
+            "Accepted and signed the contract. temp_id={} contract_id={}",
+            offered_contract.id.to_lower_hex_string(),
+            contract_id,
+        );
+
         Ok(DlcMessage::Sign(signed_msg))
     }
 
     /// Function to call to sign a DLC for which an accept was received.
+    #[tracing::instrument(skip_all)]
     pub async fn on_sign_message(
         &self,
         sign_message: &SignDlc,
@@ -568,14 +674,21 @@ where
             &self.wallet,
             &self.store,
             &self.signer_provider,
+            &self.logger,
         )
         .await
         {
             Ok(contract) => contract,
             Err(e) => {
+                log_error!(
+                    self.logger,
+                    "Error in on_sign_message. contract_id={} error={}",
+                    accepted_contract.get_contract_id_string(),
+                    e.to_string()
+                );
                 return self
                     .sign_fail_on_error(accepted_contract, sign_message.clone(), e)
-                    .await
+                    .await;
             }
         };
 
@@ -601,7 +714,6 @@ where
             else {
                 return Ok(());
             };
-
             let preclosed_contract = get_contract_in_state!(
                 self,
                 &dlc_input.dlc_input.as_ref().unwrap().contract_id,
@@ -619,6 +731,11 @@ where
                     .clone(),
             };
 
+            log_debug!(self.logger,
+                "Contract contains a DLC input. Marking the previous contract as pre-closed. dlc_input_contract_id={}", 
+                preclosed_contract.signed_contract.accepted_contract.get_contract_id_string()
+            );
+
             self.store
                 .update_contract(&Contract::PreClosed(preclosed_contract.clone()))
                 .await?;
@@ -627,6 +744,7 @@ where
         Ok(())
     }
 
+    #[tracing::instrument(skip_all, level = "debug")]
     async fn get_oracle_announcements(
         &self,
         oracle_inputs: &OracleInput,
@@ -650,7 +768,12 @@ where
         sign_message: SignDlc,
         e: Error,
     ) -> Result<R, Error> {
-        tracing::error!("Error in on_sign {}", e);
+        log_error!(
+            self.logger,
+            "Error in on_sign_message marking contract as failed sign. contract_id={} error={}",
+            accepted_contract.get_contract_id_string(),
+            e.to_string()
+        );
         self.store
             .update_contract(&Contract::FailedSign(FailedSignContract {
                 accepted_contract,
@@ -667,7 +790,12 @@ where
         accept_message: AcceptDlc,
         e: Error,
     ) -> Result<R, Error> {
-        tracing::error!("Error in on_accept {}", e);
+        log_error!(
+            self.logger,
+            "Error in on_accept_message marking contract as failed accept. contract_id={} error={}",
+            offered_contract.id.to_lower_hex_string(),
+            e.to_string()
+        );
         self.store
             .update_contract(&Contract::FailedAccept(FailedAcceptContract {
                 offered_contract,
@@ -678,6 +806,7 @@ where
         Err(e)
     }
 
+    #[tracing::instrument(skip_all, level = "debug")]
     async fn check_signed_contract(&self, contract: &SignedContract) -> Result<(), Error> {
         let confirmations = self
             .blockchain
@@ -690,35 +819,38 @@ where
             )
             .await?;
         if confirmations >= NB_CONFIRMATIONS {
-            tracing::info!(
+            log_info!(
+                self.logger,
+                "Marking signed contract as confirmed. confirmations={} contract_id={}",
                 confirmations,
-                contract_id = contract.accepted_contract.get_contract_id_string(),
-                "Marking contract as confirmed."
+                contract.accepted_contract.get_contract_id_string(),
             );
             self.store
                 .update_contract(&Contract::Confirmed(contract.clone()))
                 .await?;
         } else {
-            tracing::info!(
+            log_debug!(self.logger,
+                "Not enough confirmations to mark contract as confirmed. confirmations={} required={} contract_id={}", 
                 confirmations,
-                required = NB_CONFIRMATIONS,
-                contract_id = contract.accepted_contract.get_contract_id_string(),
-                "Not enough confirmations to mark contract as confirmed."
+                NB_CONFIRMATIONS,
+                contract.accepted_contract.get_contract_id_string(),
             );
         }
         Ok(())
     }
 
+    #[tracing::instrument(skip_all, level = "debug")]
     async fn check_signed_contracts(
         &self,
         signed_contracts: &[SignedContract],
     ) -> Result<(), Error> {
         for c in signed_contracts {
             if let Err(e) = self.check_signed_contract(c).await {
-                tracing::error!(
-                    "Error checking confirmed contract {}: {}",
+                log_error!(
+                    self.logger,
+                    "Error checking signed contract. contract_id={} error={}",
                     c.accepted_contract.get_contract_id_string(),
-                    e
+                    e.to_string()
                 )
             }
         }
@@ -726,6 +858,7 @@ where
         Ok(())
     }
 
+    #[tracing::instrument(skip_all, level = "debug")]
     async fn check_for_spliced_contract(&self) -> Result<Vec<SignedContract>, Error> {
         let contracts = self.get_store().get_signed_contracts().await?;
         for contract in &contracts {
@@ -749,9 +882,18 @@ where
                 None as Option<PublicKey>
             ) {
                 Ok(c) => Ok(c),
-                Err(Error::InvalidState(_)) => continue,
+                Err(Error::InvalidState(e)) => {
+                    log_trace!(self.logger,
+                        "The previouse contract referenced in a splice transaction is in an unexpected state. contract_id={} error={}", 
+                        contract_id.to_lower_hex_string(), e.to_string(),
+                    );
+                    continue;
+                }
                 Err(e) => {
-                    tracing::debug!("The previouse contract referenced in a splice transaction failed to retrieve. error={}", e.to_string());
+                    log_debug!(self.logger,
+                        "The previouse contract referenced in a splice transaction failed to retrieve. contract_id={} error={}", 
+                        contract_id.to_lower_hex_string(), e.to_string(),
+                    );
                     Err(e)
                 }
             }?;
@@ -762,6 +904,11 @@ where
                 signed_cet: contract.accepted_contract.dlc_transactions.fund.clone(),
             };
 
+            log_debug!(self.logger,
+                "The previous contract that was spliced is now closed because the splice contract is confirmed. contract_id={}", 
+                contract_id.to_lower_hex_string(),
+            );
+
             self.store
                 .update_contract(&Contract::PreClosed(preclosed_contract.clone()))
                 .await?;
@@ -769,6 +916,7 @@ where
         Ok(contracts)
     }
 
+    #[tracing::instrument(skip_all, level = "debug")]
     async fn check_confirmed_contracts(&self) -> Result<(), Error> {
         for c in self.store.get_confirmed_contracts().await? {
             // Confirmed contracts from channel are processed in channel specific methods.
@@ -776,10 +924,11 @@ where
                 continue;
             }
             if let Err(e) = self.check_confirmed_contract(&c).await {
-                tracing::error!(
-                    "Error checking confirmed contract {}: {}",
+                log_error!(
+                    self.logger,
+                    "Error checking confirmed contract. contract_id={} error={}",
                     c.accepted_contract.get_contract_id_string(),
-                    e
+                    e.to_string()
                 )
             }
         }
@@ -787,6 +936,7 @@ where
         Ok(())
     }
 
+    #[tracing::instrument(skip_all, level = "debug")]
     async fn get_closable_contract_info<'a>(
         &'a self,
         contract: &'a SignedContract,
@@ -794,7 +944,11 @@ where
         let contract_infos = &contract.accepted_contract.offered_contract.contract_info;
         let adaptor_infos = &contract.accepted_contract.adaptor_infos;
         for (contract_info, adaptor_info) in contract_infos.iter().zip(adaptor_infos.iter()) {
-            tracing::info!("Checking contract for oracle maturation.");
+            log_debug!(
+                self.logger,
+                "Checking contract for oracle maturation. contract_id={}",
+                contract.accepted_contract.get_contract_id_string()
+            );
             let matured: Vec<_> = contract_info
                 .oracle_announcements
                 .iter()
@@ -806,14 +960,20 @@ where
             if matured.len() >= contract_info.threshold {
                 let attestations = stream::iter(matured.iter())
                     .map(|(i, announcement)| async move {
-                        tracing::info!("Oracle announcement is matured check for attestation. even_id={}", announcement.oracle_event.event_id);
+                        log_debug!(self.logger,
+                            "Oracle announcement for contract is matured. Getting attestations. contract_id={} event_id={}", 
+                            contract.accepted_contract.get_contract_id_string(),
+                            announcement.oracle_event.event_id
+                        );
                         // First try to get the oracle
                         let oracle = match self.oracles.get(&announcement.oracle_public_key) {
                             Some(oracle) => oracle,
                             None => {
-                                tracing::debug!(
-                                    "Oracle not found for key: {}",
-                                    announcement.oracle_public_key
+                                log_debug!(self.logger,
+                                    "Oracle not found. pubkey={}. contract_id={} event_id={}", 
+                                    announcement.oracle_public_key,
+                                    contract.accepted_contract.get_contract_id_string(),
+                                    announcement.oracle_event.event_id
                                 );
                                 return None;
                             }
@@ -825,8 +985,9 @@ where
                         {
                             Ok(attestation) => attestation,
                             Err(e) => {
-                                tracing::error!(
-                                    "Attestation not found for event. id={} error={}",
+                                log_error!(self.logger,
+                                    "Attestation not found for event. pubkey={} event_id={} error={}",
+                                    announcement.oracle_public_key,
                                     announcement.oracle_event.event_id,
                                     e.to_string()
                                 );
@@ -835,15 +996,20 @@ where
                         };
                         // Validate the attestation
                         if let Err(e) = attestation.validate(&self.secp, announcement) {
-                            tracing::error!(
-                                "Oracle attestation is not valid. pubkey={} event_id={}, error={:?}",
+                            log_error!(self.logger,
+                                "Oracle attestation is not valid. pubkey={} event_id={}, error={}",
                                 announcement.oracle_public_key,
                                 announcement.oracle_event.event_id,
-                                e
+                                e.to_string()
                             );
                             return None;
                         }
-                        tracing::info!("Oracle attestation is valid. event_id={}", announcement.oracle_event.event_id);
+                        log_info!(self.logger,
+                            "Retrieved a valid attestation. pubkey={} event_id={} outcomes={:?}", 
+                            announcement.oracle_public_key,
+                            announcement.oracle_event.event_id,
+                            attestation.outcomes
+                        );
                         Some((*i, attestation))
                     })
                     .collect::<FuturesUnordered<_>>()
@@ -852,6 +1018,11 @@ where
                     .collect::<Vec<_>>()
                     .await;
                 if attestations.len() >= contract_info.threshold {
+                    log_info!(self.logger,
+                        "Found enough attestations to close contract. contract_id={} attestations={}", 
+                        contract.accepted_contract.get_contract_id_string(),
+                        attestations.len()
+                    );
                     return Some((contract_info, adaptor_info, attestations));
                 }
             }
@@ -859,13 +1030,21 @@ where
         None
     }
 
+    #[tracing::instrument(skip_all, level = "debug")]
     async fn check_confirmed_contract(&self, contract: &SignedContract) -> Result<(), Error> {
-        tracing::info!(
-            "Checking confirmed contract {}",
+        log_debug!(
+            self.logger,
+            "Checking confirmed contract. contract_id={}",
             contract.accepted_contract.get_contract_id_string()
         );
         let closable_contract_info = self.get_closable_contract_info(contract).await;
         if let Some((contract_info, adaptor_info, attestations)) = closable_contract_info {
+            log_debug!(
+                self.logger,
+                "Found closable contract info. contract_id={} attestations={}",
+                contract.accepted_contract.get_contract_id_string(),
+                attestations.len()
+            );
             let offer = &contract.accepted_contract.offered_contract;
             let signer = self.signer_provider.derive_contract_signer(offer.keys_id)?;
 
@@ -881,7 +1060,13 @@ where
                 adaptor_info,
                 &attestations,
                 &signer,
+                &self.logger,
             ) {
+                log_info!(
+                    self.logger,
+                    "Found valid CET. Closing contract. contract_id={}",
+                    contract.accepted_contract.get_contract_id_string()
+                );
                 match self
                     .close_contract(
                         contract,
@@ -891,14 +1076,20 @@ where
                     .await
                 {
                     Ok(closed_contract) => {
+                        log_info!(
+                            self.logger,
+                            "Updated contract to closed. contract_id={}",
+                            contract.accepted_contract.get_contract_id_string()
+                        );
                         self.store.update_contract(&closed_contract).await?;
                         return Ok(());
                     }
                     Err(e) => {
-                        tracing::warn!(
-                            "Failed to close contract {}: {}",
+                        log_warn!(
+                            self.logger,
+                            "Failed to close contract. contract_id={} error={}",
                             contract.accepted_contract.get_contract_id_string(),
-                            e
+                            e.to_string()
                         );
                         return Err(e);
                     }
@@ -917,8 +1108,21 @@ where
                 .get_transaction_confirmations(&pending_close_tx.compute_txid())
                 .await?;
 
+            log_debug!(
+                self.logger,
+                "Checking pending close transaction. close_txid={} contract_id={} confirmations={}",
+                pending_close_tx.compute_txid().to_string(),
+                contract.accepted_contract.get_contract_id_string(),
+                confirmations
+            );
+
             if confirmations >= NB_CONFIRMATIONS {
                 // Found a fully confirmed pending close - move directly to Closed
+                log_info!(self.logger,
+                    "Pending close transaction is fully confirmed. Moving to closed. close_txid={} contract_id={}", 
+                    pending_close_tx.compute_txid().to_string(),
+                    contract.accepted_contract.get_contract_id_string()
+                );
                 let pnl = contract.accepted_contract.compute_pnl(pending_close_tx);
                 let closed_contract = ClosedContract {
                     attestations: None, // Cooperative close has no attestations
@@ -940,6 +1144,11 @@ where
                 break; // Only one close can be confirmed
             } else if confirmations >= 1 {
                 // Found a confirmed but not fully confirmed pending close - move to PreClosed
+                log_debug!(self.logger,
+                    "Found a confirmed but not fully confirmed pending close. Moving to preclosed. close_txid={} contract_id={}", 
+                    pending_close_tx.compute_txid().to_string(),
+                    contract.accepted_contract.get_contract_id_string()
+                );
                 let preclosed_contract = PreClosedContract {
                     signed_contract: contract.clone(),
                     attestations: None, // Cooperative close has no attestations
@@ -959,11 +1168,21 @@ where
     }
 
     /// Manually close a contract with the oracle attestations.
+    #[tracing::instrument(skip_all, level = "debug")]
     pub async fn close_confirmed_contract(
         &self,
         contract_id: &ContractId,
         attestations: Vec<(usize, OracleAttestation)>,
     ) -> Result<Contract, Error> {
+        log_info!(
+            self.logger,
+            "Attempting to close confirmed contract manually. contract_id={} outcomes={:?}",
+            contract_id.to_lower_hex_string(),
+            attestations
+                .iter()
+                .map(|(_, a)| a.outcomes.clone())
+                .collect::<Vec<_>>()
+        );
         let contract = get_contract_in_state!(self, contract_id, Confirmed, None::<PublicKey>)?;
         let contract_infos = &contract.accepted_contract.offered_contract.contract_info;
         let adaptor_infos = &contract.accepted_contract.adaptor_infos;
@@ -983,6 +1202,11 @@ where
         {
             let offer = &contract.accepted_contract.offered_contract;
             let signer = self.signer_provider.derive_contract_signer(offer.keys_id)?;
+            log_debug!(
+                self.logger,
+                "Getting signed CET. contract_id={}",
+                contract.accepted_contract.get_contract_id_string()
+            );
             let cet = crate::contract_updater::get_signed_cet(
                 &self.secp,
                 &contract,
@@ -990,6 +1214,7 @@ where
                 adaptor_info,
                 &attestations,
                 &signer,
+                &self.logger,
             )?;
 
             // Check that the lock time has passed
@@ -1015,13 +1240,20 @@ where
                 .await
             {
                 Ok(closed_contract) => {
+                    log_info!(
+                        self.logger,
+                        "Closed contract manually. contract_id={}",
+                        contract.accepted_contract.get_contract_id_string()
+                    );
                     self.store.update_contract(&closed_contract).await?;
                     Ok(closed_contract)
                 }
                 Err(e) => {
-                    tracing::warn!(
-                        "Failed to close contract {}: {e}",
-                        contract.accepted_contract.get_contract_id_string()
+                    log_error!(
+                        self.logger,
+                        "Failed to close contract. contract_id={} error={}",
+                        contract.accepted_contract.get_contract_id_string(),
+                        e.to_string()
                     );
                     Err(e)
                 }
@@ -1033,11 +1265,13 @@ where
         }
     }
 
+    #[tracing::instrument(skip_all, level = "debug")]
     async fn check_preclosed_contracts(&self) -> Result<(), Error> {
         for c in self.store.get_preclosed_contracts().await? {
             if let Err(e) = self.check_preclosed_contract(&c).await {
-                tracing::error!(
-                    "Error checking pre-closed contract {}: {}",
+                log_error!(
+                    self.logger,
+                    "Error checking pre-closed contract. contract_id={} error={}",
                     c.signed_contract.accepted_contract.get_contract_id_string(),
                     e
                 )
@@ -1047,13 +1281,29 @@ where
         Ok(())
     }
 
+    #[tracing::instrument(skip_all, level = "debug")]
     async fn check_preclosed_contract(&self, contract: &PreClosedContract) -> Result<(), Error> {
         let broadcasted_txid = contract.signed_cet.compute_txid();
         let confirmations = self
             .blockchain
             .get_transaction_confirmations(&broadcasted_txid)
             .await?;
+        log_debug!(
+            self.logger,
+            "Checking pre-closed contract. broadcasted_txid={} contract_id={} confirmations={}",
+            broadcasted_txid.to_string(),
+            contract
+                .signed_contract
+                .accepted_contract
+                .get_contract_id_string(),
+            confirmations
+        );
         if confirmations >= NB_CONFIRMATIONS {
+            log_debug!(self.logger,
+                "Pre-closed contract is fully confirmed. Moving to closed. broadcasted_txid={} contract_id={}", 
+                broadcasted_txid.to_string(),
+                contract.signed_contract.accepted_contract.get_contract_id_string()
+            );
             let pnl = contract
                 .signed_contract
                 .accepted_contract
@@ -1089,6 +1339,7 @@ where
         Ok(())
     }
 
+    #[tracing::instrument(skip_all, level = "debug")]
     async fn close_contract(
         &self,
         contract: &SignedContract,
@@ -1101,9 +1352,11 @@ where
             .await?;
 
         if confirmations < 1 {
-            tracing::info!(
-                txid = signed_cet.compute_txid().to_string(),
-                "Broadcasting signed CET."
+            log_info!(
+                self.logger,
+                "Broadcasting signed CET. txid={} contract_id={}",
+                signed_cet.compute_txid().to_string(),
+                contract.accepted_contract.get_contract_id_string()
             );
             // TODO(tibo): if this fails because another tx is already in
             // mempool or blockchain, we might have been cheated. There is
@@ -1119,6 +1372,11 @@ where
 
             return Ok(Contract::PreClosed(preclosed_contract));
         } else if confirmations < NB_CONFIRMATIONS {
+            log_debug!(self.logger,
+                "Found a confirmed but not fully confirmed pending close. Moving to preclosed. txid={} contract_id={}", 
+                signed_cet.compute_txid().to_string(),
+                contract.accepted_contract.get_contract_id_string()
+            );
             let preclosed_contract = PreClosedContract {
                 signed_contract: contract.clone(),
                 attestations: Some(attestations),
@@ -1146,6 +1404,7 @@ where
     }
 
     // TODO: Make this public to refund
+    #[tracing::instrument(skip_all, level = "debug")]
     async fn check_refund(&self, contract: &SignedContract) -> Result<(), Error> {
         // TODO(tibo): should check for confirmation of refund before updating state
         if contract
@@ -1156,6 +1415,11 @@ where
             .to_consensus_u32() as u64
             <= self.time.unix_time_now()
         {
+            log_debug!(self.logger,
+                "Refund locktime has passed. Attempting to broadcast refund. refund_txid={} contract_id={}", 
+                contract.accepted_contract.dlc_transactions.refund.compute_txid().to_string(),
+                contract.accepted_contract.get_contract_id_string()
+            );
             let accepted_contract = &contract.accepted_contract;
             let refund = accepted_contract.dlc_transactions.refund.clone();
             let confirmations = self
@@ -1163,10 +1427,19 @@ where
                 .get_transaction_confirmations(&refund.compute_txid())
                 .await?;
             if confirmations == 0 {
+                log_debug!(self.logger,
+                    "Refund transaction has not been broadcast yet. Sending transaction txid={} contract_id={}", 
+                    refund.compute_txid().to_string(),
+                    contract.accepted_contract.get_contract_id_string()
+                );
                 let offer = &contract.accepted_contract.offered_contract;
                 let signer = self.signer_provider.derive_contract_signer(offer.keys_id)?;
-                let refund =
-                    crate::contract_updater::get_signed_refund(&self.secp, contract, &signer)?;
+                let refund = crate::contract_updater::get_signed_refund(
+                    &self.secp,
+                    contract,
+                    &signer,
+                    &self.logger,
+                )?;
                 self.blockchain.send_transaction(&refund).await?;
             }
 
@@ -1180,6 +1453,7 @@ where
 
     /// Function to call when we detect that a contract was closed by our counter party.
     /// This will update the state of the contract and return the [`Contract`] object.
+    #[tracing::instrument(skip_all, level = "debug")]
     pub async fn on_counterparty_close(
         &mut self,
         contract: &SignedContract,
@@ -1194,6 +1468,12 @@ where
                     .dlc_transactions
                     .get_fund_outpoint()
         }) {
+            log_error!(
+                self.logger,
+                "Closing tx does not spend the funding tx. txid={} contract_id={}",
+                closing_tx.compute_txid().to_string(),
+                contract.accepted_contract.get_contract_id_string()
+            );
             return Err(Error::InvalidParameters(
                 "Closing tx does not spend the funding tx".to_string(),
             ));
@@ -1207,18 +1487,35 @@ where
             .compute_txid()
             == closing_tx.compute_txid()
         {
+            log_debug!(
+                self.logger,
+                "Closing tx is the refund tx. Moving to refunded. txid={} contract_id={}",
+                closing_tx.compute_txid().to_string(),
+                contract.accepted_contract.get_contract_id_string()
+            );
             let refunded = Contract::Refunded(contract.clone());
             self.store.update_contract(&refunded).await?;
             return Ok(refunded);
         }
 
         let contract = if confirmations < NB_CONFIRMATIONS {
+            log_info!(self.logger,
+                "Closing transaction is not fully confirmed. Moving to preclosed. txid={} contract_id={}", 
+                closing_tx.compute_txid().to_string(),
+                contract.accepted_contract.get_contract_id_string()
+            );
             Contract::PreClosed(PreClosedContract {
                 signed_contract: contract.clone(),
                 attestations: None, // todo in some cases we can get the attestations from the closing tx
                 signed_cet: closing_tx,
             })
         } else {
+            log_info!(
+                self.logger,
+                "Closing transaction is fully confirmed. Moving to closed. txid={} contract_id={}",
+                closing_tx.compute_txid().to_string(),
+                contract.accepted_contract.get_contract_id_string()
+            );
             Contract::Closed(ClosedContract {
                 attestations: None, // todo in some cases we can get the attestations from the closing tx
                 pnl: contract.accepted_contract.compute_pnl(&closing_tx),
@@ -1242,6 +1539,7 @@ where
     /// Initiates a cooperative close of a contract by creating and signing a closing transaction.
     /// Returns a CloseDlc message to be sent to the counter party.
     /// The contract remains in Confirmed state until the close transaction is broadcast.
+    #[tracing::instrument(skip_all, level = "debug")]
     pub async fn cooperative_close_contract(
         &self,
         contract_id: &ContractId,
@@ -1255,6 +1553,7 @@ where
             &signed_contract,
             counter_payout,
             &self.signer_provider,
+            &self.logger,
         )?;
 
         // Create updated contract with pending close transaction
@@ -1263,6 +1562,12 @@ where
         updated_dlc_transactions
             .pending_close_txs
             .push(close_tx.clone());
+        log_debug!(
+            self.logger,
+            "Created updated contract with pending close transaction. close_txid={} contract_id={}",
+            close_tx.compute_txid().to_string(),
+            contract_id.to_lower_hex_string()
+        );
 
         let updated_accepted_contract = AcceptedContract {
             dlc_transactions: updated_dlc_transactions,
@@ -1289,6 +1594,7 @@ where
 
     /// Accepts a cooperative close request by completing the close transaction
     /// and broadcasting it to the network.
+    #[tracing::instrument(skip_all, level = "debug")]
     pub async fn accept_cooperative_close(
         &self,
         contract_id: &ContractId,
@@ -1302,8 +1608,15 @@ where
             &signed_contract,
             close_message,
             &self.signer_provider,
+            &self.logger,
         )?;
 
+        log_debug!(
+            self.logger,
+            "Completed cooperative close. close_txid={} contract_id={}",
+            close_tx.compute_txid().to_string(),
+            contract_id.to_lower_hex_string()
+        );
         // Broadcast the closing transaction
         self.blockchain.send_transaction(&close_tx).await?;
 
@@ -1322,8 +1635,17 @@ where
     }
 }
 
-impl<W: Deref, SP: Deref, B: Deref, S: Deref, O: Deref, T: Deref, F: Deref, X: ContractSigner>
-    Manager<W, Arc<CachedContractSignerProvider<SP, X>>, B, S, O, T, F, X>
+impl<
+        W: Deref,
+        SP: Deref,
+        B: Deref,
+        S: Deref,
+        O: Deref,
+        T: Deref,
+        F: Deref,
+        X: ContractSigner,
+        L: Deref,
+    > Manager<W, Arc<CachedContractSignerProvider<SP, X>>, B, S, O, T, F, X, L>
 where
     W::Target: Wallet,
     SP::Target: ContractSignerProvider<Signer = X>,
@@ -1332,6 +1654,7 @@ where
     O::Target: Oracle,
     T::Target: Time,
     F::Target: FeeEstimator,
+    L::Target: Logger,
 {
     /// Create a new channel offer and return the [`dlc_messages::channel::OfferChannel`]
     /// message to be sent to the `counter_party`.
@@ -1763,7 +2086,8 @@ where
             .await?
             >= CET_NSEQUENCE
         {
-            tracing::info!(
+            log_info!(
+                self.logger,
                 "Buffer transaction for contract {} has enough confirmations to spend from it",
                 serialize_hex(&contract_id)
             );
@@ -1880,6 +2204,7 @@ where
                 &self.signer_provider,
                 &self.store,
                 &self.chain_monitor,
+                &self.logger,
             )
             .await;
 
@@ -1961,6 +2286,7 @@ where
                 &self.chain_monitor,
                 &self.store,
                 &self.signer_provider,
+                &self.logger,
             )
             .await;
 
@@ -2233,6 +2559,7 @@ where
             &self.signer_provider,
             &self.time,
             &self.store,
+            &self.logger,
         )
         .await?;
 
@@ -2321,6 +2648,7 @@ where
             &self.signer_provider,
             &self.chain_monitor,
             &self.store,
+            &self.logger,
         )
         .await?;
 
@@ -2563,7 +2891,8 @@ where
                 }
             }
         } else {
-            tracing::warn!(
+            log_warn!(
+                self.logger,
                 "Couldn't find rejected dlc channel with id: {}",
                 reject.channel_id.to_lower_hex_string()
             );
@@ -2580,12 +2909,16 @@ where
 
         for channel in established_closing_channels {
             if let Err(e) = self.try_finalize_closing_established_channel(channel).await {
-                tracing::error!("Error trying to close established channel: {}", e);
+                log_error!(
+                    self.logger,
+                    "Error trying to close established channel: {}",
+                    e
+                );
             }
         }
 
         if let Err(e) = self.check_for_timed_out_channels().await {
-            tracing::error!("Error checking timed out channels {}", e);
+            log_error!(self.logger, "Error checking timed out channels {}", e);
         }
         self.check_for_watched_tx().await
     }
@@ -2614,7 +2947,8 @@ where
             ) {
                 Ok(c) => c,
                 Err(e) => {
-                    tracing::error!(
+                    log_error!(
+                        self.logger,
                         "Could not retrieve channel {:?}: {}",
                         channel_info.channel_id,
                         e
@@ -2862,7 +3196,7 @@ where
                                 }
                             }
                             _ => {
-                                tracing::error!("Saw spending of buffer transaction without being in closing state");
+                                log_error!(self.logger, "Saw spending of buffer transaction without being in closing state");
                                 Channel::Closed(ClosedChannel {
                                     counter_party: signed_channel.counter_party,
                                     temporary_channel_id: signed_channel.temporary_channel_id,
@@ -3114,7 +3448,7 @@ where
                     match future.await {
                         Ok(result) => Ok(result),
                         Err(e) => {
-                            tracing::error!("Failed to get oracle announcements: {}", e);
+                            log_error!(self.logger, "Failed to get oracle announcements: {}", e);
                             Err(e)
                         }
                     }

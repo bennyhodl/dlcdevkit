@@ -1,5 +1,7 @@
 use super::sqlx::{ContractData, ContractMetadata, SqlxError};
 use crate::error::{StorageError, WalletError};
+use crate::logger::Logger;
+use crate::logger::{log_info, WriteLog};
 use crate::Storage;
 use crate::{
     error::to_storage_error,
@@ -33,19 +35,20 @@ use sqlx::postgres::PgRow;
 use sqlx::{FromRow, Pool, Postgres, Row, Transaction};
 use std::str::FromStr;
 use std::sync::Arc;
-use tracing::info;
 
 /// Manages a pool of database connections.
 #[derive(Debug)]
 pub struct PostgresStore {
     pub(crate) pool: Pool<Postgres>,
     wallet_name: String,
+    logger: Arc<Logger>,
 }
 
 impl PostgresStore {
     pub async fn new(
         url: &str,
         migrations: bool,
+        logger: Arc<Logger>,
         wallet_name: String,
     ) -> Result<Self, StorageError> {
         let pool = PoolOptions::<Postgres>::new()
@@ -53,15 +56,20 @@ impl PostgresStore {
             .connect(url)
             .await
             .map_err(|e| StorageError::Sqlx(e.into()))?;
+        // TODO: inline migrations
         if migrations {
-            tracing::info!("Migrating postgres");
+            log_info!(logger, "Migrating postgres");
             sqlx::migrate!("src/storage/postgres/migrations")
                 .run(&pool)
                 .await
                 .map_err(|e| StorageError::Sqlx(e.into()))?;
         }
 
-        Ok(Self { pool, wallet_name })
+        Ok(Self {
+            pool,
+            logger,
+            wallet_name,
+        })
     }
 
     pub async fn get_contract_metadata(
@@ -119,8 +127,13 @@ impl PostgresStore {
         Ok(rows)
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self))]
     pub(crate) async fn read(&self) -> Result<ChangeSet, StorageError> {
+        log_info!(
+            self.logger,
+            "Reading changeset from postgres. wallet_name={}",
+            self.wallet_name
+        );
         let mut tx = self
             .pool
             .begin()
@@ -150,15 +163,12 @@ impl PostgresStore {
         Ok(changeset)
     }
 
-    #[tracing::instrument]
     pub(crate) async fn changeset_from_row(
         tx: &mut Transaction<'_, Postgres>,
         changeset: &mut ChangeSet,
         row: PgRow,
         wallet_name: &str,
     ) -> Result<(), StorageError> {
-        tracing::info!("changeset from row");
-
         let network: String = row.get("network");
         let internal_last_revealed: Option<i32> = row.get("internal_last_revealed");
         let external_last_revealed: Option<i32> = row.get("external_last_revealed");
@@ -194,12 +204,19 @@ impl PostgresStore {
         Ok(())
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self, changeset))]
     pub(crate) async fn write(&self, changeset: &ChangeSet) -> Result<(), StorageError> {
-        tracing::info!("changeset write");
         if changeset.is_empty() {
             return Ok(());
         }
+        log_info!(
+            self.logger,
+            "Writing changeset to postgres. num_blocks={}, num_txs={}, num_txouts={}, num_anchors={}",
+            changeset.local_chain.blocks.len(),
+            changeset.tx_graph.txs.len(),
+            changeset.tx_graph.txouts.len(),
+            changeset.tx_graph.anchors.len(),
+        );
 
         let wallet_name = &self.wallet_name;
         let mut tx = self
@@ -253,15 +270,17 @@ impl PostgresStore {
 #[async_trait::async_trait]
 impl Storage for PostgresStore {
     async fn initialize_bdk(&self) -> Result<ChangeSet, WalletError> {
-        tracing::info!("initialize store");
+        log_info!(
+            self.logger,
+            "Initializing storage for the BDK wallet. name={}",
+            self.wallet_name
+        );
         self.read()
             .await
             .map_err(|_| WalletError::StorageError("Did not initialize bdk storage".to_string()))
     }
 
     async fn persist_bdk(&self, changeset: &ChangeSet) -> Result<(), WalletError> {
-        tracing::info!("persist store");
-
         self.write(changeset)
             .await
             .map_err(|_| WalletError::StorageError("Did not persist bdk storage".to_string()))
@@ -270,6 +289,7 @@ impl Storage for PostgresStore {
 
 #[async_trait::async_trait]
 impl ManagerStorage for PostgresStore {
+    #[tracing::instrument(skip(self))]
     async fn get_contract(
         &self,
         id: &ddk_manager::ContractId,
@@ -288,6 +308,7 @@ impl ManagerStorage for PostgresStore {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     async fn get_contracts(&self) -> Result<Vec<Contract>, ddk_manager::error::Error> {
         let contracts = sqlx::query_as::<Postgres, ContractData>("SELECT * FROM contract_data")
             .fetch_all(&self.pool)
@@ -355,9 +376,16 @@ impl ManagerStorage for PostgresStore {
 
         tx.commit().await.map_err(to_storage_error)?;
 
+        log_info!(
+            self.logger,
+            "Stored offered contract. id={}",
+            hex::encode(contract.id)
+        );
+
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     async fn delete_contract(
         &self,
         id: &ddk_manager::ContractId,
@@ -382,7 +410,11 @@ impl ManagerStorage for PostgresStore {
     }
 
     async fn update_contract(&self, contract: &Contract) -> Result<(), ddk_manager::error::Error> {
-        tracing::info!("Updating contract: {}", hex::encode(contract.get_id()));
+        log_info!(
+            self.logger,
+            "Updating contract. id={}",
+            hex::encode(contract.get_id())
+        );
         let prefix = ContractPrefix::get_prefix(contract);
         let contract_id = hex::encode(contract.get_id());
         let (offer_collateral, accept_collateral, total_collateral) = contract.get_collateral();
@@ -393,8 +425,9 @@ impl ManagerStorage for PostgresStore {
         // Step 1: Remove by temp_id if Accepted or Signed
         match contract {
             a @ Contract::Accepted(_) | a @ Contract::Signed(_) => {
-                tracing::info!(
-                    "Deleting contract by temp_id: {:?}",
+                log_info!(
+                    self.logger,
+                    "Deleting contract by temp_id. tmp_id={}",
                     hex::encode(a.get_temporary_id())
                 );
                 let temp_id = hex::encode(a.get_temporary_id());
@@ -519,6 +552,7 @@ impl ManagerStorage for PostgresStore {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     async fn get_signed_contracts(&self) -> Result<Vec<SignedContract>, ddk_manager::error::Error> {
         let contracts =
             sqlx::query_as::<Postgres, ContractData>("SELECT * FROM contract_data WHERE state = 3")
@@ -538,6 +572,7 @@ impl ManagerStorage for PostgresStore {
         Ok(signed)
     }
 
+    #[tracing::instrument(skip(self))]
     async fn get_contract_offers(&self) -> Result<Vec<OfferedContract>, ddk_manager::error::Error> {
         let contracts = sqlx::query_as::<Postgres, ContractData>(
             "SELECT cd.id, cd.state, cd.contract_data, cd.is_compressed 
@@ -561,6 +596,7 @@ impl ManagerStorage for PostgresStore {
         Ok(offers)
     }
 
+    #[tracing::instrument(skip(self))]
     async fn get_confirmed_contracts(
         &self,
     ) -> Result<Vec<SignedContract>, ddk_manager::error::Error> {
@@ -582,6 +618,7 @@ impl ManagerStorage for PostgresStore {
         Ok(signed)
     }
 
+    #[tracing::instrument(skip(self))]
     async fn get_preclosed_contracts(
         &self,
     ) -> Result<Vec<PreClosedContract>, ddk_manager::error::Error> {
@@ -603,6 +640,7 @@ impl ManagerStorage for PostgresStore {
         Ok(preclosed)
     }
 
+    #[tracing::instrument(skip(self))]
     async fn upsert_channel(
         &self,
         _channel: ddk_manager::channel::Channel,
@@ -611,6 +649,7 @@ impl ManagerStorage for PostgresStore {
         unimplemented!("Channels not supported.")
     }
 
+    #[tracing::instrument(skip(self))]
     async fn delete_channel(
         &self,
         _channel_id: &ddk_manager::ChannelId,
@@ -618,6 +657,7 @@ impl ManagerStorage for PostgresStore {
         unimplemented!("Channels not supported.")
     }
 
+    #[tracing::instrument(skip(self, _channel_state))]
     async fn get_signed_channels(
         &self,
         _channel_state: Option<ddk_manager::channel::signed_channel::SignedChannelStateType>,
@@ -626,6 +666,7 @@ impl ManagerStorage for PostgresStore {
         unimplemented!("Channels not supported.")
     }
 
+    #[tracing::instrument(skip(self))]
     async fn get_channel(
         &self,
         _channel_id: &ddk_manager::ChannelId,
@@ -633,6 +674,7 @@ impl ManagerStorage for PostgresStore {
         unimplemented!("Channels not supported.")
     }
 
+    #[tracing::instrument(skip(self))]
     async fn get_offered_channels(
         &self,
     ) -> Result<Vec<ddk_manager::channel::offered_channel::OfferedChannel>, ddk_manager::error::Error>
@@ -640,6 +682,7 @@ impl ManagerStorage for PostgresStore {
         unimplemented!("Channels not supported.")
     }
 
+    #[tracing::instrument(skip(self))]
     async fn persist_chain_monitor(
         &self,
         _monitor: &ddk_manager::chain_monitor::ChainMonitor,
@@ -647,6 +690,7 @@ impl ManagerStorage for PostgresStore {
         unimplemented!("Chain monitor not supported.")
     }
 
+    #[tracing::instrument(skip(self))]
     async fn get_chain_monitor(
         &self,
     ) -> Result<Option<ddk_manager::chain_monitor::ChainMonitor>, ddk_manager::error::Error> {
@@ -655,14 +699,13 @@ impl ManagerStorage for PostgresStore {
 }
 
 /// Insert keychain descriptors.
-#[tracing::instrument]
+#[tracing::instrument(skip_all)]
 async fn insert_descriptor(
     tx: &mut Transaction<'_, Postgres>,
     wallet_name: &str,
     descriptor: &ExtendedDescriptor,
     keychain: KeychainKind,
 ) -> Result<(), SqlxError> {
-    info!("insert descriptor");
     let descriptor_str = descriptor.to_string();
 
     let descriptor_id = descriptor.descriptor_id().to_byte_array();
@@ -685,13 +728,12 @@ async fn insert_descriptor(
 }
 
 /// Insert network.
-#[tracing::instrument]
+#[tracing::instrument(skip(tx))]
 async fn insert_network(
     tx: &mut Transaction<'_, Postgres>,
     wallet_name: &str,
     network: Network,
 ) -> Result<(), SqlxError> {
-    info!("insert network");
     sqlx::query("INSERT INTO network (wallet_name, name) VALUES ($1, $2)")
         .bind(wallet_name)
         .bind(network.to_string())
@@ -702,15 +744,13 @@ async fn insert_network(
 }
 
 /// Update keychain last revealed
-#[tracing::instrument]
+#[tracing::instrument(skip(tx))]
 async fn update_last_revealed(
     tx: &mut Transaction<'_, Postgres>,
     wallet_name: &str,
     descriptor_id: DescriptorId,
     last_revealed: u32,
 ) -> Result<(), SqlxError> {
-    info!("update last revealed");
-
     sqlx::query(
         "UPDATE keychain SET last_revealed = $1 WHERE wallet_name = $2 AND descriptor_id = $3",
     )
@@ -724,12 +764,11 @@ async fn update_last_revealed(
 }
 
 /// Select transactions, txouts, and anchors.
-#[tracing::instrument]
+#[tracing::instrument(skip(db_tx))]
 async fn tx_graph_changeset_from_postgres(
     db_tx: &mut Transaction<'_, Postgres>,
     wallet_name: &str,
 ) -> Result<tx_graph::ChangeSet<ConfirmationBlockTime>, SqlxError> {
-    info!("tx graph changeset from postgres");
     let mut changeset = tx_graph::ChangeSet::default();
 
     // Fetch transactions
@@ -799,13 +838,12 @@ async fn tx_graph_changeset_from_postgres(
 }
 
 /// Insert transactions, txouts, and anchors.
-#[tracing::instrument]
+#[tracing::instrument(skip(db_tx, changeset))]
 async fn tx_graph_changeset_persist_to_postgres(
     db_tx: &mut Transaction<'_, Postgres>,
     wallet_name: &str,
     changeset: &tx_graph::ChangeSet<ConfirmationBlockTime>,
 ) -> Result<(), SqlxError> {
-    info!("tx graph changeset from postgres");
     for tx in &changeset.txs {
         sqlx::query(
             "INSERT INTO tx (wallet_name, txid, whole_tx) VALUES ($1, $2, $3)
@@ -860,12 +898,11 @@ async fn tx_graph_changeset_persist_to_postgres(
 }
 
 /// Select blocks.
-#[tracing::instrument]
+#[tracing::instrument(skip(db_tx))]
 async fn local_chain_changeset_from_postgres(
     db_tx: &mut Transaction<'_, Postgres>,
     wallet_name: &str,
 ) -> Result<local_chain::ChangeSet, SqlxError> {
-    info!("local chain changeset from postgres");
     let mut changeset = local_chain::ChangeSet::default();
 
     let rows = sqlx::query("SELECT hash, height FROM block WHERE wallet_name = $1")
@@ -884,13 +921,12 @@ async fn local_chain_changeset_from_postgres(
 }
 
 /// Insert blocks.
-#[tracing::instrument]
+#[tracing::instrument(skip(db_tx, changeset))]
 async fn local_chain_changeset_persist_to_postgres(
     db_tx: &mut Transaction<'_, Postgres>,
     wallet_name: &str,
     changeset: &local_chain::ChangeSet,
 ) -> Result<(), SqlxError> {
-    info!("local chain changeset to postgres");
     for (&height, &hash) in &changeset.blocks {
         match hash {
             Some(hash) => {
@@ -918,10 +954,10 @@ async fn local_chain_changeset_persist_to_postgres(
 }
 
 /// Collects information on all the wallets in the database and dumps it to stdout.
-#[tracing::instrument]
+#[tracing::instrument(skip(db))]
 #[allow(dead_code)]
-async fn easy_backup(db: Pool<Postgres>) -> Result<(), SqlxError> {
-    info!("Starting easy backup");
+async fn easy_backup(db: Pool<Postgres>, logger: Arc<Logger>) -> Result<(), SqlxError> {
+    log_info!(logger, "Starting backup of the wallet database");
 
     let statement = "SELECT * FROM keychain";
 
@@ -932,7 +968,7 @@ async fn easy_backup(db: Pool<Postgres>) -> Result<(), SqlxError> {
     let json_array = json!(results);
     println!("{}", serde_json::to_string_pretty(&json_array)?);
 
-    info!("Easy backup completed successfully");
+    log_info!(logger, "Wallet database backup completed successfully.");
     Ok(())
 }
 
@@ -950,13 +986,19 @@ struct KeychainEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::ser::deserialize_contract;
+    use crate::{logger::LogLevel, util::ser::deserialize_contract};
     use ddk_manager::Storage;
 
     async fn seed_db() -> PostgresStore {
+        let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+        println!("database_url: {database_url}");
         let store = PostgresStore::new(
-            &std::env::var("DATABASE_URL").unwrap(),
+            &database_url,
             true,
+            Arc::new(Logger::console(
+                "console_logger".to_string(),
+                LogLevel::Info,
+            )),
             "test".to_string(),
         )
         .await
@@ -1010,6 +1052,7 @@ mod tests {
 
     #[tokio::test]
     async fn postgres() {
+        dotenv::dotenv().ok();
         let db = seed_db().await;
 
         let confirmed_rows = db.get_contract_metadata(None).await.unwrap();

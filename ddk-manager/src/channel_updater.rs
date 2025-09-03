@@ -40,8 +40,9 @@ use ddk_messages::{
     oracle_msgs::{OracleAnnouncement, OracleAttestation},
     FundingSignatures,
 };
-use lightning::ln::chan_utils::{
-    build_commitment_secret, derive_private_key, CounterpartyCommitmentSecrets,
+use lightning::{
+    ln::chan_utils::{build_commitment_secret, derive_private_key, CounterpartyCommitmentSecrets},
+    util::logger::Logger,
 };
 use secp256k1_zkp::{All, EcdsaAdaptorSignature, PublicKey, Secp256k1, SecretKey, Signing};
 
@@ -283,7 +284,13 @@ where
 /// to a [`SignedChannel`] and [`SignedContract`], returning them as well as the
 /// [`SignChannel`] to be sent to the counter party.
 #[allow(clippy::too_many_arguments)]
-pub async fn verify_and_sign_accepted_channel<W: Deref, SP: Deref, X: ContractSigner, S: Deref>(
+pub async fn verify_and_sign_accepted_channel<
+    W: Deref,
+    SP: Deref,
+    X: ContractSigner,
+    S: Deref,
+    L: Deref,
+>(
     secp: &Secp256k1<All>,
     offered_channel: &OfferedChannel,
     offered_contract: &OfferedContract,
@@ -293,11 +300,13 @@ pub async fn verify_and_sign_accepted_channel<W: Deref, SP: Deref, X: ContractSi
     signer_provider: &SP,
     storage: &S,
     chain_monitor: &Mutex<ChainMonitor>,
+    logger: &L,
 ) -> Result<(SignedChannel, SignedContract, SignChannel), Error>
 where
     W::Target: Wallet,
     SP::Target: ContractSignerProvider<Signer = X>,
     S::Target: Storage,
+    L::Target: Logger,
 {
     let (tx_input_infos, input_amount) =
         crate::conversion_utils::get_tx_input_infos(&accept_channel.funding_inputs)?;
@@ -385,6 +394,7 @@ where
         Some(channel_id),
         storage,
         signer_provider,
+        logger,
     )
     .await?;
 
@@ -467,7 +477,7 @@ where
 /// given [`AcceptedChannel`] and [`AcceptedContract`], transforming them
 /// to a [`SignedChannel`] and [`SignedContract`], and returning them.
 #[allow(clippy::too_many_arguments)]
-pub async fn verify_signed_channel<W: Deref, SP: Deref, S: Deref, X: ContractSigner>(
+pub async fn verify_signed_channel<W: Deref, SP: Deref, S: Deref, X: ContractSigner, L: Deref>(
     secp: &Secp256k1<All>,
     accepted_channel: &AcceptedChannel,
     accepted_contract: &AcceptedContract,
@@ -476,11 +486,13 @@ pub async fn verify_signed_channel<W: Deref, SP: Deref, S: Deref, X: ContractSig
     chain_monitor: &Mutex<ChainMonitor>,
     storage: &S,
     signer_provider: &SP,
+    logger: &L,
 ) -> Result<(SignedChannel, SignedContract, Transaction), Error>
 where
     W::Target: Wallet,
     SP::Target: ContractSignerProvider<Signer = X>,
     S::Target: Storage,
+    L::Target: Logger,
 {
     let own_publish_pk = accepted_channel
         .accept_base_points
@@ -514,6 +526,7 @@ where
         Some(accepted_channel.channel_id),
         storage,
         signer_provider,
+        logger,
     )
     .await?;
 
@@ -1374,6 +1387,7 @@ pub async fn verify_renew_accept_and_confirm<
     X: ContractSigner,
     T: Deref,
     S: Deref,
+    L: Deref,
 >(
     secp: &Secp256k1<All>,
     renew_accept: &RenewAccept,
@@ -1385,12 +1399,14 @@ pub async fn verify_renew_accept_and_confirm<
     signer_provider: &SP,
     time: &T,
     storage: &S,
+    logger: &L,
 ) -> Result<(SignedContract, RenewConfirm), Error>
 where
     W::Target: Wallet,
     SP::Target: ContractSignerProvider<Signer = X>,
     T::Target: Time,
     S::Target: Storage,
+    L::Target: Logger,
 {
     let own_base_secret_key =
         signer_provider.get_secret_key_for_pubkey(&signed_channel.own_points.own_basepoint)?;
@@ -1457,6 +1473,7 @@ where
         Some(signed_channel.channel_id),
         storage,
         signer_provider,
+        logger,
     )
     .await?;
 
@@ -1505,6 +1522,7 @@ pub(crate) async fn verify_renew_confirm_and_finalize<
     W: Deref,
     SP: Deref,
     X: ContractSigner,
+    L: Deref,
 >(
     secp: &Secp256k1<All>,
     signed_channel: &mut SignedChannel,
@@ -1516,12 +1534,14 @@ pub(crate) async fn verify_renew_confirm_and_finalize<
     signer: &SP,
     chain_monitor: &Mutex<ChainMonitor>,
     storage: &S,
+    logger: &L,
 ) -> Result<(SignedContract, RenewFinalize), Error>
 where
     T::Target: Time,
     SP::Target: ContractSignerProvider<Signer = X>,
     W::Target: Wallet,
     S::Target: Storage,
+    L::Target: Logger,
 {
     let (
         &offer_per_update_point,
@@ -1575,6 +1595,7 @@ where
         Some(signed_channel.channel_id),
         storage,
         signer,
+        logger,
     )
     .await?;
 

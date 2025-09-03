@@ -1,3 +1,4 @@
+use crate::logger::{log_info, log_warn, WriteLog};
 use crate::{error::TransportError, DlcDevKitDlcManager, Oracle, Storage, Transport};
 use async_trait::async_trait;
 use bitcoin::secp256k1::PublicKey;
@@ -20,15 +21,20 @@ impl Transport for LightningTransport {
 
     /// Sends a message to a peer.
     async fn send_message(&self, counterparty: PublicKey, message: ddk_messages::Message) {
-        tracing::info!(message=?message, "Sending message to {}", counterparty.to_string());
+        log_info!(
+            self.logger,
+            "Sending message to counter_party={}",
+            counterparty.to_string()
+        );
         if self.peer_manager.peer_by_node_id(&counterparty).is_some() {
             self.message_handler.send_message(counterparty, message);
             self.peer_manager.process_events();
         } else {
-            tracing::warn!(
-                pubkey = counterparty.to_string(),
-                "Not connected to counterparty. Message not sent"
-            )
+            log_warn!(
+                self.logger,
+                "Not connected to counterparty. Message not sent. counter_party={}",
+                counterparty.to_string()
+            );
         }
     }
 

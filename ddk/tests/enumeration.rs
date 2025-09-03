@@ -1,13 +1,19 @@
 mod test_util;
 use bitcoin::Amount;
 use chrono::{Local, TimeDelta};
-use ddk::util::ser::serialize_contract;
-use ddk::Transport;
+use ddk::{
+    logger::{LogLevel, Logger},
+    util::ser::serialize_contract,
+    Transport,
+};
 use ddk_dlc::EnumerationPayout;
 use ddk_manager::contract::Contract;
 use ddk_manager::Storage;
 use ddk_messages::Message;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{
+    sync::Arc,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 use test_util::{generate_blocks, test_ddk};
 use tokio::time::sleep;
 
@@ -41,7 +47,10 @@ macro_rules! assert_contract_state_and_serialize {
 #[test_log::test(tokio::test)]
 #[ignore]
 async fn enumeration_contract() {
-    let (alice, bob, oracle) = test_ddk().await;
+    dotenv::dotenv().ok();
+    let logger_one = Arc::new(Logger::tracing("alice".to_string(), LogLevel::Info));
+    let logger_two = Arc::new(Logger::disabled("bob".to_string()));
+    let (alice, bob, oracle) = test_ddk(logger_two, logger_one).await;
     let expiry = TimeDelta::seconds(15);
     let timestamp: u32 = Local::now()
         .checked_add_signed(expiry)
@@ -198,7 +207,6 @@ async fn enumeration_contract() {
         .await;
 
     while time < announcement.oracle_event.event_maturity_epoch || time < locktime {
-        tracing::warn!("Waiting for time to expire for oracle event and locktime.");
         let checked_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()

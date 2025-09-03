@@ -5,8 +5,11 @@
 mod contract;
 mod wallet;
 
-use crate::error::WalletError;
+use std::sync::Arc;
+
+use crate::logger::{log_info, WriteLog};
 use crate::Storage;
+use crate::{error::WalletError, logger::Logger};
 use bdk_chain::Merge;
 use bdk_wallet::ChangeSet;
 use ddk_manager::contract::ser::Serializable;
@@ -27,13 +30,15 @@ const CHANGESET_KEY: &str = "changeset";
 #[derive(Debug, Clone)]
 pub struct SledStorage {
     db: Db,
+    logger: Arc<Logger>,
 }
 
 impl SledStorage {
     /// Creates a new instance of a SledStorage.
-    pub fn new(path: &str) -> Result<Self, sled::Error> {
+    pub fn new(path: &str, logger: Arc<Logger>) -> Result<Self, sled::Error> {
         Ok(SledStorage {
             db: sled::open(path)?,
+            logger,
         })
     }
 
@@ -112,7 +117,7 @@ impl Storage for SledStorage {
     }
 
     async fn initialize_bdk(&self) -> Result<ChangeSet, WalletError> {
-        tracing::info!("Initializing wallet persistance.");
+        log_info!(self.logger, "Initializing sled wallet persistance.");
         let changeset = match self
             .wallet_tree()
             .map_err(sled_to_wallet_error)?

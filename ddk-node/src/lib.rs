@@ -7,6 +7,7 @@ mod seed;
 use bitcoin::secp256k1::PublicKey;
 use bitcoin::{Address, Amount, FeeRate, Network};
 use ddk::builder::{Builder, SeedConfig};
+use ddk::logger::{LogLevel, Logger};
 use ddk::oracle::kormir::KormirOracleClient;
 use ddk::storage::postgres::PostgresStore;
 use ddk::transport::nostr::NostrDlc;
@@ -52,6 +53,10 @@ impl DdkNode {
     }
 
     pub async fn serve(opts: NodeOpts) -> anyhow::Result<()> {
+        let logger = Arc::new(Logger::console(
+            "console_logger".to_string(),
+            LogLevel::Info,
+        ));
         let storage_path = match opts.storage_dir {
             Some(storage) => storage,
             None => homedir::my_home()
@@ -65,14 +70,23 @@ impl DdkNode {
 
         let seed_bytes = crate::seed::xprv_from_path(storage_path.clone())?;
 
-        tracing::info!("Starting DDK node.");
-        let transport =
-            Arc::new(NostrDlc::new(&seed_bytes, "wss://nostr.dlcdevkit.com", network).await?);
+        let transport = Arc::new(
+            NostrDlc::new(
+                &seed_bytes,
+                "wss://nostr.dlcdevkit.com",
+                network,
+                logger.clone(),
+            )
+            .await?,
+        );
 
-        let storage = Arc::new(PostgresStore::new(&opts.postgres_url, true, opts.name).await?);
+        let storage = Arc::new(
+            PostgresStore::new(&opts.postgres_url, true, logger.clone(), opts.name).await?,
+        );
 
         // let oracle = Arc::new(P2PDOracleClient::new(&oracle_host).await?);
-        let oracle = Arc::new(KormirOracleClient::new(&opts.oracle_host, None).await?);
+        let oracle =
+            Arc::new(KormirOracleClient::new(&opts.oracle_host, None, logger.clone()).await?);
 
         let mut builder = Builder::new();
         builder.set_seed_bytes(SeedConfig::Bytes(seed_bytes))?;
@@ -81,6 +95,7 @@ impl DdkNode {
         builder.set_transport(transport.clone());
         builder.set_storage(storage.clone());
         builder.set_oracle(oracle.clone());
+        builder.set_logger(logger.clone());
 
         let ddk: Ddk = builder.finish().await?;
 

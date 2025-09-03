@@ -2,11 +2,17 @@ mod test_util;
 
 use bitcoin::Amount;
 use chrono::{Local, TimeDelta};
-use ddk::Transport;
+use ddk::{
+    logger::{LogLevel, Logger},
+    Transport,
+};
 use ddk_manager::{contract::Contract, Storage};
 use ddk_messages::Message;
 use ddk_payouts::options::{Direction, OptionType};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{
+    sync::Arc,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 use test_util::{generate_blocks, test_ddk};
 use tokio::time::sleep;
 
@@ -14,7 +20,10 @@ use tokio::time::sleep;
 #[test_log::test(tokio::test)]
 #[ignore]
 async fn short_call() {
-    let (alice, bob, oracle) = test_ddk().await;
+    dotenv::dotenv().ok();
+    let logger_one = Arc::new(Logger::tracing("alice".to_string(), LogLevel::Info));
+    let logger_two = Arc::new(Logger::disabled("bob".to_string()));
+    let (alice, bob, oracle) = test_ddk(logger_one, logger_two).await;
     let expiry = TimeDelta::seconds(15);
     let timestamp: u32 = Local::now()
         .checked_add_signed(expiry)
@@ -138,7 +147,6 @@ async fn short_call() {
     assert!(attestation.is_ok());
 
     while time < announcement.clone().oracle_event.event_maturity_epoch || time < locktime {
-        tracing::warn!("Waiting for time to expire for oracle event and locktime.");
         let checked_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
