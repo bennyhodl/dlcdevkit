@@ -5,6 +5,14 @@ on:
   pull_request:
 env:
   CARGO_TERM_COLOR: always
+  POSTGRES_USER: dlcdevkit
+  POSTGRES_PASS: dlcdevkit
+  DATABASE_URL: postgresql://dlcdevkit:dlcdevkit@localhost:5432/postgres
+  BITCOIND_HOST: http://localhost:18443
+  BITCOIND_USER: dlcdevkit
+  BITCOIND_PASS: dlcdevkit
+  ESPLORA_HOST: http://localhost:30000
+  RPC_WALLET: ddk
 
 jobs:
   clippy:
@@ -51,11 +59,6 @@ jobs:
   unit-tests:
     name: unit tests
     runs-on: ubuntu-latest
-    env:
-      DATABASE_URL: postgresql://dlcdevkit:dlcdevkit@localhost:5433/postgres
-      BITCOIND_HOST: http://localhost:18443
-      ESPLORA_HOST: http://localhost:30000
-
     steps:
       - name: Install Protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler

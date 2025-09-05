@@ -5,14 +5,18 @@ use std::sync::Arc;
 use bitcoin::key::Secp256k1;
 use bitcoin::Amount;
 use bitcoincore_rpc::RpcApi;
+use ddk::logger::{LogLevel, Logger};
 use ddk::oracle::memory::MemoryOracle;
 use ddk::util::ser::deserialize_contract;
 use ddk_manager::contract::Contract;
 use ddk_manager::Storage;
 use test_util::generate_blocks;
 
+use crate::test_util::get_bitcoind_client;
+
 #[tokio::test]
 async fn contract_balance() {
+    dotenv::dotenv().ok();
     let contract_bytes = include_bytes!("../../testconfig/contract_binaries/PreClosed");
     let contract = deserialize_contract(&contract_bytes.to_vec()).unwrap();
     let preclosed = match contract {
@@ -21,7 +25,8 @@ async fn contract_balance() {
     };
     let secp = Secp256k1::new();
     let oracle = Arc::new(MemoryOracle::default());
-    let bob = test_util::TestSuite::new(&secp, "balance", oracle).await;
+    let logger = Arc::new(Logger::console("balance-test".to_string(), LogLevel::Info));
+    let bob = test_util::TestSuite::new(&secp, "balance", oracle, logger).await;
 
     bob.ddk
         .storage
@@ -31,8 +36,7 @@ async fn contract_balance() {
 
     let address = bob.ddk.wallet.new_external_address().await.unwrap().address;
 
-    let auth = bitcoincore_rpc::Auth::UserPass("ddk".to_string(), "ddk".to_string());
-    let client = bitcoincore_rpc::Client::new("http://127.0.0.1:18443", auth).unwrap();
+    let client = get_bitcoind_client();
     client
         .send_to_address(
             &address,

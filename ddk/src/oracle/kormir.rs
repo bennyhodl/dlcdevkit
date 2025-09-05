@@ -1,3 +1,6 @@
+use std::sync::Arc;
+
+use crate::logger::{log_error, log_info, WriteLog};
 use bitcoin::key::XOnlyPublicKey;
 use ddk_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
 use hmac::{Hmac, Mac};
@@ -9,6 +12,7 @@ use sha2::Sha256;
 use uuid::Uuid;
 
 use crate::error::OracleError;
+use crate::logger::Logger;
 
 async fn get<T>(host: &str, path: &str) -> Result<T, reqwest::Error>
 where
@@ -58,6 +62,7 @@ pub struct KormirOracleClient {
     client: reqwest::Client,
     host: String,
     hmac_secret: Option<Vec<u8>>,
+    logger: Arc<Logger>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -69,16 +74,18 @@ impl KormirOracleClient {
     pub async fn new(
         host: &str,
         hmac_secret: Option<Vec<u8>>,
+        logger: Arc<Logger>,
     ) -> Result<KormirOracleClient, OracleError> {
         let pubkey: XOnlyPublicKey = get::<PubkeyResponse>(host, "pubkey")
             .await
             .map_err(|_| OracleError::Init("Could not get pubkey from Kormir.".to_string()))?
             .pubkey;
         let client = reqwest::Client::new();
-        tracing::info!(
+        log_info!(
+            logger,
+            "Connected to Kormir client. host={} pubkey={}",
             host,
-            pubkey = pubkey.to_string(),
-            "Connected to Kormir client."
+            pubkey.to_string()
         );
 
         Ok(KormirOracleClient {
@@ -86,6 +93,7 @@ impl KormirOracleClient {
             client,
             host: host.to_string(),
             hmac_secret,
+            logger,
         })
     }
 
@@ -95,7 +103,11 @@ impl KormirOracleClient {
     /// if announcement has been signed, and nostr information.
     pub async fn list_events(&self) -> Result<Vec<OracleEventData>, OracleError> {
         get(&self.host, "list-events").await.map_err(|e| {
-            tracing::error!(error = e.to_string(), "Error getting all kormir events.");
+            log_error!(
+                self.logger,
+                "Error getting all kormir events. error={}",
+                e.to_string()
+            );
             OracleError::Announcement("Could not list events from Kormir.".to_string())
         })
     }
@@ -128,7 +140,11 @@ impl KormirOracleClient {
             .json::<OracleAnnouncement>()
             .await?;
 
-        tracing::info!(event_id, "Created Kormir oracle event.");
+        log_info!(
+            self.logger,
+            "Created Kormir oracle event. event_id={}",
+            event_id
+        );
 
         Ok(announcement)
     }
@@ -139,7 +155,12 @@ impl KormirOracleClient {
         event_id: String,
         outcome: String,
     ) -> Result<OracleAttestation, OracleError> {
-        tracing::info!("Signing event. event_id={} outcome={}", event_id, outcome);
+        log_info!(
+            self.logger,
+            "Signing event. event_id={} outcome={}",
+            event_id,
+            outcome
+        );
 
         let event = SignEnumEvent {
             event_id: event_id.clone(),
@@ -158,7 +179,12 @@ impl KormirOracleClient {
             .json::<OracleAttestation>()
             .await?;
 
-        tracing::info!(event_id, outcome, "Signed Kormir oracle event.");
+        log_info!(
+            self.logger,
+            "Signed Kormir oracle event. event_id={} outcome={}",
+            event_id,
+            outcome
+        );
 
         Ok(attestation)
     }
@@ -199,7 +225,11 @@ impl KormirOracleClient {
             .json::<OracleAnnouncement>()
             .await?;
 
-        tracing::info!(event_id, "Created Kormir oracle event.");
+        log_info!(
+            self.logger,
+            "Created Kormir oracle event. event_id={}",
+            event_id
+        );
 
         Ok(announcement)
     }
@@ -210,7 +240,12 @@ impl KormirOracleClient {
         event_id: String,
         outcome: i64,
     ) -> Result<OracleAttestation, OracleError> {
-        tracing::info!("Signing event. event_id={} outcome={}", event_id, outcome);
+        log_info!(
+            self.logger,
+            "Signing event. event_id={} outcome={}",
+            event_id,
+            outcome
+        );
 
         let event = SignNumericEvent {
             event_id: event_id.clone(),
@@ -229,7 +264,12 @@ impl KormirOracleClient {
             .json::<OracleAttestation>()
             .await?;
 
-        tracing::info!(event_id, outcome, "Signed Kormir oracle event.");
+        log_info!(
+            self.logger,
+            "Signed Kormir oracle event. event_id={} outcome={}",
+            event_id,
+            outcome
+        );
 
         Ok(attestation)
     }
@@ -267,36 +307,50 @@ impl ddk_manager::Oracle for KormirOracleClient {
         self.pubkey
     }
 
+    #[tracing::instrument(skip(self))]
     async fn get_attestation(
         &self,
         event_id: &str,
     ) -> Result<ddk_messages::oracle_msgs::OracleAttestation, ddk_manager::error::Error> {
-        tracing::info!(event_id, "Getting attestation to close contract.");
         let attestation = get::<OracleAttestation>(&self.host, &format!("attestation/{event_id}"))
             .await
             .map_err(|e| {
-                tracing::error!(error=?e, "Could not get attestation.");
+                log_error!(self.logger, "Could not get attestation. error={:?}", e);
                 ddk_manager::error::Error::OracleError(format!("Could not get attestation: {e}"))
             })?;
-        tracing::info!(event_id, attestation =? attestation, "Kormir attestation.");
+        log_info!(
+            self.logger,
+            "Kormir attestation. event_id={} attestation={:?}",
+            event_id,
+            attestation
+        );
         Ok(attestation)
     }
 
+    #[tracing::instrument(skip(self))]
     async fn get_announcement(
         &self,
         event_id: &str,
     ) -> Result<ddk_messages::oracle_msgs::OracleAnnouncement, ddk_manager::error::Error> {
-        tracing::info!(event_id, "Getting oracle announcement.");
         let announcement =
             get::<OracleAnnouncement>(&self.host, &format!("announcement/{event_id}"))
                 .await
                 .map_err(|e| {
-                    tracing::error!(error =? e, "Could not get announcement.");
+                    log_error!(
+                        self.logger,
+                        "Could not get announcement. error={}",
+                        e.to_string()
+                    );
                     ddk_manager::error::Error::OracleError(format!(
                         "Could not get announcement: {e}"
                     ))
                 })?;
-        tracing::info!(event_id, announcement=?announcement, "Kormir announcement.");
+        log_info!(
+            self.logger,
+            "Kormir announcement. event_id={} announcement={:?}",
+            event_id,
+            announcement
+        );
         Ok(announcement)
     }
 }
@@ -314,9 +368,13 @@ mod tests {
     use super::*;
 
     async fn create_kormir() -> KormirOracleClient {
-        KormirOracleClient::new("https://kormir.dlcdevkit.com", None)
-            .await
-            .unwrap()
+        KormirOracleClient::new(
+            "https://kormir.dlcdevkit.com",
+            None,
+            Arc::new(Logger::disabled("kormir".to_string())),
+        )
+        .await
+        .unwrap()
     }
 
     #[tokio::test]

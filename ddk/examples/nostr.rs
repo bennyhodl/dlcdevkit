@@ -1,6 +1,7 @@
 use bitcoin::key::rand::Fill;
 use bitcoin::Network;
 use ddk::builder::{Builder, SeedConfig};
+use ddk::logger::{LogLevel, Logger};
 use ddk::oracle::memory::MemoryOracle;
 use ddk::storage::memory::MemoryStorage;
 use ddk::transport::nostr::NostrDlc;
@@ -14,9 +15,17 @@ async fn main() -> Result<(), ddk::error::Error> {
     seed_bytes
         .try_fill(&mut bitcoin::key::rand::thread_rng())
         .unwrap();
+    let logger = Arc::new(Logger::console("nostr_example".to_string(), LogLevel::Info));
 
-    let transport =
-        Arc::new(NostrDlc::new(&seed_bytes, "wss://nostr.dlcdevkit.com", Network::Regtest).await?);
+    let transport = Arc::new(
+        NostrDlc::new(
+            &seed_bytes,
+            "wss://nostr.dlcdevkit.com",
+            Network::Regtest,
+            logger.clone(),
+        )
+        .await?,
+    );
     let storage = Arc::new(MemoryStorage::new());
     let oracle_client = Arc::new(MemoryOracle::default());
 
@@ -25,6 +34,7 @@ async fn main() -> Result<(), ddk::error::Error> {
     builder.set_transport(transport.clone());
     builder.set_storage(storage.clone());
     builder.set_oracle(oracle_client.clone());
+    builder.set_logger(logger.clone());
 
     let ddk: NostrDdk = builder.finish().await?;
 

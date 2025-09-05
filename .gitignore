@@ -9,3 +9,8 @@
 .env
 
 /releases
+
+logs
+
+**/*/CLAUDE.md
+/.claude

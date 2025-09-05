@@ -13,7 +13,6 @@
 use crate::error::NostrError;
 use crate::nostr::nostr_to_bitcoin_pubkey;
 use crate::nostr::{DLC_MESSAGE_KIND, ORACLE_ANNOUNCMENT_KIND, ORACLE_ATTESTATION_KIND};
-use crate::util::ser::message_variant_name;
 use ddk_dlc::secp256k1_zkp::PublicKey as SecpPublicKey;
 use ddk_messages::message_handler::read_dlc_message;
 use ddk_messages::{Message, WireMessage};
@@ -107,12 +106,6 @@ pub fn parse_dlc_msg_event(event: &Event, secret_key: &SecretKey) -> Result<Mess
         }
     }?;
 
-    tracing::info!(
-        message = message_variant_name(&message),
-        "Decrypted message from {}",
-        event.pubkey.to_string()
-    );
-
     Ok(message)
 }
 
@@ -144,11 +137,6 @@ pub fn handle_dlc_msg_event(
             "Event reveived was not DLC Message event (kind 8_888).".to_string(),
         ));
     }
-    tracing::info!(
-        kind = 8_888,
-        pubkey = event.pubkey.to_string(),
-        "Received DLC message event."
-    );
 
     let message = parse_dlc_msg_event(event, secret_key)?;
 

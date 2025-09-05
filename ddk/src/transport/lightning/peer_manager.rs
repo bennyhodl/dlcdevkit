@@ -5,8 +5,9 @@ use lightning::{
         ErroringMessageHandler, IgnoringMessageHandler, MessageHandler,
         PeerManager as LdkPeerManager,
     },
+    log_error, log_info, log_warn,
     sign::{KeysManager, NodeSigner},
-    util::logger::{Level, Logger, Record},
+    util::logger::Logger as LightningLogger,
 };
 use lightning_net_tokio::{setup_inbound, SocketDescriptor};
 use std::{
@@ -15,22 +16,7 @@ use std::{
 };
 use tokio::{net::TcpListener, sync::watch, task::JoinHandle, time::interval};
 
-use crate::{ddk::DlcDevKitDlcManager, error::TransportError, Oracle, Storage};
-
-pub struct DlcDevKitLogger;
-
-/// TODO: make a logging struct for the crate.
-impl Logger for DlcDevKitLogger {
-    fn log(&self, record: Record) {
-        match record.level {
-            Level::Info => tracing::info!("{}", record.args),
-            Level::Warn => tracing::warn!("{}", record.args),
-            Level::Debug => tracing::debug!("{}", record.args),
-            Level::Error => tracing::error!("{}", record.args),
-            _ => tracing::trace!("{}", record.args),
-        }
-    }
-}
+use crate::{ddk::DlcDevKitDlcManager, error::TransportError, logger::Logger, Oracle, Storage};
 
 /// Peer manager that only recognizes DLC messages.
 pub type LnPeerManager = LdkPeerManager<
@@ -38,7 +24,7 @@ pub type LnPeerManager = LdkPeerManager<
     Arc<ErroringMessageHandler>,
     Arc<IgnoringMessageHandler>,
     Arc<IgnoringMessageHandler>,
-    Arc<DlcDevKitLogger>,
+    Arc<Logger>,
     Arc<DlcMessageHandler>,
     Arc<KeysManager>,
 >;
@@ -60,12 +46,15 @@ pub struct LightningTransport {
     pub node_id: PublicKey,
     /// Listening port for the TCP connection.
     pub listening_port: u16,
+    /// [`crate::logger::Logger`] instance.
+    pub logger: Arc<Logger>,
 }
 
 impl LightningTransport {
     pub fn new(
         seed_bytes: &[u8; 32],
         listening_port: u16,
+        logger: Arc<Logger>,
     ) -> Result<LightningTransport, TransportError> {
         let time = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -93,12 +82,13 @@ impl LightningTransport {
                 message_handler,
                 time.as_secs() as u32,
                 &ephmeral_data,
-                Arc::new(DlcDevKitLogger {}),
+                logger.clone(),
                 Arc::new(key_signer),
             )),
             message_handler: dlc_message_handler,
             node_id,
             listening_port,
+            logger,
         })
     }
 
@@ -109,20 +99,23 @@ impl LightningTransport {
         let listening_port = self.listening_port;
         let mut listen_stop = stop_signal.clone();
         let peer_manager = Arc::clone(&self.peer_manager);
+        let logger = Arc::clone(&self.logger);
         tokio::spawn(async move {
             let listener = TcpListener::bind(format!("0.0.0.0:{}", listening_port))
                 .await
                 .map_err(|e| TransportError::Listen(e.to_string()))?;
 
-            tracing::info!(
-                addr =? listener.local_addr().unwrap(),
-                "Starting lightning peer manager listener."
+            log_info!(
+                logger,
+                "Starting lightning peer manager listener. address={}",
+                listener.local_addr().unwrap()
             );
+            let logger_clone = logger.clone();
             loop {
                 tokio::select! {
                     _ = listen_stop.changed() => {
                         if *listen_stop.borrow() {
-                            tracing::warn!("Stop signal for lightning connection manager.");
+                            log_warn!(logger_clone, "Stop signal for lightning connection manager.");
                             break;
                         }
                     },
@@ -130,16 +123,14 @@ impl LightningTransport {
                         match accept_result {
                             Ok((tcp_stream, socket)) => {
                                 let peer_mgr = Arc::clone(&peer_manager);
+                                let logger_clone = logger_clone.clone();
                                 tokio::spawn(async move {
-                                    tracing::info!(
-                                        connection = socket.to_string(),
-                                        "Received connection."
-                                    );
+                                    log_info!(logger_clone, "Received connection. connection={}", socket.to_string());
                                     setup_inbound(peer_mgr, tcp_stream.into_std().unwrap()).await;
                                 });
                             }
                             Err(e) => {
-                                tracing::error!("Error accepting connection: {}", e);
+                                log_error!(logger_clone, "Error accepting connection. error={}", e);
                             }
                         }
                     }
@@ -158,47 +149,42 @@ impl LightningTransport {
         let message_manager = Arc::clone(&manager);
         let peer_manager = Arc::clone(&self.peer_manager);
         let message_handler = Arc::clone(&self.message_handler);
+        let logger = Arc::clone(&self.logger);
         tokio::spawn(async move {
             let mut message_interval = interval(Duration::from_secs(20));
+            let logger_clone = logger.clone();
             loop {
                 tokio::select! {
                     _ = message_stop.changed() => {
                         if *message_stop.borrow() {
-                            tracing::warn!("Stop signal for lightning message processor.");
+                            log_warn!(logger_clone, "Stop signal for lightning message processor.");
                             break;
                         }
                     },
                     _ = message_interval.tick() => {
                         if message_handler.has_pending_messages() {
-                            tracing::info!("There are pending messages to be sent.");
+                            log_info!(logger_clone, "There are pending messages to be sent.");
                             peer_manager.process_events();
                         }
                         let messages = message_handler.get_and_clear_received_messages();
                         for (counter_party, message) in messages {
-                            tracing::info!(
-                                counter_party = counter_party.to_string(),
-                                "Processing DLC message"
-                            );
+                            log_info!(logger_clone, "Processing DLC message. counter_party={}", counter_party.to_string());
                             match message_manager.on_dlc_message(&message, counter_party).await {
                                 Ok(Some(message)) => {
                                     if peer_manager.peer_by_node_id(&counter_party).is_some() {
-                                        tracing::info!(message=?message, "Sending message to {}", counter_party.to_string());
+                                        log_info!(logger_clone, "Sending message to counter_party={}", counter_party.to_string());
                                         message_handler.send_message(counter_party, message);
                                         peer_manager.process_events();
                                     } else {
-                                        tracing::warn!(
-                                            pubkey = counter_party.to_string(),
-                                            "Not connected to counterparty. Message not sent"
+                                        log_warn!(logger_clone,
+                                            "Not connected to counterparty. Message not sent. counter_party={}", counter_party.to_string()
                                         )
                                     }
                                 }
                                 Ok(None) => (),
                                 Err(e) => {
-                                    tracing::error!(
-                                        error=e.to_string(),
-                                        counterparty=counter_party.to_string(),
-                                        message=?message,
-                                        "Could not process dlc message."
+                                    log_error!(logger_clone,
+                                        "Could not process dlc message. message={:?} counterparty={} error={}", message, counter_party.to_string(), e.to_string()
                                     );
                                 }
                             }
@@ -238,6 +224,7 @@ mod tests {
 
     #[tokio::test]
     async fn send_offer_test() {
+        let logger = Arc::new(Logger::disabled("test_lightning_transport".to_string()));
         let mut seed_bytes = [0u8; 32];
         seed_bytes
             .try_fill(&mut bitcoin::key::rand::thread_rng())
@@ -247,8 +234,8 @@ mod tests {
             .try_fill(&mut bitcoin::key::rand::thread_rng())
             .unwrap();
 
-        let alice = LightningTransport::new(&seed_bytes, 1776).unwrap();
-        let bob = LightningTransport::new(&bob_seed_bytes, 1777).unwrap();
+        let alice = LightningTransport::new(&seed_bytes, 1776, logger.clone()).unwrap();
+        let bob = LightningTransport::new(&bob_seed_bytes, 1777, logger.clone()).unwrap();
 
         let (sender, receiver) = watch::channel(false);
         alice.listen(receiver.clone());

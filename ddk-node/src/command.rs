@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::cli_opts::{CliCommand, OracleCommand, WalletCommand};
 // use crate::convert::*;
 use crate::ddkrpc::ddk_rpc_client::DdkRpcClient;
@@ -11,6 +13,7 @@ use anyhow::anyhow;
 use bitcoin::{Amount, Transaction};
 use chrono::TimeDelta;
 use ddk::json::*;
+use ddk::logger::{LogLevel, Logger};
 use ddk::oracle::kormir::KormirOracleClient;
 use ddk::util;
 use ddk::wallet::LocalOutput;
@@ -228,8 +231,12 @@ async fn generate_contract_input() -> anyhow::Result<ContractInput> {
             },
         ],
     });
+    let logger = Arc::new(Logger::console(
+        "generate_contract_input".to_string(),
+        LogLevel::Info,
+    ));
 
-    let kormir = KormirOracleClient::new("https://kormir.dlcdevkit.com", None).await?;
+    let kormir = KormirOracleClient::new("https://kormir.dlcdevkit.com", None, logger).await?;
 
     let expiry = (chrono::Utc::now()
         .checked_add_signed(TimeDelta::minutes(15))

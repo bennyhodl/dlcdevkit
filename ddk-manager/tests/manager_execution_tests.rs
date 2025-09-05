@@ -4,6 +4,7 @@ mod test_utils;
 
 use bitcoin::Amount;
 use ddk::chain::EsploraClient;
+use ddk::logger::Logger;
 use ddk_manager::payout_curve::PayoutFunctionPiece;
 use test_utils::*;
 
@@ -726,12 +727,19 @@ async fn get_attestations(test_params: &TestParams) -> Vec<(usize, OracleAttesta
 
 async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_close: bool) {
     env_logger::try_init().ok();
+    let esplora_host = std::env::var("ESPLORA_HOST").expect("ESPLORA_HOST must be set");
+    let logger = Arc::new(Logger::disabled("test_manager_execution".to_string()));
+    let electrs = Arc::new(
+        EsploraClient::new(&esplora_host, bitcoin::Network::Regtest, logger.clone()).unwrap(),
+    );
+
     let (alice_send, mut bob_receive) = channel::<Option<Message>>(100);
     let (bob_send, mut alice_receive) = channel::<Option<Message>>(100);
     let (sync_send, mut sync_receive) = channel::<()>(100);
     let alice_sync_send = sync_send.clone();
     let bob_sync_send = sync_send;
-    let (bob_wallet, bob_storage, alice_wallet, alice_storage, sink_rpc) = init_clients().await;
+    let (bob_wallet, bob_storage, alice_wallet, alice_storage, sink_rpc) =
+        init_clients(logger.clone(), electrs.clone()).await;
     let alice_wallet = Arc::new(alice_wallet);
     let bob_wallet = Arc::new(bob_wallet);
     let sink = Arc::new(sink_rpc);
@@ -755,9 +763,6 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
 
     test_utils::set_time(initial_time);
 
-    let electrs =
-        Arc::new(EsploraClient::new("http://localhost:30000", bitcoin::Network::Regtest).unwrap());
-
     test_utils::generate_blocks(6, electrs.clone(), sink.clone()).await;
 
     refresh_wallet(&alice_wallet, TOTAL_COLLATERAL.to_sat()).await;
@@ -772,6 +777,7 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
             alice_oracles,
             Arc::clone(&mock_time),
             Arc::clone(&electrs),
+            logger.clone(),
         )
         .await
         .unwrap(),
@@ -789,6 +795,7 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
             bob_oracles,
             Arc::clone(&mock_time),
             Arc::clone(&electrs),
+            logger.clone(),
         )
         .await
         .unwrap(),

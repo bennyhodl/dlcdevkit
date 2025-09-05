@@ -1,26 +1,41 @@
-use crate::chain::EsploraClient;
+use super::WalletStorage;
 use crate::error::WalletError;
+use crate::logger::{log_debug, WriteLog};
+use crate::{chain::EsploraClient, logger::Logger};
 use bdk_chain::spk_client::FullScanRequest;
 use bdk_esplora::EsploraAsyncExt;
 use bdk_wallet::{KeychainKind, PersistedWallet, Update};
 use std::collections::BTreeMap;
-
-use super::WalletStorage;
+use std::sync::Arc;
 
 type Result<T> = std::result::Result<T, WalletError>;
 
+#[tracing::instrument(skip_all)]
 pub async fn sync(
     wallet: &mut PersistedWallet<WalletStorage>,
     blockchain: &EsploraClient,
     storage: &mut WalletStorage,
+    logger: Arc<Logger>,
 ) -> Result<()> {
+    let block_height = blockchain
+        .async_client
+        .get_height()
+        .await
+        .map_err(|e| WalletError::Esplora(e.to_string()))?;
     let prev_tip = wallet.latest_checkpoint();
-    tracing::debug!(
-        height = prev_tip.height(),
-        "Syncing wallet with latest known height."
+
+    if prev_tip.height() == block_height {
+        return Ok(());
+    }
+
+    log_debug!(
+        logger,
+        "Syncing wallet with latest known height. height={} wallet_height={}",
+        block_height,
+        prev_tip.height()
     );
     let sync_result = if prev_tip.height() == 0 {
-        tracing::info!("Performing a full chain scan.");
+        log_debug!(logger, "Performing a full chain scan.");
         let spks = wallet
             .all_unbounded_spk_iters()
             .get(&KeychainKind::External)

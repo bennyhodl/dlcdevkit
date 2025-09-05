@@ -1,4 +1,5 @@
 use super::{SledStorage, CHAIN_MONITOR_KEY, CHAIN_MONITOR_TREE};
+use crate::logger::{log_error, log_info, WriteLog};
 use crate::util::ser::{
     deserialize_contract, serialize_contract, ChannelPrefix, ContractPrefix, SignedChannelPrefix,
 };
@@ -63,7 +64,7 @@ impl Storage for SledStorage {
     }
 
     async fn update_contract(&self, contract: &Contract) -> Result<(), Error> {
-        tracing::info!("Updating contract. {:?}", contract);
+        log_info!(self.logger, "Updating contract. {:?}", contract);
         let serialized = serialize_contract(contract)?;
         self.contract_tree()?
             .transaction::<_, _, UnabortableTransactionError>(|db| {
@@ -78,7 +79,7 @@ impl Storage for SledStorage {
                 Ok(())
             })
             .map_err(|e| {
-                tracing::error!("Could not update contract: {:?}", e);
+                log_error!(self.logger, "Could not update contract. error={}", e);
                 to_storage_error(e)
             })?;
         Ok(())
@@ -313,14 +314,17 @@ fn deserialize_channel(buff: &sled::IVec) -> Result<Channel, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::logger::Logger;
+    use std::sync::Arc;
 
     macro_rules! sled_test {
         ($name: ident, $body: expr) => {
             #[tokio::test]
             async fn $name() {
                 let path = format!("{}{}", "tests/data/dlc_storagedb/", std::stringify!($name));
+                let logger = Arc::new(Logger::disabled("sled_test".to_string()));
                 {
-                    let storage = SledStorage::new(&path).expect("Error opening sled DB");
+                    let storage = SledStorage::new(&path, logger).expect("Error opening sled DB");
                     #[allow(clippy::redundant_closure_call)]
                     $body(storage).await;
                 }

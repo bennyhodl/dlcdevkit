@@ -1,3 +1,4 @@
+use crate::logger::{log_error, log_info, WriteLog};
 use bip39::{Language, Mnemonic};
 use bitcoin::key::rand::Fill;
 use bitcoin::Network;
@@ -9,12 +10,14 @@ use std::sync::{Arc, RwLock};
 use crate::chain::EsploraClient;
 use crate::ddk::{DlcDevKit, DlcManagerMessage};
 use crate::error::{BuilderError, Error};
+use crate::logger::{LogLevel, Logger};
 use crate::wallet::address::AddressGenerator;
 use crate::wallet::DlcDevKitWallet;
 use crate::{Oracle, Storage, Transport};
 
 const DEFAULT_ESPLORA_HOST: &str = "https://mutinynet.com/api";
 const DEFAULT_NETWORK: Network = Network::Signet;
+const DEFAULT_LOG_LEVEL: LogLevel = LogLevel::Info;
 
 /// Configuration for the seed bytes for the wallet.
 #[derive(Debug, Clone)]
@@ -38,6 +41,7 @@ pub struct Builder<T, S, O> {
     esplora_host: String,
     network: Network,
     seed_bytes: [u8; 64],
+    logger: Option<Arc<Logger>>,
 }
 
 /// Defaults when creating a DDK application
@@ -56,6 +60,7 @@ impl<T: Transport, S: Storage, O: Oracle> Default for Builder<T, S, O> {
             esplora_host: DEFAULT_ESPLORA_HOST.to_string(),
             network: DEFAULT_NETWORK,
             seed_bytes: [0u8; 64],
+            logger: None,
         }
     }
 }
@@ -137,14 +142,29 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
         Ok(self)
     }
 
-    /// Builds the `DlcDevKit` instance. Fails if any components are missing.
-    pub async fn finish(&self) -> Result<DlcDevKit<T, S, O>, Error> {
-        tracing::info!(
-            network = self.network.to_string(),
-            esplora = self.esplora_host,
-            "Building DDK."
-        );
+    /// Set the logger for the DDK instance.
+    pub fn set_logger(&mut self, logger: Arc<Logger>) -> &mut Self {
+        self.logger = Some(logger);
+        self
+    }
 
+    /// Setup the logger based on the provided logger or use default console logging
+    fn setup_logger(&self, name: &str) -> Result<Arc<Logger>, Error> {
+        match &self.logger {
+            Some(logger) => Ok(logger.clone()),
+            None => {
+                // Default to console logging with Info level
+                Ok(Arc::new(Logger::console(
+                    name.to_string(),
+                    DEFAULT_LOG_LEVEL,
+                )))
+            }
+        }
+    }
+
+    /// Builds the `DlcDevKit` instance. Fails if any components are missing.
+    #[tracing::instrument(name = "builder", skip(self))]
+    pub async fn finish(&self) -> Result<DlcDevKit<T, S, O>, Error> {
         let transport = self
             .transport
             .as_ref()
@@ -160,19 +180,28 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
             .as_ref()
             .map_or_else(|| Err(BuilderError::NoOracle), |o| Ok(o.clone()))?;
 
-        let _ = self
+        let name = self
             .name
             .clone()
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+        let logger = self.setup_logger(&name)?;
+
+        let esplora_client = Arc::new(EsploraClient::new(
+            &self.esplora_host,
+            self.network,
+            logger.clone(),
+        )?);
 
         let wallet = match &self.contract_address_generator {
             Some(w) => {
                 let wallet = DlcDevKitWallet::new(
                     &self.seed_bytes,
-                    &self.esplora_host,
+                    esplora_client.clone(),
                     self.network,
                     storage.clone(),
                     Some(w.clone()),
+                    logger.clone(),
                 )
                 .await?;
                 Arc::new(wallet)
@@ -180,10 +209,11 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
             None => Arc::new(
                 DlcDevKitWallet::new(
                     &self.seed_bytes,
-                    &self.esplora_host,
+                    esplora_client.clone(),
                     self.network,
                     storage.clone(),
                     None,
+                    logger.clone(),
                 )
                 .await?,
             ),
@@ -191,8 +221,6 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
 
         let mut oracles = HashMap::new();
         oracles.insert(oracle.get_public_key(), oracle.clone());
-
-        let esplora_client = Arc::new(EsploraClient::new(&self.esplora_host, self.network)?);
 
         let (sender, mut receiver) = tokio::sync::mpsc::channel(100);
         let (stop_signal_sender, stop_signal) = tokio::sync::watch::channel(false);
@@ -206,11 +234,13 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
                 oracles,
                 Arc::new(SystemTimeProvider {}),
                 wallet.clone(),
+                logger.clone(),
             )
             .await?,
         );
 
         let manager_clone = manager.clone();
+        let logger_clone = logger.clone();
         tokio::spawn(async move {
             while let Some(msg) = receiver.recv().await {
                 match msg {
@@ -229,7 +259,7 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
                             .await;
 
                         let _ = responder.send(offer).map_err(|e| {
-                            tracing::error!("Error sending offer: {:?}", e);
+                            log_error!(logger_clone.clone(), "Error sending offer: {:?}", e);
                         });
                     }
                     DlcManagerMessage::AcceptDlc {
@@ -239,7 +269,7 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
                         let accept_dlc = manager_clone.accept_contract_offer(&contract).await;
 
                         let _ = responder.send(accept_dlc).map_err(|e| {
-                            tracing::error!("Error sending accept DLC: {:?}", e);
+                            log_error!(logger_clone.clone(), "Error sending accept DLC: {:?}", e);
                         });
                     }
                     DlcManagerMessage::PeriodicCheck => {
@@ -248,6 +278,16 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
                 }
             }
         });
+
+        log_info!(
+            logger.clone(),
+            "DDK runtime created. name={}, esplora={}, network={}, transport={}, oracle={}",
+            name,
+            self.esplora_host,
+            self.network,
+            transport.name(),
+            oracle.get_public_key()
+        );
 
         Ok(DlcDevKit {
             runtime: Arc::new(RwLock::new(None)),
@@ -260,6 +300,7 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
             network: self.network,
             stop_signal,
             stop_signal_sender,
+            logger,
         })
     }
 }

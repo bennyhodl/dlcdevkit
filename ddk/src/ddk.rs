@@ -27,8 +27,11 @@
 
 use crate::chain::EsploraClient;
 use crate::error::Error;
+use crate::logger::Logger;
+use crate::logger::{log_error, log_info, log_warn, WriteLog};
 use crate::wallet::DlcDevKitWallet;
 use crate::{Oracle, Storage, Transport};
+use bitcoin::hex::DisplayHex;
 use bitcoin::secp256k1::PublicKey;
 use bitcoin::{Amount, Network, SignedAmount};
 use ddk_manager::contract::Contract;
@@ -63,6 +66,7 @@ pub type DlcDevKitDlcManager<S, O> = ddk_manager::manager::Manager<
     Arc<SystemTimeProvider>,
     Arc<DlcDevKitWallet>,
     SimpleSigner,
+    Arc<Logger>,
 >;
 
 type Result<T> = std::result::Result<T, Error>;
@@ -143,6 +147,8 @@ pub struct DlcDevKit<T: Transport, S: Storage, O: Oracle> {
     pub stop_signal: watch::Receiver<bool>,
     /// Sender for stop signal
     pub stop_signal_sender: watch::Sender<bool>,
+    /// Logger instance for structured logging
+    pub logger: Arc<Logger>,
 }
 
 impl<T, S, O> DlcDevKit<T, S, O>
@@ -204,26 +210,33 @@ where
         let transport_clone = self.transport.clone();
         let manager_clone = self.manager.clone();
         let stop_signal = self.stop_signal.clone();
+        let logger_clone = self.logger.clone();
         runtime.spawn(async move {
             if let Err(e) = transport_clone.start(stop_signal, manager_clone).await {
-                tracing::error!(error = e.to_string(), "Error in transport listeners.");
+                log_error!(
+                    logger_clone,
+                    "Error in transport listeners. error={}",
+                    e.to_string()
+                );
             }
         });
 
         // Spawn wallet sync thread (60-second interval)
         let wallet_clone = self.wallet.clone();
+        let logger_clone = self.logger.clone();
         runtime.spawn(async move {
             let mut timer = tokio::time::interval(Duration::from_secs(60));
             loop {
                 timer.tick().await;
                 if let Err(e) = wallet_clone.sync().await {
-                    tracing::warn!(error=?e, "Did not sync wallet.");
+                    log_warn!(logger_clone, "Did not sync wallet. error={}", e.to_string());
                 };
             }
         });
 
         // Spawn contract monitor thread (30-second interval)
         let processor = self.sender.clone();
+        let logger_clone = self.logger.clone();
         runtime.spawn(async move {
             let mut timer = tokio::time::interval(Duration::from_secs(30));
             loop {
@@ -232,7 +245,11 @@ where
                     .send(DlcManagerMessage::PeriodicCheck)
                     .await
                     .map_err(|e| {
-                        tracing::error!("Error sending periodic check: {}", e);
+                        log_error!(
+                            logger_clone,
+                            "Error sending periodic check: error={}",
+                            e.to_string()
+                        );
                     });
             }
         });
@@ -247,7 +264,7 @@ where
     /// - Background tasks are terminated
     /// - Resources are properly cleaned up
     pub fn stop(&self) -> Result<()> {
-        tracing::warn!("Shutting down DDK runtime and listeners.");
+        log_warn!(self.logger, "Shutting down DDK runtime and listeners.");
         self.stop_signal_sender
             .send(true)
             .map_err(|e| Error::ActorSendError(e.to_string()))?;
@@ -271,6 +288,7 @@ where
     /// 1. Creates a DLC offer message
     /// 2. Sends it through the transport layer
     /// 3. Returns the created offer for further processing
+    #[tracing::instrument(skip(self, contract_input))]
     pub async fn send_dlc_offer(
         &self,
         contract_input: &ContractInput,
@@ -278,6 +296,12 @@ where
         oracle_announcements: Vec<OracleAnnouncement>,
     ) -> Result<OfferDlc> {
         let (responder, receiver) = oneshot::channel();
+        let event_ids = &oracle_announcements
+            .iter()
+            .map(|announcement| announcement.oracle_event.event_id.as_str())
+            .collect::<Vec<_>>()
+            .join(",");
+
         self.sender
             .send(DlcManagerMessage::OfferDlc {
                 contract_input: contract_input.to_owned(),
@@ -293,14 +317,15 @@ where
 
         let offer = offer?;
 
-        let contract_id = hex::encode(offer.temporary_contract_id);
         self.transport
             .send_message(counter_party, Message::Offer(offer.clone()))
             .await;
-        tracing::info!(
-            counterparty = counter_party.to_string(),
-            contract_id,
-            "Sent DLC offer to counterparty."
+
+        log_info!(
+            self.logger,
+            "Sent DLC offer to counterparty. counterparty={} event_ids={}",
+            counter_party.to_string(),
+            event_ids,
         );
 
         Ok(offer)
@@ -313,6 +338,7 @@ where
     /// 2. Creates acceptance message
     /// 3. Sends it to the counterparty
     /// 4. Returns the acceptance details
+    #[tracing::instrument(skip(self))]
     pub async fn accept_dlc_offer(
         &self,
         contract: [u8; 32],
@@ -338,10 +364,12 @@ where
 
         let contract_id = hex::encode(contract_id);
         let counter_party = public_key.to_string();
-        tracing::info!(
-            counter_party,
+        log_info!(
+            self.logger,
+            "Accepted and sent accept DLC contract. counter_party={}, contract_id={} temp_contract_id={}",
+            counter_party.to_string(),
             contract_id,
-            "Accepted and sent accept DLC contract."
+            contract.to_lower_hex_string()
         );
 
         Ok((contract_id, counter_party, accept_dlc))
@@ -352,6 +380,7 @@ where
     /// - Unconfirmed changes
     /// - Funds locked in contracts
     /// - Total profit/loss from closed contracts
+    #[tracing::instrument(skip(self))]
     pub async fn balance(&self) -> Result<crate::Balance> {
         let wallet_balance = self.wallet.get_balance().await?;
         let contracts = self.storage.get_contracts().await?;

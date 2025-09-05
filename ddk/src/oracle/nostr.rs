@@ -1,7 +1,10 @@
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::error::OracleError;
+use crate::logger::Logger;
+use crate::logger::{log_debug, log_error, log_info, log_warn, WriteLog};
 use bitcoin::XOnlyPublicKey;
 use ddk_manager::error::Error as ManagerError;
 use ddk_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
@@ -40,6 +43,8 @@ pub struct NostrOracle {
     xonly_oracle_pubkey: XOnlyPublicKey,
     /// Nostr public key for message verification and routing
     nostr_oracle_pubkey: NostrPublicKey,
+    /// [`ddk::logger::Logger`] instance for logging
+    logger: Arc<Logger>,
 }
 
 impl NostrOracle {
@@ -55,6 +60,7 @@ impl NostrOracle {
     /// * `relays` - List of Nostr relay URLs to connect to
     /// * `since` - Optional timestamp to filter events from (defaults to now if None)
     /// * `nostr_oracle_pubkey` - The oracle's Nostr public key for message verification
+    /// * `logger` - [`ddk::logger::Logger`] instance for logging
     ///
     /// # Returns
     /// * `Ok(NostrOracle)` - Successfully initialized oracle
@@ -63,6 +69,7 @@ impl NostrOracle {
         relays: Vec<U>,
         since: Option<Timestamp>,
         nostr_oracle_pubkey: NostrPublicKey,
+        logger: Arc<Logger>,
     ) -> Result<Self, OracleError> {
         let xonly_oracle_pubkey = XOnlyPublicKey::from_slice(nostr_oracle_pubkey.as_bytes())
             .map_err(|_| {
@@ -77,7 +84,7 @@ impl NostrOracle {
             if let Ok(url) = relay.try_into_url() {
                 client.add_relay(url).await.unwrap();
             } else {
-                tracing::error!("Invalid relay URL.");
+                log_error!(logger, "Invalid relay URL.");
             }
         }
 
@@ -98,6 +105,7 @@ impl NostrOracle {
             db,
             xonly_oracle_pubkey,
             nostr_oracle_pubkey,
+            logger,
         })
     }
 
@@ -127,26 +135,28 @@ impl NostrOracle {
         &self,
         mut stop_signal: watch::Receiver<bool>,
     ) -> JoinHandle<Result<(), OracleError>> {
-        tracing::info!(
-            pubkey = self.nostr_oracle_pubkey.to_string(),
-            "Starting Nostr Oracle listener."
+        log_info!(
+            self.logger,
+            "Starting Nostr Oracle listener. pubkey={}",
+            self.nostr_oracle_pubkey.to_string()
         );
         let nostr_client = self.client.clone();
         let db = self.db.clone();
+        let logger = self.logger.clone();
         tokio::spawn(async move {
-            tracing::info!("Listening for Oracle messages.");
+            log_info!(logger, "Listening for Oracle messages.");
             let mut notifications = nostr_client.notifications();
             loop {
                 tokio::select! {
                     _ = stop_signal.changed() => {
                         if *stop_signal.borrow() {
-                            tracing::warn!("Stopping nostr oracle subscription.");
+                            log_warn!(logger, "Stopping nostr oracle subscription.");
                             nostr_client.disconnect().await;
                             break;
                         }
                     },
                     Ok(notification) = notifications.recv() => {
-                        tracing::info!("Received notification {:?}", notification);
+                        log_info!(logger, "Received notification {:?}", notification);
                         match notification {
                             RelayPoolNotification::Event {
                                 relay_url: _,
@@ -157,13 +167,13 @@ impl NostrOracle {
                                 match event.kind {
                                     Kind::Custom(88) => {
                                         if let Ok(announcement) = decode_base64::<OracleAnnouncement>(&event.content) {
-                                            tracing::info!("Received announcement event: {}", announcement.oracle_event.event_id);
+                                            log_info!(logger, "Received announcement event: {}", announcement.oracle_event.event_id);
                                             let _ = db.save_event(&event).await;
                                         }
                                     }
                                     Kind::Custom(89) => {
                                         if let Ok(attestation) = decode_base64::<OracleAttestation>(&event.content) {
-                                            tracing::info!("Received attestation event: {}", attestation.event_id);
+                                            log_info!(logger, "Received attestation event: {}", attestation.event_id);
                                             let _ =db.save_event(&event).await;
                                         }
                                     }
@@ -192,13 +202,17 @@ impl ddk_manager::Oracle for NostrOracle {
         self.xonly_oracle_pubkey
     }
 
+    #[tracing::instrument(skip(self))]
     async fn get_announcement(&self, event_id: &str) -> Result<OracleAnnouncement, ManagerError> {
-        tracing::info!("Getting announcement for event id: {}", event_id);
         let event_id = EventId::from_str(event_id)
             .map_err(|_| ManagerError::OracleError(format!("Invalid event id: {}", event_id)))?;
 
         if let Ok(event) = self.db.event_by_id(&event_id).await {
-            tracing::info!("Event found in db: {:?}", event);
+            log_debug!(
+                self.logger,
+                "Event found in nostr database. event_id={}",
+                event_id
+            );
             if let Some(event) = event {
                 return Ok(decode_base64::<OracleAnnouncement>(&event.content).unwrap());
             }
@@ -226,6 +240,7 @@ impl ddk_manager::Oracle for NostrOracle {
         ))
     }
 
+    #[tracing::instrument(skip(self))]
     async fn get_attestation(&self, event_id: &str) -> Result<OracleAttestation, ManagerError> {
         let event_id = EventId::from_str(event_id)
             .map_err(|_| ManagerError::OracleError(format!("Invalid event id: {}", event_id)))?;

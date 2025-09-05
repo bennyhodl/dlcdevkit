@@ -36,6 +36,8 @@ pub enum Error {
     Manager(#[from] DlcManagerError),
     #[error("BuilderError: {0}")]
     Builder(#[from] BuilderError),
+    #[error("LoggerError: {0}")]
+    Logger(#[from] LoggerError),
     #[error("EsploraError: {0}")]
     Esplora(#[from] bdk_esplora::esplora_client::Error),
     #[error("Generic error: {0}")]
@@ -126,6 +128,21 @@ pub enum NostrError {
     Generic(String),
 }
 
+/// Errors related to logging operations in DDK.
+/// Handles failures in:
+/// - Logger initialization
+/// - File creation and writing
+/// - Log formatting
+#[derive(Error, Debug)]
+pub enum LoggerError {
+    #[error("Logger initialization: {0}")]
+    Init(String),
+    #[error("File I/O error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Tracing setup error: {0}")]
+    TracingSetup(String),
+}
+
 /// Errors that can occur during the DlcDevKit builder process.
 /// These errors indicate missing required components when constructing
 /// a new DlcDevKit instance.
@@ -139,6 +156,8 @@ pub enum BuilderError {
     NoOracle,
     #[error("Failed to generate random seed.")]
     SeedGenerationFailed,
+    #[error("Logger setup failed.")]
+    LoggerSetupFailed,
 }
 
 /// Errors related to Bitcoin wallet operations.

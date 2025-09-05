@@ -25,6 +25,8 @@ pub mod address;
 mod command;
 
 use crate::error::{wallet_err_to_manager_err, WalletError};
+use crate::logger::Logger;
+use crate::logger::{log_error, log_info, WriteLog};
 use crate::wallet::address::AddressGenerator;
 use crate::{chain::EsploraClient, Storage};
 use bdk_chain::Balance;
@@ -86,7 +88,7 @@ const MIN_CHANGE_SIZE: u64 = 25_000;
 /// # Thread Safety
 /// The wrapper uses Arc<dyn Storage> to ensure the storage can be safely shared across threads
 /// and provides the necessary interior mutability for BDK operations.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct WalletStorage(Arc<dyn Storage>);
 
 impl AsyncWalletPersister for WalletStorage {
@@ -112,7 +114,6 @@ impl AsyncWalletPersister for WalletStorage {
     where
         Self: 'a,
     {
-        tracing::info!("persist store");
         Box::pin(persister.0.persist_bdk(changeset))
     }
 }
@@ -199,6 +200,8 @@ pub struct DlcDevKitWallet {
     dlc_path: DerivationPath,
     /// Function to generate external addresses
     address_generator: Option<Arc<dyn AddressGenerator + Send + Sync>>,
+    /// Logger
+    logger: Arc<Logger>,
 }
 
 const MIN_FEERATE: u32 = 253;
@@ -228,12 +231,14 @@ impl DlcDevKitWallet {
     /// - Maintains wallet state
     /// - Handles all BDK operations
     /// - Manages blockchain synchronization
+    #[tracing::instrument(name = "wallet", skip_all)]
     pub async fn new(
         seed_bytes: &[u8; 64],
-        esplora_url: &str,
+        blockchain: Arc<EsploraClient>,
         network: Network,
         storage: Arc<dyn Storage>,
         address_generator: Option<Arc<dyn AddressGenerator + Send + Sync>>,
+        logger: Arc<Logger>,
     ) -> Result<DlcDevKitWallet> {
         let secp = Secp256k1::new();
 
@@ -267,40 +272,54 @@ impl DlcDevKitWallet {
 
         let dlc_path = DerivationPath::from_str("m/420'/0'/0'")?;
 
-        let blockchain = Arc::new(
-            EsploraClient::new(esplora_url, network)
-                .map_err(|e| WalletError::Esplora(e.to_string()))?,
-        );
-
         let (sender, mut receiver) = channel(100);
 
+        let logger_clone = logger.clone();
         tokio::spawn(async move {
             while let Some(command) = receiver.recv().await {
                 match command {
                     WalletCommand::Sync(sender) => {
-                        let sync = command::sync(&mut wallet, &blockchain, &mut storage).await;
+                        let sync = command::sync(
+                            &mut wallet,
+                            &blockchain,
+                            &mut storage,
+                            logger_clone.clone(),
+                        )
+                        .await;
                         let _ = sender.send(sync).map_err(|e| {
-                            tracing::error!("Error sending sync command: {:?}", e);
+                            log_error!(logger_clone, "Error sending sync command. error={:?}", e);
                         });
                     }
                     WalletCommand::Balance(sender) => {
                         let balance = wallet.balance();
                         let _ = sender.send(balance).map_err(|e| {
-                            tracing::error!("Error sending balance command: {:?}", e);
+                            log_error!(
+                                logger_clone,
+                                "Error sending balance command. error={:?}",
+                                e
+                            );
                         });
                     }
                     WalletCommand::NewExternalAddress(sender) => {
                         let address = wallet.next_unused_address(KeychainKind::External);
                         let _ = wallet.persist_async(&mut storage).await;
                         let _ = sender.send(Ok(address)).map_err(|e| {
-                            tracing::error!("Error sending new external address command: {:?}", e);
+                            log_error!(
+                                logger_clone,
+                                "Error sending new external address command. error={:?}",
+                                e
+                            );
                         });
                     }
                     WalletCommand::NewChangeAddress(sender) => {
                         let address = wallet.next_unused_address(KeychainKind::Internal);
                         let _ = wallet.persist_async(&mut storage).await;
                         let _ = sender.send(Ok(address)).map_err(|e| {
-                            tracing::error!("Error sending new change address command: {:?}", e);
+                            log_error!(
+                                logger_clone,
+                                "Error sending new change address command. error={:?}",
+                                e
+                            );
                         });
                     }
                     WalletCommand::SendToAddress(address, amount, fee_rate, sender) => {
@@ -313,8 +332,9 @@ impl DlcDevKitWallet {
                             Ok(psbt) => psbt,
                             Err(e) => {
                                 let _ = sender.send(Err(WalletError::TxnBuilder(e))).map_err(|e| {
-                                    tracing::error!(
-                                        "Error sending send to address command: {:?}",
+                                    log_error!(
+                                        logger_clone,
+                                        "Error sending send to address command. error={:?}",
                                         e
                                     );
                                 });
@@ -323,7 +343,11 @@ impl DlcDevKitWallet {
                         };
                         if let Err(e) = wallet.sign(&mut psbt, SignOptions::default()) {
                             let _ = sender.send(Err(WalletError::Signing(e))).map_err(|e| {
-                                tracing::error!("Error sending send to address command: {:?}", e);
+                                log_error!(
+                                    logger_clone,
+                                    "Error sending send to address command. error={:?}",
+                                    e
+                                );
                             });
                             continue;
                         }
@@ -331,8 +355,9 @@ impl DlcDevKitWallet {
                             Ok(tx) => tx,
                             Err(_) => {
                                 let _ = sender.send(Err(WalletError::ExtractTx)).map_err(|e| {
-                                    tracing::error!(
-                                        "Error sending send to address command: {:?}",
+                                    log_error!(
+                                        logger_clone,
+                                        "Error sending send to address command. error={:?}",
                                         e
                                     );
                                 });
@@ -344,15 +369,20 @@ impl DlcDevKitWallet {
                             let _ = sender
                                 .send(Err(WalletError::Esplora(e.to_string())))
                                 .map_err(|e| {
-                                    tracing::error!(
-                                        "Error sending send to address command: {:?}",
+                                    log_error!(
+                                        logger_clone,
+                                        "Error sending send to address command. error={:?}",
                                         e
                                     );
                                 });
                             continue;
                         }
                         let _ = sender.send(Ok(txid)).map_err(|e| {
-                            tracing::error!("Error sending send to address command: {:?}", e);
+                            log_error!(
+                                logger_clone,
+                                "Error sending send to address command. error={:?}",
+                                e
+                            );
                         });
                     }
                     WalletCommand::SendAll(address, fee_rate, sender) => {
@@ -364,14 +394,22 @@ impl DlcDevKitWallet {
                             Ok(psbt) => psbt,
                             Err(e) => {
                                 let _ = sender.send(Err(WalletError::TxnBuilder(e))).map_err(|e| {
-                                    tracing::error!("Error sending send all command: {:?}", e);
+                                    log_error!(
+                                        logger_clone,
+                                        "Error sending send all command. error={:?}",
+                                        e
+                                    );
                                 });
                                 continue;
                             }
                         };
                         if let Err(e) = wallet.sign(&mut psbt, SignOptions::default()) {
                             let _ = sender.send(Err(WalletError::Signing(e))).map_err(|e| {
-                                tracing::error!("Error sending send all command: {:?}", e);
+                                log_error!(
+                                    logger_clone,
+                                    "Error sending send all command. error={:?}",
+                                    e
+                                );
                             });
                             continue;
                         }
@@ -379,7 +417,11 @@ impl DlcDevKitWallet {
                             Ok(tx) => tx,
                             Err(_) => {
                                 let _ = sender.send(Err(WalletError::ExtractTx)).map_err(|e| {
-                                    tracing::error!("Error sending send all command: {:?}", e);
+                                    log_error!(
+                                        logger_clone,
+                                        "Error sending send all command. error={:?}",
+                                        e
+                                    );
                                 });
                                 continue;
                             }
@@ -389,12 +431,20 @@ impl DlcDevKitWallet {
                             let _ = sender
                                 .send(Err(WalletError::Esplora(e.to_string())))
                                 .map_err(|e| {
-                                    tracing::error!("Error sending send all command: {:?}", e);
+                                    log_error!(
+                                        logger_clone,
+                                        "Error sending send all command. error={:?}",
+                                        e
+                                    );
                                 });
                             continue;
                         }
                         let _ = sender.send(Ok(txid)).map_err(|e| {
-                            tracing::error!("Error sending send all command: {:?}", e);
+                            log_error!(
+                                logger_clone,
+                                "Error sending send all command. error={:?}",
+                                e
+                            );
                         });
                     }
                     WalletCommand::GetTransactions(sender) => {
@@ -403,19 +453,31 @@ impl DlcDevKitWallet {
                             .map(|t| t.tx_node.tx)
                             .collect::<Vec<Arc<Transaction>>>();
                         let _ = sender.send(Ok(txs)).map_err(|e| {
-                            tracing::error!("Error sending get transactions command: {:?}", e);
+                            log_error!(
+                                logger_clone,
+                                "Error sending get transactions command. error={:?}",
+                                e
+                            );
                         });
                     }
                     WalletCommand::ListUtxos(sender) => {
                         let utxos = wallet.list_unspent().map(|utxo| utxo.to_owned()).collect();
                         let _ = sender.send(Ok(utxos)).map_err(|e| {
-                            tracing::error!("Error sending list utxos command: {:?}", e);
+                            log_error!(
+                                logger_clone,
+                                "Error sending list utxos command. error={:?}",
+                                e
+                            );
                         });
                     }
                     WalletCommand::NextDerivationIndex(sender) => {
                         let index = wallet.next_derivation_index(KeychainKind::External);
                         let _ = sender.send(Ok(index)).map_err(|e| {
-                            tracing::error!("Error sending next derivation index command: {:?}", e);
+                            log_error!(
+                                logger_clone,
+                                "Error sending next derivation index command. error={:?}",
+                                e
+                            );
                         });
                     }
                     WalletCommand::SignPsbtInput(mut psbt, input_index, sender) => {
@@ -425,21 +487,26 @@ impl DlcDevKitWallet {
                         };
                         let mut signed_psbt = psbt.clone();
                         if let Err(e) = wallet.sign(&mut signed_psbt, sign_opts) {
-                            tracing::error!("Could not sign PSBT: {:?}", e);
+                            log_error!(logger_clone, "Could not sign PSBT. error={:?}", e);
                             let _ = sender
                                 .send(Err(ManagerError::WalletError(
                                     WalletError::Signing(e).into(),
                                 )))
                                 .map_err(|e| {
-                                    tracing::error!(
-                                        "Error sending sign psbt input command: {:?}",
+                                    log_error!(
+                                        logger_clone,
+                                        "Error sending sign psbt input command. error={:?}",
                                         e
                                     );
                                 });
                         } else {
                             psbt.inputs[input_index] = signed_psbt.inputs[input_index].clone();
                             let _ = sender.send(Ok(psbt)).map_err(|e| {
-                                tracing::error!("Error sending sign psbt input command: {:?}", e);
+                                log_error!(
+                                    logger_clone,
+                                    "Error sending sign psbt input command. error={:?}",
+                                    e
+                                );
                             });
                         }
                     }
@@ -455,11 +522,13 @@ impl DlcDevKitWallet {
             fingerprint,
             dlc_path,
             address_generator,
+            logger,
         })
     }
 
     /// Synchronizes the wallet with the blockchain.
     /// This updates the wallet's UTXO set and transaction history.
+    #[tracing::instrument(skip(self))]
     pub async fn sync(&self) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.sender.send(WalletCommand::Sync(tx)).await?;
@@ -468,12 +537,13 @@ impl DlcDevKitWallet {
 
     /// Returns the wallet's master public key.
     /// Used for identification and key derivation.
+    #[tracing::instrument(skip(self))]
     pub fn get_pubkey(&self) -> PublicKey {
-        tracing::info!("Getting wallet public key.");
         PublicKey::from_secret_key(&self.secp, &self.xprv.private_key)
     }
 
     /// Retrieves the current wallet balance including confirmed and unconfirmed amounts.
+    #[tracing::instrument(skip(self))]
     pub async fn get_balance(&self) -> Result<Balance> {
         let (tx, rx) = oneshot::channel();
         self.sender.send(WalletCommand::Balance(tx)).await?;
@@ -485,6 +555,7 @@ impl DlcDevKitWallet {
     ///
     /// WARNING: If you want your custom address generator call
     /// [`address::AddressGenerator::custom_external_address`] instead.
+    #[tracing::instrument(skip(self))]
     pub async fn new_external_address(&self) -> Result<AddressInfo> {
         let (tx, rx) = oneshot::channel();
         self.sender
@@ -498,6 +569,7 @@ impl DlcDevKitWallet {
     ///
     /// WARNING: If you want your custom address generator call
     /// [`address::AddressGenerator::custom_change_address`] instead.
+    #[tracing::instrument(skip(self))]
     pub async fn new_change_address(&self) -> Result<AddressInfo> {
         let (tx, rx) = oneshot::channel();
         self.sender
@@ -515,6 +587,7 @@ impl DlcDevKitWallet {
     ///
     /// # Returns
     /// Transaction ID of the sent transaction
+    #[tracing::instrument(skip(self))]
     pub async fn send_to_address(
         &self,
         address: Address,
@@ -536,6 +609,7 @@ impl DlcDevKitWallet {
     ///
     /// # Returns
     /// Transaction ID of the sent transaction
+    #[tracing::instrument(skip(self))]
     pub async fn send_all(&self, address: Address, fee_rate: FeeRate) -> Result<Txid> {
         let (tx, rx) = oneshot::channel();
         self.sender
@@ -545,6 +619,7 @@ impl DlcDevKitWallet {
     }
 
     /// Retrieves all transactions known to the wallet.
+    #[tracing::instrument(skip(self))]
     pub async fn get_transactions(&self) -> Result<Vec<Arc<Transaction>>> {
         let (tx, rx) = oneshot::channel();
         self.sender.send(WalletCommand::GetTransactions(tx)).await?;
@@ -552,6 +627,7 @@ impl DlcDevKitWallet {
     }
 
     /// Lists all unspent transaction outputs (UTXOs) in the wallet.
+    #[tracing::instrument(skip(self))]
     pub async fn list_utxos(&self) -> Result<Vec<LocalOutput>> {
         let (tx, rx) = oneshot::channel();
         self.sender.send(WalletCommand::ListUtxos(tx)).await?;
@@ -566,17 +642,12 @@ impl DlcDevKitWallet {
     /// # Arguments
     /// * `psbt` - The PSBT to sign
     /// * `input_index` - Index of the input to sign
+    #[tracing::instrument(skip(self))]
     async fn sign_psbt_input(
         &self,
         psbt: &mut bitcoin::psbt::Psbt,
         input_index: usize,
     ) -> std::result::Result<(), ManagerError> {
-        tracing::info!(
-            input_index,
-            inputs = psbt.inputs.len(),
-            outputs = psbt.outputs.len(),
-            "Signing psbt input for dlc manager."
-        );
         let (tx, rx) = oneshot::channel();
         self.sender
             .send(WalletCommand::SignPsbtInput(psbt.clone(), input_index, tx))
@@ -644,6 +715,7 @@ impl DlcDevKitWallet {
         SecretKey::from_slice(hardened_hash.as_ref()).map_err(|_| WalletError::InvalidSecretKey)
     }
 
+    #[tracing::instrument(skip(self, key_id))]
     fn derive_secret_key_from_key_id(&self, key_id: [u8; 32]) -> Result<SecretKey> {
         let derivation_path = self.get_hierarchical_derivation_path(key_id)?;
 
@@ -667,6 +739,7 @@ impl DlcDevKitWallet {
 impl FeeEstimator for DlcDevKitWallet {
     /// Returns the estimated fee rate in satoshis per 1000 weight units.
     /// Used by the DLC manager to estimate fees for funding transactions.
+    #[tracing::instrument(skip(self))]
     fn get_est_sat_per_1000_weight(&self, confirmation_target: ConfirmationTarget) -> u32 {
         let fees = fee_estimator();
         fees.get(&confirmation_target)
@@ -692,6 +765,7 @@ impl ddk_manager::ContractSignerProvider for DlcDevKitWallet {
     ///
     /// # Returns
     /// A 32-byte key ID for the contract
+    #[tracing::instrument(skip(self))]
     fn derive_signer_key_id(&self, _is_offer_party: bool, temp_id: [u8; 32]) -> [u8; 32] {
         let mut key_id_input = Vec::new();
 
@@ -713,6 +787,7 @@ impl ddk_manager::ContractSignerProvider for DlcDevKitWallet {
     ///
     /// # Returns
     /// A SimpleSigner configured for the contract
+    #[tracing::instrument(skip(self, key_id))]
     fn derive_contract_signer(
         &self,
         key_id: [u8; 32],
@@ -760,9 +835,10 @@ impl ddk_manager::Wallet for DlcDevKitWallet {
             .await
             .map_err(wallet_err_to_manager_err)?;
 
-        tracing::info!(
-            address = address.address.to_string(),
-            "Revealed new address for contract."
+        log_info!(
+            self.logger.clone(),
+            "Revealed new address for contract. address={}",
+            address.address.to_string()
         );
         Ok(address.address)
     }
@@ -783,9 +859,10 @@ impl ddk_manager::Wallet for DlcDevKitWallet {
             .await
             .map_err(wallet_err_to_manager_err)?;
 
-        tracing::info!(
-            address = address.address.to_string(),
-            "Revealed new change address for contract."
+        log_info!(
+            self.logger.clone(),
+            "Revealed new change address for contract. address={}",
+            address.address.to_string()
         );
         Ok(address.address)
     }
@@ -797,12 +874,6 @@ impl ddk_manager::Wallet for DlcDevKitWallet {
         psbt: &mut bitcoin::psbt::Psbt,
         input_index: usize,
     ) -> std::result::Result<(), ManagerError> {
-        tracing::info!(
-            input_index,
-            inputs = psbt.inputs.len(),
-            outputs = psbt.outputs.len(),
-            "Signing psbt input for dlc manager."
-        );
         self.sign_psbt_input(psbt, input_index).await
     }
 
@@ -834,6 +905,7 @@ impl ddk_manager::Wallet for DlcDevKitWallet {
     ///
     /// # Returns
     /// A vector of UTXOs that can cover the required amount plus fees
+    #[tracing::instrument(skip(self))]
     async fn get_utxos_for_amount(
         &self,
         amount: Amount,
@@ -932,6 +1004,8 @@ impl Debug for DlcDevKitWallet {
 mod tests {
     use std::{collections::HashSet, str::FromStr, sync::Arc, time::Duration};
 
+    use crate::chain::EsploraClient;
+    use crate::logger::{LogLevel, Logger};
     use crate::storage::memory::MemoryStorage;
     use bitcoin::{
         address::NetworkChecked,
@@ -946,22 +1020,36 @@ mod tests {
     use super::DlcDevKitWallet;
 
     async fn create_wallet() -> DlcDevKitWallet {
-        let esplora = std::env::var("ESPLORA_HOST").unwrap_or("http://localhost:30000".to_string());
+        let esplora = std::env::var("ESPLORA_HOST").expect("ESPLORA_HOST must be set");
         let storage = Arc::new(MemoryStorage::new());
+        let logger = Arc::new(Logger::console(
+            "console_logger".to_string(),
+            LogLevel::Info,
+        ));
+        let esplora =
+            Arc::new(EsploraClient::new(&esplora, Network::Regtest, logger.clone()).unwrap());
         let mut entropy = [0u8; 64];
         entropy
             .try_fill(&mut bitcoin::key::rand::thread_rng())
             .unwrap();
-        DlcDevKitWallet::new(&entropy, &esplora, Network::Regtest, storage.clone(), None)
-            .await
-            .unwrap()
+        DlcDevKitWallet::new(
+            &entropy,
+            esplora,
+            Network::Regtest,
+            storage.clone(),
+            None,
+            logger.clone(),
+        )
+        .await
+        .unwrap()
     }
 
     fn generate_blocks(num: u64) {
-        tracing::warn!("Generating {} blocks.", num);
         let bitcoind =
             std::env::var("BITCOIND_HOST").unwrap_or("http://localhost:18443".to_string());
-        let auth = bitcoincore_rpc::Auth::UserPass("ddk".to_string(), "ddk".to_string());
+        let user = std::env::var("BITCOIND_USER").expect("BITCOIND_USER must be set");
+        let pass = std::env::var("BITCOIND_PASS").expect("BITCOIND_PASS must be set");
+        let auth = bitcoincore_rpc::Auth::UserPass(user, pass);
         let client = bitcoincore_rpc::Client::new(&bitcoind, auth).unwrap();
         let previous_height = client.get_block_count().unwrap();
 
@@ -977,7 +1065,9 @@ mod tests {
     fn fund_address(address: &Address<NetworkChecked>) {
         let bitcoind =
             std::env::var("BITCOIND_HOST").unwrap_or("http://localhost:18443".to_string());
-        let auth = bitcoincore_rpc::Auth::UserPass("ddk".to_string(), "ddk".to_string());
+        let user = std::env::var("BITCOIND_USER").expect("BITCOIND_USER must be set");
+        let pass = std::env::var("BITCOIND_PASS").expect("BITCOIND_PASS must be set");
+        let auth = bitcoincore_rpc::Auth::UserPass(user, pass);
         let client = bitcoincore_rpc::Client::new(&bitcoind, auth).unwrap();
         client
             .send_to_address(
@@ -1487,6 +1577,14 @@ mod tests {
             .unwrap()
             .assume_checked();
 
+        let logger = Arc::new(Logger::console(
+            "console_logger".to_string(),
+            LogLevel::Info,
+        ));
+        let esplora_host = std::env::var("ESPLORA_HOST").expect("ESPLORA_HOST must be set");
+        let esplora =
+            Arc::new(EsploraClient::new(&esplora_host, Network::Regtest, logger.clone()).unwrap());
+
         let mut seed = [0u8; 64];
         seed.try_fill(&mut bitcoin::key::rand::thread_rng())
             .unwrap();
@@ -1494,10 +1592,11 @@ mod tests {
         let memory_storage = Arc::new(MemoryStorage::new());
         let wallet = DlcDevKitWallet::new(
             &seed,
-            "http://localhost:30000",
+            esplora,
             Network::Regtest,
             memory_storage.clone(),
             Some(Arc::new(DummyAddressGenerator)),
+            logger.clone(),
         )
         .await
         .unwrap();
