@@ -79,7 +79,7 @@ pub fn get_tx_input_infos(
         let max_witness_len = if fund_input.dlc_input.is_some() {
             220
         } else {
-            107
+            108
         };
         let tx = Transaction::consensus_decode(&mut fund_input.prev_tx.as_slice())?;
         let vout = fund_input.prev_tx_vout;

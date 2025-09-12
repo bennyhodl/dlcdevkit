@@ -73,7 +73,7 @@ const TX_INPUT_BASE_WEIGHT: usize = 164;
 
 /// The witness size of a P2WPKH input
 /// See: <https://github.com/discreetlogcontracts/dlcspecs/blob/master/Transactions.md#fees>
-pub const P2WPKH_WITNESS_SIZE: usize = 107;
+pub const P2WPKH_WITNESS_SIZE: usize = 108;
 
 macro_rules! checked_add {
     ($a: expr, $b: expr) => {

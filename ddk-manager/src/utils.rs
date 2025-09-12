@@ -136,7 +136,7 @@ where
         let prev_tx_vout = utxo.outpoint.vout;
         let sequence = 0xffffffff;
         // TODO(tibo): this assumes P2WPKH with low R
-        let max_witness_len = 107;
+        let max_witness_len = 108;
         let funding_input = FundingInput {
             input_serial_id: get_new_serial_id(),
             prev_tx: writer,
