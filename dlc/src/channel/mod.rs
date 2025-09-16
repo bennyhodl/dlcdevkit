@@ -391,7 +391,7 @@ pub fn sign_cet<C: Signing>(
 
     descriptor
         .satisfy(&mut cet.input[0], sigs)
-        .map_err(|_| Error::InvalidArgument)?;
+        .map_err(|_| Error::InvalidArgument("Failed to satisfy descriptor".to_string()))?;
 
     Ok(())
 }
@@ -471,7 +471,7 @@ pub fn create_and_sign_punish_buffer_transaction<C: Signing>(
 
     descriptor
         .satisfy(&mut tx.input[0], sigs)
-        .map_err(|_| Error::InvalidArgument)?;
+        .map_err(|_| Error::InvalidArgument("Failed to satisfy descriptor".to_string()))?;
 
     Ok(tx)
 }
@@ -552,7 +552,7 @@ pub fn create_and_sign_punish_settle_transaction<C: Signing>(
 
     descriptor
         .satisfy(&mut tx.input[0], sigs)
-        .map_err(|_| Error::InvalidArgument)?;
+        .map_err(|_| Error::InvalidArgument("Failed to satisfy descriptor".to_string()))?;
 
     Ok(tx)
 }

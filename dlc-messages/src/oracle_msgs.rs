@@ -275,7 +275,11 @@ impl OracleEvent {
         if expected_nb_nonces == self.oracle_nonces.len() {
             Ok(())
         } else {
-            Err(Error::InvalidArgument)
+            Err(Error::InvalidArgument(format!(
+                "Expected number of nonces is not equal to actual number of nonces. expected={} actual={}",
+                expected_nb_nonces,
+                self.oracle_nonces.len()
+            )))
         }
     }
 }
@@ -380,11 +384,19 @@ impl OracleAttestation {
         announcement: &OracleAnnouncement,
     ) -> Result<(), Error> {
         if self.outcomes.len() != self.signatures.len() {
-            return Err(Error::InvalidArgument);
+            return Err(Error::InvalidArgument(format!(
+                "Outcomes length is not equal to signatures length. outcomes={} signatures={}",
+                self.outcomes.len(),
+                self.signatures.len()
+            )));
         }
 
         if self.oracle_public_key != announcement.oracle_public_key {
-            return Err(Error::InvalidArgument);
+            return Err(Error::InvalidArgument(format!(
+                "Oracle public key is not equal to announcement oracle public key. oracle_public_key={} announcement_oracle_public_key={}",
+                self.oracle_public_key,
+                announcement.oracle_public_key
+            )));
         }
 
         self.signatures
@@ -393,7 +405,12 @@ impl OracleAttestation {
             .try_for_each(|(sig, outcome)| {
                 let msg = tagged_attestation_msg(outcome);
                 secp.verify_schnorr(sig, &msg, &self.oracle_public_key)
-                    .map_err(|_| Error::InvalidArgument)?;
+                    .map_err(|_| Error::InvalidArgument(format!(
+                        "Failed to verify schnorr signature. signature={} oracle_public_key={} msg={}",
+                        sig,
+                        self.oracle_public_key,
+                        msg
+                    )))?;
 
                 Ok::<(), ddk_dlc::Error>(())
             })?;
@@ -404,7 +421,11 @@ impl OracleAttestation {
             .zip(announcement.oracle_event.oracle_nonces.iter())
             .all(|(sig, nonce)| sig.encode()[..32] == nonce.serialize())
         {
-            return Err(Error::InvalidArgument);
+            return Err(Error::InvalidArgument(format!(
+                "Signatures are not equal to nonces. signatures={} nonces={}",
+                self.signatures.len(),
+                announcement.oracle_event.oracle_nonces.len()
+            )));
         }
 
         Ok(())

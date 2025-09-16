@@ -33,7 +33,7 @@ impl MultiOracleTrieWithDiff {
         let is_valid =
             nb_oracles >= 1 && threshold <= nb_oracles && min_support_exp < max_error_exp;
         if !is_valid {
-            return Err(Error::InvalidArgument);
+            return Err(Error::InvalidArgument(format!("Invalid parameters. nb_oracles={} threshold={} min_support_exp={} max_error_exp={}", nb_oracles, threshold, min_support_exp, max_error_exp)));
         }
         let multi_trie = MultiTrie::new(
             oracle_numeric_infos,
@@ -60,7 +60,7 @@ impl<'a> DlcTrie<'a, MultiOracleTrieWithDiffIter<'a>> for MultiOracleTrieWithDif
 
         for (cet_index, outcome) in outcomes.iter().enumerate() {
             if outcome.count == 0 {
-                return Err(Error::InvalidArgument);
+                return Err(Error::InvalidArgument("Outcome count is 0".to_string()));
             }
             let groups = group_by_ignoring_digits(
                 outcome.start,
