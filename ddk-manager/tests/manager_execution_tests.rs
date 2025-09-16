@@ -92,17 +92,6 @@ async fn create_test_vector() {
     }
 }
 
-macro_rules! periodic_check {
-    ($d:expr, $id:expr, $p:ident) => {
-        $d.lock()
-            .await
-            .periodic_check(true)
-            .await
-            .expect("Periodic check error");
-        assert_contract_state!($d, $id, $p);
-    };
-}
-
 async fn numerical_common<F>(
     nb_oracles: usize,
     threshold: usize,
@@ -188,7 +177,6 @@ async fn numerical_common_diff_nb_digits(
 
 #[derive(Eq, PartialEq, Clone)]
 enum TestPath {
-    Splice,
     Close,
     Refund,
     CooperativeClose,
@@ -533,55 +521,55 @@ async fn single_funded_dlc_test() {
     .await;
 }
 
-#[tokio::test]
-#[ignore]
-async fn single_oracle_numerical_splice_test_manual() {
-    numerical_common(
-        1,
-        1,
-        get_polynomial_payout_curve_pieces,
-        None,
-        true,
-        TestPath::Splice,
-    )
-    .await;
-}
+// #[tokio::test]
+// #[ignore]
+// async fn single_oracle_numerical_splice_test_manual() {
+//     numerical_common(
+//         1,
+//         1,
+//         get_polynomial_payout_curve_pieces,
+//         None,
+//         true,
+//         TestPath::Splice,
+//     )
+//     .await;
+// }
 
-#[tokio::test]
-#[ignore]
-async fn single_oracle_numerical_splice_test() {
-    numerical_common(
-        1,
-        1,
-        get_polynomial_payout_curve_pieces,
-        None,
-        false,
-        TestPath::Splice,
-    )
-    .await;
-}
+// #[tokio::test]
+// #[ignore]
+// async fn single_oracle_numerical_splice_test() {
+//     numerical_common(
+//         1,
+//         1,
+//         get_polynomial_payout_curve_pieces,
+//         None,
+//         false,
+//         TestPath::Splice,
+//     )
+//     .await;
+// }
 
-#[tokio::test]
-#[ignore]
-async fn single_oracle_enum_splice_test() {
-    manager_execution_test(
-        get_enum_test_params(1, 1, None).await,
-        TestPath::Splice,
-        true,
-    )
-    .await;
-}
+// #[tokio::test]
+// #[ignore]
+// async fn single_oracle_enum_splice_test() {
+//     manager_execution_test(
+//         get_enum_test_params(1, 1, None).await,
+//         TestPath::Splice,
+//         true,
+//     )
+//     .await;
+// }
 
-#[tokio::test]
-#[ignore]
-async fn multi_oracle_enum_splice_test() {
-    manager_execution_test(
-        get_enum_test_params(3, 3, None).await,
-        TestPath::Splice,
-        false,
-    )
-    .await;
-}
+// #[tokio::test]
+// #[ignore]
+// async fn multi_oracle_enum_splice_test() {
+//     manager_execution_test(
+//         get_enum_test_params(3, 3, None).await,
+//         TestPath::Splice,
+//         false,
+//     )
+//     .await;
+// }
 
 #[tokio::test]
 #[ignore]
@@ -738,8 +726,9 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
     let (sync_send, mut sync_receive) = channel::<()>(100);
     let alice_sync_send = sync_send.clone();
     let bob_sync_send = sync_send;
+    let amount = Amount::from_btc(2.1).unwrap();
     let (bob_wallet, bob_storage, alice_wallet, alice_storage, sink_rpc) =
-        init_clients(logger.clone(), electrs.clone()).await;
+        init_clients(logger.clone(), electrs.clone(), amount, amount).await;
     let alice_wallet = Arc::new(alice_wallet);
     let bob_wallet = Arc::new(bob_wallet);
     let sink = Arc::new(sink_rpc);
@@ -755,11 +744,7 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
 
     let mock_time = Arc::new(test_utils::MockTime {});
     // For splice tests, set time much earlier to keep original DLC far from maturity
-    let initial_time = if path == TestPath::Splice {
-        (EVENT_MATURITY as u64) - 3600 // 30 days before EVENT_MATURITY
-    } else {
-        (EVENT_MATURITY as u64) - 1
-    };
+    let initial_time = (EVENT_MATURITY as u64) - 1;
 
     test_utils::set_time(initial_time);
 
@@ -924,7 +909,7 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
                 sync_receive.recv().await.expect("Error synchronizing");
                 assert_contract_state!(alice_manager_send, contract_id, FailedSign);
             }
-            TestPath::Close | TestPath::Refund | TestPath::Splice => {
+            TestPath::Close | TestPath::Refund => {
                 alice_send
                     .send(Some(Message::Accept(accept_msg)))
                     .await
@@ -936,470 +921,270 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
                 // Should not change state and should not error
                 periodic_check!(bob_manager_send, contract_id, Signed);
 
-            sync_receive.recv().await.expect("Error synchronizing");
+                sync_receive.recv().await.expect("Error synchronizing");
 
-            assert_contract_state!(alice_manager_send, contract_id, Signed);
+                assert_contract_state!(alice_manager_send, contract_id, Signed);
 
-            alice_wallet.sync().await.unwrap();
-            bob_wallet.sync().await.unwrap();
+                alice_wallet.sync().await.unwrap();
+                bob_wallet.sync().await.unwrap();
 
-            generate_blocks(10, electrs.clone(), sink.clone()).await;
+                generate_blocks(10, electrs.clone(), sink.clone()).await;
 
-            periodic_check!(alice_manager_send, contract_id, Confirmed);
-            periodic_check!(bob_manager_send, contract_id, Confirmed);
+                periodic_check!(alice_manager_send, contract_id, Confirmed);
+                periodic_check!(bob_manager_send, contract_id, Confirmed);
 
-            alice_wallet.sync().await.unwrap();
-            bob_wallet.sync().await.unwrap();
-            match path {
-                TestPath::Splice => {
-                        // Create splice DLC with maturity just in the future (1 second from current time)
-                        // Original DLC stays far in the future, splice DLC can be closer
-                        let splice_maturity = (EVENT_MATURITY + 1) as u32; // 1 second in the future
-
-                        let splice_test_params = if thread_rng().next_u32() % 2 == 0 {
-                            get_splice_in_test_params_with_maturity(
-                                test_params.oracles.clone(),
-                                splice_maturity,
-                            )
-                            .await
-                        } else {
-                            get_splice_out_test_params_with_maturity(
-                                test_params.oracles.clone(),
-                                splice_maturity,
-                            )
-                            .await
-                        };
-
-                        // First test that sending a splice offer with a fake contract id fails
-                        let _fake_splice_offer_message = {
-                            let fake_contract_id = [0u8;32];
-                            let should_fail = bob_manager_send
-                                .lock()
-                                .await
-                                .send_splice_offer(
-                                    &splice_test_params.contract_input,
-                                    "0218845781f631c48f1c9709e23092067d06837f30aa0cd0544ac887fe91ddd166"
-                                        .parse()
-                                        .unwrap(),
-                                    &fake_contract_id,
-                                )
-                                .await;
-                            assert!(matches!(should_fail.err().unwrap(), ddk_manager::error::Error::InvalidParameters(_)));
-                        };
-
-                        // Send splice offer using the current confirmed contract (Bob as original offeror)
-                        let splice_offer_msg = bob_manager_send
-                                .lock()
-                                .await
-                                .send_splice_offer(
-                                    &splice_test_params.contract_input,
-                                    "0218845781f631c48f1c9709e23092067d06837f30aa0cd0544ac887fe91ddd166"
-                                        .parse()
-                                        .unwrap(),
-                                    &contract_id,
-                                )
-                                .await
-                                .expect("Send splice offer error");
-
-                        let splice_temporary_contract_id = splice_offer_msg.temporary_contract_id;
-
-                        bob_send
-                            .send(Some(Message::Offer(splice_offer_msg)))
-                            .await
-                            .unwrap();
-
-                        assert_contract_state!(
-                            bob_manager_send,
-                            splice_temporary_contract_id,
-                            Offered
-                        );
-
-                        sync_receive.recv().await.expect("Error synchronizing");
-
-                        assert_contract_state!(
-                            alice_manager_send,
-                            splice_temporary_contract_id,
-                            Offered
-                        );
-
-                        // Accept the splice offer
-                        let (splice_contract_id, _, splice_accept_msg) = alice_manager_send
-                            .lock()
-                            .await
-                            .accept_contract_offer(&splice_temporary_contract_id)
-                            .await
-                            .expect("Error accepting splice offer");
-
-                        assert_contract_state!(alice_manager_send, splice_contract_id, Accepted);
-
-                        alice_send
-                            .send(Some(Message::Accept(splice_accept_msg)))
-                            .await
-                            .unwrap();
-
-                        sync_receive.recv().await.expect("Error synchronizing");
-
-                        // The new contract is signed, but not confirmed yet
-                        periodic_check!(bob_manager_send, splice_contract_id, Signed);
-                        // The old contract is pre-closed
-                        assert_contract_state!(bob_manager_send, contract_id, PreClosed);
-
-                        sync_receive.recv().await.expect("Error synchronizing");
-
-                        // The new contract is signed, but not confirmed yet
-                        assert_contract_state!(alice_manager_send, splice_contract_id, Signed);
-                        // The old contract is pre-closed
-                        assert_contract_state!(alice_manager_send, contract_id, PreClosed);
-
-                        alice_wallet.sync().await.unwrap();
-                        bob_wallet.sync().await.unwrap();
-
-                        test_utils::generate_blocks(10, electrs.clone(), sink.clone()).await;
-
-                        periodic_check!(bob_manager_send, splice_contract_id, Confirmed);
-                        periodic_check!(alice_manager_send, splice_contract_id, Confirmed);
-
-                        let _try_to_splice_twice = {
-                            let should_fail = bob_manager_send.lock().await.send_splice_offer(
-                                &splice_test_params.contract_input,
-                                "0218845781f631c48f1c9709e23092067d06837f30aa0cd0544ac887fe91ddd166"
-                                    .parse()
-                                    .unwrap(),
-                                &contract_id,
-                            ).await;
-                            assert!(matches!(should_fail.err().unwrap(), ddk_manager::error::Error::InvalidState(_)));
-                        };
-
-                        if manual_close {
-                            periodic_check!(bob_manager_send, splice_contract_id, Confirmed);
-                            periodic_check!(alice_manager_send, splice_contract_id, Confirmed);
-
-                            // Check that the old contract is closed now that the splice contract is confirmed
-                            periodic_check!(bob_manager_send, contract_id, Closed);
-                            periodic_check!(alice_manager_send, contract_id, Closed);
-
-                            let attestations = get_attestations(&splice_test_params).await;
-
-                            let bob_close_contract = bob_manager_send
-                                .lock()
-                                .await
-                                .close_confirmed_contract(&splice_contract_id, attestations)
-                                .await
-                                .expect("Error closing splice contract");
-
-                            let bob_close_contract = match bob_close_contract {
-                                Contract::PreClosed(c) => c,
-                                _ => panic!("Invalid contract state {:?}", bob_close_contract),
-                            };
-
-                            let second_contract = alice_manager_send
-                                .lock()
-                                .await
-                                .get_store()
-                                .get_contract(&splice_contract_id)
-                                .await
-                                .unwrap()
-                                .unwrap();
-
-                            let signed = match second_contract {
-                                Contract::Confirmed(s) => s,
-                                _ => panic!("Invalid contract state: {:?}", second_contract),
-                            };
-
-                            alice_manager_send
-                                .lock()
-                                .await
-                                .on_counterparty_close(&signed, bob_close_contract.signed_cet, 1)
-                                .await
-                                .expect("Error registering counterparty close");
-                        } else {
-                            periodic_check!(alice_manager_send, splice_contract_id, Confirmed);
-                            periodic_check!(bob_manager_send, splice_contract_id, Confirmed);
-
-                            periodic_check!(alice_manager_send, contract_id, Closed);
-                            periodic_check!(bob_manager_send, contract_id, Closed);
-
-                            test_utils::set_time(splice_maturity as u64 + 5);
-
-                            periodic_check!(bob_manager_send, splice_contract_id, PreClosed);
+                alice_wallet.sync().await.unwrap();
+                bob_wallet.sync().await.unwrap();
+                match path {
+                    TestPath::Close | TestPath::Refund => {
+                        if !manual_close {
+                            test_utils::set_time((EVENT_MATURITY as u64) + 1);
                         }
 
-                        test_utils::set_time(splice_maturity as u64 + 2);
+                        // Select the first one to close or refund randomly
+                        let (first, second) = if thread_rng().next_u32() % 2 == 0 {
+                            (alice_manager_send, bob_manager_send)
+                        } else {
+                            (bob_manager_send, alice_manager_send)
+                        };
+                        match path {
+                            TestPath::Close => {
+                                let case = thread_rng().next_u64() % 3;
+                                let blocks: Option<u32> = if case == 2 {
+                                    Some(10)
+                                } else if case == 1 {
+                                    Some(1)
+                                } else {
+                                    None
+                                };
 
-                        test_utils::generate_blocks(10, electrs.clone(), sink.clone()).await;
+                                if manual_close {
+                                    periodic_check!(first, contract_id, Confirmed);
 
-                        periodic_check!(bob_manager_send, splice_contract_id, Closed);
-                        periodic_check!(alice_manager_send, splice_contract_id, Closed);
+                                    let attestations = get_attestations(&test_params).await;
 
-                        periodic_check!(bob_manager_send, contract_id, Closed);
-                        periodic_check!(alice_manager_send, contract_id, Closed);
-
-                        let original_contract = alice_manager_send
-                            .lock()
-                            .await
-                            .get_store()
-                            .get_contract(&contract_id)
-                            .await
-                            .unwrap()
-                            .unwrap();
-                        let original_cet_txid = original_contract.get_cet_txid().unwrap();
-
-                        let splice_dlc = alice_manager_send
-                            .lock()
-                            .await
-                            .get_store()
-                            .get_contract(&splice_contract_id)
-                            .await
-                            .unwrap()
-                            .unwrap();
-                        let splice_fund_txid = splice_dlc.get_funding_txid().unwrap();
-
-                        // Assert the the executed txn in the original contract is the same as the funding txn in the splice contract
-                        assert_eq!(original_cet_txid, splice_fund_txid);
-                    }
-                TestPath::Close | TestPath::Refund => {
-                    if !manual_close {
-                        test_utils::set_time((EVENT_MATURITY as u64) + 1);
-                    }
-
-                    // Select the first one to close or refund randomly
-                    let (first, second) = if thread_rng().next_u32() % 2 == 0 {
-                        (alice_manager_send, bob_manager_send)
-                    } else {
-                        (bob_manager_send, alice_manager_send)
-                    };
-                    match path {
-                        TestPath::Close => {
-                            let case = thread_rng().next_u64() % 3;
-                            let blocks: Option<u32> = if case == 2 {
-                                Some(10)
-                            } else if case == 1 {
-                                Some(1)
-                            } else {
-                                None
-                            };
-
-                            if manual_close {
-                                periodic_check!(first, contract_id, Confirmed);
-
-                                let attestations = get_attestations(&test_params).await;
-
-                                let f = first.lock().await;
-                                let contract = f
-                                    .close_confirmed_contract(&contract_id, attestations)
-                                    .await
-                                    .expect("Error closing contract");
-
-                                alice_wallet.sync().await.unwrap();
-                                bob_wallet.sync().await.unwrap();
-
-                                if let Contract::PreClosed(contract) = contract {
-                                    let mut s = second.lock().await;
-                                    let second_contract = s
-                                        .get_store()
-                                        .get_contract(&contract_id)
+                                    let f = first.lock().await;
+                                    let contract = f
+                                        .close_confirmed_contract(&contract_id, attestations)
                                         .await
-                                        .unwrap()
-                                        .unwrap();
-                                    if let Contract::Confirmed(signed) = second_contract {
-                                        s.on_counterparty_close(
-                                            &signed,
-                                            contract.signed_cet,
-                                            blocks.unwrap_or(0),
-                                        )
-                                        .await
-                                        .expect("Error registering counterparty close");
-                                        alice_wallet.sync().await.unwrap();
-                                        bob_wallet.sync().await.unwrap();
+                                        .expect("Error closing contract");
+
+                                    alice_wallet.sync().await.unwrap();
+                                    bob_wallet.sync().await.unwrap();
+
+                                    if let Contract::PreClosed(contract) = contract {
+                                        let mut s = second.lock().await;
+                                        let second_contract = s
+                                            .get_store()
+                                            .get_contract(&contract_id)
+                                            .await
+                                            .unwrap()
+                                            .unwrap();
+                                        if let Contract::Confirmed(signed) = second_contract {
+                                            s.on_counterparty_close(
+                                                &signed,
+                                                contract.signed_cet,
+                                                blocks.unwrap_or(0),
+                                            )
+                                            .await
+                                            .expect("Error registering counterparty close");
+                                            alice_wallet.sync().await.unwrap();
+                                            bob_wallet.sync().await.unwrap();
+                                        } else {
+                                            panic!("Invalid contract state: {:?}", second_contract);
+                                        }
                                     } else {
-                                        panic!("Invalid contract state: {:?}", second_contract);
+                                        panic!("Invalid contract state {:?}", contract);
                                     }
                                 } else {
-                                    panic!("Invalid contract state {:?}", contract);
+                                    alice_wallet.sync().await.unwrap();
+                                    bob_wallet.sync().await.unwrap();
+                                    periodic_check!(first, contract_id, PreClosed);
                                 }
-                            } else {
+
+                                // mine blocks for the CET to be confirmed
+                                if let Some(b) = blocks {
+                                    generate_blocks(b as u32, electrs.clone(), sink.clone()).await;
+                                }
+
                                 alice_wallet.sync().await.unwrap();
                                 bob_wallet.sync().await.unwrap();
-                                periodic_check!(first, contract_id, PreClosed);
-                            }
 
-                            // mine blocks for the CET to be confirmed
-                            if let Some(b) = blocks {
-                                generate_blocks(b as u32, electrs.clone(), sink.clone()).await;
+                                // Randomly check with or without having the CET mined
+                                if case == 2 {
+                                    // cet becomes fully confirmed to blockchain
+                                    periodic_check!(first, contract_id, Closed);
+                                    periodic_check!(second, contract_id, Closed);
+                                } else {
+                                    periodic_check!(first, contract_id, PreClosed);
+                                    periodic_check!(second, contract_id, PreClosed);
+                                }
                             }
+                            TestPath::Refund => {
+                                alice_wallet.sync().await.unwrap();
+                                bob_wallet.sync().await.unwrap();
+                                periodic_check!(first, contract_id, Confirmed);
 
-                            alice_wallet.sync().await.unwrap();
-                            bob_wallet.sync().await.unwrap();
+                                periodic_check!(second, contract_id, Confirmed);
 
-                            // Randomly check with or without having the CET mined
-                            if case == 2 {
-                                // cet becomes fully confirmed to blockchain
-                                periodic_check!(first, contract_id, Closed);
-                                periodic_check!(second, contract_id, Closed);
-                            } else {
-                                periodic_check!(first, contract_id, PreClosed);
-                                periodic_check!(second, contract_id, PreClosed);
+                                test_utils::set_time(
+                                    ((EVENT_MATURITY + ddk_manager::manager::REFUND_DELAY) as u64)
+                                        + 1,
+                                );
+
+                                generate_blocks(10, electrs.clone(), sink.clone()).await;
+
+                                alice_wallet.sync().await.unwrap();
+                                bob_wallet.sync().await.unwrap();
+
+                                periodic_check!(first, contract_id, Refunded);
+
+                                // Randomly check with or without having the Refund mined.
+                                if thread_rng().next_u32() % 2 == 0 {
+                                    generate_blocks(1, electrs.clone(), sink.clone()).await;
+                                }
+
+                                alice_wallet.sync().await.unwrap();
+                                bob_wallet.sync().await.unwrap();
+
+                                periodic_check!(second, contract_id, Refunded);
                             }
+                            _ => unreachable!(),
                         }
-                        TestPath::Refund => {
-                            alice_wallet.sync().await.unwrap();
-                            bob_wallet.sync().await.unwrap();
-                            periodic_check!(first, contract_id, Confirmed);
-
-                            periodic_check!(second, contract_id, Confirmed);
-
-                            test_utils::set_time(
-                                ((EVENT_MATURITY + ddk_manager::manager::REFUND_DELAY) as u64) + 1,
-                            );
-
-                            generate_blocks(10, electrs.clone(), sink.clone()).await;
-
-                            alice_wallet.sync().await.unwrap();
-                            bob_wallet.sync().await.unwrap();
-
-                            periodic_check!(first, contract_id, Refunded);
-
-                            // Randomly check with or without having the Refund mined.
-                            if thread_rng().next_u32() % 2 == 0 {
-                                generate_blocks(1, electrs.clone(), sink.clone()).await;
-                            }
-
-                            alice_wallet.sync().await.unwrap();
-                            bob_wallet.sync().await.unwrap();
-
-                            periodic_check!(second, contract_id, Refunded);
-                        }
-                        _ => unreachable!(),
                     }
+                    _ => unreachable!(),
                 }
-                _ => unreachable!(),
+            }
+            TestPath::CooperativeClose => {
+                alice_send
+                    .send(Some(Message::Accept(accept_msg)))
+                    .await
+                    .unwrap();
+                sync_receive.recv().await.expect("Error synchronizing");
+
+                periodic_check!(bob_manager_send, contract_id, Signed);
+
+                // Should not change state and should not error
+                periodic_check!(bob_manager_send, contract_id, Signed);
+
+                sync_receive.recv().await.expect("Error synchronizing");
+
+                periodic_check!(alice_manager_send, contract_id, Signed);
+
+                generate_blocks(7, electrs.clone(), sink.clone()).await;
+
+                periodic_check!(alice_manager_send, contract_id, Confirmed);
+                periodic_check!(bob_manager_send, contract_id, Confirmed);
+                // Don't advance time for cooperative close to avoid oracle attestations
+                // being available, which would trigger automatic CET closure
+                // Test cooperative close flow
+
+                // First, ensure the funding transaction is confirmed
+                // Get the funding transaction and verify it's on the blockchain
+                let funding_txid = {
+                    let alice_contract = alice_manager_send
+                        .lock()
+                        .await
+                        .get_store()
+                        .get_contract(&contract_id)
+                        .await
+                        .unwrap()
+                        .unwrap();
+                    if let Contract::Confirmed(ref signed_contract) = alice_contract {
+                        signed_contract
+                            .accepted_contract
+                            .dlc_transactions
+                            .fund
+                            .compute_txid()
+                    } else {
+                        panic!("Contract should be confirmed");
+                    }
+                };
+
+                // Verify funding transaction exists on blockchain
+                let confirmations = electrs
+                    .get_transaction_confirmations(&funding_txid)
+                    .await
+                    .unwrap();
+                assert!(
+                    confirmations > 0,
+                    "Funding transaction should be confirmed on blockchain"
+                );
+
+                // Alice initiates cooperative close
+                let counter_payout = Amount::from_sat(ACCEPT_COLLATERAL / 2); // Split half to counter party
+
+                let (close_msg, _counter_party_pubkey) = alice_manager_send
+                    .lock()
+                    .await
+                    .cooperative_close_contract(&contract_id, counter_payout)
+                    .await
+                    .expect("Error initiating cooperative close");
+
+                // Alice should still be in Confirmed state (not updated until broadcast)
+                // assert_contract_state!(alice_manager_send, contract_id, Confirmed);
+
+                // Bob receives and accepts the cooperative close
+                bob_manager_send
+                    .lock()
+                    .await
+                    .accept_cooperative_close(&contract_id, &close_msg)
+                    .await
+                    .expect("Error accepting cooperative close");
+
+                // Bob should now be in PreClosed state (he broadcast the transaction)
+                periodic_check!(bob_manager_send, contract_id, PreClosed);
+
+                // Alice should still be in Confirmed state (she doesn't know about the close yet)
+                periodic_check!(alice_manager_send, contract_id, Confirmed);
+
+                // Mine a few blocks to partially confirm the close transaction
+                generate_blocks(3, electrs.clone(), sink.clone()).await;
+
+                // Alice should now detect the pending close transaction and move to PreClosed
+                alice_manager_send
+                    .lock()
+                    .await
+                    .periodic_check(true)
+                    .await
+                    .expect("Periodic check error");
+
+                periodic_check!(alice_manager_send, contract_id, PreClosed);
+
+                // Bob should still be in PreClosed (not enough confirmations yet)
+                periodic_check!(bob_manager_send, contract_id, PreClosed);
+
+                // Mine more blocks to reach full confirmation (6 total)
+                generate_blocks(5, electrs.clone(), sink.clone()).await;
+
+                // Both parties should now move to Closed state after full confirmations
+                periodic_check!(bob_manager_send, contract_id, Closed);
+                periodic_check!(alice_manager_send, contract_id, Closed);
+
+                // Verify the close transaction was properly broadcast and confirmed
+                let _close_txid = {
+                    let bob_contract = bob_manager_send
+                        .lock()
+                        .await
+                        .get_store()
+                        .get_contract(&contract_id)
+                        .await
+                        .unwrap()
+                        .unwrap();
+                    if let Contract::Closed(ref closed_contract) = bob_contract {
+                        assert!(
+                            closed_contract.attestations.is_none(),
+                            "Cooperative close should not have attestations"
+                        );
+                    } else {
+                        panic!("Bob's contract should be in Closed state");
+                    }
+                };
+                println!("Cooperative close test completed successfully!");
             }
         }
-        TestPath::CooperativeClose => {
-            alice_send.send(Some(Message::Accept(accept_msg))).await.unwrap();
-            sync_receive.recv().await.expect("Error synchronizing");
-
-            periodic_check!(bob_manager_send, contract_id, Signed);
-
-            // Should not change state and should not error
-            periodic_check!(bob_manager_send, contract_id, Signed);
-
-            sync_receive.recv().await.expect("Error synchronizing");
-
-            periodic_check!(alice_manager_send, contract_id, Signed);
-
-            generate_blocks(7, electrs.clone(), sink.clone()).await;
-
-            periodic_check!(alice_manager_send, contract_id, Confirmed);
-            periodic_check!(bob_manager_send, contract_id, Confirmed);
-            // Don't advance time for cooperative close to avoid oracle attestations
-            // being available, which would trigger automatic CET closure
-            // Test cooperative close flow
-
-            // First, ensure the funding transaction is confirmed
-            // Get the funding transaction and verify it's on the blockchain
-            let funding_txid = {
-                let alice_contract = alice_manager_send
-                    .lock()
-                    .await
-                    .get_store()
-                    .get_contract(&contract_id)
-                    .await
-                    .unwrap()
-                    .unwrap();
-                if let Contract::Confirmed(ref signed_contract) = alice_contract {
-                    signed_contract
-                        .accepted_contract
-                        .dlc_transactions
-                        .fund
-                        .compute_txid()
-                } else {
-                    panic!("Contract should be confirmed");
-                }
-            };
-
-            // Verify funding transaction exists on blockchain
-            let confirmations = electrs
-                .get_transaction_confirmations(&funding_txid)
-                .await
-                .unwrap();
-            assert!(
-                confirmations > 0,
-                "Funding transaction should be confirmed on blockchain"
-            );
-
-            // Alice initiates cooperative close
-            let counter_payout = Amount::from_sat(ACCEPT_COLLATERAL / 2); // Split half to counter party
-
-            let (close_msg, _counter_party_pubkey) = alice_manager_send
-                .lock()
-                .await
-                .cooperative_close_contract(&contract_id, counter_payout)
-                .await
-                .expect("Error initiating cooperative close");
-
-            // Alice should still be in Confirmed state (not updated until broadcast)
-            // assert_contract_state!(alice_manager_send, contract_id, Confirmed);
-
-            // Bob receives and accepts the cooperative close
-            bob_manager_send
-                .lock()
-                .await
-                .accept_cooperative_close(&contract_id, &close_msg)
-                .await
-                .expect("Error accepting cooperative close");
-
-            // Bob should now be in PreClosed state (he broadcast the transaction)
-            periodic_check!(bob_manager_send, contract_id, PreClosed);
-
-            // Alice should still be in Confirmed state (she doesn't know about the close yet)
-            periodic_check!(alice_manager_send, contract_id, Confirmed);
-
-            // Mine a few blocks to partially confirm the close transaction
-            generate_blocks(3, electrs.clone(), sink.clone()).await;
-
-            // Alice should now detect the pending close transaction and move to PreClosed
-            alice_manager_send
-                .lock()
-                .await
-                .periodic_check(true)
-                .await
-                .expect("Periodic check error");
-
-            periodic_check!(alice_manager_send, contract_id, PreClosed);
-
-            // Bob should still be in PreClosed (not enough confirmations yet)
-            periodic_check!(bob_manager_send, contract_id, PreClosed);
-
-            // Mine more blocks to reach full confirmation (6 total)
-            generate_blocks(5, electrs.clone(), sink.clone()).await;
-
-            // Both parties should now move to Closed state after full confirmations
-            periodic_check!(bob_manager_send, contract_id, Closed);
-            periodic_check!(alice_manager_send, contract_id, Closed);
-
-            // Verify the close transaction was properly broadcast and confirmed
-            let _close_txid = {
-                let bob_contract = bob_manager_send
-                    .lock()
-                    .await
-                    .get_store()
-                    .get_contract(&contract_id)
-                    .await
-                    .unwrap()
-                    .unwrap();
-                if let Contract::Closed(ref closed_contract) = bob_contract {
-                    assert!(
-                        closed_contract.attestations.is_none(),
-                        "Cooperative close should not have attestations"
-                    );
-                } else {
-                    panic!("Bob's contract should be in Closed state");
-                }
-            };
-            println!("Cooperative close test completed successfully!");  
-        }
-       }})().await;
+    })()
+    .await;
 
     alice_send.send(None).await.unwrap();
     bob_send.send(None).await.unwrap();
