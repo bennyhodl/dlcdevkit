@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
         with:
-          toolchain: 1.88.0
+          toolchain: 1.89.0
           components: clippy
           override: true
       - name: Check clippy
@@ -154,6 +154,6 @@ jobs:
           chmod +x ./testconfig/scripts/wait_for_electrs.sh
           ./testconfig/scripts/wait_for_electrs.sh
       - name: Run test
-        run: RUST_MIN_STACK=8388608 cargo test -p ddk-manager splice_test -- --ignored
+        run: RUST_MIN_STACK=8388608 cargo test -p ddk-manager splice -- --nocapture --ignored
       - name: Stop bitcoin node
         run: docker compose down -v

@@ -4,7 +4,7 @@ mod test_utils;
 
 use std::sync::Arc;
 
-use bitcoin::Network;
+use bitcoin::{Amount, Network};
 use ddk::chain::EsploraClient;
 use ddk::logger::Logger;
 use ddk_manager::contract::offered_contract::OfferedContract;
@@ -30,7 +30,9 @@ async fn accept_contract_test() {
         EsploraClient::new("http://localhost:30000", Network::Regtest, logger.clone()).unwrap(),
     );
 
-    let stuff = test_utils::create_and_fund_wallet(logger.clone(), blockchain.clone()).await;
+    let amount = Amount::from_btc(2.1).unwrap();
+    let stuff =
+        test_utils::create_and_fund_wallet(logger.clone(), blockchain.clone(), amount).await;
     let wallet = Arc::new(stuff.0);
     wallet.sync().await.unwrap();
 

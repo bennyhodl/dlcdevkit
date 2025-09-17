@@ -1002,6 +1002,7 @@ dependencies = [
  "ddk-dlc",
  "ddk-messages",
  "ddk-trie",
+ "dotenv",
  "env_logger 0.9.3",
  "futures",
  "hex-conservative 0.1.2",

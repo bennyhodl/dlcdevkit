@@ -90,6 +90,18 @@ macro_rules! receive_loop {
 }
 
 #[macro_export]
+macro_rules! periodic_check {
+    ($d:expr, $id:expr, $p:ident) => {
+        $d.lock()
+            .await
+            .periodic_check(true)
+            .await
+            .expect("Periodic check error");
+        assert_contract_state!($d, $id, $p);
+    };
+}
+
+#[macro_export]
 macro_rules! write_contract {
     ($contract: ident, $state: ident) => {
         match $contract {
@@ -788,7 +800,8 @@ pub fn get_variable_oracle_numeric_infos(nb_digits: &[usize]) -> OracleNumericIn
 
 pub async fn refresh_wallet(wallet: &DlcDevKitWallet, expected_funds: u64) {
     let mut retry = 0;
-    while wallet.get_balance().await.unwrap().confirmed.to_sat() < expected_funds {
+    let balance = wallet.get_balance().await.unwrap().confirmed.to_sat();
+    while balance < expected_funds {
         if retry > 30 {
             panic!("Wallet refresh taking too long.")
         }
@@ -809,6 +822,8 @@ pub fn rpc_client() -> Client {
 pub async fn init_clients(
     logger: Arc<Logger>,
     esplora: Arc<EsploraClient>,
+    offer_amount: Amount,
+    accept_amount: Amount,
 ) -> (
     DlcDevKitWallet,
     Arc<MemoryStorage>,
@@ -819,8 +834,8 @@ pub async fn init_clients(
     let sink_rpc = rpc_client();
 
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    let offer_rpc = create_and_fund_wallet(logger.clone(), esplora.clone()).await;
-    let accept_rpc = create_and_fund_wallet(logger.clone(), esplora.clone()).await;
+    let offer_rpc = create_and_fund_wallet(logger.clone(), esplora.clone(), offer_amount).await;
+    let accept_rpc = create_and_fund_wallet(logger.clone(), esplora.clone(), accept_amount).await;
 
     let sink_address = sink_rpc
         .get_new_address(None, Some(AddressType::Bech32))
@@ -841,6 +856,7 @@ pub async fn init_clients(
 pub async fn create_and_fund_wallet(
     logger: Arc<Logger>,
     esplora: Arc<EsploraClient>,
+    amount: Amount,
 ) -> (DlcDevKitWallet, Arc<MemoryStorage>) {
     let sink_rpc = rpc_client();
     let sink_address = sink_rpc
@@ -863,25 +879,18 @@ pub async fn create_and_fund_wallet(
     .unwrap();
 
     let address = wallet.new_external_address().await.unwrap().address;
-    sink_rpc
-        .send_to_address(
-            &address,
-            Amount::from_btc(2.1).unwrap(),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        )
-        .unwrap();
+    if amount > Amount::ZERO {
+        sink_rpc
+            .send_to_address(&address, amount, None, None, None, None, None, None)
+            .unwrap();
+    }
 
     sink_rpc.generate_to_address(5, &sink_address).unwrap();
     let mut done = false;
     while !done {
         wallet.sync().await.unwrap();
         let balance = wallet.get_balance().await.unwrap();
-        if balance.confirmed > Amount::ZERO {
+        if balance.confirmed > Amount::ZERO || amount == Amount::ZERO {
             done = true;
         }
     }

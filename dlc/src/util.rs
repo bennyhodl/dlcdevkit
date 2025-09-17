@@ -97,7 +97,10 @@ pub fn get_sig_for_p2wpkh_input<C: Signing>(
 pub fn weight_to_fee(weight: usize, fee_rate: u64) -> Result<Amount, Error> {
     let amount = (f64::ceil((weight as f64) / 4.0) as u64)
         .checked_mul(fee_rate)
-        .ok_or(Error::InvalidArgument)?;
+        .ok_or(Error::InvalidArgument(format!(
+            "Checked multiplication failed: weight={} fee_rate={}",
+            weight, fee_rate
+        )))?;
     Ok(Amount::from_sat(amount))
 }
 
@@ -252,7 +255,10 @@ pub(crate) fn compute_var_int_prefix_size(len: usize) -> usize {
 /// Validate that the fee rate is not too high
 pub fn validate_fee_rate(fee_rate_per_vb: u64) -> Result<(), Error> {
     if fee_rate_per_vb > 25 * 250 {
-        return Err(Error::InvalidArgument);
+        return Err(Error::InvalidArgument(format!(
+            "Fee rate is too high. fee_rate_per_vb={}",
+            fee_rate_per_vb
+        )));
     }
 
     Ok(())

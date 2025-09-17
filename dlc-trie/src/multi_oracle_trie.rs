@@ -168,7 +168,9 @@ impl MultiOracleTrie {
     /// Creates a new MultiOracleTrie
     pub fn new(oracle_numeric_infos: &OracleNumericInfo, threshold: usize) -> Result<Self, Error> {
         if oracle_numeric_infos.nb_digits.is_empty() {
-            return Err(Error::InvalidArgument);
+            return Err(Error::InvalidArgument(
+                "Oracle numeric infos is empty".to_string(),
+            ));
         }
         let digit_trie = DigitTrie::new(oracle_numeric_infos.base);
         let extra_cover_trie = if oracle_numeric_infos.has_diff_nb_digits() {
@@ -201,7 +203,7 @@ impl<'a> DlcTrie<'a, MultiOracleTrieIter<'a>> for MultiOracleTrie {
         let oracle_numeric_infos = &self.oracle_numeric_infos;
         for (cet_index, outcome) in outcomes.iter().enumerate() {
             if outcome.count == 0 {
-                return Err(Error::InvalidArgument);
+                return Err(Error::InvalidArgument("Outcome count is 0".to_string()));
             }
             let groups = group_by_ignoring_digits(
                 outcome.start,
