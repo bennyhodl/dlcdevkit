@@ -1,6 +1,6 @@
 [package]
 name = "ddk-payouts"
-version = "1.0.3"
+version = "1.0.4"
 authors = ["benny b <ben@bitcoinbay.foundation>"]
 description = "Library to build payout functions for DLC contracts."
 license = "MIT"
@@ -8,10 +8,10 @@ repository = "https://github.com/bennyhodl/dlcdevkit"
 edition = "2021"
 
 [dependencies]
-ddk-manager = { version = "1.0.3", path = "../ddk-manager", features = ["use-serde"] }
-ddk-dlc = { version = "1.0.3", path = "../dlc", features = ["use-serde"] }
-ddk-messages = { version = "1.0.3", path = "../dlc-messages", features = ["use-serde"] }
-ddk-trie = { version = "1.0.3", path = "../dlc-trie", features = ["use-serde"] }
+ddk-manager = { version = "1.0.4", path = "../ddk-manager", features = ["use-serde"] }
+ddk-dlc = { version = "1.0.4", path = "../dlc", features = ["use-serde"] }
+ddk-messages = { version = "1.0.4", path = "../dlc-messages", features = ["use-serde"] }
+ddk-trie = { version = "1.0.4", path = "../dlc-trie", features = ["use-serde"] }
 
 bitcoin = "0.32.6"
 serde = { version = "1.0.209", features = ["derive"] }
