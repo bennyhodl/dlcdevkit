@@ -444,8 +444,12 @@ pub fn create_spliced_dlc_transactions(
     // Filter out DLC inputs from regular inputs to avoid duplicates
     // DLC inputs are already included in the inputs[] array, so we need to remove them
     // before adding them back from dlc_inputs[] to avoid double-counting
-    enhanced_offer_params.inputs.retain(|input| input.max_witness_len <= 108);
-    enhanced_accept_params.inputs.retain(|input| input.max_witness_len <= 108);
+    enhanced_offer_params
+        .inputs
+        .retain(|input| input.max_witness_len <= 108);
+    enhanced_accept_params
+        .inputs
+        .retain(|input| input.max_witness_len <= 108);
 
     let offer_dlc_tx_inputs = offer_params
         .dlc_inputs
