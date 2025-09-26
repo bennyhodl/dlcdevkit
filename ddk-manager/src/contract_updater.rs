@@ -156,16 +156,41 @@ where
         accept_params.collateral.to_sat(),
     );
 
-    let dlc_transactions = ddk_dlc::create_dlc_transactions(
-        &offered_contract.offer_params,
-        &accept_params,
-        &offered_contract.contract_info[0].get_payouts(total_collateral)?,
-        offered_contract.refund_locktime,
-        offered_contract.fee_rate_per_vb,
-        0,
-        offered_contract.cet_locktime,
-        offered_contract.fund_output_serial_id,
-    )?;
+    // Check BOTH parties for DLC inputs - either party having DLC inputs means we need splicing
+    let has_dlc_inputs = !accept_params.dlc_inputs.is_empty() || !offered_contract.offer_params.dlc_inputs.is_empty();
+
+    let dlc_transactions = if has_dlc_inputs {
+        log_debug!(
+            logger,
+            "Creating spliced DLC transactions. num_dlc_inputs={}",
+            accept_params.dlc_inputs.len() + offered_contract.offer_params.dlc_inputs.len()
+        );
+        ddk_dlc::create_spliced_dlc_transactions(
+            &offered_contract.offer_params,
+            &accept_params,
+            &offered_contract.contract_info[0].get_payouts(total_collateral)?,
+            offered_contract.refund_locktime,
+            offered_contract.fee_rate_per_vb,
+            0,
+            offered_contract.cet_locktime,
+            offered_contract.fund_output_serial_id,
+        )?
+    } else {
+        log_debug!(
+            logger,
+            "Creating DLC transactions without splicing."
+        );
+        ddk_dlc::create_dlc_transactions(
+            &offered_contract.offer_params,
+            &accept_params,
+            &offered_contract.contract_info[0].get_payouts(total_collateral)?,
+            offered_contract.refund_locktime,
+            offered_contract.fee_rate_per_vb,
+            0,
+            offered_contract.cet_locktime,
+            offered_contract.fund_output_serial_id,
+        )?
+    };
 
     log_info!(
         logger,
@@ -327,7 +352,7 @@ where
     L::Target: Logger,
 {
     let (tx_input_infos, input_amount) = get_tx_input_infos(&accept_msg.funding_inputs)?;
-    let dlc_inputs = get_dlc_inputs_from_funding_inputs(&accept_msg.funding_inputs);
+    let accept_dlc_inputs = get_dlc_inputs_from_funding_inputs(&accept_msg.funding_inputs);
 
     let accept_params = PartyParams {
         fund_pubkey: accept_msg.funding_pubkey,
@@ -336,7 +361,7 @@ where
         payout_script_pubkey: accept_msg.payout_spk.clone(),
         payout_serial_id: accept_msg.payout_serial_id,
         inputs: tx_input_infos,
-        dlc_inputs: dlc_inputs.clone(),
+        dlc_inputs: accept_dlc_inputs.clone(),
         input_amount,
         collateral: accept_msg.accept_collateral,
     };
@@ -362,11 +387,15 @@ where
         .collect::<Vec<_>>();
 
     let total_collateral = offered_contract.total_collateral;
-    let dlc_transactions = if !dlc_inputs.is_empty() {
+
+    // Check BOTH parties for DLC inputs - either party having DLC inputs means we need splicing
+    let has_dlc_inputs = !accept_dlc_inputs.is_empty() || !offered_contract.offer_params.dlc_inputs.is_empty();
+
+    let dlc_transactions = if has_dlc_inputs {
         log_debug!(
             logger,
             "Creating spliced DLC transactions. num_dlc_inputs={}",
-            dlc_inputs.len()
+            accept_dlc_inputs.len() + offered_contract.offer_params.dlc_inputs.len()
         );
         ddk_dlc::create_spliced_dlc_transactions(
             &offered_contract.offer_params,
@@ -379,6 +408,10 @@ where
             offered_contract.fund_output_serial_id,
         )?
     } else {
+        log_debug!(
+            logger,
+            "Creating DLC transactions without splicing."
+        );
         ddk_dlc::create_dlc_transactions(
             &offered_contract.offer_params,
             &accept_params,
