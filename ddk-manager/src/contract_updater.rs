@@ -157,7 +157,8 @@ where
     );
 
     // Check BOTH parties for DLC inputs - either party having DLC inputs means we need splicing
-    let has_dlc_inputs = !accept_params.dlc_inputs.is_empty() || !offered_contract.offer_params.dlc_inputs.is_empty();
+    let has_dlc_inputs = !accept_params.dlc_inputs.is_empty()
+        || !offered_contract.offer_params.dlc_inputs.is_empty();
 
     let dlc_transactions = if has_dlc_inputs {
         log_debug!(
@@ -176,10 +177,7 @@ where
             offered_contract.fund_output_serial_id,
         )?
     } else {
-        log_debug!(
-            logger,
-            "Creating DLC transactions without splicing."
-        );
+        log_debug!(logger, "Creating DLC transactions without splicing.");
         ddk_dlc::create_dlc_transactions(
             &offered_contract.offer_params,
             &accept_params,
@@ -389,7 +387,8 @@ where
     let total_collateral = offered_contract.total_collateral;
 
     // Check BOTH parties for DLC inputs - either party having DLC inputs means we need splicing
-    let has_dlc_inputs = !accept_dlc_inputs.is_empty() || !offered_contract.offer_params.dlc_inputs.is_empty();
+    let has_dlc_inputs =
+        !accept_dlc_inputs.is_empty() || !offered_contract.offer_params.dlc_inputs.is_empty();
 
     let dlc_transactions = if has_dlc_inputs {
         log_debug!(
@@ -408,10 +407,7 @@ where
             offered_contract.fund_output_serial_id,
         )?
     } else {
-        log_debug!(
-            logger,
-            "Creating DLC transactions without splicing."
-        );
+        log_debug!(logger, "Creating DLC transactions without splicing.");
         ddk_dlc::create_dlc_transactions(
             &offered_contract.offer_params,
             &accept_params,
