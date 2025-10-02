@@ -1136,6 +1136,7 @@ where
                         .dlc_transactions
                         .fund
                         .compute_txid(),
+                    signed_contract: contract.clone(),
                 };
 
                 self.store
@@ -1330,6 +1331,7 @@ where
                     .fund
                     .compute_txid(),
                 pnl,
+                signed_contract: contract.signed_contract.clone(),
             };
             self.store
                 .update_contract(&Contract::Closed(closed_contract))
@@ -1398,6 +1400,7 @@ where
                 .fund
                 .compute_txid(),
             counter_party_id: contract.accepted_contract.offered_contract.counter_party,
+            signed_contract: contract.clone(),
         };
 
         Ok(Contract::Closed(closed_contract))
@@ -1528,6 +1531,7 @@ where
                     .dlc_transactions
                     .fund
                     .compute_txid(),
+                signed_contract: contract.clone(),
             })
         };
 
@@ -3434,6 +3438,7 @@ where
                 .fund
                 .compute_txid(),
             pnl,
+            signed_contract: contract.clone(),
         })
     }
 

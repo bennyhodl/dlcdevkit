@@ -2249,18 +2249,14 @@ where
             confirmed_contract
                 .accepted_contract
                 .adaptor_signatures
-                .as_ref()
-                .expect("to have adaptor signatures"),
+                .clone(),
         )
     } else {
         (
             &accept_per_update_point,
             &accept_points.own_basepoint,
             &offer_revoke_params.own_pk,
-            confirmed_contract
-                .adaptor_signatures
-                .as_ref()
-                .expect("to have adaptor signatures"),
+            confirmed_contract.adaptor_signatures.clone(),
         )
     };
 

@@ -397,6 +397,8 @@ pub struct ClosedContract {
     pub funding_txid: Txid,
     /// The profit and loss for the given contract
     pub pnl: SignedAmount,
+    /// The signed contract that was closed.
+    pub signed_contract: SignedContract,
 }
 
 /// Information about the adaptor signatures and the CET for which they are

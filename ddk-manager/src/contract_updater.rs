@@ -315,8 +315,7 @@ pub(crate) fn accept_contract_internal(
     let accepted_contract = AcceptedContract {
         offered_contract: offered_contract.clone(),
         adaptor_infos,
-        // Drop own adaptor signatures as no point keeping them.
-        adaptor_signatures: None,
+        adaptor_signatures: adaptor_sigs.clone(),
         accept_params: accept_params.clone(),
         funding_inputs: funding_inputs.to_vec(),
         dlc_transactions,
@@ -734,14 +733,14 @@ where
         accept_params: accept_params.clone(),
         funding_inputs: funding_inputs_info.to_vec(),
         adaptor_infos,
-        adaptor_signatures: Some(cet_adaptor_signatures.to_vec()),
+        adaptor_signatures: cet_adaptor_signatures.to_vec(),
         accept_refund_signature: *refund_signature,
         dlc_transactions,
     };
 
     let signed_contract = SignedContract {
         accepted_contract,
-        adaptor_signatures: None,
+        adaptor_signatures: own_signatures.clone(),
         offer_refund_signature,
         funding_signatures: FundingSignatures { funding_signatures },
         channel_id,
@@ -994,7 +993,7 @@ where
 
     let signed_contract = SignedContract {
         accepted_contract: accepted_contract.clone(),
-        adaptor_signatures: Some(cet_adaptor_signatures.to_vec()),
+        adaptor_signatures: cet_adaptor_signatures.to_vec(),
         offer_refund_signature: *refund_signature,
         funding_signatures: funding_signatures.clone(),
         channel_id,
@@ -1037,16 +1036,12 @@ where
 
     let (adaptor_sigs, other_pubkey) = if offered_contract.is_offer_party {
         (
-            contract
-                .accepted_contract
-                .adaptor_signatures
-                .as_ref()
-                .unwrap(),
+            contract.accepted_contract.adaptor_signatures.clone(),
             &contract.accepted_contract.accept_params.fund_pubkey,
         )
     } else {
         (
-            contract.adaptor_signatures.as_ref().unwrap(),
+            contract.adaptor_signatures.clone(),
             &offered_contract.offer_params.fund_pubkey,
         )
     };

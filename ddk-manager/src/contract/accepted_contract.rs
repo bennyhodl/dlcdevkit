@@ -24,7 +24,7 @@ pub struct AcceptedContract {
     pub adaptor_infos: Vec<AdaptorInfo>,
     /// The adaptor signatures of the accepting party. Note that the accepting
     /// party does not keep them thus an option is used.
-    pub adaptor_signatures: Option<Vec<EcdsaAdaptorSignature>>,
+    pub adaptor_signatures: Vec<EcdsaAdaptorSignature>,
     /// The signature for the refund transaction from the accepting party.
     pub accept_refund_signature: Signature,
     /// The bitcoin set of bitcoin transactions for the contract.
@@ -54,7 +54,8 @@ impl AcceptedContract {
         string_id
     }
 
-    pub(crate) fn get_accept_contract_msg(
+    /// Construct the accept contract message
+    pub fn get_accept_contract_msg(
         &self,
         ecdsa_adaptor_signatures: &[EcdsaAdaptorSignature],
     ) -> AcceptDlc {
