@@ -29,10 +29,8 @@ pub struct SignedContract {
 }
 
 impl SignedContract {
-    pub(crate) fn get_sign_dlc(
-        &self,
-        cet_adaptor_signatures: Vec<EcdsaAdaptorSignature>,
-    ) -> SignDlc {
+    /// Construct the sign DLC message from the signed contract
+    pub fn get_sign_dlc(&self, cet_adaptor_signatures: Vec<EcdsaAdaptorSignature>) -> SignDlc {
         let contract_id = self.accepted_contract.get_contract_id();
 
         SignDlc {

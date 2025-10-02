@@ -54,7 +54,8 @@ impl AcceptedContract {
         string_id
     }
 
-    pub(crate) fn get_accept_contract_msg(
+    /// Construct the accept contract message
+    pub fn get_accept_contract_msg(
         &self,
         ecdsa_adaptor_signatures: &[EcdsaAdaptorSignature],
     ) -> AcceptDlc {
