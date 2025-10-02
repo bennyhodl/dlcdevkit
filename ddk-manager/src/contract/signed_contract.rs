@@ -19,7 +19,7 @@ pub struct SignedContract {
     /// The accepted contract that was signed.
     pub accepted_contract: AcceptedContract,
     /// The adaptor signatures of the offering party (None if offering party).
-    pub adaptor_signatures: Option<Vec<EcdsaAdaptorSignature>>,
+    pub adaptor_signatures: Vec<EcdsaAdaptorSignature>,
     /// The refund signature of the offering party.
     pub offer_refund_signature: Signature,
     /// The signatures for the funding inputs of the offering party.

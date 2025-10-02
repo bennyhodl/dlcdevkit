@@ -116,13 +116,13 @@ impl_dlc_writeable!(AcceptedContract, {
     (accept_params, { cb_writeable, ddk_messages::ser_impls::party_params::write, ddk_messages::ser_impls::party_params::read }),
     (funding_inputs, vec),
     (adaptor_infos, vec),
-    (adaptor_signatures, {option_cb, write_ecdsa_adaptor_signatures, read_ecdsa_adaptor_signatures }),
+    (adaptor_signatures, { cb_writeable, write_ecdsa_adaptor_signatures, read_ecdsa_adaptor_signatures }),
     (accept_refund_signature, writeable),
     (dlc_transactions, {cb_writeable, dlc_transactions::write, dlc_transactions::read })
 });
 impl_dlc_writeable!(SignedContract, {
     (accepted_contract, writeable),
-    (adaptor_signatures, {option_cb, write_ecdsa_adaptor_signatures, read_ecdsa_adaptor_signatures }),
+    (adaptor_signatures, { cb_writeable, write_ecdsa_adaptor_signatures, read_ecdsa_adaptor_signatures }),
     (offer_refund_signature, writeable),
     (funding_signatures, writeable),
     (channel_id, option)
