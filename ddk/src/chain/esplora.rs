@@ -7,7 +7,7 @@ use crate::logger::{log_error, log_info, log_warn, WriteLog};
 use bdk_esplora::esplora_client::Error as EsploraError;
 use bdk_esplora::esplora_client::{AsyncClient, BlockingClient, Builder};
 use bitcoin::Network;
-use bitcoin::{Transaction, Txid};
+use bitcoin::{consensus::encode, Transaction, Txid};
 use ddk_manager::error::Error as ManagerError;
 use lightning::chain::chaininterface::{ConfirmationTarget, FeeEstimator};
 
@@ -74,10 +74,14 @@ impl ddk_manager::Blockchain for EsploraClient {
         &self,
         transaction: &bitcoin::Transaction,
     ) -> Result<(), ManagerError> {
+        let txid = transaction.compute_txid();
+        let tx_hex = encode::serialize_hex(transaction);
+
         log_info!(
             self.logger,
-            "Broadcasting transaction. txid={}, num_inputs={}, num_outputs={}",
-            transaction.compute_txid().to_string(),
+            "Broadcasting transaction. txid={}, tx_hex={}, num_inputs={}, num_outputs={}",
+            txid.to_string(),
+            tx_hex,
             transaction.input.len(),
             transaction.output.len()
         );
@@ -100,8 +104,9 @@ impl ddk_manager::Blockchain for EsploraClient {
         if let Err(e) = self.async_client.broadcast(transaction).await {
             log_error!(
                 self.logger,
-                "Could not broadcast transaction. txid={} error={:?}",
-                transaction.compute_txid().to_string(),
+                "Could not broadcast transaction. txid={}, tx_hex={}, error={}",
+                txid.to_string(),
+                tx_hex,
                 e.to_string()
             );
 
