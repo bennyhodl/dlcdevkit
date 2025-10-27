@@ -41,6 +41,7 @@ use lightning::ln::chan_utils::{
 };
 use lightning::util::logger::Logger;
 use lightning::{log_debug, log_error, log_info, log_trace, log_warn};
+use once_cell::sync::Lazy;
 use secp256k1_zkp::XOnlyPublicKey;
 use secp256k1_zkp::{
     ecdsa::Signature, All, EcdsaAdaptorSignature, PublicKey, Secp256k1, SecretKey,
@@ -52,7 +53,15 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 /// The number of confirmations required before moving the the confirmed state.
-pub const NB_CONFIRMATIONS: u32 = 6;
+pub const DEFAULT_NB_CONFIRMATIONS: u32 = 3;
+
+/// The number of confirmations required before moving the the confirmed state.
+/// Uses the NB_CONFIRMATIONS environment variable to set the value.
+static NB_CONFIRMATIONS: Lazy<u32> = Lazy::new(|| match std::env::var("NB_CONFIRMATIONS") {
+    Ok(val) => val.parse().unwrap_or(DEFAULT_NB_CONFIRMATIONS),
+    Err(_) => DEFAULT_NB_CONFIRMATIONS,
+});
+
 /// The delay to set the refund value to.
 pub const REFUND_DELAY: u32 = 86400 * 7;
 /// The nSequence value used for CETs in DLC channels
@@ -818,7 +827,7 @@ where
                     .compute_txid(),
             )
             .await?;
-        if confirmations >= NB_CONFIRMATIONS {
+        if confirmations >= *NB_CONFIRMATIONS {
             log_info!(
                 self.logger,
                 "Marking signed contract as confirmed. confirmations={} contract_id={}",
@@ -832,7 +841,7 @@ where
             log_debug!(self.logger,
                 "Not enough confirmations to mark contract as confirmed. confirmations={} required={} contract_id={}", 
                 confirmations,
-                NB_CONFIRMATIONS,
+                *NB_CONFIRMATIONS,
                 contract.accepted_contract.get_contract_id_string(),
             );
         }
@@ -1116,7 +1125,7 @@ where
                 confirmations
             );
 
-            if confirmations >= NB_CONFIRMATIONS {
+            if confirmations >= *NB_CONFIRMATIONS {
                 // Found a fully confirmed pending close - move directly to Closed
                 log_info!(self.logger,
                     "Pending close transaction is fully confirmed. Moving to closed. close_txid={} contract_id={}", 
@@ -1299,7 +1308,7 @@ where
                 .get_contract_id_string(),
             confirmations
         );
-        if confirmations >= NB_CONFIRMATIONS {
+        if confirmations >= *NB_CONFIRMATIONS {
             log_debug!(self.logger,
                 "Pre-closed contract is fully confirmed. Moving to closed. broadcasted_txid={} contract_id={}", 
                 broadcasted_txid.to_string(),
@@ -1373,7 +1382,7 @@ where
             };
 
             return Ok(Contract::PreClosed(preclosed_contract));
-        } else if confirmations < NB_CONFIRMATIONS {
+        } else if confirmations < *NB_CONFIRMATIONS {
             log_debug!(self.logger,
                 "Found a confirmed but not fully confirmed pending close. Moving to preclosed. txid={} contract_id={}", 
                 signed_cet.compute_txid().to_string(),
@@ -1501,7 +1510,7 @@ where
             return Ok(refunded);
         }
 
-        let contract = if confirmations < NB_CONFIRMATIONS {
+        let contract = if confirmations < *NB_CONFIRMATIONS {
             log_info!(self.logger,
                 "Closing transaction is not fully confirmed. Moving to preclosed. txid={} contract_id={}", 
                 closing_tx.compute_txid().to_string(),
