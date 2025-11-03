@@ -5,7 +5,7 @@ homepage = "https://github.com/bennyhodl/dlcdevkit"
 license-file = "../LICENSE"
 name = "ddk-dlc"
 repository = "https://github.com/bennyhodl/dlcdevkit/tree/master/dlc"
-version = "1.0.6"
+version = "1.0.7"
 edition = "2015"
 
 [dependencies]
