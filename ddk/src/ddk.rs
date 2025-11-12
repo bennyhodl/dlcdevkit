@@ -415,3 +415,18 @@ where
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use ddk_messages::oracle_msgs::OracleAnnouncement;
+    use lightning::{io::Cursor, util::ser::Readable};
+
+    #[test]
+    fn oracle_announcement_tlv() {
+        let bytes = hex::decode("fdd824fd012a6d9f8eb0ad220690c328fc3bf0a5f063687bdd5e40ddcf37e8ad1fad86c2dc71eb891df5cb225af2085ec2e1767c724b0f0e2a47e3defdb4d9716ea5baba0421ba9ead06ccc4aa156fb6f7e014951413ca47194c6c8fecca83a1e28830c061d0fdd822c600016961420d0edf1d96ad8c376634d797a46d8b25886e61716bb3c63ddfed260b8668eefda5fdd8064e0004086e6f742d70616964067265706169641d6c6971756964617465642d62792d6d617475726174696f6e2d646174651d6c6971756964617465642d62792d70726963652d7468726573686f6c644d6c6f616e2d6d6174757265642d31653665356635383537333866383036343338623833333134623932653161303739366462353432646237643636323630656564306530666239623530616538").unwrap();
+        let mut cursor = Cursor::new(bytes);
+        let announcement = OracleAnnouncement::read(&mut cursor);
+        println!("{:?}", announcement);
+        assert!(announcement.is_ok())
+    }
+}

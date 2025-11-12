@@ -1,8 +1,8 @@
 //! Structs containing oracle information.
 
 use crate::ser_impls::{
-    read_as_tlv, read_i32, read_schnorr_pubkey, read_schnorrsig, read_strings_u16, write_as_tlv,
-    write_i32, write_schnorr_pubkey, write_schnorrsig, write_strings_u16, BigSize,
+    read_as_tlv, read_i32, read_schnorr_pubkey, read_strings_u16, write_as_tlv, write_i32,
+    write_schnorr_pubkey, write_schnorrsig, write_strings_u16, BigSize,
 };
 use bitcoin::hashes::{Hash, HashEngine};
 use ddk_dlc::{Error, OracleInfo as DlcOracleInfo};
@@ -224,17 +224,67 @@ impl OracleAnnouncement {
     }
 }
 
-impl_dlc_writeable!(OracleAnnouncement, {
-    (announcement_signature, {cb_writeable, write_schnorrsig, read_schnorrsig}),
-    (oracle_public_key, {cb_writeable, write_schnorr_pubkey, read_schnorr_pubkey}),
-    (oracle_event, {cb_writeable, write_as_tlv, read_as_tlv})
-});
+// fn read_oracle_message<T: Readable>(msg: MagnoliaResponse) -> Result<T, Error> {
+//     let bytes = hex::decode(msg.hex).map_err(|e| Error::OracleError(e.to_string()))?;
+//     let mut cursor = Cursor::new(bytes);
+//     let _type_id: u64 = lightning::util::ser::BigSize::read(&mut cursor).unwrap().0;
+//     let _length: u64 = lightning::util::ser::BigSize::read(&mut cursor).unwrap().0;
+//     T::read(&mut cursor).map_err(|e| Error::OracleError(e.to_string()))
+// }
+// impl_dlc_writeable!(OracleAnnouncement, {
+//     (announcement_signature, {cb_writeable, write_schnorrsig, read_schnorrsig}),
+//     (oracle_public_key, {cb_writeable, write_schnorr_pubkey, read_schnorr_pubkey}),
+//     (oracle_event, {cb_writeable, write_as_tlv, read_as_tlv})
+// });
 
 impl From<&OracleAnnouncement> for DlcOracleInfo {
     fn from(input: &OracleAnnouncement) -> DlcOracleInfo {
         DlcOracleInfo {
             public_key: input.oracle_public_key,
             nonces: input.oracle_event.oracle_nonces.clone(),
+        }
+    }
+}
+
+impl Readable for OracleAnnouncement {
+    fn read<R: bitcoin::io::Read>(reader: &mut R) -> Result<Self, DecodeError> {
+        let _type_id: u64 = BigSize::read(reader)?.0;
+        let _length: u64 = BigSize::read(reader)?.0;
+
+        let announcement_signature = crate::ser_impls::read_schnorrsig(reader)?;
+        let oracle_public_key = crate::ser_impls::read_schnorr_pubkey(reader)?;
+        let _type_id: u64 = BigSize::read(reader)?.0;
+        let _length: u64 = BigSize::read(reader)?.0;
+        let oracle_event = OracleEvent::read(reader)?;
+
+        Ok(Self {
+            announcement_signature,
+            oracle_public_key,
+            oracle_event,
+        })
+    }
+}
+
+impl Writeable for OracleAnnouncement {
+    fn write<W: Writer>(&self, writer: &mut W) -> Result<(), lightning::io::Error> {
+        BigSize(self.type_id() as u64).write(writer)?;
+        BigSize(self.serialized_length() as u64).write(writer)?;
+        write_schnorrsig(&self.announcement_signature, writer)?;
+        write_schnorr_pubkey(&self.oracle_public_key, writer)?;
+        write_as_tlv(&self.oracle_event, writer)?;
+        Ok(())
+    }
+
+    fn serialized_length(&self) -> usize {
+        // Calculate size without the outer TLV wrapper (type + length)
+        64 + // announcement_signature
+        32 + // oracle_public_key
+        {
+            // oracle_event as TLV
+            let event_size = self.oracle_event.serialized_length();
+            BigSize(self.oracle_event.type_id() as u64).serialized_length() +
+            BigSize(event_size as u64).serialized_length() +
+            event_size
         }
     }
 }
@@ -446,12 +496,53 @@ impl Type for OracleAttestation {
     }
 }
 
-impl_dlc_writeable!(OracleAttestation, {
-    (event_id, string),
-    (oracle_public_key, {cb_writeable, write_schnorr_pubkey, read_schnorr_pubkey}),
-    (signatures, {vec_u16_cb, write_schnorrsig, read_schnorrsig}),
-    (outcomes, {cb_writeable, write_strings_u16, read_strings_u16})
-});
+impl Readable for OracleAttestation {
+    fn read<R: bitcoin::io::Read>(reader: &mut R) -> Result<Self, DecodeError> {
+        let _type_id: u64 = BigSize::read(reader)?.0;
+        let _length: u64 = BigSize::read(reader)?.0;
+
+        Ok(Self {
+            event_id: Readable::read(reader)?,
+            oracle_public_key: crate::ser_impls::read_schnorr_pubkey(reader)?,
+            signatures: {
+                let len: u16 = Readable::read(reader)?;
+                let mut signatures = Vec::with_capacity(len as usize);
+                for _ in 0..len {
+                    signatures.push(crate::ser_impls::read_schnorrsig(reader)?);
+                }
+                signatures
+            },
+            outcomes: crate::ser_impls::read_strings_u16(reader)?,
+        })
+    }
+}
+
+impl Writeable for OracleAttestation {
+    fn write<W: Writer>(&self, writer: &mut W) -> Result<(), lightning::io::Error> {
+        BigSize(self.type_id() as u64).write(writer)?;
+        BigSize(self.serialized_length() as u64).write(writer)?;
+        self.event_id.write(writer)?;
+        write_schnorr_pubkey(&self.oracle_public_key, writer)?;
+        (self.signatures.len() as u16).write(writer)?;
+        for sig in &self.signatures {
+            write_schnorrsig(sig, writer)?;
+        }
+        write_strings_u16(&self.outcomes, writer)?;
+        Ok(())
+    }
+
+    fn serialized_length(&self) -> usize {
+        // Calculate size without the outer TLV wrapper (type + length)
+        self.event_id.serialized_length() +
+        32 + // oracle_public_key
+        2 + // signatures length u16
+        (64 * self.signatures.len()) + // each signature is 64 bytes
+        {
+            // outcomes as u16 length + strings
+            2 + self.outcomes.iter().map(|s| s.len() + 2).sum::<usize>()
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
