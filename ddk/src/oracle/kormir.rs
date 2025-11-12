@@ -378,6 +378,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "Kormir is not available"]
     async fn kormir_enum_events() {
         let kormir = create_kormir().await;
 
@@ -406,6 +407,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "Kormir is not available"]
     async fn kormir_numeric_events() {
         let kormir = create_kormir().await;
 

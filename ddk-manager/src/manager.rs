@@ -993,13 +993,13 @@ where
                             .await
                         {
                             Ok(attestation) => attestation,
-                            Err(e) => {
-                                log_error!(self.logger,
-                                    "Attestation not found for event. pubkey={} event_id={} error={}",
-                                    announcement.oracle_public_key,
-                                    announcement.oracle_event.event_id,
-                                    e.to_string()
-                                );
+                            Err(_) => {
+                                // log_error!(self.logger,
+                                //     "Attestation not found for event. pubkey={} event_id={} error={}",
+                                //     announcement.oracle_public_key,
+                                //     announcement.oracle_event.event_id,
+                                //     e.to_string()
+                                // );
                                 return None;
                             }
                         };
@@ -1041,11 +1041,11 @@ where
 
     #[tracing::instrument(skip_all, level = "debug")]
     async fn check_confirmed_contract(&self, contract: &SignedContract) -> Result<(), Error> {
-        log_debug!(
-            self.logger,
-            "Checking confirmed contract. contract_id={}",
-            contract.accepted_contract.get_contract_id_string()
-        );
+        // log_debug!(
+        //     self.logger,
+        //     "Checking confirmed contract. contract_id={}",
+        //     contract.accepted_contract.get_contract_id_string()
+        // );
         let closable_contract_info = self.get_closable_contract_info(contract).await;
         if let Some((contract_info, adaptor_info, attestations)) = closable_contract_info {
             log_debug!(
