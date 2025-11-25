@@ -52,6 +52,5 @@ pub struct NodeOpts {
     pub name: String,
     #[arg(long)]
     #[arg(help = "Url for the postgres database connection.")]
-    #[arg(default_value = "postgres://dlcdevkit:dlcdevkit@localhost:5433/ddk_one")]
     pub postgres_url: String,
 }
