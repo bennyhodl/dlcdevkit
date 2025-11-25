@@ -143,8 +143,24 @@ impl DdkRpc for DdkNode {
             contract_input,
             counter_party,
         } = request.into_inner();
+
         let contract_input: ContractInput =
-            serde_json::from_slice(&contract_input).expect("couldn't get bytes correct");
+            serde_json::from_slice(&contract_input).map_err(|e| {
+                Status::new(
+                    Code::InvalidArgument,
+                    format!("Invalid contract input: {}", e),
+                )
+            })?;
+
+        if contract_input.fee_rate > 1000 {
+            return Err(Status::new(
+                Code::InvalidArgument,
+                format!(
+                    "Fee rate too high: {} sat/vbyte (max: 1000)",
+                    contract_input.fee_rate
+                ),
+            ));
+        }
         let mut oracle_announcements = Vec::new();
         for info in &contract_input.contract_infos {
             let announcement = self
@@ -156,7 +172,12 @@ impl DdkRpc for DdkNode {
             oracle_announcements.push(announcement)
         }
 
-        let counter_party = PublicKey::from_str(&counter_party).expect("no public key");
+        let counter_party = PublicKey::from_str(&counter_party).map_err(|e| {
+            Status::new(
+                Code::InvalidArgument,
+                format!("Invalid counter party pubkey: {}", e),
+            )
+        })?;
         let offer_msg = self
             .node
             .send_dlc_offer(&contract_input, counter_party, oracle_announcements)
@@ -179,8 +200,23 @@ impl DdkRpc for DdkNode {
         request: Request<AcceptOfferRequest>,
     ) -> Result<Response<AcceptOfferResponse>, Status> {
         tracing::info!("Request to accept offer.");
+        let contract_id_hex = request.into_inner().contract_id;
+        let contract_id_bytes = hex::decode(&contract_id_hex).map_err(|e| {
+            Status::new(
+                Code::InvalidArgument,
+                format!("Invalid contract ID hex: {}", e),
+            )
+        })?;
+        if contract_id_bytes.len() != 32 {
+            return Err(Status::new(
+                Code::InvalidArgument,
+                format!(
+                    "Contract ID must be 32 bytes, got {}",
+                    contract_id_bytes.len()
+                ),
+            ));
+        }
         let mut contract_id = [0u8; 32];
-        let contract_id_bytes = hex::decode(&request.into_inner().contract_id).unwrap();
         contract_id.copy_from_slice(&contract_id_bytes);
         let (contract_id, counter_party, accept_dlc) =
             self.node.accept_dlc_offer(contract_id).await.map_err(|e| {
@@ -297,7 +333,16 @@ impl DdkRpc for DdkNode {
         request: Request<ConnectRequest>,
     ) -> Result<Response<ConnectResponse>, Status> {
         let ConnectRequest { pubkey, host } = request.into_inner();
-        let pubkey = PublicKey::from_str(&pubkey).unwrap();
+
+        if host.len() > 255 {
+            return Err(Status::new(
+                Code::InvalidArgument,
+                "Host string too long (max: 255 characters)",
+            ));
+        }
+
+        let pubkey = PublicKey::from_str(&pubkey)
+            .map_err(|e| Status::new(Code::InvalidArgument, format!("Invalid pubkey: {}", e)))?;
         self.node.transport.connect_outbound(pubkey, &host).await;
         Ok(Response::new(ConnectResponse {}))
     }
@@ -336,7 +381,23 @@ impl DdkRpc for DdkNode {
             amount,
             fee_rate,
         } = request.into_inner();
-        let address = Address::from_str(&address).unwrap().assume_checked();
+
+        if fee_rate > 1000 {
+            return Err(Status::new(
+                Code::InvalidArgument,
+                format!("Fee rate too high: {} sat/vbyte (max: 1000)", fee_rate),
+            ));
+        }
+
+        let address = Address::from_str(&address)
+            .map_err(|e| Status::new(Code::InvalidArgument, format!("Invalid address: {}", e)))?
+            .require_network(self.node.network())
+            .map_err(|e| {
+                Status::new(
+                    Code::InvalidArgument,
+                    format!("Address network mismatch: {}", e),
+                )
+            })?;
         let amount = Amount::from_sat(amount);
         let fee_rate = match FeeRate::from_sat_per_vb(fee_rate) {
             Some(f) => f,
