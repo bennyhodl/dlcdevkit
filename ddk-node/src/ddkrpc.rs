@@ -230,11 +230,54 @@ pub struct CreateEnumResponse {
     #[prost(bytes = "vec", tag = "1")]
     pub announcement: ::prost::alloc::vec::Vec<u8>,
 }
+#[derive(serde::Serialize, serde::Deserialize)]
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CreateNumericRequest {
+    #[prost(uint32, tag = "1")]
+    pub maturity: u32,
+    #[prost(uint32, tag = "2")]
+    pub nb_digits: u32,
+}
+#[derive(serde::Serialize, serde::Deserialize)]
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CreateNumericResponse {
+    #[prost(bytes = "vec", tag = "1")]
+    pub announcement: ::prost::alloc::vec::Vec<u8>,
+}
+#[derive(serde::Serialize, serde::Deserialize)]
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SignRequest {
+    #[prost(string, tag = "1")]
+    pub event_id: ::prost::alloc::string::String,
+    #[prost(oneof = "sign_request::Outcome", tags = "2, 3")]
+    pub outcome: ::core::option::Option<sign_request::Outcome>,
+}
+pub mod sign_request {
+    #[derive(serde::Serialize, serde::Deserialize)]
+    #[allow(clippy::derive_partial_eq_without_eq)]
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
+    pub enum Outcome {
+        #[prost(string, tag = "2")]
+        EnumOutcome(::prost::alloc::string::String),
+        #[prost(int64, tag = "3")]
+        NumericOutcome(i64),
+    }
+}
+#[derive(serde::Serialize, serde::Deserialize)]
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SignResponse {
+    #[prost(bytes = "vec", tag = "1")]
+    pub signature: ::prost::alloc::vec::Vec<u8>,
+}
 /// Generated client implementations.
 pub mod ddk_rpc_client {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
-    use tonic::codegen::*;
     use tonic::codegen::http::Uri;
+    use tonic::codegen::*;
     #[derive(Debug, Clone)]
     pub struct DdkRpcClient<T> {
         inner: tonic::client::Grpc<T>,
@@ -278,9 +321,8 @@ pub mod ddk_rpc_client {
                     <T as tonic::client::GrpcService<tonic::body::BoxBody>>::ResponseBody,
                 >,
             >,
-            <T as tonic::codegen::Service<
-                http::Request<tonic::body::BoxBody>,
-            >>::Error: Into<StdError> + Send + Sync,
+            <T as tonic::codegen::Service<http::Request<tonic::body::BoxBody>>>::Error:
+                Into<StdError> + Send + Sync,
         {
             DdkRpcClient::new(InterceptedService::new(inner, interceptor))
         }
@@ -319,131 +361,103 @@ pub mod ddk_rpc_client {
             &mut self,
             request: impl tonic::IntoRequest<super::InfoRequest>,
         ) -> std::result::Result<tonic::Response<super::InfoResponse>, tonic::Status> {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::new(
-                        tonic::Code::Unknown,
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::new(
+                    tonic::Code::Unknown,
+                    format!("Service was not ready: {}", e.into()),
+                )
+            })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static("/ddkrpc.DdkRpc/Info");
             let mut req = request.into_request();
-            req.extensions_mut().insert(GrpcMethod::new("ddkrpc.DdkRpc", "Info"));
+            req.extensions_mut()
+                .insert(GrpcMethod::new("ddkrpc.DdkRpc", "Info"));
             self.inner.unary(req, path, codec).await
         }
         pub async fn send_offer(
             &mut self,
             request: impl tonic::IntoRequest<super::SendOfferRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::SendOfferResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::new(
-                        tonic::Code::Unknown,
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::SendOfferResponse>, tonic::Status> {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::new(
+                    tonic::Code::Unknown,
+                    format!("Service was not ready: {}", e.into()),
+                )
+            })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static("/ddkrpc.DdkRpc/SendOffer");
             let mut req = request.into_request();
-            req.extensions_mut().insert(GrpcMethod::new("ddkrpc.DdkRpc", "SendOffer"));
+            req.extensions_mut()
+                .insert(GrpcMethod::new("ddkrpc.DdkRpc", "SendOffer"));
             self.inner.unary(req, path, codec).await
         }
         pub async fn accept_offer(
             &mut self,
             request: impl tonic::IntoRequest<super::AcceptOfferRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::AcceptOfferResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::new(
-                        tonic::Code::Unknown,
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::AcceptOfferResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::new(
+                    tonic::Code::Unknown,
+                    format!("Service was not ready: {}", e.into()),
+                )
+            })?;
             let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/ddkrpc.DdkRpc/AcceptOffer",
-            );
+            let path = http::uri::PathAndQuery::from_static("/ddkrpc.DdkRpc/AcceptOffer");
             let mut req = request.into_request();
-            req.extensions_mut().insert(GrpcMethod::new("ddkrpc.DdkRpc", "AcceptOffer"));
+            req.extensions_mut()
+                .insert(GrpcMethod::new("ddkrpc.DdkRpc", "AcceptOffer"));
             self.inner.unary(req, path, codec).await
         }
         pub async fn list_offers(
             &mut self,
             request: impl tonic::IntoRequest<super::ListOffersRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::ListOffersResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::new(
-                        tonic::Code::Unknown,
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::ListOffersResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::new(
+                    tonic::Code::Unknown,
+                    format!("Service was not ready: {}", e.into()),
+                )
+            })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static("/ddkrpc.DdkRpc/ListOffers");
             let mut req = request.into_request();
-            req.extensions_mut().insert(GrpcMethod::new("ddkrpc.DdkRpc", "ListOffers"));
+            req.extensions_mut()
+                .insert(GrpcMethod::new("ddkrpc.DdkRpc", "ListOffers"));
             self.inner.unary(req, path, codec).await
         }
         pub async fn new_address(
             &mut self,
             request: impl tonic::IntoRequest<super::NewAddressRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::NewAddressResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::new(
-                        tonic::Code::Unknown,
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::NewAddressResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::new(
+                    tonic::Code::Unknown,
+                    format!("Service was not ready: {}", e.into()),
+                )
+            })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static("/ddkrpc.DdkRpc/NewAddress");
             let mut req = request.into_request();
-            req.extensions_mut().insert(GrpcMethod::new("ddkrpc.DdkRpc", "NewAddress"));
+            req.extensions_mut()
+                .insert(GrpcMethod::new("ddkrpc.DdkRpc", "NewAddress"));
             self.inner.unary(req, path, codec).await
         }
         pub async fn wallet_balance(
             &mut self,
             request: impl tonic::IntoRequest<super::WalletBalanceRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::WalletBalanceResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::new(
-                        tonic::Code::Unknown,
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::WalletBalanceResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::new(
+                    tonic::Code::Unknown,
+                    format!("Service was not ready: {}", e.into()),
+                )
+            })?;
             let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/ddkrpc.DdkRpc/WalletBalance",
-            );
+            let path = http::uri::PathAndQuery::from_static("/ddkrpc.DdkRpc/WalletBalance");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("ddkrpc.DdkRpc", "WalletBalance"));
@@ -452,64 +466,51 @@ pub mod ddk_rpc_client {
         pub async fn wallet_sync(
             &mut self,
             request: impl tonic::IntoRequest<super::WalletSyncRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::WalletSyncResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::new(
-                        tonic::Code::Unknown,
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::WalletSyncResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::new(
+                    tonic::Code::Unknown,
+                    format!("Service was not ready: {}", e.into()),
+                )
+            })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static("/ddkrpc.DdkRpc/WalletSync");
             let mut req = request.into_request();
-            req.extensions_mut().insert(GrpcMethod::new("ddkrpc.DdkRpc", "WalletSync"));
+            req.extensions_mut()
+                .insert(GrpcMethod::new("ddkrpc.DdkRpc", "WalletSync"));
             self.inner.unary(req, path, codec).await
         }
         pub async fn sync(
             &mut self,
             request: impl tonic::IntoRequest<super::SyncRequest>,
         ) -> std::result::Result<tonic::Response<super::SyncResponse>, tonic::Status> {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::new(
-                        tonic::Code::Unknown,
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::new(
+                    tonic::Code::Unknown,
+                    format!("Service was not ready: {}", e.into()),
+                )
+            })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static("/ddkrpc.DdkRpc/Sync");
             let mut req = request.into_request();
-            req.extensions_mut().insert(GrpcMethod::new("ddkrpc.DdkRpc", "Sync"));
+            req.extensions_mut()
+                .insert(GrpcMethod::new("ddkrpc.DdkRpc", "Sync"));
             self.inner.unary(req, path, codec).await
         }
         pub async fn get_wallet_transactions(
             &mut self,
             request: impl tonic::IntoRequest<super::GetWalletTransactionsRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::GetWalletTransactionsResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::new(
-                        tonic::Code::Unknown,
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::GetWalletTransactionsResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::new(
+                    tonic::Code::Unknown,
+                    format!("Service was not ready: {}", e.into()),
+                )
+            })?;
             let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/ddkrpc.DdkRpc/GetWalletTransactions",
-            );
+            let path = http::uri::PathAndQuery::from_static("/ddkrpc.DdkRpc/GetWalletTransactions");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("ddkrpc.DdkRpc", "GetWalletTransactions"));
@@ -518,115 +519,85 @@ pub mod ddk_rpc_client {
         pub async fn list_utxos(
             &mut self,
             request: impl tonic::IntoRequest<super::ListUtxosRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::ListUtxosResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::new(
-                        tonic::Code::Unknown,
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::ListUtxosResponse>, tonic::Status> {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::new(
+                    tonic::Code::Unknown,
+                    format!("Service was not ready: {}", e.into()),
+                )
+            })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static("/ddkrpc.DdkRpc/ListUtxos");
             let mut req = request.into_request();
-            req.extensions_mut().insert(GrpcMethod::new("ddkrpc.DdkRpc", "ListUtxos"));
+            req.extensions_mut()
+                .insert(GrpcMethod::new("ddkrpc.DdkRpc", "ListUtxos"));
             self.inner.unary(req, path, codec).await
         }
         pub async fn list_peers(
             &mut self,
             request: impl tonic::IntoRequest<super::ListPeersRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::ListPeersResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::new(
-                        tonic::Code::Unknown,
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::ListPeersResponse>, tonic::Status> {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::new(
+                    tonic::Code::Unknown,
+                    format!("Service was not ready: {}", e.into()),
+                )
+            })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static("/ddkrpc.DdkRpc/ListPeers");
             let mut req = request.into_request();
-            req.extensions_mut().insert(GrpcMethod::new("ddkrpc.DdkRpc", "ListPeers"));
+            req.extensions_mut()
+                .insert(GrpcMethod::new("ddkrpc.DdkRpc", "ListPeers"));
             self.inner.unary(req, path, codec).await
         }
         pub async fn connect_peer(
             &mut self,
             request: impl tonic::IntoRequest<super::ConnectRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::ConnectResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::new(
-                        tonic::Code::Unknown,
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::ConnectResponse>, tonic::Status> {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::new(
+                    tonic::Code::Unknown,
+                    format!("Service was not ready: {}", e.into()),
+                )
+            })?;
             let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/ddkrpc.DdkRpc/ConnectPeer",
-            );
+            let path = http::uri::PathAndQuery::from_static("/ddkrpc.DdkRpc/ConnectPeer");
             let mut req = request.into_request();
-            req.extensions_mut().insert(GrpcMethod::new("ddkrpc.DdkRpc", "ConnectPeer"));
+            req.extensions_mut()
+                .insert(GrpcMethod::new("ddkrpc.DdkRpc", "ConnectPeer"));
             self.inner.unary(req, path, codec).await
         }
         pub async fn list_oracles(
             &mut self,
             request: impl tonic::IntoRequest<super::ListOraclesRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::ListOraclesResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::new(
-                        tonic::Code::Unknown,
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::ListOraclesResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::new(
+                    tonic::Code::Unknown,
+                    format!("Service was not ready: {}", e.into()),
+                )
+            })?;
             let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/ddkrpc.DdkRpc/ListOracles",
-            );
+            let path = http::uri::PathAndQuery::from_static("/ddkrpc.DdkRpc/ListOracles");
             let mut req = request.into_request();
-            req.extensions_mut().insert(GrpcMethod::new("ddkrpc.DdkRpc", "ListOracles"));
+            req.extensions_mut()
+                .insert(GrpcMethod::new("ddkrpc.DdkRpc", "ListOracles"));
             self.inner.unary(req, path, codec).await
         }
         pub async fn list_contracts(
             &mut self,
             request: impl tonic::IntoRequest<super::ListContractsRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::ListContractsResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::new(
-                        tonic::Code::Unknown,
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::ListContractsResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::new(
+                    tonic::Code::Unknown,
+                    format!("Service was not ready: {}", e.into()),
+                )
+            })?;
             let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/ddkrpc.DdkRpc/ListContracts",
-            );
+            let path = http::uri::PathAndQuery::from_static("/ddkrpc.DdkRpc/ListContracts");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("ddkrpc.DdkRpc", "ListContracts"));
@@ -636,41 +607,32 @@ pub mod ddk_rpc_client {
             &mut self,
             request: impl tonic::IntoRequest<super::SendRequest>,
         ) -> std::result::Result<tonic::Response<super::SendResponse>, tonic::Status> {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::new(
-                        tonic::Code::Unknown,
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::new(
+                    tonic::Code::Unknown,
+                    format!("Service was not ready: {}", e.into()),
+                )
+            })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static("/ddkrpc.DdkRpc/Send");
             let mut req = request.into_request();
-            req.extensions_mut().insert(GrpcMethod::new("ddkrpc.DdkRpc", "Send"));
+            req.extensions_mut()
+                .insert(GrpcMethod::new("ddkrpc.DdkRpc", "Send"));
             self.inner.unary(req, path, codec).await
         }
         pub async fn oracle_announcements(
             &mut self,
             request: impl tonic::IntoRequest<super::OracleAnnouncementsRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::OracleAnnouncementsResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::new(
-                        tonic::Code::Unknown,
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::OracleAnnouncementsResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::new(
+                    tonic::Code::Unknown,
+                    format!("Service was not ready: {}", e.into()),
+                )
+            })?;
             let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/ddkrpc.DdkRpc/OracleAnnouncements",
-            );
+            let path = http::uri::PathAndQuery::from_static("/ddkrpc.DdkRpc/OracleAnnouncements");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("ddkrpc.DdkRpc", "OracleAnnouncements"));
@@ -679,23 +641,54 @@ pub mod ddk_rpc_client {
         pub async fn create_enum(
             &mut self,
             request: impl tonic::IntoRequest<super::CreateEnumRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::CreateEnumResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::new(
-                        tonic::Code::Unknown,
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::CreateEnumResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::new(
+                    tonic::Code::Unknown,
+                    format!("Service was not ready: {}", e.into()),
+                )
+            })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static("/ddkrpc.DdkRpc/CreateEnum");
             let mut req = request.into_request();
-            req.extensions_mut().insert(GrpcMethod::new("ddkrpc.DdkRpc", "CreateEnum"));
+            req.extensions_mut()
+                .insert(GrpcMethod::new("ddkrpc.DdkRpc", "CreateEnum"));
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn create_numeric(
+            &mut self,
+            request: impl tonic::IntoRequest<super::CreateNumericRequest>,
+        ) -> std::result::Result<tonic::Response<super::CreateNumericResponse>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::new(
+                    tonic::Code::Unknown,
+                    format!("Service was not ready: {}", e.into()),
+                )
+            })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/ddkrpc.DdkRpc/CreateNumeric");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("ddkrpc.DdkRpc", "CreateNumeric"));
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn sign_announcement(
+            &mut self,
+            request: impl tonic::IntoRequest<super::SignRequest>,
+        ) -> std::result::Result<tonic::Response<super::SignResponse>, tonic::Status> {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::new(
+                    tonic::Code::Unknown,
+                    format!("Service was not ready: {}", e.into()),
+                )
+            })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/ddkrpc.DdkRpc/SignAnnouncement");
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("ddkrpc.DdkRpc", "SignAnnouncement"));
             self.inner.unary(req, path, codec).await
         }
     }
@@ -714,45 +707,27 @@ pub mod ddk_rpc_server {
         async fn send_offer(
             &self,
             request: tonic::Request<super::SendOfferRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::SendOfferResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::SendOfferResponse>, tonic::Status>;
         async fn accept_offer(
             &self,
             request: tonic::Request<super::AcceptOfferRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::AcceptOfferResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::AcceptOfferResponse>, tonic::Status>;
         async fn list_offers(
             &self,
             request: tonic::Request<super::ListOffersRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::ListOffersResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::ListOffersResponse>, tonic::Status>;
         async fn new_address(
             &self,
             request: tonic::Request<super::NewAddressRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::NewAddressResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::NewAddressResponse>, tonic::Status>;
         async fn wallet_balance(
             &self,
             request: tonic::Request<super::WalletBalanceRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::WalletBalanceResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::WalletBalanceResponse>, tonic::Status>;
         async fn wallet_sync(
             &self,
             request: tonic::Request<super::WalletSyncRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::WalletSyncResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::WalletSyncResponse>, tonic::Status>;
         async fn sync(
             &self,
             request: tonic::Request<super::SyncRequest>,
@@ -760,24 +735,15 @@ pub mod ddk_rpc_server {
         async fn get_wallet_transactions(
             &self,
             request: tonic::Request<super::GetWalletTransactionsRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::GetWalletTransactionsResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::GetWalletTransactionsResponse>, tonic::Status>;
         async fn list_utxos(
             &self,
             request: tonic::Request<super::ListUtxosRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::ListUtxosResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::ListUtxosResponse>, tonic::Status>;
         async fn list_peers(
             &self,
             request: tonic::Request<super::ListPeersRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::ListPeersResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::ListPeersResponse>, tonic::Status>;
         async fn connect_peer(
             &self,
             request: tonic::Request<super::ConnectRequest>,
@@ -785,17 +751,11 @@ pub mod ddk_rpc_server {
         async fn list_oracles(
             &self,
             request: tonic::Request<super::ListOraclesRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::ListOraclesResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::ListOraclesResponse>, tonic::Status>;
         async fn list_contracts(
             &self,
             request: tonic::Request<super::ListContractsRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::ListContractsResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::ListContractsResponse>, tonic::Status>;
         async fn send(
             &self,
             request: tonic::Request<super::SendRequest>,
@@ -803,17 +763,19 @@ pub mod ddk_rpc_server {
         async fn oracle_announcements(
             &self,
             request: tonic::Request<super::OracleAnnouncementsRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::OracleAnnouncementsResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::OracleAnnouncementsResponse>, tonic::Status>;
         async fn create_enum(
             &self,
             request: tonic::Request<super::CreateEnumRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::CreateEnumResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::CreateEnumResponse>, tonic::Status>;
+        async fn create_numeric(
+            &self,
+            request: tonic::Request<super::CreateNumericRequest>,
+        ) -> std::result::Result<tonic::Response<super::CreateNumericResponse>, tonic::Status>;
+        async fn sign_announcement(
+            &self,
+            request: tonic::Request<super::SignRequest>,
+        ) -> std::result::Result<tonic::Response<super::SignResponse>, tonic::Status>;
     }
     #[derive(Debug)]
     pub struct DdkRpcServer<T: DdkRpc> {
@@ -838,10 +800,7 @@ pub mod ddk_rpc_server {
                 max_encoding_message_size: None,
             }
         }
-        pub fn with_interceptor<F>(
-            inner: T,
-            interceptor: F,
-        ) -> InterceptedService<Self, F>
+        pub fn with_interceptor<F>(inner: T, interceptor: F) -> InterceptedService<Self, F>
         where
             F: tonic::service::Interceptor,
         {
@@ -897,21 +856,15 @@ pub mod ddk_rpc_server {
                 "/ddkrpc.DdkRpc/Info" => {
                     #[allow(non_camel_case_types)]
                     struct InfoSvc<T: DdkRpc>(pub Arc<T>);
-                    impl<T: DdkRpc> tonic::server::UnaryService<super::InfoRequest>
-                    for InfoSvc<T> {
+                    impl<T: DdkRpc> tonic::server::UnaryService<super::InfoRequest> for InfoSvc<T> {
                         type Response = super::InfoResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::InfoRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as DdkRpc>::info(&inner, request).await
-                            };
+                            let fut = async move { <T as DdkRpc>::info(&inner, request).await };
                             Box::pin(fut)
                         }
                     }
@@ -941,21 +894,16 @@ pub mod ddk_rpc_server {
                 "/ddkrpc.DdkRpc/SendOffer" => {
                     #[allow(non_camel_case_types)]
                     struct SendOfferSvc<T: DdkRpc>(pub Arc<T>);
-                    impl<T: DdkRpc> tonic::server::UnaryService<super::SendOfferRequest>
-                    for SendOfferSvc<T> {
+                    impl<T: DdkRpc> tonic::server::UnaryService<super::SendOfferRequest> for SendOfferSvc<T> {
                         type Response = super::SendOfferResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::SendOfferRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as DdkRpc>::send_offer(&inner, request).await
-                            };
+                            let fut =
+                                async move { <T as DdkRpc>::send_offer(&inner, request).await };
                             Box::pin(fut)
                         }
                     }
@@ -985,23 +933,16 @@ pub mod ddk_rpc_server {
                 "/ddkrpc.DdkRpc/AcceptOffer" => {
                     #[allow(non_camel_case_types)]
                     struct AcceptOfferSvc<T: DdkRpc>(pub Arc<T>);
-                    impl<
-                        T: DdkRpc,
-                    > tonic::server::UnaryService<super::AcceptOfferRequest>
-                    for AcceptOfferSvc<T> {
+                    impl<T: DdkRpc> tonic::server::UnaryService<super::AcceptOfferRequest> for AcceptOfferSvc<T> {
                         type Response = super::AcceptOfferResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::AcceptOfferRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as DdkRpc>::accept_offer(&inner, request).await
-                            };
+                            let fut =
+                                async move { <T as DdkRpc>::accept_offer(&inner, request).await };
                             Box::pin(fut)
                         }
                     }
@@ -1031,21 +972,16 @@ pub mod ddk_rpc_server {
                 "/ddkrpc.DdkRpc/ListOffers" => {
                     #[allow(non_camel_case_types)]
                     struct ListOffersSvc<T: DdkRpc>(pub Arc<T>);
-                    impl<T: DdkRpc> tonic::server::UnaryService<super::ListOffersRequest>
-                    for ListOffersSvc<T> {
+                    impl<T: DdkRpc> tonic::server::UnaryService<super::ListOffersRequest> for ListOffersSvc<T> {
                         type Response = super::ListOffersResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::ListOffersRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as DdkRpc>::list_offers(&inner, request).await
-                            };
+                            let fut =
+                                async move { <T as DdkRpc>::list_offers(&inner, request).await };
                             Box::pin(fut)
                         }
                     }
@@ -1075,21 +1011,16 @@ pub mod ddk_rpc_server {
                 "/ddkrpc.DdkRpc/NewAddress" => {
                     #[allow(non_camel_case_types)]
                     struct NewAddressSvc<T: DdkRpc>(pub Arc<T>);
-                    impl<T: DdkRpc> tonic::server::UnaryService<super::NewAddressRequest>
-                    for NewAddressSvc<T> {
+                    impl<T: DdkRpc> tonic::server::UnaryService<super::NewAddressRequest> for NewAddressSvc<T> {
                         type Response = super::NewAddressResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::NewAddressRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as DdkRpc>::new_address(&inner, request).await
-                            };
+                            let fut =
+                                async move { <T as DdkRpc>::new_address(&inner, request).await };
                             Box::pin(fut)
                         }
                     }
@@ -1119,23 +1050,16 @@ pub mod ddk_rpc_server {
                 "/ddkrpc.DdkRpc/WalletBalance" => {
                     #[allow(non_camel_case_types)]
                     struct WalletBalanceSvc<T: DdkRpc>(pub Arc<T>);
-                    impl<
-                        T: DdkRpc,
-                    > tonic::server::UnaryService<super::WalletBalanceRequest>
-                    for WalletBalanceSvc<T> {
+                    impl<T: DdkRpc> tonic::server::UnaryService<super::WalletBalanceRequest> for WalletBalanceSvc<T> {
                         type Response = super::WalletBalanceResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::WalletBalanceRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as DdkRpc>::wallet_balance(&inner, request).await
-                            };
+                            let fut =
+                                async move { <T as DdkRpc>::wallet_balance(&inner, request).await };
                             Box::pin(fut)
                         }
                     }
@@ -1165,21 +1089,16 @@ pub mod ddk_rpc_server {
                 "/ddkrpc.DdkRpc/WalletSync" => {
                     #[allow(non_camel_case_types)]
                     struct WalletSyncSvc<T: DdkRpc>(pub Arc<T>);
-                    impl<T: DdkRpc> tonic::server::UnaryService<super::WalletSyncRequest>
-                    for WalletSyncSvc<T> {
+                    impl<T: DdkRpc> tonic::server::UnaryService<super::WalletSyncRequest> for WalletSyncSvc<T> {
                         type Response = super::WalletSyncResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::WalletSyncRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as DdkRpc>::wallet_sync(&inner, request).await
-                            };
+                            let fut =
+                                async move { <T as DdkRpc>::wallet_sync(&inner, request).await };
                             Box::pin(fut)
                         }
                     }
@@ -1209,21 +1128,15 @@ pub mod ddk_rpc_server {
                 "/ddkrpc.DdkRpc/Sync" => {
                     #[allow(non_camel_case_types)]
                     struct SyncSvc<T: DdkRpc>(pub Arc<T>);
-                    impl<T: DdkRpc> tonic::server::UnaryService<super::SyncRequest>
-                    for SyncSvc<T> {
+                    impl<T: DdkRpc> tonic::server::UnaryService<super::SyncRequest> for SyncSvc<T> {
                         type Response = super::SyncResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::SyncRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as DdkRpc>::sync(&inner, request).await
-                            };
+                            let fut = async move { <T as DdkRpc>::sync(&inner, request).await };
                             Box::pin(fut)
                         }
                     }
@@ -1253,23 +1166,18 @@ pub mod ddk_rpc_server {
                 "/ddkrpc.DdkRpc/GetWalletTransactions" => {
                     #[allow(non_camel_case_types)]
                     struct GetWalletTransactionsSvc<T: DdkRpc>(pub Arc<T>);
-                    impl<
-                        T: DdkRpc,
-                    > tonic::server::UnaryService<super::GetWalletTransactionsRequest>
-                    for GetWalletTransactionsSvc<T> {
+                    impl<T: DdkRpc> tonic::server::UnaryService<super::GetWalletTransactionsRequest>
+                        for GetWalletTransactionsSvc<T>
+                    {
                         type Response = super::GetWalletTransactionsResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::GetWalletTransactionsRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as DdkRpc>::get_wallet_transactions(&inner, request)
-                                    .await
+                                <T as DdkRpc>::get_wallet_transactions(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -1300,21 +1208,16 @@ pub mod ddk_rpc_server {
                 "/ddkrpc.DdkRpc/ListUtxos" => {
                     #[allow(non_camel_case_types)]
                     struct ListUtxosSvc<T: DdkRpc>(pub Arc<T>);
-                    impl<T: DdkRpc> tonic::server::UnaryService<super::ListUtxosRequest>
-                    for ListUtxosSvc<T> {
+                    impl<T: DdkRpc> tonic::server::UnaryService<super::ListUtxosRequest> for ListUtxosSvc<T> {
                         type Response = super::ListUtxosResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::ListUtxosRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as DdkRpc>::list_utxos(&inner, request).await
-                            };
+                            let fut =
+                                async move { <T as DdkRpc>::list_utxos(&inner, request).await };
                             Box::pin(fut)
                         }
                     }
@@ -1344,21 +1247,16 @@ pub mod ddk_rpc_server {
                 "/ddkrpc.DdkRpc/ListPeers" => {
                     #[allow(non_camel_case_types)]
                     struct ListPeersSvc<T: DdkRpc>(pub Arc<T>);
-                    impl<T: DdkRpc> tonic::server::UnaryService<super::ListPeersRequest>
-                    for ListPeersSvc<T> {
+                    impl<T: DdkRpc> tonic::server::UnaryService<super::ListPeersRequest> for ListPeersSvc<T> {
                         type Response = super::ListPeersResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::ListPeersRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as DdkRpc>::list_peers(&inner, request).await
-                            };
+                            let fut =
+                                async move { <T as DdkRpc>::list_peers(&inner, request).await };
                             Box::pin(fut)
                         }
                     }
@@ -1388,21 +1286,16 @@ pub mod ddk_rpc_server {
                 "/ddkrpc.DdkRpc/ConnectPeer" => {
                     #[allow(non_camel_case_types)]
                     struct ConnectPeerSvc<T: DdkRpc>(pub Arc<T>);
-                    impl<T: DdkRpc> tonic::server::UnaryService<super::ConnectRequest>
-                    for ConnectPeerSvc<T> {
+                    impl<T: DdkRpc> tonic::server::UnaryService<super::ConnectRequest> for ConnectPeerSvc<T> {
                         type Response = super::ConnectResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::ConnectRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as DdkRpc>::connect_peer(&inner, request).await
-                            };
+                            let fut =
+                                async move { <T as DdkRpc>::connect_peer(&inner, request).await };
                             Box::pin(fut)
                         }
                     }
@@ -1432,23 +1325,16 @@ pub mod ddk_rpc_server {
                 "/ddkrpc.DdkRpc/ListOracles" => {
                     #[allow(non_camel_case_types)]
                     struct ListOraclesSvc<T: DdkRpc>(pub Arc<T>);
-                    impl<
-                        T: DdkRpc,
-                    > tonic::server::UnaryService<super::ListOraclesRequest>
-                    for ListOraclesSvc<T> {
+                    impl<T: DdkRpc> tonic::server::UnaryService<super::ListOraclesRequest> for ListOraclesSvc<T> {
                         type Response = super::ListOraclesResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::ListOraclesRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as DdkRpc>::list_oracles(&inner, request).await
-                            };
+                            let fut =
+                                async move { <T as DdkRpc>::list_oracles(&inner, request).await };
                             Box::pin(fut)
                         }
                     }
@@ -1478,23 +1364,16 @@ pub mod ddk_rpc_server {
                 "/ddkrpc.DdkRpc/ListContracts" => {
                     #[allow(non_camel_case_types)]
                     struct ListContractsSvc<T: DdkRpc>(pub Arc<T>);
-                    impl<
-                        T: DdkRpc,
-                    > tonic::server::UnaryService<super::ListContractsRequest>
-                    for ListContractsSvc<T> {
+                    impl<T: DdkRpc> tonic::server::UnaryService<super::ListContractsRequest> for ListContractsSvc<T> {
                         type Response = super::ListContractsResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::ListContractsRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as DdkRpc>::list_contracts(&inner, request).await
-                            };
+                            let fut =
+                                async move { <T as DdkRpc>::list_contracts(&inner, request).await };
                             Box::pin(fut)
                         }
                     }
@@ -1524,21 +1403,15 @@ pub mod ddk_rpc_server {
                 "/ddkrpc.DdkRpc/Send" => {
                     #[allow(non_camel_case_types)]
                     struct SendSvc<T: DdkRpc>(pub Arc<T>);
-                    impl<T: DdkRpc> tonic::server::UnaryService<super::SendRequest>
-                    for SendSvc<T> {
+                    impl<T: DdkRpc> tonic::server::UnaryService<super::SendRequest> for SendSvc<T> {
                         type Response = super::SendResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::SendRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as DdkRpc>::send(&inner, request).await
-                            };
+                            let fut = async move { <T as DdkRpc>::send(&inner, request).await };
                             Box::pin(fut)
                         }
                     }
@@ -1568,15 +1441,11 @@ pub mod ddk_rpc_server {
                 "/ddkrpc.DdkRpc/OracleAnnouncements" => {
                     #[allow(non_camel_case_types)]
                     struct OracleAnnouncementsSvc<T: DdkRpc>(pub Arc<T>);
-                    impl<
-                        T: DdkRpc,
-                    > tonic::server::UnaryService<super::OracleAnnouncementsRequest>
-                    for OracleAnnouncementsSvc<T> {
+                    impl<T: DdkRpc> tonic::server::UnaryService<super::OracleAnnouncementsRequest>
+                        for OracleAnnouncementsSvc<T>
+                    {
                         type Response = super::OracleAnnouncementsResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::OracleAnnouncementsRequest>,
@@ -1614,21 +1483,16 @@ pub mod ddk_rpc_server {
                 "/ddkrpc.DdkRpc/CreateEnum" => {
                     #[allow(non_camel_case_types)]
                     struct CreateEnumSvc<T: DdkRpc>(pub Arc<T>);
-                    impl<T: DdkRpc> tonic::server::UnaryService<super::CreateEnumRequest>
-                    for CreateEnumSvc<T> {
+                    impl<T: DdkRpc> tonic::server::UnaryService<super::CreateEnumRequest> for CreateEnumSvc<T> {
                         type Response = super::CreateEnumResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::CreateEnumRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as DdkRpc>::create_enum(&inner, request).await
-                            };
+                            let fut =
+                                async move { <T as DdkRpc>::create_enum(&inner, request).await };
                             Box::pin(fut)
                         }
                     }
@@ -1655,18 +1519,93 @@ pub mod ddk_rpc_server {
                     };
                     Box::pin(fut)
                 }
-                _ => {
-                    Box::pin(async move {
-                        Ok(
-                            http::Response::builder()
-                                .status(200)
-                                .header("grpc-status", "12")
-                                .header("content-type", "application/grpc")
-                                .body(empty_body())
-                                .unwrap(),
-                        )
-                    })
+                "/ddkrpc.DdkRpc/CreateNumeric" => {
+                    #[allow(non_camel_case_types)]
+                    struct CreateNumericSvc<T: DdkRpc>(pub Arc<T>);
+                    impl<T: DdkRpc> tonic::server::UnaryService<super::CreateNumericRequest> for CreateNumericSvc<T> {
+                        type Response = super::CreateNumericResponse;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::CreateNumericRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut =
+                                async move { <T as DdkRpc>::create_numeric(&inner, request).await };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = CreateNumericSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
                 }
+                "/ddkrpc.DdkRpc/SignAnnouncement" => {
+                    #[allow(non_camel_case_types)]
+                    struct SignAnnouncementSvc<T: DdkRpc>(pub Arc<T>);
+                    impl<T: DdkRpc> tonic::server::UnaryService<super::SignRequest> for SignAnnouncementSvc<T> {
+                        type Response = super::SignResponse;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::SignRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as DdkRpc>::sign_announcement(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = SignAnnouncementSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                _ => Box::pin(async move {
+                    Ok(http::Response::builder()
+                        .status(200)
+                        .header("grpc-status", "12")
+                        .header("content-type", "application/grpc")
+                        .body(empty_body())
+                        .unwrap())
+                }),
             }
         }
     }

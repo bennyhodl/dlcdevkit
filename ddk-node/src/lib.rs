@@ -20,13 +20,13 @@ use ddk_manager::Storage as DlcStorage;
 use ddkrpc::ddk_rpc_server::{DdkRpc, DdkRpcServer};
 use ddkrpc::{
     AcceptOfferRequest, AcceptOfferResponse, ConnectRequest, ConnectResponse, CreateEnumRequest,
-    CreateEnumResponse, GetWalletTransactionsRequest, GetWalletTransactionsResponse,
-    ListContractsRequest, ListContractsResponse, ListOffersRequest, ListOffersResponse,
-    ListOraclesRequest, ListOraclesResponse, ListPeersRequest, ListPeersResponse, ListUtxosRequest,
-    ListUtxosResponse, NewAddressRequest, NewAddressResponse, OracleAnnouncementsRequest,
-    OracleAnnouncementsResponse, SendOfferRequest, SendOfferResponse, SendRequest, SendResponse,
-    SyncRequest, SyncResponse, WalletBalanceRequest, WalletBalanceResponse, WalletSyncRequest,
-    WalletSyncResponse,
+    CreateEnumResponse, CreateNumericRequest, CreateNumericResponse, GetWalletTransactionsRequest,
+    GetWalletTransactionsResponse, ListContractsRequest, ListContractsResponse, ListOffersRequest,
+    ListOffersResponse, ListOraclesRequest, ListOraclesResponse, ListPeersRequest,
+    ListPeersResponse, ListUtxosRequest, ListUtxosResponse, NewAddressRequest, NewAddressResponse,
+    OracleAnnouncementsRequest, OracleAnnouncementsResponse, SendOfferRequest, SendOfferResponse,
+    SendRequest, SendResponse, SignRequest, SignResponse, SyncRequest, SyncResponse,
+    WalletBalanceRequest, WalletBalanceResponse, WalletSyncRequest, WalletSyncResponse,
 };
 use ddkrpc::{InfoRequest, InfoResponse};
 use opts::NodeOpts;
@@ -405,5 +405,56 @@ impl DdkRpc for DdkNode {
         };
 
         Ok(Response::new(SyncResponse {}))
+    }
+
+    async fn create_numeric(
+        &self,
+        request: Request<CreateNumericRequest>,
+    ) -> Result<Response<CreateNumericResponse>, Status> {
+        let CreateNumericRequest {
+            maturity,
+            nb_digits,
+        } = request.into_inner();
+        let announcement = self
+            .node
+            .oracle
+            .create_numeric_event(
+                Some(nb_digits as u16), // Number of digits
+                None,                   // Default is_signed to false
+                None,                   // Default precision to 0
+                "unit".to_string(),     // Default unit
+                maturity,               // Maturity timestamp
+            )
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        let announcement_bytes =
+            serde_json::to_vec(&announcement).map_err(|e| Status::internal(e.to_string()))?;
+
+        Ok(Response::new(CreateNumericResponse {
+            announcement: announcement_bytes,
+        }))
+    }
+
+    async fn sign_announcement(
+        &self,
+        request: Request<SignRequest>,
+    ) -> Result<Response<SignResponse>, Status> {
+        let SignRequest { event_id, outcome } = request.into_inner();
+        let attestation = match outcome {
+            Some(ddkrpc::sign_request::Outcome::EnumOutcome(outcome)) => {
+                self.node.oracle.sign_enum_event(event_id, outcome).await
+            }
+            Some(ddkrpc::sign_request::Outcome::NumericOutcome(outcome)) => {
+                self.node.oracle.sign_numeric_event(event_id, outcome).await
+            }
+            None => return Err(Status::invalid_argument("Outcome must be specified")),
+        }
+        .map_err(|e| Status::internal(e.to_string()))?;
+
+        let signature =
+            serde_json::to_vec(&attestation).map_err(|e| Status::internal(e.to_string()))?;
+
+        Ok(Response::new(SignResponse { signature }))
     }
 }

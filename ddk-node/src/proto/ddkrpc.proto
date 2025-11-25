@@ -19,6 +19,8 @@ service DdkRpc {
   rpc Send (SendRequest) returns (SendResponse);
   rpc OracleAnnouncements (OracleAnnouncementsRequest) returns (OracleAnnouncementsResponse);
   rpc CreateEnum (CreateEnumRequest) returns (CreateEnumResponse);
+  rpc CreateNumeric (CreateNumericRequest) returns (CreateNumericResponse);
+  rpc SignAnnouncement (SignRequest) returns (SignResponse);
 }
 
 message InfoRequest {}
@@ -145,5 +147,26 @@ message CreateEnumRequest {
 
 message CreateEnumResponse {
   bytes announcement = 1;
+}
+
+message CreateNumericRequest {
+  uint32 maturity = 1;
+  uint32 nb_digits = 2;
+}
+
+message CreateNumericResponse {
+  bytes announcement = 1;
+}
+
+message SignRequest {
+  string event_id = 1;
+  oneof outcome {
+    string enum_outcome = 2;
+    int64 numeric_outcome = 3;
+  }
+}
+
+message SignResponse {
+  bytes signature = 1;
 }
 
