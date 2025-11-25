@@ -32,13 +32,90 @@ use ddkrpc::{InfoRequest, InfoResponse};
 use opts::NodeOpts;
 use std::str::FromStr;
 use std::sync::Arc;
+use tonic::service::Interceptor;
 use tonic::transport::Server;
 use tonic::Request;
 use tonic::Response;
 use tonic::Status;
 use tonic::{async_trait, Code};
 
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
+
+type HmacSha256 = Hmac<Sha256>;
+
 type Ddk = DlcDevKit<NostrDlc, PostgresStore, KormirOracleClient>;
+
+const TIMESTAMP_TOLERANCE_SECS: i64 = 300;
+
+/// HMAC authentication interceptor for gRPC requests.
+///
+/// This interceptor verifies requests using HMAC-SHA256 signatures. Clients must send:
+/// - `x-timestamp`: Unix timestamp (seconds) when the request was made
+/// - `x-signature`: HMAC-SHA256(timestamp, secret) as a hex string
+///
+/// The server verifies the signature matches and the timestamp is within 5 minutes.
+/// If no secret is configured, all requests are allowed (for localhost-only deployments).
+#[derive(Clone)]
+pub struct HmacAuthInterceptor {
+    secret: Option<Vec<u8>>,
+}
+
+impl HmacAuthInterceptor {
+    pub fn new(secret: Option<String>) -> Self {
+        Self {
+            secret: secret.map(|s| s.into_bytes()),
+        }
+    }
+
+    fn verify_signature(&self, timestamp: &str, signature: &str, secret: &[u8]) -> bool {
+        let Ok(mut mac) = HmacSha256::new_from_slice(secret) else {
+            return false;
+        };
+        mac.update(timestamp.as_bytes());
+        let expected = hex::encode(mac.finalize().into_bytes());
+        expected == signature
+    }
+}
+
+impl Interceptor for HmacAuthInterceptor {
+    fn call(&mut self, req: Request<()>) -> Result<Request<()>, Status> {
+        let Some(secret) = &self.secret else {
+            return Ok(req);
+        };
+
+        let metadata = req.metadata();
+
+        let timestamp = metadata
+            .get("x-timestamp")
+            .and_then(|v| v.to_str().ok())
+            .ok_or_else(|| Status::unauthenticated("Missing x-timestamp header"))?;
+
+        let signature = metadata
+            .get("x-signature")
+            .and_then(|v| v.to_str().ok())
+            .ok_or_else(|| Status::unauthenticated("Missing x-signature header"))?;
+
+        let ts: i64 = timestamp
+            .parse()
+            .map_err(|_| Status::unauthenticated("Invalid timestamp format"))?;
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| Status::internal("System time error"))?
+            .as_secs() as i64;
+
+        if (now - ts).abs() > TIMESTAMP_TOLERANCE_SECS {
+            return Err(Status::unauthenticated("Timestamp expired"));
+        }
+
+        if !self.verify_signature(timestamp, signature, secret) {
+            return Err(Status::unauthenticated("Invalid signature"));
+        }
+
+        Ok(req)
+    }
+}
 
 #[derive(Clone)]
 pub struct DdkNode {
@@ -53,6 +130,17 @@ impl DdkNode {
     }
 
     pub async fn serve(opts: NodeOpts) -> anyhow::Result<()> {
+        let is_localhost =
+            opts.grpc_host.starts_with("127.0.0.1") || opts.grpc_host.starts_with("localhost");
+
+        if !is_localhost && opts.api_secret.is_none() {
+            anyhow::bail!(
+                "API secret is required when binding to non-localhost address ({}). \
+                Use --api-secret to set a secret or bind to 127.0.0.1 for local-only access.",
+                opts.grpc_host
+            );
+        }
+
         let logger = Arc::new(Logger::console(
             "console_logger".to_string(),
             LogLevel::Info,
@@ -102,14 +190,23 @@ impl DdkNode {
         ddk.start()?;
         let node = DdkNode::new(ddk);
         let node_stop = node.node.clone();
+
+        let interceptor = HmacAuthInterceptor::new(opts.api_secret.clone());
+
         let server = Server::builder()
-            .add_service(DdkRpcServer::new(node))
+            .add_service(DdkRpcServer::with_interceptor(node, interceptor))
             .serve_with_shutdown(opts.grpc_host.parse()?, async {
                 tokio::signal::ctrl_c()
                     .await
                     .expect("Failed to install Ctrl+C signal handler");
                 let _ = node_stop.stop();
             });
+
+        if opts.api_secret.is_some() {
+            tracing::info!("gRPC server starting with HMAC authentication enabled");
+        } else {
+            tracing::info!("gRPC server starting without authentication (localhost only)");
+        }
 
         server.await?;
 
