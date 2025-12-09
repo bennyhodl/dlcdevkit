@@ -163,10 +163,12 @@ impl ddk_manager::Blockchain for EsploraClient {
             .get_height()
             .await
             .map_err(esplora_err_to_manager_err)?;
-
         if txn.confirmed {
             match txn.block_height {
-                Some(height) => Ok(tip_height - height),
+                Some(height) => Ok(tip_height
+                    .checked_sub(height)
+                    .map(|diff| diff + 1)
+                    .unwrap_or(0)),
                 None => Ok(0),
             }
         } else {

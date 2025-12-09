@@ -13,6 +13,7 @@ env:
   BITCOIND_PASS: dlcdevkit
   ESPLORA_HOST: http://localhost:30000
   RPC_WALLET: ddk
+  NB_CONFIRMATIONS: 6
 
 jobs:
   clippy:
