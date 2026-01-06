@@ -1,16 +1,25 @@
-# DDK Node
+# ddk-node
 
 [![Crate](https://img.shields.io/crates/v/ddk-node.svg?logo=rust)](https://crates.io/crates/ddk-node)
 
-Dlc Dev Kit node example with [`ddk`](../ddk), [`lightning`](../ddk/src/transport/lightning/), [`sled`](../ddk/src/storage/sled/), and [`kormir`](../ddk/src/oracle/kormir.rs).
+A ready-to-go DLC node with a gRPC server and accompanying CLI built on the DlcDevKit framework.
 
-Node binary is available through [`crates.io`](https://crates.io/crates/ddk-node).
+The node uses Nostr for transport, PostgreSQL for storage, and Kormir as the oracle client.
+
+## Installation
 
 ```
 $ cargo install ddk-node
 ```
-## Usage
-The downloaded binary included the node binary and a cli interface.
+
+## Binaries
+
+| Binary | Description |
+|--------|-------------|
+| `ddk-node` | The DLC node server exposing a gRPC API |
+| `ddk-cli` | Command-line client to interact with `ddk-node` |
+
+## Node Usage
 
 ```
 $ ddk-node --help
@@ -18,16 +27,19 @@ $ ddk-node --help
 Usage: ddk-node [OPTIONS]
 
 Options:
-      --log <LOG>                  Set the log level. [default: info]
-  -n, --network <NETWORK>          Set the Bitcoin network for DDK [default: regtest]
-  -s, --storage-dir <STORAGE_DIR>  The path where DlcDevKit will store data.
-  -p, --port <LISTENING_PORT>      Listening port for network transport. [default: 1776]
-      --grpc <GRPC_HOST>           Host and port the gRPC server will run on. [default: 0.0.0.0:3030]
-      --esplora <ESPLORA_HOST>     Host to connect to an esplora server. [default: http://127.0.0.1:30000]
-      --oracle <ORACLE_HOST>       Host to connect to an oracle server. [default: http://127.0.0.1:8082]
-      --seed <SEED>                Seed config strategy ('bytes' OR 'file') [default: file]
+      --log <LOG>                  Set the log level [default: info]
+  -n, --network <NETWORK>          Set the Bitcoin network [default: signet]
+  -s, --storage-dir <STORAGE_DIR>  Data storage path [default: ~/.ddk]
+  -p, --port <PORT>                Transport listening port [default: 1776]
+      --grpc <GRPC_HOST>           gRPC server host:port [default: 0.0.0.0:3030]
+      --esplora <ESPLORA_HOST>     Esplora server URL [default: https://mutinynet.com/api]
+      --oracle <ORACLE_HOST>       Kormir oracle URL [default: https://kormir.dlcdevkit.com]
+      --seed <SEED>                Seed strategy: 'file' or 'bytes' [default: file]
+      --postgres-url <URL>         PostgreSQL connection URL
   -h, --help                       Print help
 ```
+
+## CLI Usage
 
 ```
 $ ddk-cli --help
@@ -37,68 +49,75 @@ CLI for ddk-node
 Usage: ddk-cli [OPTIONS] <COMMAND>
 
 Commands:
-  info            Gets information about the DDK instance
-  offer-contract  Pass a contract input to send an offer
-  offers          Retrieve the offers that ddk-node has received
-  accept-offer    Accept a DLC offer with the contract id string
-  contracts       List contracts
-  wallet          Wallet commands
-  peers           Get the peers connected to the node
+  info            Get node information (pubkey, transport, oracle)
+  offer-contract  Send a contract offer to a counterparty
+  offers          List received contract offers
+  accept-offer    Accept a DLC offer by contract ID
+  contracts       List all contracts
+  balance         Get wallet balance
+  wallet          Wallet commands (new-address, transactions, utxos, send, sync)
+  oracle          Oracle commands (announcements, create-enum, create-numeric, sign)
+  peers           List connected peers
   connect         Connect to another DDK node
-  help            Print this message or the help of the given subcommand(s)
+  sync            Sync wallet and contracts
+  help            Print help
 
 Options:
-  -s, --server <SERVER>  ddk-node gRPC server to connect to. [default: http://127.0.0.1:3030]
+  -s, --server <SERVER>  gRPC server to connect to [default: http://127.0.0.1:3030]
   -h, --help             Print help
-  -V, --version          Print version
 ```
+
+## gRPC API
+
+The node exposes a gRPC service with the following methods:
+
+| Method | Description |
+|--------|-------------|
+| `Info` | Get node info (pubkey, transport, oracle) |
+| `SendOffer` | Send a DLC offer to a counterparty |
+| `AcceptOffer` | Accept a received DLC offer |
+| `ListOffers` | List all received contract offers |
+| `ListContracts` | List all contracts |
+| `NewAddress` | Generate a new wallet address |
+| `WalletBalance` | Get wallet balance |
+| `WalletSync` | Sync the on-chain wallet |
+| `GetWalletTransactions` | Get wallet transactions |
+| `ListUtxos` | List wallet UTXOs |
+| `Send` | Send Bitcoin to an address |
+| `ListPeers` | List connected peers |
+| `ConnectPeer` | Connect to another DDK node |
+| `ListOracles` | Get oracle info |
+| `OracleAnnouncements` | Get oracle announcement by event ID |
+| `CreateEnum` | Create an enum oracle event |
+| `CreateNumeric` | Create a numeric oracle event |
+| `SignAnnouncement` | Sign an oracle announcement |
 
 ## Development
 
-If you are testing local changes to [`ddk`](../ddk/) or running `ddk-node` locally:
-
-```
-# Start bitcoin and esplora
+```bash
+# Start bitcoin, esplora, and postgres
 $ just deps
 
-$ just node-one # Start node one 
-$ just node-two # Start node two in a different terminal
+# Start node one
+$ just node-one
 
-$ just bc ...ARGS # Interface with the Bitcoin node.
+# Start node two (in another terminal)
+$ just node-two
+
+# Use the CLI
+$ just cli-one info
+$ just cli-two info
+
+# Connect nodes
+$ PUBKEY=$(just cli-one info | jq -r .pubkey)
+$ just cli-two connect $PUBKEY@127.0.0.1:1776
+
+# Create and accept a contract
+$ just cli-two offer-contract $PUBKEY
+$ just cli-one offers
+$ just cli-one accept-offer <CONTRACT_ID>
 ```
 
-An oracle is hosted at `https://kormir.dlcdevkit.com`
+## License
 
-To interface the nodes with the CLI, you can use `just cli-one` and `just cli-two`.
-
-To create an enum event with `kormir`:
-
-1. Create the event
-```
-curl --location 'http://localhost:8082/create-enum' \
---header 'Content-Type: application/json' \
---data '{
-    "event_id": "EVENT ID",
-    "outcomes": [
-        ...OUTCOMES
-    ],
-    "event_maturity_epoch": UNIX_TIME
-}'
-```
-
-2. Connect two ddk-nodes
-```
-$ PUBKEY=$(just cli-one info | jq -r .pubkey) && just cli-two connect $PUBKEY@127.0.0.1:1776
-```
-
-3. Offer Contract 
-```
-$ just cli-two offer-contract $PUBKEY # Follow the prompts and input the outcomes and payouts
-```
-
-4. Accept Contract
-```
-$ just cli-one offers # Select the recently created offer
-
-$ just cli-one accept-contract <CONTRACT ID>
-```
+This project is licensed under the MIT License.
