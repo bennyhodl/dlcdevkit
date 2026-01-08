@@ -84,7 +84,3 @@ required-features = ["nostr"]
 name = "postgres"
 path = "examples/postgres.rs"
 required-features = ["postgres", "lightning", "kormir"]
-
-[[example]]
-name = "descriptor_mismatch"
-path = "examples/descriptor_mismatch.rs"
