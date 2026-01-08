@@ -5,6 +5,7 @@ use ddk::error::WalletError;
 use ddk::logger::{LogLevel, Logger};
 use ddk::storage::memory::MemoryStorage;
 use ddk::wallet::DlcDevKitWallet;
+use ddk::Storage;
 use bitcoin::Network;
 use std::sync::Arc;
 
@@ -30,7 +31,7 @@ async fn descriptor_mismatch_error() {
     );
 
     // Create shared storage
-    let storage = Arc::new(MemoryStorage::new());
+    let storage = Arc::new(MemoryStorage::new()) as Arc<dyn Storage>;
 
     // First seed - this will create and persist a wallet
     let mut seed1 = [0u8; 64];
@@ -66,13 +67,23 @@ async fn descriptor_mismatch_error() {
     match result {
         Ok(_) => panic!("Expected WalletPersistanceError but wallet loaded successfully"),
         Err(WalletError::WalletPersistanceError(e)) => {
-            // Successfully triggered the error at line 262
+
+            println!("\n{}", "=".repeat(70));
+            println!("   {:?}", WalletError::WalletPersistanceError(e.clone()));
+            println!("\n{}", "=".repeat(70));
             assert!(
-                e.contains("descriptor") || e.len() > 0,
-                "Expected descriptor-related error message, got: {}",
-                e
+                e.len() > 0,
+                "Error message should not be empty"
             );
         }
-        Err(e) => panic!("Expected WalletPersistanceError, got: {:?}", e),
+        Err(e) => {
+            println!("\n{}", "=".repeat(70));
+            println!("UNEXPECTED ERROR TYPE");
+            println!("{}", "=".repeat(70));
+            println!("Expected WalletPersistanceError, but got: {:?}", e);
+            println!("Full error Debug: {:?}", e);
+            println!("{}", "=".repeat(70));
+            panic!("Expected WalletPersistanceError, got: {:?}", e);
+        }
     }
 }
