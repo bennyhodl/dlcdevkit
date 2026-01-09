@@ -9,13 +9,12 @@ use ddk::Storage;
 use bitcoin::Network;
 use std::sync::Arc;
 
-/// Test to trigger the descriptor mismatch error.
-///
-/// This test creates a wallet with one seed, then tries to load it with a different seed.
-/// Since the descriptors won't match, it will trigger the error. The error message
-/// will show checksums of the descriptors instead of the full descriptor strings.
-#[tokio::test]
-async fn descriptor_mismatch_error() {
+/// Helper function to test descriptor mismatch error across different storage backends.
+/// 
+/// This function creates a wallet with one seed, persists it, then tries to load it
+/// with a different seed. It verifies that the error message correctly shows checksums
+/// instead of full descriptors.
+async fn test_descriptor_mismatch_error_with_storage(storage: Arc<dyn Storage>) {
     dotenv::dotenv().ok();
     
     // Setup logger
@@ -31,8 +30,6 @@ async fn descriptor_mismatch_error() {
             .expect("Failed to create Esplora client"),
     );
 
-    // Create shared storage
-    let storage = Arc::new(MemoryStorage::new()) as Arc<dyn Storage>;
 
     // First seed - this will create and persist a wallet
     let mut seed1 = [0u8; 64];
@@ -111,4 +108,84 @@ async fn descriptor_mismatch_error() {
             panic!("Expected DescriptorMismatch, got: {:?}", e);
         }
     }
+}
+
+/// Test descriptor mismatch error with MemoryStorage backend.
+///
+/// This test verifies that the descriptor mismatch error message works correctly
+/// with the in-memory storage backend.
+#[tokio::test]
+async fn descriptor_mismatch_error_memory() {
+    dotenv::dotenv().ok();
+    let storage = Arc::new(MemoryStorage::new()) as Arc<dyn Storage>;
+    test_descriptor_mismatch_error_with_storage(storage).await;
+}
+
+/// Test descriptor mismatch error with SledStorage backend.
+///
+/// This test verifies that the descriptor mismatch error message works correctly
+/// with the Sled embedded database storage backend.
+#[cfg(feature = "sled")]
+#[tokio::test]
+async fn descriptor_mismatch_error_sled() {
+    use ddk::storage::sled::SledStorage;
+    use uuid;
+    
+    dotenv::dotenv().ok();
+    let logger = Arc::new(Logger::console(
+        "descriptor_mismatch_sled_test".to_string(),
+        LogLevel::Info,
+    ));
+    
+    // Create a temporary directory for the sled database
+    let temp_dir = std::env::temp_dir();
+    let db_path = temp_dir.join(format!("ddk_test_sled_{}", uuid::Uuid::new_v4()));
+    
+    let storage = Arc::new(
+        SledStorage::new(db_path.to_str().unwrap(), logger)
+            .expect("Failed to create SledStorage")
+    ) as Arc<dyn Storage>;
+    
+    test_descriptor_mismatch_error_with_storage(storage).await;
+    
+    // Cleanup: remove the temporary database
+    if db_path.exists() {
+        std::fs::remove_dir_all(&db_path).ok();
+    }
+}
+
+/// Test descriptor mismatch error with PostgresStorage backend.
+///
+/// This test verifies that the descriptor mismatch error message works correctly
+/// with the PostgreSQL storage backend.
+///
+/// Note: Requires DATABASE_URL environment variable to be set.
+#[cfg(feature = "postgres")]
+#[tokio::test]
+async fn descriptor_mismatch_error_postgres() {
+    use ddk::storage::postgres::PostgresStore;
+    use uuid;
+    
+    dotenv::dotenv().ok();
+    let postgres_url = std::env::var("DATABASE_URL")
+        .expect("DATABASE_URL must be set for postgres tests");
+    
+    let logger = Arc::new(Logger::console(
+        "descriptor_mismatch_postgres_test".to_string(),
+        LogLevel::Info,
+    ));
+    
+    // Create a unique wallet name for this test to avoid conflicts
+    let wallet_name = format!("test_wallet_{}", uuid::Uuid::new_v4());
+    
+    let storage = Arc::new(
+        PostgresStore::new(&postgres_url, true, logger, wallet_name.clone())
+            .await
+            .expect("Failed to create PostgresStore")
+    ) as Arc<dyn Storage>;
+    
+    test_descriptor_mismatch_error_with_storage(storage).await;
+    
+    // Note: We don't clean up the database here as it's shared infrastructure.
+    // In a real scenario, you might want to clean up test data.
 }
