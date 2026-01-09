@@ -9,10 +9,11 @@ use ddk::Storage;
 use bitcoin::Network;
 use std::sync::Arc;
 
-/// Test to trigger the descriptor mismatch error at line 262 in wallet/mod.rs
+/// Test to trigger the descriptor mismatch error.
 ///
 /// This test creates a wallet with one seed, then tries to load it with a different seed.
-/// Since the descriptors won't match, it will trigger the error at line 262.
+/// Since the descriptors won't match, it will trigger the error. The error message
+/// will show checksums of the descriptors instead of the full descriptor strings.
 #[tokio::test]
 async fn descriptor_mismatch_error() {
     dotenv::dotenv().ok();
@@ -65,25 +66,49 @@ async fn descriptor_mismatch_error() {
 
     // Verify we got the expected error
     match result {
-        Ok(_) => panic!("Expected WalletPersistanceError but wallet loaded successfully"),
-        Err(WalletError::WalletPersistanceError(e)) => {
-
+        Ok(_) => panic!("Expected DescriptorMismatch error but wallet loaded successfully"),
+        Err(WalletError::DescriptorMismatch { keychain, expected, stored }) => {
             println!("\n{}", "=".repeat(70));
-            println!("   {:?}", WalletError::WalletPersistanceError(e.clone()));
-            println!("\n{}", "=".repeat(70));
+            println!("SUCCESS: Descriptor mismatch error detected");
+            println!("{}", "=".repeat(70));
+            println!("Keychain: {}", keychain);
+            println!("Expected descriptor checksum: {}", expected);
+            println!("Stored descriptor checksum: {}", stored);
+            println!("{}", "=".repeat(70));
+            
+            // Verify the error contains meaningful information
+            assert_eq!(keychain, "external", "Should identify external keychain");
             assert!(
-                e.len() > 0,
-                "Error message should not be empty"
+                expected.len() > 0,
+                "Expected descriptor checksum should not be empty"
+            );
+            assert!(
+                stored.len() > 0,
+                "Stored descriptor checksum should not be empty"
+            );
+            // Verify checksums are valid (8 alphanumeric characters or "unknown")
+            // Checksums should be 8 characters (typical) or "unknown" if extraction failed
+            assert!(
+                expected.len() == 8 || expected == "unknown",
+                "Expected checksum should be 8 characters or 'unknown', got: '{}' (length: {})",
+                expected,
+                expected.len()
+            );
+            assert!(
+                stored.len() == 8 || stored == "unknown" || stored.starts_with("Could not extract"),
+                "Stored checksum should be 8 characters, 'unknown', or an error message, got: '{}' (length: {})",
+                stored,
+                stored.len()
             );
         }
         Err(e) => {
             println!("\n{}", "=".repeat(70));
             println!("UNEXPECTED ERROR TYPE");
             println!("{}", "=".repeat(70));
-            println!("Expected WalletPersistanceError, but got: {:?}", e);
+            println!("Expected DescriptorMismatch, but got: {:?}", e);
             println!("Full error Debug: {:?}", e);
             println!("{}", "=".repeat(70));
-            panic!("Expected WalletPersistanceError, got: {:?}", e);
+            panic!("Expected DescriptorMismatch, got: {:?}", e);
         }
     }
 }

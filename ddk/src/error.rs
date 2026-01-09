@@ -207,6 +207,12 @@ pub enum WalletError {
     InvalidDerivationIndex,
     #[error("Invalid secret key")]
     InvalidSecretKey,
+    #[error("Descriptor mismatch in {keychain} keychain.\nExpected descriptor checksum: {expected}\nStored descriptor checksum: {stored}")]
+    DescriptorMismatch {
+        keychain: String,
+        expected: String,
+        stored: String,
+    },
 }
 
 /// Converts a generic error to a DLC manager storage error

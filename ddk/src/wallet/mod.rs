@@ -206,6 +206,160 @@ pub struct DlcDevKitWallet {
 
 const MIN_FEERATE: u32 = 253;
 
+/// Helper function to extract the checksum from a descriptor string.
+/// 
+/// Descriptors typically have a checksum at the end after a '#' character.
+/// Returns the checksum (usually 8 alphanumeric characters) or "unknown" if not found.
+fn extract_descriptor_checksum(descriptor: &str) -> String {
+    if let Some(hash_pos) = descriptor.rfind('#') {
+        let checksum = &descriptor[hash_pos + 1..];
+        // Trim whitespace and take exactly 8 characters (typical checksum length)
+        let trimmed = checksum.trim();
+        trimmed.chars().take(8).collect()
+    } else {
+        "unknown".to_string()
+    }
+}
+
+/// Helper function to parse BDK load errors and extract descriptor mismatch information.
+/// 
+/// This function attempts to identify descriptor mismatches from BDK error messages
+/// and provides detailed information about which keychain failed and what descriptors
+/// were expected vs stored. Only checksums of descriptors are shown for security.
+fn parse_descriptor_mismatch_error(
+    error: &dyn std::error::Error,
+    external_descriptor_str: &str,
+    internal_descriptor_str: &str,
+) -> WalletError {
+    let error_msg = error.to_string();
+    let error_debug = format!("{:?}", error);
+    let error_lower = error_msg.to_lowercase();
+    
+    // Try to determine which keychain failed by checking error message
+    // Look for explicit mentions of keychain types
+    let (keychain, expected_descriptor) = if error_lower.contains("external") 
+        || error_debug.contains("External") 
+        || error_debug.contains("external") {
+        ("external", external_descriptor_str.to_string())
+    } else if error_lower.contains("internal") 
+        || error_debug.contains("Internal") 
+        || error_debug.contains("internal") {
+        ("internal", internal_descriptor_str.to_string())
+    } else {
+        // If we can't determine from the error message, we need to check both
+        // Check if either descriptor appears in the error (indicating which one was expected)
+        if error_msg.contains(external_descriptor_str) || error_debug.contains(external_descriptor_str) {
+            ("external", external_descriptor_str.to_string())
+        } else if error_msg.contains(internal_descriptor_str) || error_debug.contains(internal_descriptor_str) {
+            ("internal", internal_descriptor_str.to_string())
+        } else {
+            // Default to external if we can't determine
+            ("external", external_descriptor_str.to_string())
+        }
+    };
+    
+    // Try to extract the stored descriptor from the error message
+    // BDK errors might contain descriptor information in various formats
+    let stored_descriptor = extract_stored_descriptor_from_error(&error_msg, &error_debug)
+        .unwrap_or_else(|| {
+            // If we can't extract it, provide a helpful message with the original error
+            format!("Could not extract stored descriptor from error message. This may indicate a descriptor mismatch. Original error: {}", error_msg)
+        });
+    
+    // Extract checksums from descriptors instead of showing full descriptors
+    let expected_checksum = extract_descriptor_checksum(&expected_descriptor);
+    let stored_checksum = if stored_descriptor.starts_with("Could not extract") {
+        // If we couldn't extract the descriptor, keep the error message as-is
+        stored_descriptor
+    } else {
+        extract_descriptor_checksum(&stored_descriptor)
+    };
+    
+    WalletError::DescriptorMismatch {
+        keychain: keychain.to_string(),
+        expected: expected_checksum,
+        stored: stored_checksum,
+    }
+}
+
+/// Attempts to extract the stored descriptor from BDK error messages.
+/// 
+/// BDK error messages may contain descriptor information in various formats.
+/// This function tries common patterns to extract the stored descriptor.
+fn extract_stored_descriptor_from_error(error_msg: &str, error_debug: &str) -> Option<String> {
+    // Common patterns BDK might use in error messages:
+    // - "stored: <descriptor>"
+    // - "found: <descriptor>"
+    // - "existing: <descriptor>"
+    // - "persisted: <descriptor>"
+    // - Descriptor might be in quotes or after certain keywords
+    
+    // BDK error format: "Descriptor mismatch for External keychain: loaded <stored_descriptor>, expected <expected_descriptor>"
+    // Try to extract from "loaded " pattern first (most common BDK format)
+    for text in [error_msg, error_debug] {
+        if let Some(pos) = text.find("loaded ") {
+            let after_loaded = &text[pos + "loaded ".len()..];
+            // Find the comma that separates stored from expected
+            if let Some(comma_pos) = after_loaded.find(',') {
+                let stored_desc = after_loaded[..comma_pos].trim();
+                if stored_desc.contains("wpkh") || stored_desc.contains("sh") || stored_desc.contains("tr") {
+                    return Some(stored_desc.to_string());
+                }
+            } else {
+                // No comma found, try to extract until end or newline
+                let trimmed = after_loaded.trim();
+                if let Some(desc_end) = trimmed.find(|c: char| c == '\n' || c == '\r') {
+                    let potential_desc = trimmed[..desc_end].trim();
+                    if potential_desc.contains("wpkh") || potential_desc.contains("sh") || potential_desc.contains("tr") {
+                        return Some(potential_desc.to_string());
+                    }
+                } else if trimmed.contains("wpkh") || trimmed.contains("sh") || trimmed.contains("tr") {
+                    // Take first reasonable chunk
+                    let end = trimmed.len().min(200);
+                    return Some(trimmed[..end].trim().to_string());
+                }
+            }
+        }
+    }
+    
+    // Fallback to other patterns
+    let keywords = ["stored:", "found:", "existing:", "persisted:", "stored ", "found ", "existing ", "persisted "];
+    
+    for text in [error_msg, error_debug] {
+        for keyword in &keywords {
+            if let Some(pos) = text.find(keyword) {
+                let after_keyword = &text[pos + keyword.len()..];
+                // Try to find descriptor in quotes first
+                if let Some(quote_start) = after_keyword.find('"') {
+                    if let Some(quote_end) = after_keyword[quote_start + 1..].find('"') {
+                        let descriptor = &after_keyword[quote_start + 1..quote_start + 1 + quote_end];
+                        if descriptor.contains("wpkh") || descriptor.contains("sh") || descriptor.contains("tr") {
+                            return Some(descriptor.to_string());
+                        }
+                    }
+                }
+                
+                // Try to extract descriptor without quotes (look for common descriptor patterns)
+                let trimmed = after_keyword.trim();
+                // Descriptors typically start with certain patterns and contain specific characters
+                if let Some(desc_end) = trimmed.find(|c: char| c == '\n' || c == '\r' || c == ',' || c == '}') {
+                    let potential_desc = trimmed[..desc_end].trim();
+                    if potential_desc.contains("wpkh") || potential_desc.contains("sh") || potential_desc.contains("tr") 
+                        || potential_desc.starts_with("wpkh") || potential_desc.starts_with("sh") || potential_desc.starts_with("tr") {
+                        return Some(potential_desc.to_string());
+                    }
+                } else if trimmed.contains("wpkh") || trimmed.contains("sh") || trimmed.contains("tr") {
+                    // Take first reasonable chunk
+                    let end = trimmed.len().min(200); // Limit length
+                    return Some(trimmed[..end].trim().to_string());
+                }
+            }
+        }
+    }
+    
+    None
+}
+
 impl DlcDevKitWallet {
     /// Creates a new DlcDevKitWallet instance.
     ///
@@ -259,7 +413,27 @@ impl DlcDevKitWallet {
             .check_network(network)
             .load_wallet_async(&mut storage)
             .await
-            .map_err(|e| WalletError::WalletPersistanceError(e.to_string()))?;
+            .map_err(|e| {
+                // Check if this is a descriptor mismatch error
+                let error_msg = e.to_string();
+                let error_lower = error_msg.to_lowercase();
+                
+                // Convert descriptors to strings for the helper function
+                let external_desc_str = external_descriptor.0.to_string();
+                let internal_desc_str = internal_descriptor.0.to_string();
+                
+                // Common indicators of descriptor mismatch errors
+                if error_lower.contains("descriptor") && (error_lower.contains("mismatch") 
+                    || error_lower.contains("does not match") 
+                    || error_lower.contains("expected")
+                    || error_lower.contains("stored")
+                    || error_lower.contains("found")) {
+                    parse_descriptor_mismatch_error(&e, &external_desc_str, &internal_desc_str)
+                } else {
+                    // For other errors, use the generic error
+                    WalletError::WalletPersistanceError(error_msg)
+                }
+            })?;
 
         let mut wallet = match load_wallet {
             Some(w) => w,
