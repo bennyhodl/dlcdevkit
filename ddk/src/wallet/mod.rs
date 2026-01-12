@@ -33,7 +33,8 @@ use bdk_chain::Balance;
 use bdk_wallet::coin_selection::{
     BranchAndBoundCoinSelection, CoinSelectionAlgorithm, SingleRandomDraw,
 };
-use bdk_wallet::descriptor::IntoWalletDescriptor;
+use bdk_wallet::descriptor::{Descriptor, IntoWalletDescriptor};
+use bdk_wallet::keys::DescriptorPublicKey;
 use bdk_wallet::AsyncWalletPersister;
 pub use bdk_wallet::LocalOutput;
 use bdk_wallet::{
@@ -221,8 +222,7 @@ fn extract_descriptor_checksum(descriptor: &str) -> String {
     }
 }
 
-/// Helper function to parse BDK load errors and extract descriptor mismatch information.
-/// 
+
 /// This function attempts to identify descriptor mismatches from BDK error messages
 /// and provides detailed information about which keychain failed and what descriptors
 /// were expected vs stored. Only checksums of descriptors are shown for security.
@@ -285,79 +285,81 @@ fn parse_descriptor_mismatch_error(
 /// Attempts to extract the stored descriptor from BDK error messages.
 /// 
 /// BDK error messages may contain descriptor information in various formats.
-/// This function tries common patterns to extract the stored descriptor.
+/// This function extracts potential descriptors and validates them using BDK's
+/// descriptor parser (which uses the bitcoin crate internally).
 fn extract_stored_descriptor_from_error(error_msg: &str, error_debug: &str) -> Option<String> {
-    // Common patterns BDK might use in error messages:
-    // - "stored: <descriptor>"
-    // - "found: <descriptor>"
-    // - "existing: <descriptor>"
-    // - "persisted: <descriptor>"
-    // - Descriptor might be in quotes or after certain keywords
-    
-    // BDK error format: "Descriptor mismatch for External keychain: loaded <stored_descriptor>, expected <expected_descriptor>"
-    // Try to extract from "loaded " pattern first (most common BDK format)
+    // Try both error message formats
     for text in [error_msg, error_debug] {
-        if let Some(pos) = text.find("loaded ") {
-            let after_loaded = &text[pos + "loaded ".len()..];
-            // Find the comma that separates stored from expected
-            if let Some(comma_pos) = after_loaded.find(',') {
-                let stored_desc = after_loaded[..comma_pos].trim();
-                if stored_desc.contains("wpkh") || stored_desc.contains("sh") || stored_desc.contains("tr") {
-                    return Some(stored_desc.to_string());
-                }
-            } else {
-                // No comma found, try to extract until end or newline
-                let trimmed = after_loaded.trim();
-                if let Some(desc_end) = trimmed.find(|c: char| c == '\n' || c == '\r') {
-                    let potential_desc = trimmed[..desc_end].trim();
-                    if potential_desc.contains("wpkh") || potential_desc.contains("sh") || potential_desc.contains("tr") {
-                        return Some(potential_desc.to_string());
-                    }
-                } else if trimmed.contains("wpkh") || trimmed.contains("sh") || trimmed.contains("tr") {
-                    // Take first reasonable chunk
-                    let end = trimmed.len().min(200);
-                    return Some(trimmed[..end].trim().to_string());
-                }
+        // Try common BDK error patterns
+        if let Some(desc) = extract_after_keyword(text, "loaded ") {
+            if let Some(valid_desc) = validate_descriptor(&desc) {
+                return Some(valid_desc);
             }
         }
-    }
-    
-    // Fallback to other patterns
-    let keywords = ["stored:", "found:", "existing:", "persisted:", "stored ", "found ", "existing ", "persisted "];
-    
-    for text in [error_msg, error_debug] {
-        for keyword in &keywords {
-            if let Some(pos) = text.find(keyword) {
-                let after_keyword = &text[pos + keyword.len()..];
-                // Try to find descriptor in quotes first
-                if let Some(quote_start) = after_keyword.find('"') {
-                    if let Some(quote_end) = after_keyword[quote_start + 1..].find('"') {
-                        let descriptor = &after_keyword[quote_start + 1..quote_start + 1 + quote_end];
-                        if descriptor.contains("wpkh") || descriptor.contains("sh") || descriptor.contains("tr") {
-                            return Some(descriptor.to_string());
-                        }
-                    }
-                }
-                
-                // Try to extract descriptor without quotes (look for common descriptor patterns)
-                let trimmed = after_keyword.trim();
-                // Descriptors typically start with certain patterns and contain specific characters
-                if let Some(desc_end) = trimmed.find(|c: char| c == '\n' || c == '\r' || c == ',' || c == '}') {
-                    let potential_desc = trimmed[..desc_end].trim();
-                    if potential_desc.contains("wpkh") || potential_desc.contains("sh") || potential_desc.contains("tr") 
-                        || potential_desc.starts_with("wpkh") || potential_desc.starts_with("sh") || potential_desc.starts_with("tr") {
-                        return Some(potential_desc.to_string());
-                    }
-                } else if trimmed.contains("wpkh") || trimmed.contains("sh") || trimmed.contains("tr") {
-                    // Take first reasonable chunk
-                    let end = trimmed.len().min(200); // Limit length
-                    return Some(trimmed[..end].trim().to_string());
+        
+        // Try other common patterns
+        for keyword in ["stored:", "found:", "existing:", "persisted:", "stored ", "found ", "existing ", "persisted "] {
+            if let Some(desc) = extract_after_keyword(text, keyword) {
+                if let Some(valid_desc) = validate_descriptor(&desc) {
+                    return Some(valid_desc);
                 }
             }
         }
     }
     
     None
+}
+
+/// Extracts a potential descriptor string after a keyword in the error text.
+/// 
+/// Handles descriptors in quotes, separated by commas, or terminated by newlines/braces.
+fn extract_after_keyword(text: &str, keyword: &str) -> Option<String> {
+    let pos = text.find(keyword)?;
+    let after_keyword = &text[pos + keyword.len()..];
+    
+    // Try to extract from quoted string first (most reliable)
+    if let Some(quote_start) = after_keyword.find('"') {
+        if let Some(quote_end) = after_keyword[quote_start + 1..].find('"') {
+            let descriptor = after_keyword[quote_start + 1..quote_start + 1 + quote_end].trim();
+            if !descriptor.is_empty() {
+                return Some(descriptor.to_string());
+            }
+        }
+    }
+    
+    // Extract until delimiter (comma, newline, closing brace, or end of string)
+    let trimmed = after_keyword.trim();
+    let desc_end = trimmed
+        .find(|c: char| matches!(c, ',' | '\n' | '\r' | '}' | ']'))
+        .unwrap_or_else(|| trimmed.len().min(500)); // Limit to reasonable length
+    
+    let potential_desc = trimmed[..desc_end].trim();
+    if !potential_desc.is_empty() {
+        Some(potential_desc.to_string())
+    } else {
+        None
+    }
+}
+
+/// Validates that a string is a valid descriptor by attempting to parse it.
+/// 
+/// Uses BDK's descriptor parser (which uses the bitcoin crate internally)
+/// to ensure only valid descriptors are returned. The parser handles checksums
+/// and whitespace automatically.
+fn validate_descriptor(descriptor_str: &str) -> Option<String> {
+    let trimmed = descriptor_str.trim();
+    
+    // Skip empty strings
+    if trimmed.is_empty() {
+        return None;
+    }
+    
+    // Try to parse as a descriptor to validate it
+    // BDK's parser handles checksums (e.g., "wpkh(...)#abc12345") automatically
+    trimmed
+        .parse::<Descriptor<DescriptorPublicKey>>()
+        .ok()
+        .map(|_| trimmed.to_string())
 }
 
 impl DlcDevKitWallet {
