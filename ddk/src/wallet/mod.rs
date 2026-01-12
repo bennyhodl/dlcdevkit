@@ -208,7 +208,7 @@ pub struct DlcDevKitWallet {
 const MIN_FEERATE: u32 = 253;
 
 /// Helper function to extract the checksum from a descriptor string.
-/// 
+///
 /// Descriptors typically have a checksum at the end after a '#' character.
 /// Returns the checksum (usually 8 alphanumeric characters) or "unknown" if not found.
 fn extract_descriptor_checksum(descriptor: &str) -> String {
@@ -222,7 +222,6 @@ fn extract_descriptor_checksum(descriptor: &str) -> String {
     }
 }
 
-
 /// This function attempts to identify descriptor mismatches from BDK error messages
 /// and provides detailed information about which keychain failed and what descriptors
 /// were expected vs stored. Only checksums of descriptors are shown for security.
@@ -234,30 +233,36 @@ fn parse_descriptor_mismatch_error(
     let error_msg = error.to_string();
     let error_debug = format!("{:?}", error);
     let error_lower = error_msg.to_lowercase();
-    
+
     // Try to determine which keychain failed by checking error message
     // Look for explicit mentions of keychain types
-    let (keychain, expected_descriptor) = if error_lower.contains("external") 
-        || error_debug.contains("External") 
-        || error_debug.contains("external") {
+    let (keychain, expected_descriptor) = if error_lower.contains("external")
+        || error_debug.contains("External")
+        || error_debug.contains("external")
+    {
         ("external", external_descriptor_str.to_string())
-    } else if error_lower.contains("internal") 
-        || error_debug.contains("Internal") 
-        || error_debug.contains("internal") {
+    } else if error_lower.contains("internal")
+        || error_debug.contains("Internal")
+        || error_debug.contains("internal")
+    {
         ("internal", internal_descriptor_str.to_string())
     } else {
         // If we can't determine from the error message, we need to check both
         // Check if either descriptor appears in the error (indicating which one was expected)
-        if error_msg.contains(external_descriptor_str) || error_debug.contains(external_descriptor_str) {
+        if error_msg.contains(external_descriptor_str)
+            || error_debug.contains(external_descriptor_str)
+        {
             ("external", external_descriptor_str.to_string())
-        } else if error_msg.contains(internal_descriptor_str) || error_debug.contains(internal_descriptor_str) {
+        } else if error_msg.contains(internal_descriptor_str)
+            || error_debug.contains(internal_descriptor_str)
+        {
             ("internal", internal_descriptor_str.to_string())
         } else {
             // Default to external if we can't determine
             ("external", external_descriptor_str.to_string())
         }
     };
-    
+
     // Try to extract the stored descriptor from the error message
     // BDK errors might contain descriptor information in various formats
     let stored_descriptor = extract_stored_descriptor_from_error(&error_msg, &error_debug)
@@ -265,7 +270,7 @@ fn parse_descriptor_mismatch_error(
             // If we can't extract it, provide a helpful message with the original error
             format!("Could not extract stored descriptor from error message. This may indicate a descriptor mismatch. Original error: {}", error_msg)
         });
-    
+
     // Extract checksums from descriptors instead of showing full descriptors
     let expected_checksum = extract_descriptor_checksum(&expected_descriptor);
     let stored_checksum = if stored_descriptor.starts_with("Could not extract") {
@@ -274,7 +279,7 @@ fn parse_descriptor_mismatch_error(
     } else {
         extract_descriptor_checksum(&stored_descriptor)
     };
-    
+
     WalletError::DescriptorMismatch {
         keychain: keychain.to_string(),
         expected: expected_checksum,
@@ -283,7 +288,7 @@ fn parse_descriptor_mismatch_error(
 }
 
 /// Attempts to extract the stored descriptor from BDK error messages.
-/// 
+///
 /// BDK error messages may contain descriptor information in various formats.
 /// This function extracts potential descriptors and validates them using BDK's
 /// descriptor parser (which uses the bitcoin crate internally).
@@ -296,9 +301,18 @@ fn extract_stored_descriptor_from_error(error_msg: &str, error_debug: &str) -> O
                 return Some(valid_desc);
             }
         }
-        
+
         // Try other common patterns
-        for keyword in ["stored:", "found:", "existing:", "persisted:", "stored ", "found ", "existing ", "persisted "] {
+        for keyword in [
+            "stored:",
+            "found:",
+            "existing:",
+            "persisted:",
+            "stored ",
+            "found ",
+            "existing ",
+            "persisted ",
+        ] {
             if let Some(desc) = extract_after_keyword(text, keyword) {
                 if let Some(valid_desc) = validate_descriptor(&desc) {
                     return Some(valid_desc);
@@ -306,17 +320,17 @@ fn extract_stored_descriptor_from_error(error_msg: &str, error_debug: &str) -> O
             }
         }
     }
-    
+
     None
 }
 
 /// Extracts a potential descriptor string after a keyword in the error text.
-/// 
+///
 /// Handles descriptors in quotes, separated by commas, or terminated by newlines/braces.
 fn extract_after_keyword(text: &str, keyword: &str) -> Option<String> {
     let pos = text.find(keyword)?;
     let after_keyword = &text[pos + keyword.len()..];
-    
+
     // Try to extract from quoted string first (most reliable)
     if let Some(quote_start) = after_keyword.find('"') {
         if let Some(quote_end) = after_keyword[quote_start + 1..].find('"') {
@@ -326,13 +340,13 @@ fn extract_after_keyword(text: &str, keyword: &str) -> Option<String> {
             }
         }
     }
-    
+
     // Extract until delimiter (comma, newline, closing brace, or end of string)
     let trimmed = after_keyword.trim();
     let desc_end = trimmed
         .find(|c: char| matches!(c, ',' | '\n' | '\r' | '}' | ']'))
         .unwrap_or_else(|| trimmed.len().min(500)); // Limit to reasonable length
-    
+
     let potential_desc = trimmed[..desc_end].trim();
     if !potential_desc.is_empty() {
         Some(potential_desc.to_string())
@@ -342,18 +356,18 @@ fn extract_after_keyword(text: &str, keyword: &str) -> Option<String> {
 }
 
 /// Validates that a string is a valid descriptor by attempting to parse it.
-/// 
+///
 /// Uses BDK's descriptor parser (which uses the bitcoin crate internally)
 /// to ensure only valid descriptors are returned. The parser handles checksums
 /// and whitespace automatically.
 fn validate_descriptor(descriptor_str: &str) -> Option<String> {
     let trimmed = descriptor_str.trim();
-    
+
     // Skip empty strings
     if trimmed.is_empty() {
         return None;
     }
-    
+
     // Try to parse as a descriptor to validate it
     // BDK's parser handles checksums (e.g., "wpkh(...)#abc12345") automatically
     trimmed
@@ -419,17 +433,19 @@ impl DlcDevKitWallet {
                 // Check if this is a descriptor mismatch error
                 let error_msg = e.to_string();
                 let error_lower = error_msg.to_lowercase();
-                
+
                 // Convert descriptors to strings for the helper function
                 let external_desc_str = external_descriptor.0.to_string();
                 let internal_desc_str = internal_descriptor.0.to_string();
-                
+
                 // Common indicators of descriptor mismatch errors
-                if error_lower.contains("descriptor") && (error_lower.contains("mismatch") 
-                    || error_lower.contains("does not match") 
-                    || error_lower.contains("expected")
-                    || error_lower.contains("stored")
-                    || error_lower.contains("found")) {
+                if error_lower.contains("descriptor")
+                    && (error_lower.contains("mismatch")
+                        || error_lower.contains("does not match")
+                        || error_lower.contains("expected")
+                        || error_lower.contains("stored")
+                        || error_lower.contains("found"))
+                {
                     parse_descriptor_mismatch_error(&e, &external_desc_str, &internal_desc_str)
                 } else {
                     // For other errors, use the generic error

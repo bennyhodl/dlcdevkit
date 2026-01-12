@@ -1,22 +1,22 @@
 mod test_util;
 
+use bitcoin::Network;
 use ddk::chain::EsploraClient;
 use ddk::error::WalletError;
 use ddk::logger::{LogLevel, Logger};
 use ddk::storage::memory::MemoryStorage;
 use ddk::wallet::DlcDevKitWallet;
 use ddk::Storage;
-use bitcoin::Network;
 use std::sync::Arc;
 
 /// Helper function to test descriptor mismatch error across different storage backends.
-/// 
+///
 /// This function creates a wallet with one seed, persists it, then tries to load it
 /// with a different seed. It verifies that the error message correctly shows checksums
 /// instead of full descriptors.
 async fn test_descriptor_mismatch_error_with_storage(storage: Arc<dyn Storage>) {
     dotenv::dotenv().ok();
-    
+
     // Setup logger
     let logger = Arc::new(Logger::console(
         "descriptor_mismatch_test".to_string(),
@@ -30,11 +30,10 @@ async fn test_descriptor_mismatch_error_with_storage(storage: Arc<dyn Storage>) 
             .expect("Failed to create Esplora client"),
     );
 
-
     // First seed - this will create and persist a wallet
     let mut seed1 = [0u8; 64];
     seed1[0..8].copy_from_slice(b"seed_one");
-    
+
     let _wallet1 = DlcDevKitWallet::new(
         &seed1,
         esplora.clone(),
@@ -50,7 +49,7 @@ async fn test_descriptor_mismatch_error_with_storage(storage: Arc<dyn Storage>) 
     // This should fail at line 262 because the descriptors won't match
     let mut seed2 = [0u8; 64];
     seed2[0..8].copy_from_slice(b"seed_two");
-    
+
     let result = DlcDevKitWallet::new(
         &seed2,
         esplora.clone(),
@@ -64,7 +63,11 @@ async fn test_descriptor_mismatch_error_with_storage(storage: Arc<dyn Storage>) 
     // Verify we got the expected error
     match result {
         Ok(_) => panic!("Expected DescriptorMismatch error but wallet loaded successfully"),
-        Err(WalletError::DescriptorMismatch { keychain, expected, stored }) => {
+        Err(WalletError::DescriptorMismatch {
+            keychain,
+            expected,
+            stored,
+        }) => {
             println!("\n{}", "=".repeat(70));
             println!("SUCCESS: Descriptor mismatch error detected");
             println!("{}", "=".repeat(70));
@@ -72,7 +75,7 @@ async fn test_descriptor_mismatch_error_with_storage(storage: Arc<dyn Storage>) 
             println!("Expected descriptor checksum: {}", expected);
             println!("Stored descriptor checksum: {}", stored);
             println!("{}", "=".repeat(70));
-            
+
             // Verify the error contains meaningful information
             assert_eq!(keychain, "external", "Should identify external keychain");
             assert!(
@@ -130,24 +133,23 @@ async fn descriptor_mismatch_error_memory() {
 async fn descriptor_mismatch_error_sled() {
     use ddk::storage::sled::SledStorage;
     use uuid;
-    
+
     dotenv::dotenv().ok();
     let logger = Arc::new(Logger::console(
         "descriptor_mismatch_sled_test".to_string(),
         LogLevel::Info,
     ));
-    
+
     // Create a temporary directory for the sled database
     let temp_dir = std::env::temp_dir();
     let db_path = temp_dir.join(format!("ddk_test_sled_{}", uuid::Uuid::new_v4()));
-    
+
     let storage = Arc::new(
-        SledStorage::new(db_path.to_str().unwrap(), logger)
-            .expect("Failed to create SledStorage")
+        SledStorage::new(db_path.to_str().unwrap(), logger).expect("Failed to create SledStorage"),
     ) as Arc<dyn Storage>;
-    
+
     test_descriptor_mismatch_error_with_storage(storage).await;
-    
+
     // Cleanup: remove the temporary database
     if db_path.exists() {
         std::fs::remove_dir_all(&db_path).ok();
@@ -165,27 +167,24 @@ async fn descriptor_mismatch_error_sled() {
 async fn descriptor_mismatch_error_postgres() {
     use ddk::storage::postgres::PostgresStore;
     use uuid;
-    
+
     dotenv::dotenv().ok();
-    let postgres_url = std::env::var("DATABASE_URL")
-        .expect("DATABASE_URL must be set for postgres tests");
-    
+    let postgres_url =
+        std::env::var("DATABASE_URL").expect("DATABASE_URL must be set for postgres tests");
+
     let logger = Arc::new(Logger::console(
         "descriptor_mismatch_postgres_test".to_string(),
         LogLevel::Info,
     ));
-    
+
     // Create a unique wallet name for this test to avoid conflicts
     let wallet_name = format!("test_wallet_{}", uuid::Uuid::new_v4());
-    
+
     let storage = Arc::new(
         PostgresStore::new(&postgres_url, true, logger, wallet_name.clone())
             .await
-            .expect("Failed to create PostgresStore")
+            .expect("Failed to create PostgresStore"),
     ) as Arc<dyn Storage>;
-    
+
     test_descriptor_mismatch_error_with_storage(storage).await;
-    
-    // Note: We don't clean up the database here as it's shared infrastructure.
-    // In a real scenario, you might want to clean up test data.
 }
