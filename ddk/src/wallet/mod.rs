@@ -222,6 +222,25 @@ fn extract_descriptor_checksum(descriptor: &str) -> String {
     }
 }
 
+/// Extracts fingerprint and derivation path from bracketed content in descriptor.
+///
+/// Descriptors typically have a derivation path in brackets, e.g., [7caf7de6/84'/1'/0'].
+/// Returns (fingerprint, path) or ("unknown", "unknown") if not found.
+fn extract_descriptor_fingerprint_and_path(descriptor: &str) -> (String, String) {
+    if let Some(bracket_start) = descriptor.find('[') {
+        if let Some(bracket_end) = descriptor[bracket_start..].find(']') {
+            let content = &descriptor[bracket_start + 1..bracket_start + bracket_end];
+            if let Some(slash_pos) = content.find('/') {
+                return (
+                    content[..slash_pos].to_string(),
+                    content[slash_pos + 1..].to_string(),
+                );
+            }
+        }
+    }
+    ("unknown".to_string(), "unknown".to_string())
+}
+
 /// This function attempts to identify descriptor mismatches from BDK error messages
 /// and provides detailed information about which keychain failed and what descriptors
 /// were expected vs stored. Only checksums of descriptors are shown for security.
@@ -236,144 +255,98 @@ fn parse_descriptor_mismatch_error(
 
     // Try to determine which keychain failed by checking error message
     // Look for explicit mentions of keychain types
-    let (keychain, expected_descriptor) = if error_lower.contains("external")
-        || error_debug.contains("External")
-        || error_debug.contains("external")
-    {
-        ("external", external_descriptor_str.to_string())
-    } else if error_lower.contains("internal")
-        || error_debug.contains("Internal")
-        || error_debug.contains("internal")
-    {
-        ("internal", internal_descriptor_str.to_string())
-    } else {
-        // If we can't determine from the error message, we need to check both
-        // Check if either descriptor appears in the error (indicating which one was expected)
-        if error_msg.contains(external_descriptor_str)
-            || error_debug.contains(external_descriptor_str)
-        {
+    let (keychain, expected_descriptor) =
+        if error_lower.contains("external") || error_debug.contains("External") {
             ("external", external_descriptor_str.to_string())
-        } else if error_msg.contains(internal_descriptor_str)
-            || error_debug.contains(internal_descriptor_str)
-        {
+        } else if error_lower.contains("internal") || error_debug.contains("Internal") {
             ("internal", internal_descriptor_str.to_string())
         } else {
-            // Default to external if we can't determine
-            ("external", external_descriptor_str.to_string())
+            // If we can't determine from the error message, check if either descriptor appears
+            // in the error (indicating which one was expected)
+            if error_msg.contains(external_descriptor_str)
+                || error_debug.contains(external_descriptor_str)
+            {
+                ("external", external_descriptor_str.to_string())
+            } else if error_msg.contains(internal_descriptor_str)
+                || error_debug.contains(internal_descriptor_str)
+            {
+                ("internal", internal_descriptor_str.to_string())
+            } else {
+                // Default to external if we can't determine
+                ("external", external_descriptor_str.to_string())
+            }
+        };
+
+    // Extract checksums, fingerprints, and derivation paths directly from descriptors
+    let expected_checksum = extract_descriptor_checksum(&expected_descriptor);
+    let (expected_fingerprint, expected_path) =
+        extract_descriptor_fingerprint_and_path(&expected_descriptor);
+
+    // Extract stored checksum, fingerprint, and path directly from error message
+    // BDK error format: "loaded wpkh([fingerprint/path]...)#checksum, expected ..."
+    let (stored_checksum, stored_fingerprint, stored_path) =
+        extract_stored_info_from_error(&error_msg, &error_debug);
+
+    // Format descriptor information with fingerprint below the path
+    let format_descriptor_info = |checksum: &str, path: &str, fingerprint: &str| {
+        if path != "unknown" {
+            format!(
+                "  Checksum: {}\n  DerivationPath: {}\n  Fingerprint: {}",
+                checksum, path, fingerprint
+            )
+        } else {
+            format!("  Checksum: {}", checksum)
         }
     };
 
-    // Try to extract the stored descriptor from the error message
-    // BDK errors might contain descriptor information in various formats
-    let stored_descriptor = extract_stored_descriptor_from_error(&error_msg, &error_debug)
-        .unwrap_or_else(|| {
-            // If we can't extract it, provide a helpful message with the original error
-            format!("Could not extract stored descriptor from error message. This may indicate a descriptor mismatch. Original error: {}", error_msg)
-        });
-
-    // Extract checksums from descriptors instead of showing full descriptors
-    let expected_checksum = extract_descriptor_checksum(&expected_descriptor);
-    let stored_checksum = if stored_descriptor.starts_with("Could not extract") {
-        // If we couldn't extract the descriptor, keep the error message as-is
-        stored_descriptor
-    } else {
-        extract_descriptor_checksum(&stored_descriptor)
-    };
+    let expected =
+        format_descriptor_info(&expected_checksum, &expected_path, &expected_fingerprint);
+    let stored = format_descriptor_info(&stored_checksum, &stored_path, &stored_fingerprint);
 
     WalletError::DescriptorMismatch {
         keychain: keychain.to_string(),
-        expected: expected_checksum,
-        stored: stored_checksum,
+        expected,
+        stored,
     }
 }
 
-/// Attempts to extract the stored descriptor from BDK error messages.
+/// Extracts checksum, fingerprint, and derivation path from BDK error messages using descriptor parsing.
 ///
-/// BDK error messages may contain descriptor information in various formats.
-/// This function extracts potential descriptors and validates them using BDK's
-/// descriptor parser (which uses the bitcoin crate internally).
-fn extract_stored_descriptor_from_error(error_msg: &str, error_debug: &str) -> Option<String> {
+/// BDK error format: "loaded wpkh([fingerprint/path]...)#checksum, expected ..."
+/// This function extracts the full descriptor string, parses it using BDK's parser,
+/// then extracts checksum, fingerprint, and path from the parsed descriptor's string representation.
+fn extract_stored_info_from_error(error_msg: &str, error_debug: &str) -> (String, String, String) {
     // Try both error message formats
     for text in [error_msg, error_debug] {
-        // Try common BDK error patterns
-        if let Some(desc) = extract_after_keyword(text, "loaded ") {
-            if let Some(valid_desc) = validate_descriptor(&desc) {
-                return Some(valid_desc);
-            }
-        }
+        // Look for "loaded " keyword which precedes the stored descriptor
+        if let Some(loaded_pos) = text.find("loaded ") {
+            let after_loaded = &text[loaded_pos + 7..]; // Skip "loaded "
 
-        // Try other common patterns
-        for keyword in [
-            "stored:",
-            "found:",
-            "existing:",
-            "persisted:",
-            "stored ",
-            "found ",
-            "existing ",
-            "persisted ",
-        ] {
-            if let Some(desc) = extract_after_keyword(text, keyword) {
-                if let Some(valid_desc) = validate_descriptor(&desc) {
-                    return Some(valid_desc);
+            // Extract the full descriptor string (up to the comma or end)
+            let desc_end = after_loaded.find(',').unwrap_or(after_loaded.len());
+            let descriptor_str = after_loaded[..desc_end].trim();
+
+            // Try to parse the descriptor using BDK's parser
+            if let Ok(descriptor) = descriptor_str.parse::<Descriptor<DescriptorPublicKey>>() {
+                // Get the canonical string representation (includes checksum)
+                let canonical_str = descriptor.to_string();
+
+                // Extract checksum, fingerprint, and path from the canonical representation
+                let checksum = extract_descriptor_checksum(&canonical_str);
+                let (fingerprint, path) = extract_descriptor_fingerprint_and_path(&canonical_str);
+
+                if checksum != "unknown" || path != "unknown" {
+                    return (checksum, fingerprint, path);
                 }
             }
         }
     }
 
-    None
-}
-
-/// Extracts a potential descriptor string after a keyword in the error text.
-///
-/// Handles descriptors in quotes, separated by commas, or terminated by newlines/braces.
-fn extract_after_keyword(text: &str, keyword: &str) -> Option<String> {
-    let pos = text.find(keyword)?;
-    let after_keyword = &text[pos + keyword.len()..];
-
-    // Try to extract from quoted string first (most reliable)
-    if let Some(quote_start) = after_keyword.find('"') {
-        if let Some(quote_end) = after_keyword[quote_start + 1..].find('"') {
-            let descriptor = after_keyword[quote_start + 1..quote_start + 1 + quote_end].trim();
-            if !descriptor.is_empty() {
-                return Some(descriptor.to_string());
-            }
-        }
-    }
-
-    // Extract until delimiter (comma, newline, closing brace, or end of string)
-    let trimmed = after_keyword.trim();
-    let desc_end = trimmed
-        .find(|c: char| matches!(c, ',' | '\n' | '\r' | '}' | ']'))
-        .unwrap_or_else(|| trimmed.len().min(500)); // Limit to reasonable length
-
-    let potential_desc = trimmed[..desc_end].trim();
-    if !potential_desc.is_empty() {
-        Some(potential_desc.to_string())
-    } else {
-        None
-    }
-}
-
-/// Validates that a string is a valid descriptor by attempting to parse it.
-///
-/// Uses BDK's descriptor parser (which uses the bitcoin crate internally)
-/// to ensure only valid descriptors are returned. The parser handles checksums
-/// and whitespace automatically.
-fn validate_descriptor(descriptor_str: &str) -> Option<String> {
-    let trimmed = descriptor_str.trim();
-
-    // Skip empty strings
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    // Try to parse as a descriptor to validate it
-    // BDK's parser handles checksums (e.g., "wpkh(...)#abc12345") automatically
-    trimmed
-        .parse::<Descriptor<DescriptorPublicKey>>()
-        .ok()
-        .map(|_| trimmed.to_string())
+    (
+        "unknown".to_string(),
+        "unknown".to_string(),
+        "unknown".to_string(),
+    )
 }
 
 impl DlcDevKitWallet {

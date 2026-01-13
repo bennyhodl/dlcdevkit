@@ -68,38 +68,49 @@ async fn test_descriptor_mismatch_error_with_storage(storage: Arc<dyn Storage>) 
             expected,
             stored,
         }) => {
-            println!("\n{}", "=".repeat(70));
+            println!("\n{}", "=".repeat(80));
             println!("SUCCESS: Descriptor mismatch error detected");
-            println!("{}", "=".repeat(70));
+            println!("{}", "=".repeat(80));
             println!("Keychain: {}", keychain);
-            println!("Expected descriptor checksum: {}", expected);
-            println!("Stored descriptor checksum: {}", stored);
-            println!("{}", "=".repeat(70));
+            println!("Expected descriptor: {}", expected);
+            println!("Stored descriptor: {}", stored);
+            println!("{}", "=".repeat(80));
 
             // Verify the error contains meaningful information
             assert_eq!(keychain, "external", "Should identify external keychain");
             assert!(
-                expected.len() > 0,
-                "Expected descriptor checksum should not be empty"
+                !expected.is_empty(),
+                "Expected descriptor should not be empty"
+            );
+            assert!(!stored.is_empty(), "Stored descriptor should not be empty");
+            // Verify the format includes checksum, path, and fingerprint
+            assert!(
+                expected.contains("DerivationPath:") || expected == "unknown",
+                "Expected descriptor should include DerivationPath, got: '{}'",
+                expected
             );
             assert!(
-                stored.len() > 0,
-                "Stored descriptor checksum should not be empty"
+                stored.contains("DerivationPath:")
+                    || stored == "unknown"
+                    || stored.starts_with("Could not extract"),
+                "Stored descriptor should include DerivationPath, got: '{}'",
+                stored
             );
-            // Verify checksums are valid (8 alphanumeric characters or "unknown")
-            // Checksums should be 8 characters (typical) or "unknown" if extraction failed
-            assert!(
-                expected.len() == 8 || expected == "unknown",
-                "Expected checksum should be 8 characters or 'unknown', got: '{}' (length: {})",
-                expected,
-                expected.len()
-            );
-            assert!(
-                stored.len() == 8 || stored == "unknown" || stored.starts_with("Could not extract"),
-                "Stored checksum should be 8 characters, 'unknown', or an error message, got: '{}' (length: {})",
-                stored,
-                stored.len()
-            );
+            // Verify fingerprint is present when path is present
+            if expected.contains("DerivationPath:") {
+                assert!(
+                    expected.contains("Fingerprint:"),
+                    "Expected descriptor should include Fingerprint when DerivationPath is present, got: '{}'",
+                    expected
+                );
+            }
+            if stored.contains("DerivationPath:") {
+                assert!(
+                    stored.contains("Fingerprint:"),
+                    "Stored descriptor should include Fingerprint when DerivationPath is present, got: '{}'",
+                    stored
+                );
+            }
         }
         Err(e) => {
             println!("\n{}", "=".repeat(70));
@@ -157,10 +168,6 @@ async fn descriptor_mismatch_error_sled() {
 }
 
 /// Test descriptor mismatch error with PostgresStorage backend.
-///
-/// This test verifies that the descriptor mismatch error message works correctly
-/// with the PostgreSQL storage backend.
-///
 /// Note: Requires DATABASE_URL environment variable to be set.
 #[cfg(feature = "postgres")]
 #[tokio::test]
@@ -187,4 +194,64 @@ async fn descriptor_mismatch_error_postgres() {
     ) as Arc<dyn Storage>;
 
     test_descriptor_mismatch_error_with_storage(storage).await;
+}
+
+/// Test function to display the formatted error message.
+///
+/// This test triggers a descriptor mismatch error and prints the full
+/// formatted error message directly from the error's Display implementation.
+#[tokio::test]
+async fn display_error_message() {
+    dotenv::dotenv().ok();
+    let storage = Arc::new(MemoryStorage::new()) as Arc<dyn Storage>;
+
+    // Setup logger
+    let logger = Arc::new(Logger::console(
+        "display_error_test".to_string(),
+        LogLevel::Info,
+    ));
+
+    // Setup Esplora client
+    let esplora_host = std::env::var("ESPLORA_HOST").expect("ESPLORA_HOST must be set");
+    let esplora = Arc::new(
+        EsploraClient::new(&esplora_host, Network::Regtest, logger.clone())
+            .expect("Failed to create Esplora client"),
+    );
+
+    // First seed - this will create and persist a wallet
+    let mut seed1 = [0u8; 64];
+    seed1[0..8].copy_from_slice(b"seed_one");
+
+    let _wallet1 = DlcDevKitWallet::new(
+        &seed1,
+        esplora.clone(),
+        Network::Regtest,
+        storage.clone(),
+        None,
+        logger.clone(),
+    )
+    .await
+    .expect("Failed to create first wallet");
+
+    // Second seed - this will try to load the existing wallet but with different descriptors
+    let mut seed2 = [0u8; 64];
+    seed2[0..8].copy_from_slice(b"seed_two");
+
+    let result = DlcDevKitWallet::new(
+        &seed2,
+        esplora.clone(),
+        Network::Regtest,
+        storage.clone(),
+        None,
+        logger.clone(),
+    )
+    .await;
+
+    // Display the error message directly from the error's Display implementation
+    match result {
+        Ok(_) => panic!("Expected DescriptorMismatch error but wallet loaded successfully"),
+        Err(e) => {
+            println!("{}", e);
+        }
+    }
 }
