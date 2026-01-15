@@ -304,28 +304,20 @@ fn extract_descriptor_info(
         extract_structured_error_info(error, external_descriptor_str, internal_descriptor_str)
             .unwrap_or(("external", external_descriptor_str.to_string()));
 
-    let expected_checksum = extract_descriptor_checksum(&expected_descriptor);
-    let (_expected_fingerprint, expected_path) =
-        extract_descriptor_fingerprint_and_path(&expected_descriptor);
-
-    let format_descriptor_info = |checksum: &str, path: &str| {
-        if path != "unknown" {
-            format!("  Checksum: {}\n  DerivationPath: {}", checksum, path)
-        } else {
-            format!("  Checksum: {}", checksum)
-        }
-    };
-
-    let expected = format_descriptor_info(&expected_checksum, &expected_path);
+    // Format expected descriptor info
+    let expected = format!(
+        "  Checksum: {}",
+        extract_descriptor_checksum(&expected_descriptor)
+    );
 
     // Extract stored descriptor info from error message
     // Note: This requires parsing the error message string, but it's necessary
     // to meet the requirement of showing expected vs stored descriptor for comparison
     let error_msg = error.to_string();
     let error_debug = format!("{:?}", error);
-    let (stored_checksum, _stored_fingerprint, stored_path) =
+    let (stored_checksum, _stored_fingerprint, _stored_path) =
         extract_stored_descriptor_info(&error_msg, &error_debug);
-    let stored = format_descriptor_info(&stored_checksum, &stored_path);
+    let stored = format!("  Checksum: {}", stored_checksum);
 
     WalletError::DescriptorMismatch {
         keychain: keychain.to_string(),
