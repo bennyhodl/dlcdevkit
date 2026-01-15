@@ -212,9 +212,9 @@ pub enum WalletError {
         {keychain} descriptor mismatch detected.\n\n\
         Expected descriptor:\n{expected}\n\n\
         Stored descriptor:\n{stored}\n\n\
-        This error occurs when the wallet's stored descriptor doesn't match the descriptor\n\
-        derived from the current seed. Please verify you're using the correct seed/private key\n\
-        for this wallet, or reset the wallet data if needed. Please verify your backups before resetting."
+        The wallet's stored descriptor doesn't match the descriptor\n\
+        derived from the current seed. Please verify you're using the correct seed\n\
+        or reset the wallet data if needed, but verify your wallet backups before resetting."
     )]
     DescriptorMismatch {
         keychain: String,

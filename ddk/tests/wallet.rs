@@ -1,6 +1,6 @@
 mod test_util;
 
-use bitcoin::Network;
+use bitcoin::{key::rand::Fill, Network};
 use ddk::chain::EsploraClient;
 use ddk::error::WalletError;
 use ddk::logger::{LogLevel, Logger};
@@ -32,7 +32,9 @@ async fn test_descriptor_mismatch_error_with_storage(storage: Arc<dyn Storage>) 
 
     // First seed - this will create and persist a wallet
     let mut seed1 = [0u8; 64];
-    seed1[0..8].copy_from_slice(b"seed_one");
+    seed1
+        .try_fill(&mut bitcoin::key::rand::thread_rng())
+        .expect("Failed to generate random seed");
 
     let _wallet1 = DlcDevKitWallet::new(
         &seed1,
@@ -46,9 +48,10 @@ async fn test_descriptor_mismatch_error_with_storage(storage: Arc<dyn Storage>) 
     .expect("Failed to create first wallet");
 
     // Second seed - this will try to load the existing wallet but with different descriptors
-    // This should fail at line 262 because the descriptors won't match
     let mut seed2 = [0u8; 64];
-    seed2[0..8].copy_from_slice(b"seed_two");
+    seed2
+        .try_fill(&mut bitcoin::key::rand::thread_rng())
+        .expect("Failed to generate random seed");
 
     let result = DlcDevKitWallet::new(
         &seed2,
@@ -83,7 +86,7 @@ async fn test_descriptor_mismatch_error_with_storage(storage: Arc<dyn Storage>) 
                 "Expected descriptor should not be empty"
             );
             assert!(!stored.is_empty(), "Stored descriptor should not be empty");
-            // Verify the format includes checksum, path, and fingerprint
+            // Verify the format includes checksum and derivation path
             assert!(
                 expected.contains("DerivationPath:") || expected == "unknown",
                 "Expected descriptor should include DerivationPath, got: '{}'",
@@ -96,21 +99,17 @@ async fn test_descriptor_mismatch_error_with_storage(storage: Arc<dyn Storage>) 
                 "Stored descriptor should include DerivationPath, got: '{}'",
                 stored
             );
-            // Verify fingerprint is present when path is present
-            if expected.contains("DerivationPath:") {
-                assert!(
-                    expected.contains("Fingerprint:"),
-                    "Expected descriptor should include Fingerprint when DerivationPath is present, got: '{}'",
-                    expected
-                );
-            }
-            if stored.contains("DerivationPath:") {
-                assert!(
-                    stored.contains("Fingerprint:"),
-                    "Stored descriptor should include Fingerprint when DerivationPath is present, got: '{}'",
-                    stored
-                );
-            }
+            // Verify checksum is present
+            assert!(
+                expected.contains("Checksum:"),
+                "Expected descriptor should include Checksum, got: '{}'",
+                expected
+            );
+            assert!(
+                stored.contains("Checksum:"),
+                "Stored descriptor should include Checksum, got: '{}'",
+                stored
+            );
         }
         Err(e) => {
             println!("\n{}", "=".repeat(70));
@@ -194,64 +193,4 @@ async fn descriptor_mismatch_error_postgres() {
     ) as Arc<dyn Storage>;
 
     test_descriptor_mismatch_error_with_storage(storage).await;
-}
-
-/// Test function to display the formatted error message.
-///
-/// This test triggers a descriptor mismatch error and prints the full
-/// formatted error message directly from the error's Display implementation.
-#[tokio::test]
-async fn display_error_message() {
-    dotenv::dotenv().ok();
-    let storage = Arc::new(MemoryStorage::new()) as Arc<dyn Storage>;
-
-    // Setup logger
-    let logger = Arc::new(Logger::console(
-        "display_error_test".to_string(),
-        LogLevel::Info,
-    ));
-
-    // Setup Esplora client
-    let esplora_host = std::env::var("ESPLORA_HOST").expect("ESPLORA_HOST must be set");
-    let esplora = Arc::new(
-        EsploraClient::new(&esplora_host, Network::Regtest, logger.clone())
-            .expect("Failed to create Esplora client"),
-    );
-
-    // First seed - this will create and persist a wallet
-    let mut seed1 = [0u8; 64];
-    seed1[0..8].copy_from_slice(b"seed_one");
-
-    let _wallet1 = DlcDevKitWallet::new(
-        &seed1,
-        esplora.clone(),
-        Network::Regtest,
-        storage.clone(),
-        None,
-        logger.clone(),
-    )
-    .await
-    .expect("Failed to create first wallet");
-
-    // Second seed - this will try to load the existing wallet but with different descriptors
-    let mut seed2 = [0u8; 64];
-    seed2[0..8].copy_from_slice(b"seed_two");
-
-    let result = DlcDevKitWallet::new(
-        &seed2,
-        esplora.clone(),
-        Network::Regtest,
-        storage.clone(),
-        None,
-        logger.clone(),
-    )
-    .await;
-
-    // Display the error message directly from the error's Display implementation
-    match result {
-        Ok(_) => panic!("Expected DescriptorMismatch error but wallet loaded successfully"),
-        Err(e) => {
-            println!("{}", e);
-        }
-    }
 }
