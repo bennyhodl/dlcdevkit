@@ -208,9 +208,6 @@ pub struct DlcDevKitWallet {
 const MIN_FEERATE: u32 = 253;
 
 /// Helper function to extract the checksum from a descriptor string.
-///
-/// Descriptors typically have a checksum at the end after a '#' character.
-/// Returns the checksum (usually 8 alphanumeric characters) or "unknown" if not found.
 fn extract_descriptor_checksum(descriptor: &str) -> String {
     if let Some(hash_pos) = descriptor.rfind('#') {
         let checksum = &descriptor[hash_pos + 1..];
@@ -223,9 +220,6 @@ fn extract_descriptor_checksum(descriptor: &str) -> String {
 }
 
 /// Extracts fingerprint and derivation path from bracketed content in descriptor.
-///
-/// Descriptors typically have a derivation path in brackets, e.g., [7caf7de6/84'/1'/0'].
-/// Returns (fingerprint, path) or ("unknown", "unknown") if not found.
 fn extract_descriptor_fingerprint_and_path(descriptor: &str) -> (String, String) {
     if let Some(bracket_start) = descriptor.find('[') {
         if let Some(bracket_end) = descriptor[bracket_start..].find(']') {
@@ -241,67 +235,98 @@ fn extract_descriptor_fingerprint_and_path(descriptor: &str) -> (String, String)
     ("unknown".to_string(), "unknown".to_string())
 }
 
-/// This function attempts to identify descriptor mismatches from BDK error messages
-/// and provides detailed information about which keychain failed and what descriptors
-/// were expected vs stored. Only checksums of descriptors are shown for security.
-fn parse_descriptor_mismatch_error(
+/// Attempts to extract structured information from the error chain.
+///
+/// Walks the error source chain looking for:
+/// 1. Exact descriptor strings in error messages (most reliable)
+/// 2. Enum variant names in Debug format (e.g., "KeychainKind::External")
+///
+/// Returns a tuple of (keychain, descriptor_string) if any matching evidence is found, or None otherwise.
+fn extract_structured_error_info(
+    error: &dyn std::error::Error,
+    external_descriptor_str: &str,
+    internal_descriptor_str: &str,
+) -> Option<(&'static str, String)> {
+    let mut current: Option<&dyn std::error::Error> = Some(error);
+
+    // Walk the error chain
+    while let Some(err) = current {
+        let error_debug = format!("{:?}", err);
+        let error_msg = err.to_string();
+
+        // Check for exact descriptor strings (most reliable indicator)
+        // This works even if BDK's error format changes
+        if error_msg.contains(external_descriptor_str)
+            || error_debug.contains(external_descriptor_str)
+        {
+            return Some(("external", external_descriptor_str.to_string()));
+        }
+
+        if error_msg.contains(internal_descriptor_str)
+            || error_debug.contains(internal_descriptor_str)
+        {
+            return Some(("internal", internal_descriptor_str.to_string()));
+        }
+
+        // Try to extract keychain from Debug format enum variants
+        if error_debug.contains("KeychainKind::External") {
+            return Some(("external", external_descriptor_str.to_string()));
+        }
+
+        if error_debug.contains("KeychainKind::Internal") {
+            return Some(("internal", internal_descriptor_str.to_string()));
+        }
+
+        // Move to next error in chain
+        current = err.source();
+    }
+
+    None
+}
+
+/// Returns true if the error looks like a descriptor mismatch (heuristics-based).
+fn is_descriptor_mismatch(
+    error: &dyn std::error::Error,
+    external_descriptor_str: &str,
+    internal_descriptor_str: &str,
+) -> bool {
+    extract_structured_error_info(error, external_descriptor_str, internal_descriptor_str).is_some()
+}
+
+/// Identifies descriptor mismatches in BDK errors and extracts info on which keychain failed.
+fn extract_descriptor_info(
     error: &dyn std::error::Error,
     external_descriptor_str: &str,
     internal_descriptor_str: &str,
 ) -> WalletError {
-    let error_msg = error.to_string();
-    let error_debug = format!("{:?}", error);
-    let error_lower = error_msg.to_lowercase();
-
-    // Try to determine which keychain failed by checking error message
-    // Look for explicit mentions of keychain types
+    // Extract structured information from error chain
     let (keychain, expected_descriptor) =
-        if error_lower.contains("external") || error_debug.contains("External") {
-            ("external", external_descriptor_str.to_string())
-        } else if error_lower.contains("internal") || error_debug.contains("Internal") {
-            ("internal", internal_descriptor_str.to_string())
-        } else {
-            // If we can't determine from the error message, check if either descriptor appears
-            // in the error (indicating which one was expected)
-            if error_msg.contains(external_descriptor_str)
-                || error_debug.contains(external_descriptor_str)
-            {
-                ("external", external_descriptor_str.to_string())
-            } else if error_msg.contains(internal_descriptor_str)
-                || error_debug.contains(internal_descriptor_str)
-            {
-                ("internal", internal_descriptor_str.to_string())
-            } else {
-                // Default to external if we can't determine
-                ("external", external_descriptor_str.to_string())
-            }
-        };
+        extract_structured_error_info(error, external_descriptor_str, internal_descriptor_str)
+            .unwrap_or(("external", external_descriptor_str.to_string()));
 
-    // Extract checksums, fingerprints, and derivation paths directly from descriptors
+    // Extract checksums and derivation paths directly from descriptors
     let expected_checksum = extract_descriptor_checksum(&expected_descriptor);
-    let (expected_fingerprint, expected_path) =
+    let (_expected_fingerprint, expected_path) =
         extract_descriptor_fingerprint_and_path(&expected_descriptor);
 
-    // Extract stored checksum, fingerprint, and path directly from error message
-    // BDK error format: "loaded wpkh([fingerprint/path]...)#checksum, expected ..."
-    let (stored_checksum, stored_fingerprint, stored_path) =
-        extract_stored_info_from_error(&error_msg, &error_debug);
-
-    // Format descriptor information with fingerprint below the path
-    let format_descriptor_info = |checksum: &str, path: &str, fingerprint: &str| {
+    let format_descriptor_info = |checksum: &str, path: &str| {
         if path != "unknown" {
-            format!(
-                "  Checksum: {}\n  DerivationPath: {}\n  Fingerprint: {}",
-                checksum, path, fingerprint
-            )
+            format!("  Checksum: {}\n  DerivationPath: {}", checksum, path)
         } else {
             format!("  Checksum: {}", checksum)
         }
     };
 
-    let expected =
-        format_descriptor_info(&expected_checksum, &expected_path, &expected_fingerprint);
-    let stored = format_descriptor_info(&stored_checksum, &stored_path, &stored_fingerprint);
+    let expected = format_descriptor_info(&expected_checksum, &expected_path);
+
+    // Extract stored descriptor info from error message
+    // Note: This requires parsing the error message string, but it's necessary
+    // to meet the requirement of showing expected vs stored descriptor for comparison
+    let error_msg = error.to_string();
+    let error_debug = format!("{:?}", error);
+    let (stored_checksum, _stored_fingerprint, stored_path) =
+        extract_stored_descriptor_info(&error_msg, &error_debug);
+    let stored = format_descriptor_info(&stored_checksum, &stored_path);
 
     WalletError::DescriptorMismatch {
         keychain: keychain.to_string(),
@@ -310,12 +335,9 @@ fn parse_descriptor_mismatch_error(
     }
 }
 
-/// Extracts checksum, fingerprint, and derivation path from BDK error messages using descriptor parsing.
-///
-/// BDK error format: "loaded wpkh([fingerprint/path]...)#checksum, expected ..."
-/// This function extracts the full descriptor string, parses it using BDK's parser,
-/// then extracts checksum, fingerprint, and path from the parsed descriptor's string representation.
-fn extract_stored_info_from_error(error_msg: &str, error_debug: &str) -> (String, String, String) {
+/// Extracts checksum, fingerprint, and derivation path from the stored descriptor
+/// in BDK error messages.
+fn extract_stored_descriptor_info(error_msg: &str, error_debug: &str) -> (String, String, String) {
     // Try both error message formats
     for text in [error_msg, error_debug] {
         // Look for "loaded " keyword which precedes the stored descriptor
@@ -403,26 +425,13 @@ impl DlcDevKitWallet {
             .load_wallet_async(&mut storage)
             .await
             .map_err(|e| {
-                // Check if this is a descriptor mismatch error
-                let error_msg = e.to_string();
-                let error_lower = error_msg.to_lowercase();
-
-                // Convert descriptors to strings for the helper function
                 let external_desc_str = external_descriptor.0.to_string();
                 let internal_desc_str = internal_descriptor.0.to_string();
 
-                // Common indicators of descriptor mismatch errors
-                if error_lower.contains("descriptor")
-                    && (error_lower.contains("mismatch")
-                        || error_lower.contains("does not match")
-                        || error_lower.contains("expected")
-                        || error_lower.contains("stored")
-                        || error_lower.contains("found"))
-                {
-                    parse_descriptor_mismatch_error(&e, &external_desc_str, &internal_desc_str)
+                if is_descriptor_mismatch(&e, &external_desc_str, &internal_desc_str) {
+                    extract_descriptor_info(&e, &external_desc_str, &internal_desc_str)
                 } else {
-                    // For other errors, use the generic error
-                    WalletError::WalletPersistanceError(error_msg)
+                    WalletError::WalletPersistanceError(e.to_string())
                 }
             })?;
 
