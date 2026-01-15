@@ -304,7 +304,6 @@ fn extract_descriptor_info(
         extract_structured_error_info(error, external_descriptor_str, internal_descriptor_str)
             .unwrap_or(("external", external_descriptor_str.to_string()));
 
-    // Extract checksums and derivation paths directly from descriptors
     let expected_checksum = extract_descriptor_checksum(&expected_descriptor);
     let (_expected_fingerprint, expected_path) =
         extract_descriptor_fingerprint_and_path(&expected_descriptor);
@@ -340,7 +339,6 @@ fn extract_descriptor_info(
 fn extract_stored_descriptor_info(error_msg: &str, error_debug: &str) -> (String, String, String) {
     // Try both error message formats
     for text in [error_msg, error_debug] {
-        // Look for "loaded " keyword which precedes the stored descriptor
         if let Some(loaded_pos) = text.find("loaded ") {
             let after_loaded = &text[loaded_pos + 7..]; // Skip "loaded "
 
@@ -353,7 +351,6 @@ fn extract_stored_descriptor_info(error_msg: &str, error_debug: &str) -> (String
                 // Get the canonical string representation (includes checksum)
                 let canonical_str = descriptor.to_string();
 
-                // Extract checksum, fingerprint, and path from the canonical representation
                 let checksum = extract_descriptor_checksum(&canonical_str);
                 let (fingerprint, path) = extract_descriptor_fingerprint_and_path(&canonical_str);
 
