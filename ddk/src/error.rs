@@ -209,7 +209,7 @@ pub enum WalletError {
     InvalidSecretKey,
     #[error(
         "DESCRIPTOR MISMATCH DETECTED\n\n\
-        {keychain} descriptor mismatch detected.\n\n\
+        {keychain}.\n\n\
         Expected descriptor:\n{expected}\n\n\
         Stored descriptor:\n{stored}\n\n\
         The wallet's stored descriptor doesn't match the descriptor\n\

@@ -300,9 +300,12 @@ fn extract_descriptor_info(
     internal_descriptor_str: &str,
 ) -> WalletError {
     // Extract structured information from error chain
-    let (keychain, expected_descriptor) =
-        extract_structured_error_info(error, external_descriptor_str, internal_descriptor_str)
-            .unwrap_or(("external", external_descriptor_str.to_string()));
+    let (keychain, expected_descriptor) = extract_structured_error_info(
+        error,
+        external_descriptor_str,
+        internal_descriptor_str,
+    )
+    .unwrap_or(("unknown", external_descriptor_str.to_string()));
 
     // Format expected descriptor info
     let expected = format!(
@@ -319,8 +322,15 @@ fn extract_descriptor_info(
         extract_stored_descriptor_info(&error_msg, &error_debug);
     let stored = format!("  Checksum: {}", stored_checksum);
 
+    // Format keychain message - indicate uncertainty if we couldn't determine which keychain
+    let keychain_msg = if keychain == "unknown" {
+        "A descriptor mismatch was detected, but the specific keychain (external/internal) could not be determined".to_string()
+    } else {
+        format!("{keychain} descriptor mismatch detected")
+    };
+
     WalletError::DescriptorMismatch {
-        keychain: keychain.to_string(),
+        keychain: keychain_msg,
         expected,
         stored,
     }

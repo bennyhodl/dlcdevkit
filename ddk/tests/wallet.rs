@@ -80,7 +80,11 @@ async fn test_descriptor_mismatch_error_with_storage(storage: Arc<dyn Storage>) 
             println!("{}", error_msg);
             println!("{}", "=".repeat(80));
 
-            assert_eq!(keychain, "external", "Should identify external keychain");
+            assert!(
+                keychain.contains("external") && keychain.contains("descriptor mismatch detected"),
+                "Should identify external keychain, got: '{}'",
+                keychain
+            );
             assert!(
                 !expected.is_empty(),
                 "Expected descriptor should not be empty"
