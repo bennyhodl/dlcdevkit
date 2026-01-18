@@ -207,6 +207,20 @@ pub enum WalletError {
     InvalidDerivationIndex,
     #[error("Invalid secret key")]
     InvalidSecretKey,
+    #[error(
+        "DESCRIPTOR MISMATCH DETECTED\n\n\
+        {keychain}.\n\n\
+        Expected descriptor:\n{expected}\n\n\
+        Stored descriptor:\n{stored}\n\n\
+        The wallet's stored descriptor doesn't match the descriptor\n\
+        derived from the current seed. Please verify you're using the correct seed\n\
+        or reset the wallet data if needed, but verify your wallet backups before resetting."
+    )]
+    DescriptorMismatch {
+        keychain: String,
+        expected: String,
+        stored: String,
+    },
 }
 
 /// Converts a generic error to a DLC manager storage error
