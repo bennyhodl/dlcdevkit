@@ -25,10 +25,10 @@
 //! - Bitcoin wallet operations
 //! - DLC contract management
 
-use crate::chain::EsploraClient;
+use crate::chain::{EsploraClient, ZeromqClient};
 use crate::error::Error;
 use crate::logger::Logger;
-use crate::logger::{log_error, log_info, log_warn, WriteLog};
+use crate::logger::{log_debug, log_error, log_info, log_warn, WriteLog};
 use crate::wallet::DlcDevKitWallet;
 use crate::{Oracle, Storage, Transport};
 use bitcoin::hex::DisplayHex;
@@ -45,6 +45,7 @@ use ddk_messages::{AcceptDlc, Message, OfferDlc};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio::runtime::Runtime;
+use tokio::select;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
@@ -149,6 +150,8 @@ pub struct DlcDevKit<T: Transport, S: Storage, O: Oracle> {
     pub stop_signal_sender: watch::Sender<bool>,
     /// Logger instance for structured logging
     pub logger: Arc<Logger>,
+    /// Optional ZeroMQ client for blockhash notifications
+    pub zmq_client: Option<Arc<ZeromqClient>>,
 }
 
 impl<T, S, O> DlcDevKit<T, S, O>
@@ -224,10 +227,28 @@ where
         // Spawn wallet sync thread (60-second interval)
         let wallet_clone = self.wallet.clone();
         let logger_clone = self.logger.clone();
+        let zmq_clone = self.zmq_client.clone();
         runtime.spawn(async move {
-            let mut timer = tokio::time::interval(Duration::from_secs(60));
+            // If ZMQ is configured, we want to wait to poll for a new block. We don't want to
+            // completely remove polling since it acts as backup in case ZMQ messages are missed
+            let wait_time = if zmq_clone.is_some() { 300 } else { 60 };
             loop {
-                timer.tick().await;
+                let sleep = tokio::time::sleep(Duration::from_secs(wait_time));
+                if let Some(zmq_client) = &zmq_clone {
+                    log_debug!(
+                        logger_clone,
+                        "Listening for ZMQ notifications or sleep completion"
+                    );
+                    let mut new_block = zmq_client.subscribe();
+                    select! {
+                        _ = new_block.changed() => {},
+                        _ = sleep => {}
+                    }
+                } else {
+                    log_debug!(logger_clone, "Listening for sleep completion");
+                    sleep.await;
+                }
+
                 if let Err(e) = wallet_clone.sync().await {
                     log_warn!(logger_clone, "Did not sync wallet. error={}", e.to_string());
                 };
@@ -237,10 +258,28 @@ where
         // Spawn contract monitor thread (30-second interval)
         let processor = self.sender.clone();
         let logger_clone = self.logger.clone();
+        let zmq_clone = self.zmq_client.clone();
         runtime.spawn(async move {
-            let mut timer = tokio::time::interval(Duration::from_secs(30));
+            // If ZMQ is configured, we want to wait to poll for a new block. We don't want to
+            // completely remove polling since it acts as backup in case ZMQ messages are missed
+            let wait_time = if zmq_clone.is_some() { 150 } else { 30 };
             loop {
-                timer.tick().await;
+                let sleep = tokio::time::sleep(Duration::from_secs(wait_time));
+                if let Some(zmq_client) = &zmq_clone {
+                    log_debug!(
+                        logger_clone,
+                        "Listening for ZMQ notifications or sleep completion"
+                    );
+                    let mut new_block = zmq_client.subscribe();
+                    select! {
+                        _ = new_block.changed() => {},
+                        _ = sleep => {}
+                    }
+                } else {
+                    log_debug!(logger_clone, "Listening for sleep completion");
+                    sleep.await;
+                }
+
                 let _ = processor
                     .send(DlcManagerMessage::PeriodicCheck)
                     .await
