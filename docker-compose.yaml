@@ -15,12 +15,14 @@ services:
       -txindex=1
       -zmqpubrawblock=tcp://0.0.0.0:28332
       -zmqpubrawtx=tcp://0.0.0.0:28333
+      -zmqpubhashblock=tcp://0.0.0.0:28334
       -printtoconsole
       -regtest
       -disablewallet=0
     ports:
       # regtest ports
       - 18443:18443
+      - 28334:28334
     volumes:
       - ddk-bitcoin:/bitcoin/.bitcoin
   electrs:
@@ -63,7 +65,7 @@ services:
     environment:
       - POSTGRES_PASSWORD=$POSTGRES_PASS
       - POSTGRES_USER=$POSTGRES_USER
-      
+
     ports:
       - "5432:5432"
     volumes:
