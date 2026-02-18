@@ -43,7 +43,11 @@ pub struct ZeromqClient {
 }
 
 impl ZeromqClient {
-    pub async fn new(endpoint: &str, logger: Arc<dyn Logger + Send + Sync>) -> Result<Self, Error> {
+    pub async fn new(
+        endpoint: &str,
+        logger: Arc<dyn Logger + Send + Sync>,
+        stop: watch::Receiver<bool>,
+    ) -> Result<Self, Error> {
         let mut socket = SubSocket::new();
         socket.connect(endpoint).await?;
 
@@ -54,7 +58,9 @@ impl ZeromqClient {
 
         let sender_clone = sender.clone();
         let logger_clone = logger.clone();
-        tokio::spawn(async move { listen_and_notify(socket, sender_clone, logger_clone).await });
+        tokio::spawn(
+            async move { listen_and_notify(socket, sender_clone, logger_clone, stop).await },
+        );
 
         Ok(Self { logger, sender })
     }
@@ -78,12 +84,17 @@ async fn listen_and_notify(
     mut socket: SubSocket,
     sender: watch::Sender<ZeromqMessage>,
     logger: Arc<dyn Logger + Send + Sync>,
+    mut stop: watch::Receiver<bool>,
 ) -> Result<(), Error> {
     log_info!(logger, "Starting ZMQ subscriber loop");
     socket.subscribe(HASH_BLOCK_TOPIC).await?;
 
     loop {
         select! {
+            _ = stop.changed() => {
+                log_info!(logger, "ZMQ client received stop signal. Exiting.");
+                return Ok(());
+            }
             message = socket.recv() => {
                 let message = match message {
                     Ok(message) => message,

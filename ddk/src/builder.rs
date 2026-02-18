@@ -288,7 +288,9 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
         });
 
         let zmq_client = if let Some(endpoint) = &self.zmq_blockhash_endpoint {
-            Some(Arc::new(ZeromqClient::new(endpoint, logger.clone()).await?))
+            Some(Arc::new(
+                ZeromqClient::new(endpoint, logger.clone(), stop_signal.clone()).await?,
+            ))
         } else {
             None
         };
