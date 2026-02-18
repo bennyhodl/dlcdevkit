@@ -226,66 +226,38 @@ where
 
         // Spawn wallet sync thread (60-second interval)
         let wallet_clone = self.wallet.clone();
-        let logger_clone = self.logger.clone();
-        let zmq_clone = self.zmq_client.clone();
+        let logger = self.logger.clone();
+        let zmq = self.zmq_client.clone();
         runtime.spawn(async move {
             // If ZMQ is configured, we want to wait to poll for a new block. We don't want to
             // completely remove polling since it acts as backup in case ZMQ messages are missed
-            let wait_time = if zmq_clone.is_some() { 300 } else { 60 };
+            let wait_time = if zmq.is_some() { 300 } else { 60 };
             loop {
-                let sleep = tokio::time::sleep(Duration::from_secs(wait_time));
-                if let Some(zmq_client) = &zmq_clone {
-                    log_debug!(
-                        logger_clone,
-                        "Listening for ZMQ notifications or sleep completion"
-                    );
-                    let mut new_block = zmq_client.subscribe();
-                    select! {
-                        _ = new_block.changed() => {},
-                        _ = sleep => {}
-                    }
-                } else {
-                    log_debug!(logger_clone, "Listening for sleep completion");
-                    sleep.await;
-                }
+                wait(&zmq, wait_time, logger.clone()).await;
 
                 if let Err(e) = wallet_clone.sync().await {
-                    log_warn!(logger_clone, "Did not sync wallet. error={}", e.to_string());
+                    log_warn!(logger, "Did not sync wallet. error={}", e.to_string());
                 };
             }
         });
 
         // Spawn contract monitor thread (30-second interval)
         let processor = self.sender.clone();
-        let logger_clone = self.logger.clone();
-        let zmq_clone = self.zmq_client.clone();
+        let logger = self.logger.clone();
+        let zmq = self.zmq_client.clone();
         runtime.spawn(async move {
             // If ZMQ is configured, we want to wait to poll for a new block. We don't want to
             // completely remove polling since it acts as backup in case ZMQ messages are missed
-            let wait_time = if zmq_clone.is_some() { 150 } else { 30 };
+            let wait_time = if zmq.is_some() { 150 } else { 30 };
             loop {
-                let sleep = tokio::time::sleep(Duration::from_secs(wait_time));
-                if let Some(zmq_client) = &zmq_clone {
-                    log_debug!(
-                        logger_clone,
-                        "Listening for ZMQ notifications or sleep completion"
-                    );
-                    let mut new_block = zmq_client.subscribe();
-                    select! {
-                        _ = new_block.changed() => {},
-                        _ = sleep => {}
-                    }
-                } else {
-                    log_debug!(logger_clone, "Listening for sleep completion");
-                    sleep.await;
-                }
+                wait(&zmq, wait_time, logger.clone()).await;
 
                 let _ = processor
                     .send(DlcManagerMessage::PeriodicCheck)
                     .await
                     .map_err(|e| {
                         log_error!(
-                            logger_clone,
+                            logger,
                             "Error sending periodic check: error={}",
                             e.to_string()
                         );
@@ -452,5 +424,23 @@ where
             contract: contract.to_owned(),
             contract_pnl: contract_pnl.to_owned().to_sat(),
         })
+    }
+}
+
+async fn wait(zmq: &Option<Arc<ZeromqClient>>, wait_time: u64, logger: Arc<Logger>) {
+    let sleep = tokio::time::sleep(Duration::from_secs(wait_time));
+    if let Some(zmq_client) = zmq {
+        log_debug!(
+            logger,
+            "Listening for ZMQ notifications or sleep completion"
+        );
+        let mut new_block = zmq_client.subscribe();
+        select! {
+            _ = new_block.changed() => {},
+            _ = sleep => {}
+        }
+    } else {
+        log_debug!(logger, "Listening for sleep completion");
+        sleep.await;
     }
 }
