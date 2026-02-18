@@ -85,15 +85,23 @@ async fn listen_and_notify(
     sender: watch::Sender<ZeromqMessage>,
     logger: Arc<dyn Logger + Send + Sync>,
     mut stop: watch::Receiver<bool>,
-) -> Result<(), Error> {
+) {
     log_info!(logger, "Starting ZMQ subscriber loop");
-    socket.subscribe(HASH_BLOCK_TOPIC).await?;
+    if let Err(err) = socket.subscribe(HASH_BLOCK_TOPIC).await {
+        log_error!(
+            logger,
+            "Error subscribing to the ZMQ {} topic: {}",
+            HASH_BLOCK_TOPIC,
+            err
+        );
+        return;
+    }
 
     loop {
         select! {
             _ = stop.changed() => {
                 log_info!(logger, "ZMQ client received stop signal. Exiting.");
-                return Ok(());
+                break;
             }
             message = socket.recv() => {
                 let message = match message {
