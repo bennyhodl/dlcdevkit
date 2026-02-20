@@ -7,12 +7,13 @@ use lightning::util::logger::Logger;
 use std::sync::Arc;
 use tokio::select;
 use tokio::sync::watch;
+use tokio::sync::watch::error::SendError;
 use zeromq::prelude::*;
 use zeromq::SubSocket;
 
 const HASH_BLOCK_TOPIC: &str = "hashblock";
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ZeromqMessage {
     NewBlock(BlockHash),
 }
@@ -125,14 +126,50 @@ async fn listen_and_notify(
                 // The body is a "32-byte block hash in reversed byte order."
                 let mut hash = [0u8; 32];
                 hash.copy_from_slice(body);
-                hash.reverse();
-                let message = ZeromqMessage::new_blockhash(hash);
 
-                match sender.send(message.clone()) {
-                    Ok(_) => log_debug!(logger, "Blockhash {} sucessfully sent from ZMQ client", message),
+                let blockhash = hex::encode(hash);
+                match handle_message_body(hash, &sender) {
+                    Ok(_) => log_debug!(logger, "Blockhash {} sucessfully sent from ZMQ client", blockhash),
                     Err(err) => log_warn!(logger, "New block notification failed due to no active receivers: {}", err)
                 };
             }
         }
+    }
+}
+
+fn handle_message_body(
+    mut body: [u8; 32],
+    sender: &watch::Sender<ZeromqMessage>,
+) -> Result<(), SendError<ZeromqMessage>> {
+    body.reverse();
+    let message = ZeromqMessage::new_blockhash(body);
+
+    sender.send(message.clone())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn handle_message_body_blockhash() {
+        let body: [u8; 32] =
+            hex::decode("0000000000000000000152c5a30d731fdce51fe8c07d5cf227015b386188e5a2")
+                .unwrap()
+                .try_into()
+                .unwrap();
+        let (sender, receiver) = watch::channel(ZeromqMessage::init_dummy());
+
+        handle_message_body(body, &sender).unwrap();
+
+        let body: [u8; 32] =
+            hex::decode("a2e58861385b0127f25c7dc0e81fe5dc1f730da3c55201000000000000000000")
+                .unwrap()
+                .try_into()
+                .unwrap();
+        let expected = ZeromqMessage::new_blockhash(body);
+
+        assert!(receiver.has_changed().unwrap());
+        assert_eq!(expected, *receiver.borrow());
     }
 }
