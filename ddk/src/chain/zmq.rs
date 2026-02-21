@@ -129,7 +129,7 @@ async fn listen_and_notify(
 
                 let blockhash = hex::encode(hash);
                 match handle_message_body(hash, &sender) {
-                    Ok(_) => log_debug!(logger, "Blockhash {} sucessfully sent from ZMQ client", blockhash),
+                    Ok(_) => log_debug!(logger, "Blockhash {} successfully sent from ZMQ client", blockhash),
                     Err(err) => log_warn!(logger, "New block notification failed due to no active receivers: {}", err)
                 };
             }
