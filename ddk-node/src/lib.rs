@@ -97,7 +97,7 @@ impl DdkNode {
         builder.set_oracle(oracle.clone());
         builder.set_logger(logger.clone());
 
-        if let Some(endpoint) = opts.zmq_blockhash_endpoint {
+        if let Some(endpoint) = opts.zmq_blockhash_endpoint.filter(|e| !e.is_empty()) {
             builder.set_zmq_blockhash_endpoint(endpoint);
         }
 
