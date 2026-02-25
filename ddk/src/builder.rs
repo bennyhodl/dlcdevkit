@@ -120,7 +120,7 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
         self
     }
 
-    /// Set the esplora server to connect to.
+    /// Set the bitcoind server to connect to.
     pub fn set_zmq_blockhash_endpoint(&mut self, endpoint: impl ToString) -> &mut Self {
         self.zmq_blockhash_endpoint = Some(endpoint.to_string());
         self
