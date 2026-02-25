@@ -25,7 +25,7 @@
 //! - Bitcoin wallet operations
 //! - DLC contract management
 
-use crate::chain::{EsploraClient, ZeromqClient};
+use crate::chain::{EsploraClient, ZeromqClient, ZeromqMessage};
 use crate::error::Error;
 use crate::logger::Logger;
 use crate::logger::{log_debug, log_error, log_info, log_warn, WriteLog};
@@ -232,8 +232,9 @@ where
             // If ZMQ is configured, we want to wait to poll for a new block. We don't want to
             // completely remove polling since it acts as backup in case ZMQ messages are missed
             let wait_time = if zmq.is_some() { 300 } else { 60 };
+            let mut new_block = zmq.map(|z| z.subscribe());
             loop {
-                wait(&zmq, wait_time, logger.clone()).await;
+                wait(&mut new_block, wait_time, logger.clone()).await;
 
                 if let Err(e) = wallet_clone.sync().await {
                     log_warn!(logger, "Did not sync wallet. error={}", e.to_string());
@@ -249,8 +250,9 @@ where
             // If ZMQ is configured, we want to wait to poll for a new block. We don't want to
             // completely remove polling since it acts as backup in case ZMQ messages are missed
             let wait_time = if zmq.is_some() { 150 } else { 30 };
+            let mut new_block = zmq.map(|z| z.subscribe());
             loop {
-                wait(&zmq, wait_time, logger.clone()).await;
+                wait(&mut new_block, wait_time, logger.clone()).await;
 
                 let _ = processor
                     .send(DlcManagerMessage::PeriodicCheck)
@@ -427,14 +429,17 @@ where
     }
 }
 
-async fn wait(zmq: &Option<Arc<ZeromqClient>>, wait_time: u64, logger: Arc<Logger>) {
+async fn wait(
+    new_block: &mut Option<watch::Receiver<ZeromqMessage>>,
+    wait_time: u64,
+    logger: Arc<Logger>,
+) {
     let sleep = tokio::time::sleep(Duration::from_secs(wait_time));
-    if let Some(zmq_client) = zmq {
+    if let Some(new_block) = new_block {
         log_debug!(
             logger,
             "Listening for ZMQ notifications or sleep completion"
         );
-        let mut new_block = zmq_client.subscribe();
         select! {
             _ = new_block.changed() => {},
             _ = sleep => {}
