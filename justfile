@@ -15,7 +15,7 @@ node-one:
   - cargo run --bin ddk-node -- --network regtest --esplora $ESPLORA_HOST --name node-one --postgres-url postgres://$POSTGRES_USER:$POSTGRES_PASS@$POSTGRES_HOST/ddk_one --log debug --zmq-blockhash-endpoint $ZMQ_BLOCKHASH_ENDPOINT
 
 node-two:
-  - cargo run --bin ddk-node -- --network regtest --esplora $ESPLORA_HOST --port 1777 --grpc 0.0.0.0:3031 --storage-dir ~/.ddk/node-two --name node-two --postgres-url postgres://$POSTGRES_USER:$POSTGRES_PASS@$POSTGRES_HOST/ddk_two --log debug
+  - cargo run --bin ddk-node -- --network regtest --esplora $ESPLORA_HOST --port 1777 --grpc 0.0.0.0:3031 --storage-dir ~/.ddk/node-two --name node-two --postgres-url postgres://$POSTGRES_USER:$POSTGRES_PASS@$POSTGRES_HOST/ddk_two --log debug --zmq-blockhash-endpoint $ZMQ_BLOCKHASH_ENDPOINT
 
 cli-one *args:
   - cargo run --bin ddk-cli {{args}}
