@@ -112,7 +112,6 @@ async fn listen_and_notify(
                         continue;
                     }
                 };
-                log_debug!(logger, "ZMQ message received: {:?}", message);
 
                 let Some(body) = message.get(1) else {
                     log_error!(logger, "Message from ZMQ did not contain a body: {:?}", message);
