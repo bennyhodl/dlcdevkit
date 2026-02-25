@@ -55,7 +55,7 @@ impl DdkNode {
     pub async fn serve(opts: NodeOpts) -> anyhow::Result<()> {
         let logger = Arc::new(Logger::console(
             "console_logger".to_string(),
-            LogLevel::Info,
+            LogLevel::from(opts.log),
         ));
         let storage_path = match opts.storage_dir {
             Some(storage) => storage,
