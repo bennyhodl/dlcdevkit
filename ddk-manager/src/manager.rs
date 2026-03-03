@@ -62,6 +62,12 @@ static NB_CONFIRMATIONS: Lazy<u32> = Lazy::new(|| match std::env::var("NB_CONFIR
     Err(_) => DEFAULT_NB_CONFIRMATIONS,
 });
 
+/// Automatically broadcast the refund transaction in `check_confirmed_contracts`
+static AUTOMATIC_REFUND: Lazy<bool> = Lazy::new(|| match std::env::var("AUTOMATIC_REFUND") {
+    Ok(val) => val.parse().unwrap_or(true),
+    Err(_) => true,
+});
+
 /// The delay to set the refund value to.
 pub const REFUND_DELAY: u32 = 86400 * 7;
 /// The nSequence value used for CETs in DLC channels
@@ -1415,10 +1421,15 @@ where
         Ok(Contract::Closed(closed_contract))
     }
 
-    // TODO: Make this public to refund
+    /// Check if the refund locktime has passed and broadcast the refund transaction if it has.
     #[tracing::instrument(skip_all, level = "debug")]
-    async fn check_refund(&self, contract: &SignedContract) -> Result<(), Error> {
-        // TODO(tibo): should check for confirmation of refund before updating state
+    pub async fn check_and_broadcast_refund(
+        &self,
+        contract_id: &ContractId,
+    ) -> Result<Contract, Error> {
+        // Assert the contract is confirmed
+        let contract = get_contract_in_state!(self, contract_id, Confirmed, None::<PublicKey>)?;
+
         if contract
             .accepted_contract
             .dlc_transactions
@@ -1448,16 +1459,52 @@ where
                 let signer = self.signer_provider.derive_contract_signer(offer.keys_id)?;
                 let refund = crate::contract_updater::get_signed_refund(
                     &self.secp,
-                    contract,
+                    &contract,
                     &signer,
                     &self.logger,
                 )?;
                 self.blockchain.send_transaction(&refund).await?;
             }
 
-            self.store
-                .update_contract(&Contract::Refunded(contract.clone()))
+            let refunded = Contract::Refunded(contract.clone());
+            self.store.update_contract(&refunded).await?;
+            Ok(refunded)
+        } else {
+            return Err(Error::InvalidParameters(
+                "Contract maturity has not passed to broadcast refund".to_string(),
+            ));
+        }
+    }
+
+    #[tracing::instrument(skip_all, level = "debug")]
+    async fn check_refund(&self, contract: &SignedContract) -> Result<(), Error> {
+        if contract
+            .accepted_contract
+            .dlc_transactions
+            .refund
+            .lock_time
+            .to_consensus_u32() as u64
+            <= self.time.unix_time_now()
+        {
+            let refund_txid = contract
+                .accepted_contract
+                .dlc_transactions
+                .refund
+                .compute_txid();
+            let confirmations = self
+                .blockchain
+                .get_transaction_confirmations(&refund_txid)
                 .await?;
+
+            if confirmations > 0 {
+                // Counterparty (or we) already broadcast the refund tx. Update state.
+                self.store
+                    .update_contract(&Contract::Refunded(contract.clone()))
+                    .await?;
+            } else if *AUTOMATIC_REFUND {
+                self.check_and_broadcast_refund(&contract.accepted_contract.get_contract_id())
+                    .await?;
+            }
         }
 
         Ok(())
