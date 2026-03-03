@@ -375,6 +375,18 @@ where
         Ok((contract_id, counter_party, accept_dlc))
     }
 
+    /// Refunds a DLC contract.
+    ///
+    /// This method checks if the refund locktime has passed and broadcasts the refund transaction if it has.
+    ///
+    /// # Arguments
+    /// * `contract_id` - The ID of the contract to refund
+    ///
+    /// # Errors if the contract maturity has not passed to broadcast refund
+    pub async fn refund_dlc(&self, contract_id: &[u8; 32]) -> Result<Contract> {
+        Ok(self.manager.check_and_broadcast_refund(contract_id).await?)
+    }
+
     /// Retrieves the current balance state, including:
     /// - Confirmed balance
     /// - Unconfirmed changes

@@ -179,6 +179,7 @@ async fn numerical_common_diff_nb_digits(
 enum TestPath {
     Close,
     Refund,
+    ManualRefund,
     CooperativeClose,
     BadAcceptCetSignature,
     BadAcceptRefundSignature,
@@ -426,6 +427,17 @@ async fn enum_single_oracle_refund_manual_test() {
         get_enum_test_params(1, 1, Some(get_enum_oracles(1, 0).await)).await,
         TestPath::Refund,
         true,
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn enum_single_oracle_manual_refund_test() {
+    manager_execution_test(
+        get_enum_test_params(1, 1, Some(get_enum_oracles(1, 0).await)).await,
+        TestPath::ManualRefund,
+        false,
     )
     .await;
 }
@@ -909,7 +921,7 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
                 sync_receive.recv().await.expect("Error synchronizing");
                 assert_contract_state!(alice_manager_send, contract_id, FailedSign);
             }
-            TestPath::Close | TestPath::Refund => {
+            TestPath::Close | TestPath::Refund | TestPath::ManualRefund => {
                 alice_send
                     .send(Some(Message::Accept(accept_msg)))
                     .await
@@ -936,7 +948,7 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
                 alice_wallet.sync().await.unwrap();
                 bob_wallet.sync().await.unwrap();
                 match path {
-                    TestPath::Close | TestPath::Refund => {
+                    TestPath::Close | TestPath::Refund | TestPath::ManualRefund => {
                         if !manual_close {
                             test_utils::set_time((EVENT_MATURITY as u64) + 1);
                         }
@@ -1047,6 +1059,42 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
                                 alice_wallet.sync().await.unwrap();
                                 bob_wallet.sync().await.unwrap();
 
+                                periodic_check!(second, contract_id, Refunded);
+                            }
+                            TestPath::ManualRefund => {
+                                alice_wallet.sync().await.unwrap();
+                                bob_wallet.sync().await.unwrap();
+                                periodic_check!(first, contract_id, Confirmed);
+                                periodic_check!(second, contract_id, Confirmed);
+
+                                test_utils::set_time(
+                                    ((EVENT_MATURITY + ddk_manager::manager::REFUND_DELAY) as u64)
+                                        + 1,
+                                );
+
+                                generate_blocks(10, electrs.clone(), sink.clone()).await;
+
+                                alice_wallet.sync().await.unwrap();
+                                bob_wallet.sync().await.unwrap();
+
+                                // Manually broadcast the refund for the first party.
+                                first
+                                    .lock()
+                                    .await
+                                    .check_and_broadcast_refund(&contract_id)
+                                    .await
+                                    .expect("Error manually broadcasting refund");
+                                assert_contract_state!(first, contract_id, Refunded);
+
+                                // Randomly check with or without having the Refund mined.
+                                if thread_rng().next_u32() % 2 == 0 {
+                                    generate_blocks(1, electrs.clone(), sink.clone()).await;
+                                }
+
+                                alice_wallet.sync().await.unwrap();
+                                bob_wallet.sync().await.unwrap();
+
+                                // Second party picks it up via periodic check.
                                 periodic_check!(second, contract_id, Refunded);
                             }
                             _ => unreachable!(),
