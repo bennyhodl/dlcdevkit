@@ -30,9 +30,12 @@ pub struct NodeOpts {
     #[arg(help = "Listening port for the lightning network transport.")]
     pub listening_port: u16,
     #[arg(long = "grpc")]
-    #[arg(default_value = "0.0.0.0:3030")]
+    #[arg(default_value = "127.0.0.1:3030")]
     #[arg(help = "Host and port the gRPC server will run on.")]
     pub grpc_host: String,
+    #[arg(long = "api-secret")]
+    #[arg(help = "HMAC secret for gRPC authentication. Required for non-localhost bindings.")]
+    pub api_secret: Option<String>,
     #[arg(long = "esplora")]
     #[arg(default_value = "https://mutinynet.com/api")]
     #[arg(help = "Esplora server to connect to.")]

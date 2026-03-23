@@ -27,12 +27,15 @@ use ddk_messages::oracle_msgs::{EventDescriptor, OracleAnnouncement};
 use ddk_messages::{AcceptDlc, OfferDlc};
 use inquire::{Select, Text};
 use serde_json::Value;
-use tonic::transport::Channel;
 
-pub async fn cli_command(
-    arg: CliCommand,
-    client: &mut DdkRpcClient<Channel>,
-) -> anyhow::Result<()> {
+pub async fn cli_command<T>(arg: CliCommand, client: &mut DdkRpcClient<T>) -> anyhow::Result<()>
+where
+    T: tonic::client::GrpcService<tonic::body::BoxBody> + Send + 'static,
+    T::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    T::ResponseBody: tonic::codegen::Body<Data = tonic::codegen::Bytes> + Send + 'static,
+    <T::ResponseBody as tonic::codegen::Body>::Error:
+        Into<Box<dyn std::error::Error + Send + Sync>> + Send,
+{
     match arg {
         CliCommand::Info => {
             let info = client.info(InfoRequest::default()).await?.into_inner();
@@ -306,9 +309,16 @@ async fn generate_contract_input() -> anyhow::Result<ContractInput> {
     })
 }
 
-async fn interactive_contract_input(
-    client: &mut DdkRpcClient<Channel>,
-) -> anyhow::Result<ContractInput> {
+async fn interactive_contract_input<T>(
+    client: &mut DdkRpcClient<T>,
+) -> anyhow::Result<ContractInput>
+where
+    T: tonic::client::GrpcService<tonic::body::BoxBody> + Send + 'static,
+    T::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    T::ResponseBody: tonic::codegen::Body<Data = tonic::codegen::Bytes> + Send + 'static,
+    <T::ResponseBody as tonic::codegen::Body>::Error:
+        Into<Box<dyn std::error::Error + Send + Sync>> + Send,
+{
     let contract_type =
         Select::new("Select type of contract.", vec!["enum", "numerical"]).prompt()?;
 
