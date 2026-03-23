@@ -89,9 +89,10 @@ pub struct ContractInput {
 impl ContractInput {
     /// Validate the contract input parameters
     pub fn validate(&self) -> Result<(), Error> {
-        if self.offer_collateral < DUST_LIMIT {
+        // Allow 0 collateral for single-funded DLCs, but non-zero must exceed dust limit
+        if self.offer_collateral > Amount::ZERO && self.offer_collateral < DUST_LIMIT {
             return Err(Error::InvalidParameters(
-                "Offer collateral must be greater than dust limit.".to_string(),
+                "Non-zero offer collateral must be greater than dust limit.".to_string(),
             ));
         }
 
