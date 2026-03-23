@@ -142,6 +142,12 @@ pub async fn cli_command(
                 amount,
                 fee_rate,
             } => {
+                if fee_rate > 1000 {
+                    return Err(anyhow!(
+                        "Fee rate too high: {} sat/vbyte (max: 1000)",
+                        fee_rate
+                    ));
+                }
                 let txid = client
                     .send(SendRequest {
                         address,
@@ -237,7 +243,12 @@ pub async fn cli_command(
             print!("{peers}");
         }
         CliCommand::Connect { connect_string } => {
-            let parts = connect_string.split("@").collect::<Vec<&str>>();
+            let parts: Vec<&str> = connect_string.split('@').collect();
+            if parts.len() != 2 {
+                return Err(anyhow!(
+                    "Invalid connection string format. Expected: pubkey@host:port"
+                ));
+            }
             client
                 .connect_peer(ConnectRequest {
                     pubkey: parts[0].to_string(),
@@ -330,6 +341,12 @@ async fn interactive_contract_input(
                 .prompt()?
                 .parse()?;
             let fee_rate: u64 = Text::new("Fee rate (sats/vbyte):").prompt()?.parse()?;
+            if fee_rate > 1000 {
+                return Err(anyhow!(
+                    "Fee rate too high: {} sat/vbyte (max: 1000)",
+                    fee_rate
+                ));
+            }
             let min_price: u64 = Text::new("Minimum Bitcoin price:").prompt()?.parse()?;
             let max_price: u64 = Text::new("Maximum Bitcoin price:").prompt()?.parse()?;
             let num_steps: u64 = Text::new("Number of rounding steps:").prompt()?.parse()?;
@@ -372,6 +389,12 @@ async fn interactive_contract_input(
                 outcome_payouts.push(outcome_payout);
             }
             let fee_rate: u64 = Text::new("Fee rate (sats/vbyte):").prompt()?.parse()?;
+            if fee_rate > 1000 {
+                return Err(anyhow!(
+                    "Fee rate too high: {} sat/vbyte (max: 1000)",
+                    fee_rate
+                ));
+            }
             // TODO: list possible events.
             ddk_payouts::enumeration::create_contract_input(
                 outcome_payouts,
