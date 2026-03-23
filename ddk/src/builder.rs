@@ -7,7 +7,7 @@ use ddk_manager::SystemTimeProvider;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use crate::chain::EsploraClient;
+use crate::chain::{EsploraClient, ZeromqClient};
 use crate::ddk::{DlcDevKit, DlcManagerMessage};
 use crate::error::{BuilderError, Error};
 use crate::logger::{LogLevel, Logger};
@@ -39,6 +39,7 @@ pub struct Builder<T, S, O> {
     oracle: Option<Arc<O>>,
     contract_address_generator: Option<Arc<dyn AddressGenerator + Send + Sync + 'static>>,
     esplora_host: String,
+    zmq_blockhash_endpoint: Option<String>,
     network: Network,
     seed_bytes: [u8; 64],
     logger: Option<Arc<Logger>>,
@@ -58,6 +59,7 @@ impl<T: Transport, S: Storage, O: Oracle> Default for Builder<T, S, O> {
             oracle: None,
             contract_address_generator: None,
             esplora_host: DEFAULT_ESPLORA_HOST.to_string(),
+            zmq_blockhash_endpoint: None,
             network: DEFAULT_NETWORK,
             seed_bytes: [0u8; 64],
             logger: None,
@@ -115,6 +117,12 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
     /// Set the esplora server to connect to.
     pub fn set_esplora_host(&mut self, host: String) -> &mut Self {
         self.esplora_host = host;
+        self
+    }
+
+    /// Set the bitcoind server to connect to.
+    pub fn set_zmq_blockhash_endpoint(&mut self, endpoint: impl ToString) -> &mut Self {
+        self.zmq_blockhash_endpoint = Some(endpoint.to_string());
         self
     }
 
@@ -279,14 +287,23 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
             }
         });
 
+        let zmq_client = if let Some(endpoint) = &self.zmq_blockhash_endpoint {
+            Some(Arc::new(
+                ZeromqClient::new(endpoint, logger.clone(), stop_signal.clone()).await?,
+            ))
+        } else {
+            None
+        };
+
         log_info!(
             logger.clone(),
-            "DDK runtime created. name={}, esplora={}, network={}, transport={}, oracle={}",
+            "DDK runtime created. name={}, esplora={}, network={}, transport={}, oracle={}, zmq_enabled={}",
             name,
             self.esplora_host,
             self.network,
             transport.name(),
-            oracle.get_public_key()
+            oracle.get_public_key(),
+            zmq_client.is_some()
         );
 
         Ok(DlcDevKit {
@@ -301,6 +318,7 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
             stop_signal,
             stop_signal_sender,
             logger,
+            zmq_client,
         })
     }
 }
