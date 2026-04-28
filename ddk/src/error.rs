@@ -45,6 +45,8 @@ pub enum Error {
     #[cfg(feature = "nostr")]
     #[error("NostrError: {0}")]
     Nostr(#[from] NostrError),
+    #[error("ZmqError: {0}")]
+    Zmq(#[from] zeromq::ZmqError),
 }
 
 /// Errors related to storage operations in DDK.

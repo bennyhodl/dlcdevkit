@@ -25,10 +25,10 @@
 //! - Bitcoin wallet operations
 //! - DLC contract management
 
-use crate::chain::EsploraClient;
+use crate::chain::{EsploraClient, ZeromqClient, ZeromqMessage};
 use crate::error::Error;
 use crate::logger::Logger;
-use crate::logger::{log_error, log_info, log_warn, WriteLog};
+use crate::logger::{log_debug, log_error, log_info, log_warn, WriteLog};
 use crate::wallet::DlcDevKitWallet;
 use crate::{Oracle, Storage, Transport};
 use bitcoin::hex::DisplayHex;
@@ -45,6 +45,7 @@ use ddk_messages::{AcceptDlc, Message, OfferDlc};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio::runtime::Runtime;
+use tokio::select;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
@@ -149,6 +150,8 @@ pub struct DlcDevKit<T: Transport, S: Storage, O: Oracle> {
     pub stop_signal_sender: watch::Sender<bool>,
     /// Logger instance for structured logging
     pub logger: Arc<Logger>,
+    /// Optional ZeroMQ client for blockhash notifications
+    pub zmq_client: Option<Arc<ZeromqClient>>,
 }
 
 impl<T, S, O> DlcDevKit<T, S, O>
@@ -223,30 +226,40 @@ where
 
         // Spawn wallet sync thread (60-second interval)
         let wallet_clone = self.wallet.clone();
-        let logger_clone = self.logger.clone();
+        let logger = self.logger.clone();
+        let zmq = self.zmq_client.clone();
         runtime.spawn(async move {
-            let mut timer = tokio::time::interval(Duration::from_secs(60));
+            // If ZMQ is configured, we want to wait to poll for a new block. We don't want to
+            // completely remove polling since it acts as backup in case ZMQ messages are missed
+            let wait_time = if zmq.is_some() { 300 } else { 60 };
+            let mut new_block = zmq.map(|z| z.subscribe());
             loop {
-                timer.tick().await;
+                wait(&mut new_block, wait_time, logger.clone()).await;
+
                 if let Err(e) = wallet_clone.sync().await {
-                    log_warn!(logger_clone, "Did not sync wallet. error={}", e.to_string());
+                    log_warn!(logger, "Did not sync wallet. error={}", e.to_string());
                 };
             }
         });
 
         // Spawn contract monitor thread (30-second interval)
         let processor = self.sender.clone();
-        let logger_clone = self.logger.clone();
+        let logger = self.logger.clone();
+        let zmq = self.zmq_client.clone();
         runtime.spawn(async move {
-            let mut timer = tokio::time::interval(Duration::from_secs(30));
+            // If ZMQ is configured, we want to wait to poll for a new block. We don't want to
+            // completely remove polling since it acts as backup in case ZMQ messages are missed
+            let wait_time = if zmq.is_some() { 150 } else { 30 };
+            let mut new_block = zmq.map(|z| z.subscribe());
             loop {
-                timer.tick().await;
+                wait(&mut new_block, wait_time, logger.clone()).await;
+
                 let _ = processor
                     .send(DlcManagerMessage::PeriodicCheck)
                     .await
                     .map_err(|e| {
                         log_error!(
-                            logger_clone,
+                            logger,
                             "Error sending periodic check: error={}",
                             e.to_string()
                         );
@@ -425,5 +438,26 @@ where
             contract: contract.to_owned(),
             contract_pnl: contract_pnl.to_owned().to_sat(),
         })
+    }
+}
+
+async fn wait(
+    new_block: &mut Option<watch::Receiver<ZeromqMessage>>,
+    wait_time: u64,
+    logger: Arc<Logger>,
+) {
+    let sleep = tokio::time::sleep(Duration::from_secs(wait_time));
+    if let Some(new_block) = new_block {
+        log_debug!(
+            logger,
+            "Listening for ZMQ notifications or sleep completion"
+        );
+        select! {
+            _ = new_block.changed() => {},
+            _ = sleep => {}
+        }
+    } else {
+        log_debug!(logger, "Listening for sleep completion");
+        sleep.await;
     }
 }

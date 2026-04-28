@@ -53,4 +53,7 @@ pub struct NodeOpts {
     #[arg(long)]
     #[arg(help = "Url for the postgres database connection.")]
     pub postgres_url: String,
+    #[arg(long)]
+    #[arg(help = "Endpoint for bitcoind ZeroMQ blockhash notifications")]
+    pub zmq_blockhash_endpoint: Option<String>,
 }

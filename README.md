@@ -77,6 +77,7 @@ You can create a custom DDK instance by implementing the required traits defined
 A bitcoin node, esplora server, and oracle server are required to run DDK. Developers can spin up a development environment with the `justfile` provided.
 
 ```
+$ cp .env.example .env
 $ just deps
 ```
 
