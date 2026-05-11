@@ -56,7 +56,7 @@ macro_rules! assert_contract_state_and_serialize {
 #[test_log::test(tokio::test)]
 #[ignore]
 async fn enumeration_contract() {
-    dotenv::dotenv().ok();
+    dotenvy::dotenv().ok();
     let logger_one = Arc::new(Logger::tracing("alice".to_string(), LogLevel::Info));
     let logger_two = Arc::new(Logger::disabled("bob".to_string()));
     let (alice, bob, oracle) = test_ddk(logger_two, logger_one).await;

@@ -1,3 +1,5 @@
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine as _;
 use ddk_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
 use lightning::util::ser::Writeable;
 use nostr::event::Error;
@@ -9,7 +11,7 @@ pub fn create_announcement_event(
     announcement: &OracleAnnouncement,
 ) -> Result<Event, Error> {
     let content = announcement.encode();
-    let event = EventBuilder::new(Kind::Custom(88), base64::encode(content))
+    let event = EventBuilder::new(Kind::Custom(88), BASE64.encode(content))
         .build(keys.public_key)
         .sign_with_keys(keys)?;
     Ok(event)
@@ -22,7 +24,7 @@ pub fn create_attestation_event(
     event_id: EventId,
 ) -> Result<Event, Error> {
     let content = attestation.encode();
-    let event = EventBuilder::new(Kind::Custom(89), base64::encode(content))
+    let event = EventBuilder::new(Kind::Custom(89), BASE64.encode(content))
         .tag(Tag::event(event_id))
         .build(keys.public_key)
         .sign_with_keys(keys)?;

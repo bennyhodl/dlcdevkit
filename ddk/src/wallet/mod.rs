@@ -246,9 +246,9 @@ impl DlcDevKitWallet {
         let fingerprint = xprv.fingerprint(&secp);
 
         let external_descriptor =
-            Bip84(xprv, KeychainKind::External).into_wallet_descriptor(&secp, network)?;
+            Bip84(xprv, KeychainKind::External).into_wallet_descriptor(&secp, network.into())?;
         let internal_descriptor =
-            Bip84(xprv, KeychainKind::Internal).into_wallet_descriptor(&secp, network)?;
+            Bip84(xprv, KeychainKind::Internal).into_wallet_descriptor(&secp, network.into())?;
 
         let mut storage = WalletStorage(storage);
 
@@ -926,7 +926,11 @@ impl ddk_manager::Wallet for DlcDevKitWallet {
             .coin_select(
                 vec![],
                 utxos,
-                FeeRate::from_sat_per_vb_unchecked(fee_rate),
+                FeeRate::from_sat_per_vb(fee_rate).ok_or_else(|| {
+                    ManagerError::WalletError(Box::new(WalletError::Esplora(format!(
+                        "Invalid fee rate: {fee_rate}"
+                    ))))
+                })?,
                 amount,
                 ScriptBuf::new().as_script(),
                 &mut thread_rng(),

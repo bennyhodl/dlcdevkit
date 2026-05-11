@@ -20,7 +20,7 @@ use tokio::time::sleep;
 #[test_log::test(tokio::test)]
 #[ignore]
 async fn short_call() {
-    dotenv::dotenv().ok();
+    dotenvy::dotenv().ok();
     let logger_one = Arc::new(Logger::tracing("alice".to_string(), LogLevel::Info));
     let logger_two = Arc::new(Logger::disabled("bob".to_string()));
     let (alice, bob, oracle) = test_ddk(logger_one, logger_two).await;

@@ -11,7 +11,7 @@ use ddk_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
 use lightning::io::Cursor;
 use lightning::util::ser::Readable;
 use nostr_database::MemoryDatabase;
-use nostr_database::NostrEventsDatabase;
+use nostr_database::NostrDatabase;
 use nostr_rs::event::EventId;
 use nostr_rs::event::Kind;
 use nostr_rs::key::PublicKey as NostrPublicKey;
@@ -269,7 +269,9 @@ impl ddk_manager::Oracle for NostrOracle {
 }
 
 fn decode_base64<T: Readable>(content: &str) -> Result<T, OracleError> {
-    let bytes = base64::decode(content)
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(content)
         .map_err(|_| OracleError::Custom("Failed to decode base64.".to_string()))?;
     let mut cursor = Cursor::new(bytes);
     T::read(&mut cursor).map_err(|_| OracleError::Custom("Failed to read event.".to_string()))

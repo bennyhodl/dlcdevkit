@@ -1052,7 +1052,7 @@ mod tests {
 
     #[tokio::test]
     async fn postgres() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         let db = seed_db().await;
 
         let confirmed_rows = db.get_contract_metadata(None).await.unwrap();

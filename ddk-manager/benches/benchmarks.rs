@@ -3,7 +3,7 @@ use bitcoin::Amount;
 use bitcoin::OutPoint;
 use bitcoin::ScriptBuf;
 use bitcoin::WPubkeyHash;
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use ddk_dlc::create_dlc_transactions;
 use ddk_dlc::DlcTransactions;
 use ddk_dlc::PartyParams;
@@ -26,6 +26,7 @@ use ddk_messages::oracle_msgs::OracleEvent;
 use secp256k1_zkp::{
     global::SECP256K1, rand::thread_rng, schnorr::Signature, Keypair, SecretKey, XOnlyPublicKey,
 };
+use std::hint::black_box;
 use std::str::FromStr;
 
 /// The base in which the outcome values are decomposed.

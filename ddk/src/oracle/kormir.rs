@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::logger::{log_error, log_info, WriteLog};
 use bitcoin::key::XOnlyPublicKey;
 use ddk_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use kormir::storage::OracleEventData;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
 use serde::Deserialize;
