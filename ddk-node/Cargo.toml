@@ -19,6 +19,8 @@ bitcoin = { version = "0.32.6", features = ["rand", "serde"] }
 anyhow = "1.0.86"
 clap = { version = "4.5.9", features = ["derive"] }
 hex = "0.4.3"
+hmac = "0.12"
+sha2 = "0.10"
 homedir = "0.3.3"
 inquire = "0.7.5"
 prost = "0.12.1"

@@ -31,13 +31,16 @@ Options:
   -n, --network <NETWORK>          Set the Bitcoin network [default: signet]
   -s, --storage-dir <STORAGE_DIR>  Data storage path [default: ~/.ddk]
   -p, --port <PORT>                Transport listening port [default: 1776]
-      --grpc <GRPC_HOST>           gRPC server host:port [default: 0.0.0.0:3030]
+      --grpc <GRPC_HOST>           gRPC server host:port [default: 127.0.0.1:3030]
+      --api-secret <API_SECRET>    HMAC secret for gRPC authentication
       --esplora <ESPLORA_HOST>     Esplora server URL [default: https://mutinynet.com/api]
       --oracle <ORACLE_HOST>       Kormir oracle URL [default: https://kormir.dlcdevkit.com]
       --seed <SEED>                Seed strategy: 'file' or 'bytes' [default: file]
       --postgres-url <URL>         PostgreSQL connection URL
   -h, --help                       Print help
 ```
+
+When binding to non-localhost addresses (e.g., `--grpc 0.0.0.0:3030`), an API secret is required via `--api-secret`.
 
 ## CLI Usage
 
