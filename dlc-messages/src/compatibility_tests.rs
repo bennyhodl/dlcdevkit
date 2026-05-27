@@ -435,6 +435,7 @@ fn test_single(case: TestCase, secp: &secp256k1::Secp256k1<secp256k1::All>) {
         0,
         params.contract_maturity_bound,
         0,
+        0,
     )
     .unwrap();
 
@@ -731,6 +732,7 @@ fn test_dlc_txs() {
             params.fee_rate,
             0,
             params.contract_maturity_bound,
+            0,
             0,
         )
         .unwrap();

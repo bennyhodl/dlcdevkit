@@ -55,6 +55,9 @@ pub mod util;
 /// See: https://github.com/discreetlogcontracts/dlcspecs/blob/master/Transactions.md#change-outputs
 const DUST_LIMIT: Amount = Amount::from_sat(1000);
 
+/// Bit 0 of `contract_flags`: redirect all refund proceeds to the accepter.
+pub const REFUND_TO_ACCEPTER_FLAG: u8 = 0x01;
+
 /// The transaction version
 /// See: https://github.com/discreetlogcontracts/dlcspecs/blob/master/Transactions.md#funding-transaction
 const TX_VERSION: Version = Version::TWO;
@@ -436,6 +439,7 @@ pub fn create_spliced_dlc_transactions(
     fund_lock_time: u32,
     cet_lock_time: u32,
     fund_output_serial_id: u64,
+    contract_flags: u8,
 ) -> Result<DlcTransactions, Error> {
     // Create enhanced party parameters that include DLC inputs as regular inputs
     let mut enhanced_offer_params = offer_params.clone();
@@ -480,6 +484,7 @@ pub fn create_spliced_dlc_transactions(
         fund_lock_time,
         cet_lock_time,
         fund_output_serial_id,
+        contract_flags,
     )
 }
 
@@ -494,6 +499,7 @@ pub fn create_dlc_transactions(
     fund_lock_time: u32,
     cet_lock_time: u32,
     fund_output_serial_id: u64,
+    contract_flags: u8,
 ) -> Result<DlcTransactions, Error> {
     let (fund_tx, funding_script_pubkey) = create_fund_transaction_with_fees(
         offer_params,
@@ -517,6 +523,7 @@ pub fn create_dlc_transactions(
         refund_lock_time,
         cet_lock_time,
         None,
+        contract_flags,
     )?;
 
     Ok(DlcTransactions {
@@ -594,6 +601,7 @@ pub fn create_fund_transaction_with_fees(
 }
 
 /// Create the contract execution transactions and refund transaction.
+#[allow(clippy::too_many_arguments)]
 pub fn create_cets_and_refund_tx(
     offer_params: &PartyParams,
     accept_params: &PartyParams,
@@ -602,6 +610,7 @@ pub fn create_cets_and_refund_tx(
     refund_lock_time: u32,
     cet_lock_time: u32,
     cet_nsequence: Option<Sequence>,
+    contract_flags: u8,
 ) -> Result<(Vec<Transaction>, Transaction), Error> {
     let total_collateral = checked_add!(offer_params.collateral, accept_params.collateral)?;
 
@@ -637,13 +646,20 @@ pub fn create_cets_and_refund_tx(
         cet_lock_time,
     );
 
+    let (offer_refund_value, accept_refund_value) = if contract_flags & REFUND_TO_ACCEPTER_FLAG != 0
+    {
+        (Amount::ZERO, total_collateral)
+    } else {
+        (offer_params.collateral, accept_params.collateral)
+    };
+
     let offer_refund_output = TxOut {
-        value: offer_params.collateral,
+        value: offer_refund_value,
         script_pubkey: offer_params.payout_script_pubkey.clone(),
     };
 
     let accept_refund_ouput = TxOut {
-        value: accept_params.collateral,
+        value: accept_refund_value,
         script_pubkey: accept_params.payout_script_pubkey.clone(),
     };
 
@@ -1495,6 +1511,7 @@ mod tests {
             10,
             10,
             0,
+            0,
         )
         .unwrap();
 
@@ -1531,6 +1548,7 @@ mod tests {
             4,
             10,
             10,
+            0,
             0,
         )
         .unwrap();
@@ -1716,6 +1734,7 @@ mod tests {
                 10,
                 10,
                 case.serials[0],
+                0,
             )
             .unwrap();
 
@@ -1759,5 +1778,63 @@ mod tests {
             )
             .expect("Could not find fund output");
         }
+    }
+
+    #[test]
+    fn refund_to_accepter_flag_redirects_all_funds() {
+        let secp = Secp256k1::new();
+        let mut rng = secp256k1_zkp::rand::thread_rng();
+
+        let offer_collateral = Amount::from_sat(100000000);
+        let accept_collateral = Amount::ZERO;
+        let total_collateral = offer_collateral + accept_collateral;
+
+        let (offer_party_params, _) =
+            get_party_params(Amount::from_sat(1000000000), offer_collateral, None);
+
+        let accept_fund_privkey = SecretKey::new(&mut rng);
+        let accept_party_params = PartyParams {
+            fund_pubkey: PublicKey::from_secret_key(&secp, &accept_fund_privkey),
+            change_script_pubkey: get_p2wpkh_script_pubkey(&secp, &mut rng),
+            change_serial_id: 2,
+            payout_script_pubkey: get_p2wpkh_script_pubkey(&secp, &mut rng),
+            payout_serial_id: 2,
+            input_amount: Amount::ZERO,
+            collateral: accept_collateral,
+            inputs: vec![],
+            dlc_inputs: vec![],
+        };
+
+        let dlc_txs = create_dlc_transactions(
+            &offer_party_params,
+            &accept_party_params,
+            &[Payout {
+                offer: total_collateral,
+                accept: Amount::ZERO,
+            }],
+            100,
+            4,
+            10,
+            10,
+            0,
+            REFUND_TO_ACCEPTER_FLAG,
+        )
+        .unwrap();
+
+        let refund_tx = &dlc_txs.refund;
+
+        assert_eq!(
+            refund_tx.output.len(),
+            1,
+            "Refund TX should have exactly one output when flag is set"
+        );
+        assert_eq!(
+            refund_tx.output[0].value, total_collateral,
+            "The single output should receive total collateral"
+        );
+        assert_eq!(
+            refund_tx.output[0].script_pubkey, accept_party_params.payout_script_pubkey,
+            "Output should pay to the accepter's payout SPK"
+        );
     }
 }

@@ -129,6 +129,7 @@ pub fn create_contract_input(
         offer_collateral,
         accept_collateral,
         fee_rate,
+        contract_flags: 0,
         contract_infos,
     }
 }

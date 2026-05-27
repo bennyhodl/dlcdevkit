@@ -68,6 +68,7 @@ pub fn create_parlay_contract(
         offer_collateral,
         accept_collateral,
         fee_rate,
+        contract_flags: 0,
         contract_infos: vec![contract_info],
     }
 }

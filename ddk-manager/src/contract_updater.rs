@@ -175,6 +175,7 @@ where
             0,
             offered_contract.cet_locktime,
             offered_contract.fund_output_serial_id,
+            offered_contract.contract_flags,
         )?
     } else {
         log_debug!(logger, "Creating DLC transactions without splicing.");
@@ -187,6 +188,7 @@ where
             0,
             offered_contract.cet_locktime,
             offered_contract.fund_output_serial_id,
+            offered_contract.contract_flags,
         )?
     };
 
@@ -404,6 +406,7 @@ where
             0,
             offered_contract.cet_locktime,
             offered_contract.fund_output_serial_id,
+            offered_contract.contract_flags,
         )?
     } else {
         log_debug!(logger, "Creating DLC transactions without splicing.");
@@ -416,6 +419,7 @@ where
             0,
             offered_contract.cet_locktime,
             offered_contract.fund_output_serial_id,
+            offered_contract.contract_flags,
         )?
     };
 

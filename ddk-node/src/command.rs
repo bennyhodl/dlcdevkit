@@ -299,6 +299,7 @@ async fn generate_contract_input() -> anyhow::Result<ContractInput> {
         offer_collateral: Amount::from_sat(10_500_000),
         accept_collateral: Amount::from_sat(10_500_000),
         fee_rate: 1,
+        contract_flags: 0,
         contract_infos: vec![ContractInputInfo {
             contract_descriptor,
             oracles: oracle_input,

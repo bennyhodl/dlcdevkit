@@ -81,6 +81,9 @@ pub struct ContractInput {
     pub accept_collateral: Amount,
     /// The fee rate used to construct the transactions.
     pub fee_rate: u64,
+    /// Feature flags for the contract (bit 0: refund to accepter).
+    #[cfg_attr(feature = "use-serde", serde(default))]
+    pub contract_flags: u8,
     /// The set of contract that make up the DLC (a single DLC can be based
     /// on multiple contracts).
     pub contract_infos: Vec<ContractInputInfo>,
@@ -132,6 +135,7 @@ mod tests {
             offer_collateral: Amount::from_sat(1000000),
             accept_collateral: Amount::from_sat(2000000),
             fee_rate: 1234,
+            contract_flags: 0,
             contract_infos: vec![ContractInputInfo {
                 contract_descriptor: ContractDescriptor::Enum(EnumDescriptor {
                     outcome_payouts: vec![

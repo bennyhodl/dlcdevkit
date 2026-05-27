@@ -47,6 +47,9 @@ pub struct OfferedContract {
     pub cet_locktime: u32,
     /// The time at which the contract becomes refundable.
     pub refund_locktime: u32,
+    /// Feature flags for the contract (bit 0: refund to accepter).
+    #[cfg_attr(feature = "use-serde", serde(default))]
+    pub contract_flags: u8,
     /// Keys Id for generating the signers
     pub(crate) keys_id: KeysId,
 }
@@ -120,6 +123,7 @@ impl OfferedContract {
             fee_rate_per_vb: contract.fee_rate,
             cet_locktime,
             refund_locktime: latest_maturity + refund_delay,
+            contract_flags: contract.contract_flags,
             counter_party: *counter_party,
             keys_id,
         }
@@ -157,6 +161,7 @@ impl OfferedContract {
             fund_output_serial_id: offer_dlc.fund_output_serial_id,
             funding_inputs: offer_dlc.funding_inputs.clone(),
             total_collateral: offer_dlc.contract_info.get_total_collateral(),
+            contract_flags: offer_dlc.contract_flags,
             counter_party,
             keys_id,
         })
@@ -168,7 +173,7 @@ impl From<&OfferedContract> for OfferDlc {
         OfferDlc {
             protocol_version: PROTOCOL_VERSION,
             temporary_contract_id: offered_contract.id,
-            contract_flags: 0,
+            contract_flags: offered_contract.contract_flags,
             chain_hash: BITCOIN_CHAINHASH,
             contract_info: offered_contract.into(),
             funding_pubkey: offered_contract.offer_params.fund_pubkey,

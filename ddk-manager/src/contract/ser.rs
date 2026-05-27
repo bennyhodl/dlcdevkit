@@ -98,6 +98,7 @@ impl_dlc_writeable!(OfferedContract, {
     (fee_rate_per_vb, writeable),
     (cet_locktime, writeable),
     (refund_locktime, writeable),
+    (contract_flags, writeable),
     (counter_party, writeable),
     (keys_id, writeable)
 });
