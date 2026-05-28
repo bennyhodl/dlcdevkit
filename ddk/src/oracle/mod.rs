@@ -5,3 +5,5 @@ pub mod memory;
 pub mod nostr;
 #[cfg(feature = "p2pderivatives")]
 pub mod p2p_derivatives;
+#[cfg(feature = "pow-attest")]
+pub mod pow_attest;
