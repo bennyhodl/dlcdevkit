@@ -222,6 +222,7 @@ where
         offered_contract.cet_locktime,
         offered_contract.fund_output_serial_id,
         Sequence(offered_channel.cet_nsequence),
+        offered_contract.contract_flags,
     )?;
 
     let own_base_secret_key =
@@ -368,6 +369,7 @@ where
         offered_contract.cet_locktime,
         offered_contract.fund_output_serial_id,
         Sequence(cet_nsequence),
+        offered_contract.contract_flags,
     )?;
 
     let channel_id = crate::utils::compute_id(
@@ -1246,6 +1248,7 @@ where
         fee_rate_per_vb: signed_channel.fee_rate_per_vb,
         cet_locktime: renew_offer.cet_locktime,
         refund_locktime: renew_offer.refund_locktime,
+        contract_flags: 0,
         keys_id,
     };
 
@@ -1338,6 +1341,7 @@ where
         offered_contract.fee_rate_per_vb,
         0,
         Sequence(cet_nsequence),
+        offered_contract.contract_flags,
     )?;
 
     let own_secret_key = derive_private_key(secp, &accept_per_update_point, &own_base_secret_key);
@@ -1452,6 +1456,7 @@ where
         offered_contract.fee_rate_per_vb,
         0,
         Sequence(cet_nsequence),
+        offered_contract.contract_flags,
     )?;
 
     let _offer_own_sk = derive_private_key(secp, &offer_per_update_point, &own_base_secret_key);

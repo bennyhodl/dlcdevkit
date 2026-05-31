@@ -206,7 +206,18 @@ fn create_transactions(payouts: &[Payout]) -> DlcTransactions {
         collateral: Amount::from_sat(100000000),
         dlc_inputs: vec![],
     };
-    create_dlc_transactions(&offer_params, &accept_params, payouts, 1000, 2, 0, 1000, 3).unwrap()
+    create_dlc_transactions(
+        &offer_params,
+        &accept_params,
+        payouts,
+        1000,
+        2,
+        0,
+        1000,
+        3,
+        0,
+    )
+    .unwrap()
 }
 
 fn accept_seckey() -> SecretKey {

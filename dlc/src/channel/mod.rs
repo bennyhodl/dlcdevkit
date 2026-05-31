@@ -243,6 +243,7 @@ pub fn create_channel_transactions(
     cet_lock_time: u32,
     fund_output_serial_id: u64,
     cet_nsequence: Sequence,
+    contract_flags: u8,
 ) -> Result<DlcChannelTransactions, Error> {
     let extra_fee =
         super::util::weight_to_fee(BUFFER_TX_WEIGHT + CET_EXTRA_WEIGHT, fee_rate_per_vb)?;
@@ -267,6 +268,7 @@ pub fn create_channel_transactions(
         fee_rate_per_vb,
         cet_lock_time,
         cet_nsequence,
+        contract_flags,
     )
 }
 
@@ -285,6 +287,7 @@ pub fn create_renewal_channel_transactions(
     fee_rate_per_vb: u64,
     cet_lock_time: u32,
     cet_nsequence: Sequence,
+    contract_flags: u8,
 ) -> Result<DlcChannelTransactions, Error> {
     let extra_fee =
         super::util::weight_to_fee(BUFFER_TX_WEIGHT + CET_EXTRA_WEIGHT, fee_rate_per_vb)?;
@@ -327,6 +330,7 @@ pub fn create_renewal_channel_transactions(
         refund_lock_time,
         cet_lock_time,
         Some(cet_nsequence),
+        contract_flags,
     )?;
 
     Ok(DlcChannelTransactions {

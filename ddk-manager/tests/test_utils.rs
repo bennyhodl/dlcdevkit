@@ -344,6 +344,7 @@ pub async fn get_enum_test_params(
         offer_collateral: Amount::from_sat(OFFER_COLLATERAL),
         accept_collateral: Amount::from_sat(ACCEPT_COLLATERAL),
         fee_rate: 2,
+        contract_flags: 0,
         contract_infos: vec![contract_info],
     };
 
@@ -447,6 +448,7 @@ pub async fn get_splice_in_test_params_with_maturity(
         offer_collateral,
         accept_collateral: Amount::ZERO,
         fee_rate: 2,
+        contract_flags: 0,
         contract_infos: vec![contract_info],
     };
 
@@ -501,6 +503,7 @@ pub async fn get_splice_out_test_params_with_maturity(
         offer_collateral,
         accept_collateral: Amount::ZERO,
         fee_rate: 2,
+        contract_flags: 0,
         contract_infos: vec![contract_info],
     };
 
@@ -526,6 +529,7 @@ pub async fn get_single_funded_test_params(nb_oracles: usize, threshold: usize) 
         offer_collateral: TOTAL_COLLATERAL,
         accept_collateral: Amount::ZERO,
         fee_rate: 5,
+        contract_flags: 0,
         contract_infos: vec![contract_info],
     };
 
@@ -718,6 +722,7 @@ pub async fn get_numerical_test_params(
         offer_collateral: Amount::from_sat(OFFER_COLLATERAL),
         accept_collateral: Amount::from_sat(ACCEPT_COLLATERAL),
         fee_rate: 2,
+        contract_flags: 0,
         contract_infos: vec![contract_info],
     };
 
@@ -773,6 +778,7 @@ pub async fn get_enum_and_numerical_test_params(
         offer_collateral: Amount::from_sat(OFFER_COLLATERAL),
         accept_collateral: Amount::from_sat(ACCEPT_COLLATERAL),
         fee_rate: 2,
+        contract_flags: 0,
         contract_infos,
     };
 

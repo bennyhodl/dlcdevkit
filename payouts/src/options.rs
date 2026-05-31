@@ -58,6 +58,7 @@ fn build_order_offer(
         offer_collateral,
         accept_collateral: total_collateral - offer_collateral,
         fee_rate,
+        contract_flags: 0,
     }
 }
 

@@ -432,6 +432,7 @@ async fn splice_test_params() -> test_utils::TestParams {
         offer_collateral: TOTAL_COLLATERAL,
         accept_collateral: Amount::ZERO,
         fee_rate: 1,
+        contract_flags: 0,
         contract_infos: vec![contract_input_info],
     };
     test_utils::TestParams {
@@ -484,6 +485,7 @@ async fn get_splice_test_params(oracle: MemoryOracle, splice_path: SplicePath) -
         offer_collateral: amount,
         accept_collateral: Amount::ZERO,
         fee_rate: 1,
+        contract_flags: 0,
         contract_infos: vec![contract_input_info],
     };
 
