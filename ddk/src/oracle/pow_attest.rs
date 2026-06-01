@@ -15,14 +15,14 @@ use crate::error::OracleError;
 use crate::logger::{log_error, log_info, Logger, WriteLog};
 use bitcoin::key::XOnlyPublicKey;
 use ddk_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
-use lightning::util::ser::Readable;
+use ddk_messages::ser_impls::read_as_tlv;
 use serde::Deserialize;
 
 /// Client for the pow-attest oracle.
 ///
 /// The oracle exposes binary TLV endpoints that match the dlcspecs format
-/// verbatim, so deserialization uses `lightning::util::ser::Readable` on the
-/// response payload after stripping the outer TLV header.
+/// verbatim. Responses are deserialized with `ddk_messages::ser_impls::read_as_tlv`,
+/// which reads the BigSize type + BigSize length prefix before decoding the payload.
 #[derive(Debug)]
 pub struct PowAttestOracleClient {
     host: String,
@@ -73,25 +73,6 @@ impl PowAttestOracleClient {
     }
 }
 
-/// Strips the outer TLV header (BigSize type + BigSize length) from the
-/// response body and reads the inner payload.
-///
-/// The pow-attest endpoints return the full TLV wire format including the
-/// 3-byte BigSize type (`fdd824` for announcements, `fdd868` for attestations)
-/// and the 1-byte BigSize length prefix. `OracleAnnouncement::read` and
-/// `OracleAttestation::read` expect only the payload, so the leading 4 bytes
-/// are skipped here.
-fn read_tlv_payload<T: Readable>(bytes: &[u8]) -> Result<T, lightning::ln::msgs::DecodeError> {
-    // Outer type+len wrapper is 4 bytes for the message sizes pow-attest emits
-    // (3-byte BigSize type + 1-byte BigSize length <= 252). If the server ever
-    // grows a message past 252 bytes of payload, the length prefix becomes
-    // multi-byte and this offset will need to follow the BigSize length rules
-    // in dlcspecs.
-    let payload = if bytes.len() > 4 { &bytes[4..] } else { bytes };
-    let mut cur = Cursor::new(payload);
-    T::read(&mut cur)
-}
-
 #[async_trait::async_trait]
 impl ddk_manager::Oracle for PowAttestOracleClient {
     fn get_public_key(&self) -> XOnlyPublicKey {
@@ -129,7 +110,7 @@ impl ddk_manager::Oracle for PowAttestOracleClient {
                     "Could not read announcement body: {e}"
                 ))
             })?;
-        let announcement = read_tlv_payload::<OracleAnnouncement>(&bytes).map_err(|e| {
+        let announcement = read_as_tlv::<OracleAnnouncement, _>(&mut Cursor::new(&bytes)).map_err(|e| {
             log_error!(
                 self.logger,
                 "Could not decode pow-attest announcement TLV. error={:?}",
@@ -177,7 +158,7 @@ impl ddk_manager::Oracle for PowAttestOracleClient {
                     "Could not read attestation body: {e}"
                 ))
             })?;
-        let attestation = read_tlv_payload::<OracleAttestation>(&bytes).map_err(|e| {
+        let attestation = read_as_tlv::<OracleAttestation, _>(&mut Cursor::new(&bytes)).map_err(|e| {
             log_error!(
                 self.logger,
                 "Could not decode pow-attest attestation TLV. error={:?}",
@@ -216,7 +197,7 @@ mod tests {
     #[test]
     fn roundtrips_static_announcement() {
         let bytes = hex::decode(STATIC_ANNOUNCEMENT_TLV_HEX).expect("hex");
-        let ann = read_tlv_payload::<OracleAnnouncement>(&bytes)
+        let ann = read_as_tlv::<OracleAnnouncement, _>(&mut Cursor::new(&bytes))
             .expect("OracleAnnouncement::read failed on captured pow-attest TLV");
         assert_eq!(ann.oracle_event.oracle_nonces.len(), 1);
         assert!(ann.oracle_event.event_id.contains("6ba7b810"));
