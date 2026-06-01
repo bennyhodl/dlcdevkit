@@ -397,7 +397,7 @@ async function release() {
   }
 
   // Step 4: create (or resume) the release branch.
-  const branchExists = run(`git rev-parse --verify ${releaseBranch}`, {
+  const branchExists = run(`git rev-parse --verify ${releaseBranch} 2>/dev/null`, {
     allowFailure: true,
   });
   if (branchExists) {
@@ -408,13 +408,11 @@ async function release() {
     console.log(`✅ Created branch ${releaseBranch}`);
   }
 
-  // Step 5: release notes, committed as their own change so the working tree
-  // is clean before cargo-workspaces runs.
+  // Step 5: generate release notes. The `releases/` dir is gitignored — the
+  // notes live on the GitHub release page (see Step 10), not in the repo — so
+  // there's nothing to commit, and the ignored file doesn't dirty the working
+  // tree before cargo-workspaces runs.
   const releaseNotes = generateReleaseNotes(version);
-  run("git add releases/");
-  run(`git commit -m "docs: release notes for v${version}"`, {
-    allowFailure: true, // no-op on resume / nothing to commit
-  });
 
   // Step 6: bump + publish in dependency order via cargo-workspaces.
   // It derives the publish order from the dependency graph and skips crates
