@@ -77,14 +77,17 @@ function getRepoInfo() {
   return repoInfo;
 }
 
-// Read the current workspace version. All crates share one version, so any
-// member works; ddk is the canonical one.
+// Read the current workspace version. All crates inherit it via
+// `version.workspace = true`, so the canonical source is the root
+// Cargo.toml's [workspace.package] section.
 function currentVersion() {
   const m = fs
-    .readFileSync("ddk/Cargo.toml", "utf8")
-    .match(/^version = "(.*)"$/m);
+    .readFileSync("Cargo.toml", "utf8")
+    .match(/^\[workspace\.package\][\s\S]*?^version = "(.*)"$/m);
   if (!m) {
-    console.error("❌ Could not read current version from ddk/Cargo.toml");
+    console.error(
+      "❌ Could not read current version from [workspace.package] in Cargo.toml"
+    );
     process.exit(1);
   }
   return m[1];
