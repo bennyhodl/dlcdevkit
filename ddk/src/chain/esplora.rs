@@ -5,20 +5,18 @@ use crate::error::{esplora_err_to_manager_err, Error};
 use crate::logger::Logger;
 use crate::logger::{log_error, log_info, log_warn, WriteLog};
 use bdk_esplora::esplora_client::Error as EsploraError;
-use bdk_esplora::esplora_client::{AsyncClient, BlockingClient, Builder};
+use bdk_esplora::esplora_client::{AsyncClient, Builder};
 use bitcoin::Network;
 use bitcoin::{consensus::encode, Transaction, Txid};
 use ddk_manager::error::Error as ManagerError;
 use lightning::chain::chaininterface::{ConfirmationTarget, FeeEstimator};
 
-/// Esplora client for getting chain information. Holds both a blocking
-/// and an async client.
+/// Esplora client for getting chain information.
 ///
 /// Used by rust-dlc for getting transactions related to DLC contracts.
 /// Used by bdk to sync the wallet and track transaction.
 #[derive(Debug)]
 pub struct EsploraClient {
-    pub blocking_client: BlockingClient,
     pub async_client: AsyncClient,
     network: Network,
     logger: Arc<Logger>,
@@ -31,10 +29,8 @@ impl EsploraClient {
         logger: Arc<Logger>,
     ) -> Result<EsploraClient, Error> {
         let builder = Builder::new(esplora_host).timeout(Duration::from_secs(5).as_secs());
-        let blocking_client = builder.clone().build_blocking();
         let async_client = builder.build_async()?;
         Ok(EsploraClient {
-            blocking_client,
             async_client,
             network,
             logger,

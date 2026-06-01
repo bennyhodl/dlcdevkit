@@ -1,11 +1,11 @@
 [package]
+name = "ddk-messages"
 authors = ["benny b <ben@bitcoinbay.foundation>", "Crypto Garage"]
 description = "Structs and serialization for the Discreet Log Contract (DLC) protocol."
-homepage = "https://github.com/bennyhodl/dlcdevkit"
 license-file = "../LICENSE"
-name = "ddk-messages"
 repository = "https://github.com/bennyhodl/dlcdevkit/tree/master/dlc-messages"
-version = "1.0.11"
+homepage.workspace = true
+version.workspace = true
 edition = "2015"
 
 [features]
@@ -15,15 +15,15 @@ no-std = ["ddk-dlc/no-std"]
 use-serde = ["serde", "secp256k1-zkp/serde", "bitcoin/serde"]
 
 [dependencies]
-bitcoin = { version = "0.32.6", default-features = false }
-ddk-dlc = { version = "1.0.11", path = "../dlc", default-features = false }
-lightning = { version = "0.1.5", default-features = false }
-secp256k1-zkp = { version = "0.11.0" }
-serde = {version = "1.0", features = ["derive"], optional = true}
+bitcoin = { workspace = true }
+ddk-dlc = { workspace = true }
+lightning = { workspace = true }
+secp256k1-zkp = { workspace = true }
+serde = { workspace = true, features = ["derive"], optional = true }
 
 [dev-dependencies]
-bitcoin = { version = "0.32.6", default-features = false, features = ["serde"] }
-ddk-messages = {path = "./", default-features = false, features = ["use-serde"]}
-secp256k1-zkp = {version = "0.11.0", features = ["serde", "global-context"]}
-serde = {version = "1.0", features = ["derive"]}
-serde_json = "1.0"
+bitcoin = { workspace = true, features = ["serde"] }
+ddk-messages = { path = "./", default-features = false, features = ["use-serde"] }
+secp256k1-zkp = { workspace = true, features = ["serde", "global-context"] }
+serde = { workspace = true, features = ["std", "derive"] }
+serde_json = { workspace = true }

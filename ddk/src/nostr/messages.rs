@@ -13,6 +13,8 @@
 use crate::error::NostrError;
 use crate::nostr::nostr_to_bitcoin_pubkey;
 use crate::nostr::{DLC_MESSAGE_KIND, ORACLE_ANNOUNCMENT_KIND, ORACLE_ATTESTATION_KIND};
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine as _;
 use ddk_dlc::secp256k1_zkp::PublicKey as SecpPublicKey;
 use ddk_messages::message_handler::read_dlc_message;
 use ddk_messages::{Message, WireMessage};
@@ -79,7 +81,9 @@ pub fn create_oracle_message_filter(since: Timestamp) -> Filter {
 pub fn parse_dlc_msg_event(event: &Event, secret_key: &SecretKey) -> Result<Message, NostrError> {
     let decrypt = nip04::decrypt(secret_key, &event.pubkey, &event.content)?;
 
-    let bytes = base64::decode(decrypt).map_err(|e| NostrError::MessageParsing(e.to_string()))?;
+    let bytes = BASE64
+        .decode(decrypt)
+        .map_err(|e| NostrError::MessageParsing(e.to_string()))?;
 
     let mut cursor = lightning::io::Cursor::new(bytes);
 
@@ -176,7 +180,7 @@ pub fn create_dlc_msg_event(
     let mut bytes = msg.type_id().encode();
     bytes.extend(msg.encode());
 
-    let content = nip04::encrypt(&keys.secret_key().clone(), &to, base64::encode(&bytes))?;
+    let content = nip04::encrypt(&keys.secret_key().clone(), &to, BASE64.encode(&bytes))?;
 
     let p_tags = Tag::public_key(to);
 

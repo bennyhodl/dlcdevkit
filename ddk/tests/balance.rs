@@ -16,7 +16,7 @@ use crate::test_util::get_bitcoind_client;
 
 #[tokio::test]
 async fn contract_balance() {
-    dotenv::dotenv().ok();
+    dotenvy::dotenv().ok();
     let contract_bytes = include_bytes!("../../testconfig/contract_binaries/PreClosed");
     let contract = deserialize_contract(&contract_bytes.to_vec()).unwrap();
     let preclosed = match contract {

@@ -1,19 +1,19 @@
 [package]
+name = "ddk-dlc"
 authors = ["benny b <ben@bitcoinbay.foundation>", "Crypto Garage"]
 description = "Creation, signing and verification of Discreet Log Contracts (DLC) transactions."
-homepage = "https://github.com/bennyhodl/dlcdevkit"
 license-file = "../LICENSE"
-name = "ddk-dlc"
 repository = "https://github.com/bennyhodl/dlcdevkit/tree/master/dlc"
-version = "1.0.11"
+homepage.workspace = true
+version.workspace = true
 edition = "2015"
 
 [dependencies]
-bitcoin = { version = "0.32.6", default-features = false }
+bitcoin = { workspace = true }
 miniscript = { version = "12.2", default-features = false }
 secp256k1-sys = "0.10.0"
-secp256k1-zkp = "0.11.0"
-serde = { version = "1.0", default-features = false, optional = true }
+secp256k1-zkp = { workspace = true }
+serde = { workspace = true, features = ["derive"], optional = true }
 
 [features]
 # for benchmarks
@@ -25,4 +25,4 @@ use-serde = ["serde", "secp256k1-zkp/serde", "bitcoin/serde"]
 
 [dev-dependencies]
 rayon = "1.5"
-secp256k1-zkp = { version = "0.11.0", features = ["hashes", "rand","serde", "global-context"] }
+secp256k1-zkp = { workspace = true, features = ["hashes", "rand", "serde", "global-context"] }

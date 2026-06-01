@@ -1,3 +1,50 @@
 [workspace]
 resolver = "2"
 members = ["ddk", "dlc", "dlc-messages", "dlc-trie", "payouts", "ddk-node", "ddk-manager", "kormir"]
+
+[workspace.package]
+version = "1.0.11"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/bennyhodl/dlcdevkit"
+homepage = "https://github.com/bennyhodl/dlcdevkit"
+
+[workspace.dependencies]
+# Default-features are disabled here so no-std crates (dlc, dlc-messages, dlc-trie)
+# don't pull std. Std-using crates must opt in via `features = ["std"]`.
+ddk = { version = "1.0.11", path = "ddk", default-features = false }
+ddk-dlc = { version = "1.0.11", path = "dlc", default-features = false }
+ddk-messages = { version = "1.0.11", path = "dlc-messages", default-features = false }
+ddk-trie = { version = "1.0.11", path = "dlc-trie", default-features = false }
+ddk-manager = { version = "1.0.11", path = "ddk-manager", default-features = false }
+ddk-payouts = { version = "1.0.11", path = "payouts" }
+kormir = { version = "1.0.11", path = "kormir" }
+
+bitcoin = { version = "0.32.6", default-features = false }
+lightning = { version = "0.2.2", default-features = false }
+secp256k1-zkp = "0.11.0"
+
+serde = { version = "1.0.209", default-features = false }
+serde_json = "1.0.142"
+
+# async / runtime
+tokio = "1.41.1"
+async-trait = "0.1.89"
+futures = "0.3.31"
+
+# error handling
+anyhow = "1.0.86"
+thiserror = "2.0.12"
+
+# logging
+tracing = "0.1.41"
+log = "0.4.22"
+
+# utility
+hex = "0.4.3"
+chrono = "0.4.39"
+
+# dev / test
+bitcoincore-rpc = "0.19.0"
+bitcoincore-rpc-json = "0.19.0"
+dotenvy = "0.15.7"

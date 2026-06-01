@@ -27,6 +27,7 @@ pub type LnPeerManager = LdkPeerManager<
     Arc<Logger>,
     Arc<DlcMessageHandler>,
     Arc<KeysManager>,
+    Arc<IgnoringMessageHandler>,
 >;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
@@ -59,7 +60,8 @@ impl LightningTransport {
         let time = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .map_err(|e| TransportError::Init(e.to_string()))?;
-        let key_signer = KeysManager::new(seed_bytes, time.as_secs(), time.as_nanos() as u32);
+        let key_signer =
+            KeysManager::new(seed_bytes, time.as_secs(), time.as_nanos() as u32, false);
         let node_id = key_signer
             .get_node_id(lightning::sign::Recipient::Node)
             .map_err(|_| TransportError::Init("Could not get node id.".to_string()))?;
@@ -70,6 +72,7 @@ impl LightningTransport {
             route_handler: Arc::new(IgnoringMessageHandler {}),
             onion_message_handler: Arc::new(IgnoringMessageHandler {}),
             custom_message_handler: dlc_message_handler.clone(),
+            send_only_message_handler: Arc::new(IgnoringMessageHandler {}),
         };
 
         let mut ephmeral_data = [0u8; 32];

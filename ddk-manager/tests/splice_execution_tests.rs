@@ -495,6 +495,6 @@ async fn get_splice_test_params(oracle: MemoryOracle, splice_path: SplicePath) -
 #[tokio::test]
 #[ignore]
 async fn splice() {
-    dotenv::dotenv().ok();
+    dotenvy::dotenv().ok();
     splice_execution_test(splice_test_params().await).await
 }

@@ -1,20 +1,20 @@
 [package]
 name = "ddk-payouts"
-version = "1.0.11"
 authors = ["benny b <ben@bitcoinbay.foundation>"]
 description = "Library to build payout functions for DLC contracts."
-license = "MIT"
-repository = "https://github.com/bennyhodl/dlcdevkit"
-edition = "2021"
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+edition.workspace = true
 
 [dependencies]
-ddk-manager = { version = "1.0.11", path = "../ddk-manager", features = ["use-serde"] }
-ddk-dlc = { version = "1.0.11", path = "../dlc", features = ["use-serde"] }
-ddk-messages = { version = "1.0.11", path = "../dlc-messages", features = ["use-serde"] }
-ddk-trie = { version = "1.0.11", path = "../dlc-trie", features = ["use-serde"] }
+ddk-manager = { workspace = true, features = ["std", "use-serde"] }
+ddk-dlc = { workspace = true, features = ["std", "use-serde"] }
+ddk-messages = { workspace = true, features = ["std", "use-serde"] }
+ddk-trie = { workspace = true, features = ["std", "use-serde"] }
 
-bitcoin = "0.32.6"
-serde = { version = "1.0.209", features = ["derive"] }
-serde_json = "1.0.127"
-anyhow = "1.0.86"
-thiserror = "2.0.12"
+bitcoin = { workspace = true, features = ["std"] }
+serde = { workspace = true, features = ["std", "derive"] }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }

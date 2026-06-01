@@ -14,7 +14,7 @@ use lightning::{
         peer_handler::CustomMessageHandler,
         wire::{CustomMessageReader, Type},
     },
-    util::ser::{Readable, Writeable, MAX_BUF_SIZE},
+    util::ser::{FixedLengthReader, Readable, Writeable, MAX_BUF_SIZE},
 };
 use secp256k1_zkp::PublicKey;
 
@@ -173,12 +173,15 @@ impl CustomMessageHandler for MessageHandler {
                         .process_segment_chunk(s)
                         .map_err(|e| to_ln_error(e, "Error processing segment chunk"))?
                     {
+                        let msg_len = msg.len() as u64;
                         let mut buf = Cursor::new(msg);
                         let message_type = <u16 as Readable>::read(&mut buf).map_err(|e| {
                             to_ln_error(e, "Could not reconstruct message from segments")
                         })?;
+                        let remaining = msg_len.saturating_sub(buf.position());
+                        let mut limited = FixedLengthReader::new(&mut buf, remaining);
                         if let WireMessage::Message(m) = self
-                            .read(message_type, &mut buf)
+                            .read(message_type, &mut limited)
                             .map_err(|e| {
                                 to_ln_error(e, "Could not reconstruct message from segments")
                             })?
@@ -270,11 +273,14 @@ mod tests {
             .expect("Error writing type id");
         msg.write(&mut buf).expect("Error writing message");
         let handler = MessageHandler::new();
+        let buf_len = buf.len() as u64;
         let mut reader = Cursor::new(&mut buf);
         let message_type =
             <u16 as Readable>::read(&mut reader).expect("to be able to read the type prefix.");
+        let remaining = buf_len.saturating_sub(reader.position());
+        let mut limited = FixedLengthReader::new(&mut reader, remaining);
         handler
-            .read(message_type, &mut reader)
+            .read(message_type, &mut limited)
             .expect("to be able to read the message")
             .expect("to have a message");
     }
@@ -312,8 +318,8 @@ mod tests {
     #[test]
     fn read_unknown_message_returns_none() {
         let handler = MessageHandler::new();
-        let mut buf = &[0u8; 10];
-        let mut reader = Cursor::new(&mut buf);
+        let buf: &[u8] = &[0u8; 10];
+        let mut reader = buf;
         let message_type = 0;
 
         assert!(handler

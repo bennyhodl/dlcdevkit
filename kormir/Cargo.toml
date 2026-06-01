@@ -1,30 +1,30 @@
 [package]
 name = "kormir"
-version = "1.0.11"
-edition = "2021"
 authors = ["benthecarman <ben@mutinywallet.com>", "benny b <ben@bitcoinbay.foundation>"]
 description = "Oracle implementation for DLCs"
-license = "MIT"
+license.workspace = true
 documentation = "https://docs.rs/kormir"
 homepage = "https://github.com/bennyhodl/kormir"
 repository = "https://github.com/bennyhodl/kormir"
+version.workspace = true
+edition.workspace = true
 
 [features]
 default = []
 nostr = ["dep:nostr", "dep:base64"]
 
 [dependencies]
-bitcoin = { version = "0.32.6", features = ["serde"] }
-ddk-dlc = { version = "1.0.11", path = "../dlc", features = ["use-serde"] }
-ddk-messages = { version = "1.0.11", path = "../dlc-messages", features = [ "use-serde"] }
-lightning = "0.1.5"
-log = "0.4.22"
-nostr = { version = "0.40.0", optional = true }
-base64 = { version = "0.13.1", optional = true }
-serde = "1.0"
-secp256k1-zkp = "0.11"
-hex = "0.4.3"
-serde_json = "1.0.142"
+bitcoin = { workspace = true, features = ["std", "serde"] }
+ddk-dlc = { workspace = true, features = ["std", "use-serde"] }
+ddk-messages = { workspace = true, features = ["std", "use-serde"] }
+lightning = { workspace = true, features = ["std"] }
+log = { workspace = true }
+nostr = { version = "0.44.0", optional = true }
+base64 = { version = "0.22.1", optional = true }
+serde = { workspace = true, features = ["std", "derive"] }
+secp256k1-zkp = { workspace = true }
+hex = { workspace = true }
+serde_json = { workspace = true }
 
 [dev-dependencies]
-tokio = { version = "1.11.0", features = ["full"] }
+tokio = { workspace = true, features = ["full"] }
