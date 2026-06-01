@@ -971,7 +971,7 @@ checksum = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
 
 [[package]]
 name = "ddk"
-version = "1.0.11"
+version = "1.1.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -1012,7 +1012,7 @@ dependencies = [
 
 [[package]]
 name = "ddk-dlc"
-version = "1.0.11"
+version = "1.1.0"
 dependencies = [
  "bitcoin",
  "miniscript",
@@ -1024,7 +1024,7 @@ dependencies = [
 
 [[package]]
 name = "ddk-manager"
-version = "1.0.11"
+version = "1.1.0"
 dependencies = [
  "async-trait",
  "bitcoin",
@@ -1051,7 +1051,7 @@ dependencies = [
 
 [[package]]
 name = "ddk-messages"
-version = "1.0.11"
+version = "1.1.0"
 dependencies = [
  "bitcoin",
  "ddk-dlc",
@@ -1064,7 +1064,7 @@ dependencies = [
 
 [[package]]
 name = "ddk-node"
-version = "1.0.11"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "bitcoin",
@@ -1092,7 +1092,7 @@ dependencies = [
 
 [[package]]
 name = "ddk-payouts"
-version = "1.0.11"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "bitcoin",
@@ -1107,7 +1107,7 @@ dependencies = [
 
 [[package]]
 name = "ddk-trie"
-version = "1.0.11"
+version = "1.1.0"
 dependencies = [
  "bitcoin",
  "ddk-dlc",
@@ -2085,9 +2085,9 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "jiff"
-version = "0.2.24"
+version = "0.2.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f00b5dbd620d61dfdcb6007c9c1f6054ebd75319f163d886a9055cec1155073d"
+checksum = "4603d3033e49e2b0e31229fcab20a5d40089c607d975cd9c80551dc69eed9102"
 dependencies = [
  "jiff-static",
  "log",
@@ -2098,9 +2098,9 @@ dependencies = [
 
 [[package]]
 name = "jiff-static"
-version = "0.2.24"
+version = "0.2.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e000de030ff8022ea1da3f466fbb0f3a809f5e51ed31f6dd931c35181ad8e6d7"
+checksum = "782d32378dddf207193ac91cefb848ad41abb58195c95168e1291227a0832b47"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2192,7 +2192,7 @@ dependencies = [
 
 [[package]]
 name = "kormir"
-version = "1.0.11"
+version = "1.1.0"
 dependencies = [
  "base64 0.22.1",
  "bitcoin",
@@ -4162,9 +4162,9 @@ dependencies = [
 
 [[package]]
 name = "test-log"
-version = "0.2.20"
+version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f46bf474f0a4afebf92f076d54fd5e63423d9438b8c278a3d2ccb0f47f7cdb3"
+checksum = "9b9c218384242b5c89b68303ab6f6fc53a312d923f0c14dc6bb860c6aeee40f1"
 dependencies = [
  "env_logger",
  "test-log-macros",
@@ -4173,9 +4173,9 @@ dependencies = [
 
 [[package]]
 name = "test-log-core"
-version = "0.2.20"
+version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37d4d41320b48bc4a211a9021678fcc0c99569b594ea31c93735b8e517102b4c"
+checksum = "c26ef8b00e4d382e59f6a8ddb3cd790b3a5bb29f21a358a9a69ea2f29f13f27b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4184,9 +4184,9 @@ dependencies = [
 
 [[package]]
 name = "test-log-macros"
-version = "0.2.20"
+version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9beb9249a81e430dffd42400a49019bcf548444f1968ff23080a625de0d4d320"
+checksum = "944ad38adcbb71eaa682c56bceeb079e4ca82b4b3edc2a0fde5cb297b77dac8d"
 dependencies = [
  "syn",
  "test-log-core",
