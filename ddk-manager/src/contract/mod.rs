@@ -27,6 +27,14 @@ pub mod ser;
 pub mod signed_contract;
 pub(crate) mod utils;
 
+/// Converts wire-level contract information into the execution information
+/// required to construct CETs and adaptor signatures.
+pub fn execution_contract_infos(
+    contract_info: &ddk_messages::contract_msgs::ContractInfo,
+) -> Result<Vec<contract_info::ContractInfo>, Error> {
+    Ok(crate::conversion_utils::get_contract_info_and_announcements(contract_info)?)
+}
+
 #[derive(Clone)]
 /// Enum representing the possible states of a DLC.
 pub enum Contract {
