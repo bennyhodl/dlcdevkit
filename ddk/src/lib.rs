@@ -6,6 +6,8 @@
 pub mod builder;
 /// Working with the bitcoin chain.
 pub mod chain;
+/// Stateless DLC contract operations.
+pub mod contract;
 mod ddk;
 /// DDK error types
 pub mod error;
