@@ -550,4 +550,28 @@ mod tests {
             assert_eq!(chain_monitor, retrieved);
         }
     );
+
+    #[test]
+    fn old_format_offered_contract_deserializes() {
+        let serialized = include_bytes!("../../../../testconfig/contract_binaries/old/Offered");
+        let contract = deserialize_contract(&serialized.to_vec())
+            .expect("Old format Offered binary should deserialize");
+        if let Contract::Offered(offered) = contract {
+            assert_eq!(offered.contract_flags, 0);
+        } else {
+            panic!("Expected Offered contract");
+        }
+    }
+
+    #[test]
+    fn new_format_offered_contract_deserializes() {
+        let serialized = include_bytes!("../../../../testconfig/contract_binaries/Offered");
+        let contract = deserialize_contract(&serialized.to_vec())
+            .expect("New format Offered binary should deserialize");
+        if let Contract::Offered(offered) = contract {
+            assert_eq!(offered.contract_flags, 0);
+        } else {
+            panic!("Expected Offered contract");
+        }
+    }
 }

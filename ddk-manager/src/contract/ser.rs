@@ -11,6 +11,8 @@ use crate::contract::AdaptorInfo;
 use crate::contract::{
     ClosedContract, ContractDescriptor, FailedAcceptContract, FailedSignContract, PreClosedContract,
 };
+use crate::KeysId;
+use bitcoin::Amount;
 use crate::payout_curve::{
     HyperbolaPayoutCurvePiece, PayoutFunction, PayoutFunctionPiece, PayoutPoint,
     PolynomialPayoutCurvePiece, RoundingInterval, RoundingIntervals,
@@ -87,21 +89,77 @@ impl_dlc_writeable!(EnumDescriptor, {
         {vec_cb, ddk_messages::ser_impls::enum_payout::write, ddk_messages::ser_impls::enum_payout::read}
     )
 });
-impl_dlc_writeable!(OfferedContract, {
-    (id, writeable),
-    (is_offer_party, writeable),
-    (contract_info, vec),
-    (offer_params, { cb_writeable, ddk_messages::ser_impls::party_params::write, ddk_messages::ser_impls::party_params::read }),
-    (total_collateral, writeable),
-    (funding_inputs, vec),
-    (fund_output_serial_id, writeable),
-    (fee_rate_per_vb, writeable),
-    (cet_locktime, writeable),
-    (refund_locktime, writeable),
-    (contract_flags, writeable),
-    (counter_party, writeable),
-    (keys_id, writeable)
-});
+impl Writeable for OfferedContract {
+    fn write<W: Writer>(&self, w: &mut W) -> Result<(), lightning::io::Error> {
+        self.id.write(w)?;
+        self.is_offer_party.write(w)?;
+        write_vec(&self.contract_info, w)?;
+        ddk_messages::ser_impls::party_params::write(&self.offer_params, w)?;
+        self.total_collateral.write(w)?;
+        write_vec(&self.funding_inputs, w)?;
+        self.fund_output_serial_id.write(w)?;
+        self.fee_rate_per_vb.write(w)?;
+        self.cet_locktime.write(w)?;
+        self.refund_locktime.write(w)?;
+        self.contract_flags.write(w)?;
+        self.counter_party.write(w)?;
+        self.keys_id.write(w)?;
+        Ok(())
+    }
+}
+
+impl Readable for OfferedContract {
+    fn read<R: Read>(r: &mut R) -> Result<Self, DecodeError> {
+        let id: [u8; 32] = Readable::read(r)?;
+        let is_offer_party: bool = Readable::read(r)?;
+        let contract_info = read_vec(r)?;
+        let offer_params = ddk_messages::ser_impls::party_params::read(r)?;
+        let total_collateral: Amount = Readable::read(r)?;
+        let funding_inputs = read_vec(r)?;
+        let fund_output_serial_id: u64 = Readable::read(r)?;
+        let fee_rate_per_vb: u64 = Readable::read(r)?;
+        let cet_locktime: u32 = Readable::read(r)?;
+        let refund_locktime: u32 = Readable::read(r)?;
+
+        // Backward compatibility: contract_flags (u8) was inserted between
+        // refund_locktime and counter_party. Peek one byte: 0x02/0x03 means
+        // old format (compressed pubkey prefix), 0x00/0x01 means new format
+        // (contract_flags value).
+        let mut peek = [0u8; 1];
+        r.read_exact(&mut peek)?;
+        let (contract_flags, counter_party) = if peek[0] == 0x02 || peek[0] == 0x03 {
+            // Old format: this byte is the start of counter_party pubkey
+            let mut pubkey_bytes = [0u8; 33];
+            pubkey_bytes[0] = peek[0];
+            r.read_exact(&mut pubkey_bytes[1..])?;
+            let pk = secp256k1_zkp::PublicKey::from_slice(&pubkey_bytes)
+                .map_err(|_| DecodeError::InvalidValue)?;
+            (0u8, pk)
+        } else {
+            // New format: this byte is contract_flags
+            let counter_party: secp256k1_zkp::PublicKey = Readable::read(r)?;
+            (peek[0], counter_party)
+        };
+
+        let keys_id: KeysId = Readable::read(r)?;
+
+        Ok(Self {
+            id,
+            is_offer_party,
+            contract_info,
+            offer_params,
+            total_collateral,
+            funding_inputs,
+            fund_output_serial_id,
+            fee_rate_per_vb,
+            cet_locktime,
+            refund_locktime,
+            contract_flags,
+            counter_party,
+            keys_id,
+        })
+    }
+}
 impl_dlc_writeable_external!(RangeInfo, range_info, { (cet_index, usize), (adaptor_index, usize)});
 impl_dlc_writeable_enum!(AdaptorInfo,;; (0, Numerical, write_multi_oracle_trie, read_multi_oracle_trie), (1, NumericalWithDifference, write_multi_oracle_trie_with_diff, read_multi_oracle_trie_with_diff); (2, Enum));
 impl_dlc_writeable_external!(
