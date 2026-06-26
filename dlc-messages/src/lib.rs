@@ -441,7 +441,7 @@ impl Readable for OfferDlc {
         let possible_pv = u32::from_be_bytes([peek[0], peek[1], peek[2], peek[3]]);
 
         let (protocol_version, contract_flags, chain_hash) =
-            if possible_pv >= 1 && possible_pv <= 10 {
+            if (1..=10).contains(&possible_pv) {
                 // New format: peek[0..4] = protocol_version, peek[4] = contract_flags
                 let chain_hash: [u8; 32] = Readable::read(r)?;
                 (possible_pv, peek[4], chain_hash)
