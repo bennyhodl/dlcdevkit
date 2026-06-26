@@ -11,12 +11,12 @@ use crate::contract::AdaptorInfo;
 use crate::contract::{
     ClosedContract, ContractDescriptor, FailedAcceptContract, FailedSignContract, PreClosedContract,
 };
-use crate::KeysId;
-use bitcoin::Amount;
 use crate::payout_curve::{
     HyperbolaPayoutCurvePiece, PayoutFunction, PayoutFunctionPiece, PayoutPoint,
     PolynomialPayoutCurvePiece, RoundingInterval, RoundingIntervals,
 };
+use crate::KeysId;
+use bitcoin::Amount;
 use ddk_dlc::DlcTransactions;
 use ddk_messages::impl_dlc_writeable;
 use ddk_messages::ser_impls::{

@@ -440,20 +440,19 @@ impl Readable for OfferDlc {
         r.read_exact(&mut peek)?;
         let possible_pv = u32::from_be_bytes([peek[0], peek[1], peek[2], peek[3]]);
 
-        let (protocol_version, contract_flags, chain_hash) =
-            if (1..=10).contains(&possible_pv) {
-                // New format: peek[0..4] = protocol_version, peek[4] = contract_flags
-                let chain_hash: [u8; 32] = Readable::read(r)?;
-                (possible_pv, peek[4], chain_hash)
-            } else {
-                // Old format: peek[0] = contract_flags, peek[1..5] = first 4 chain_hash bytes
-                let mut remaining = [0u8; 28];
-                r.read_exact(&mut remaining)?;
-                let mut chain_hash = [0u8; 32];
-                chain_hash[..4].copy_from_slice(&peek[1..5]);
-                chain_hash[4..].copy_from_slice(&remaining);
-                (1u32, peek[0], chain_hash)
-            };
+        let (protocol_version, contract_flags, chain_hash) = if (1..=10).contains(&possible_pv) {
+            // New format: peek[0..4] = protocol_version, peek[4] = contract_flags
+            let chain_hash: [u8; 32] = Readable::read(r)?;
+            (possible_pv, peek[4], chain_hash)
+        } else {
+            // Old format: peek[0] = contract_flags, peek[1..5] = first 4 chain_hash bytes
+            let mut remaining = [0u8; 28];
+            r.read_exact(&mut remaining)?;
+            let mut chain_hash = [0u8; 32];
+            chain_hash[..4].copy_from_slice(&peek[1..5]);
+            chain_hash[4..].copy_from_slice(&remaining);
+            (1u32, peek[0], chain_hash)
+        };
 
         Ok(Self {
             protocol_version,
