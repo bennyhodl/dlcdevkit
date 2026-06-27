@@ -399,24 +399,81 @@ impl OfferDlc {
     }
 }
 
-impl_dlc_writeable!(OfferDlc, OFFER_TYPE, {
-        (protocol_version, writeable),
-        (contract_flags, writeable),
-        (chain_hash, writeable),
-        (temporary_contract_id, writeable),
-        (contract_info, writeable),
-        (funding_pubkey, writeable),
-        (payout_spk, writeable),
-        (payout_serial_id, writeable),
-        (offer_collateral, writeable),
-        (funding_inputs, vec),
-        (change_spk, writeable),
-        (change_serial_id, writeable),
-        (fund_output_serial_id, writeable),
-        (fee_rate_per_vb, writeable),
-        (cet_locktime, writeable),
-        (refund_locktime, writeable)
-});
+impl Writeable for OfferDlc {
+    fn write<W: Writer>(&self, w: &mut W) -> Result<(), lightning::io::Error> {
+        OFFER_TYPE.write(w)?;
+        self.protocol_version.write(w)?;
+        self.contract_flags.write(w)?;
+        self.chain_hash.write(w)?;
+        self.temporary_contract_id.write(w)?;
+        self.contract_info.write(w)?;
+        self.funding_pubkey.write(w)?;
+        self.payout_spk.write(w)?;
+        self.payout_serial_id.write(w)?;
+        self.offer_collateral.write(w)?;
+        crate::ser_impls::write_vec(&self.funding_inputs, w)?;
+        self.change_spk.write(w)?;
+        self.change_serial_id.write(w)?;
+        self.fund_output_serial_id.write(w)?;
+        self.fee_rate_per_vb.write(w)?;
+        self.cet_locktime.write(w)?;
+        self.refund_locktime.write(w)?;
+        Ok(())
+    }
+}
+
+impl Readable for OfferDlc {
+    fn read<R: lightning::io::Read>(r: &mut R) -> Result<Self, DecodeError> {
+        let type_id: u16 = Readable::read(r)?;
+        if type_id != OFFER_TYPE {
+            return Err(DecodeError::UnknownRequiredFeature);
+        }
+
+        // Backward compatibility: detect old format (no protocol_version) vs new format.
+        // New format: [protocol_version: 4 bytes][contract_flags: 1 byte][chain_hash: 32 bytes]
+        // Old format: [contract_flags: 1 byte][chain_hash: 32 bytes]
+        //
+        // Read 5 bytes. Interpret first 4 as u32. If 1-10, it's protocol_version (new format).
+        // In old format, these 4 bytes are contract_flags (0x00/0x01) + 3 chain_hash bytes,
+        // which produces values far outside 1-10 for any Bitcoin network.
+        let mut peek = [0u8; 5];
+        r.read_exact(&mut peek)?;
+        let possible_pv = u32::from_be_bytes([peek[0], peek[1], peek[2], peek[3]]);
+
+        let (protocol_version, contract_flags, chain_hash) = if (1..=10).contains(&possible_pv) {
+            // New format: peek[0..4] = protocol_version, peek[4] = contract_flags
+            let chain_hash: [u8; 32] = Readable::read(r)?;
+            (possible_pv, peek[4], chain_hash)
+        } else {
+            // Old format: peek[0] = contract_flags, peek[1..5] = first 4 chain_hash bytes
+            let mut remaining = [0u8; 28];
+            r.read_exact(&mut remaining)?;
+            let mut chain_hash = [0u8; 32];
+            chain_hash[..4].copy_from_slice(&peek[1..5]);
+            chain_hash[4..].copy_from_slice(&remaining);
+            (1u32, peek[0], chain_hash)
+        };
+
+        Ok(Self {
+            protocol_version,
+            contract_flags,
+            chain_hash,
+            temporary_contract_id: Readable::read(r)?,
+            contract_info: Readable::read(r)?,
+            funding_pubkey: Readable::read(r)?,
+            payout_spk: Readable::read(r)?,
+            payout_serial_id: Readable::read(r)?,
+            offer_collateral: Readable::read(r)?,
+            funding_inputs: crate::ser_impls::read_vec(r)?,
+            change_spk: Readable::read(r)?,
+            change_serial_id: Readable::read(r)?,
+            fund_output_serial_id: Readable::read(r)?,
+            fee_rate_per_vb: Readable::read(r)?,
+            cet_locktime: Readable::read(r)?,
+            refund_locktime: Readable::read(r)?,
+        })
+    }
+}
 
 /// Contains information about a party wishing to accept a DLC offer. The contained
 /// information is sufficient for the offering party to re-build the set of
