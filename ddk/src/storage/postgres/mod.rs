@@ -36,6 +36,25 @@ use sqlx::{FromRow, Pool, Postgres, Row, Transaction};
 use std::str::FromStr;
 use std::sync::Arc;
 
+/// Default maximum number of connections held in the Postgres pool.
+///
+/// Production deployments under load should raise this (20+) via the
+/// `DATABASE_MAX_CONNECTIONS` environment variable to avoid connection
+/// exhaustion.
+pub const DEFAULT_MAX_CONNECTIONS: u32 = 5;
+
+/// Resolves the maximum size of the Postgres connection pool.
+///
+/// Reads the `DATABASE_MAX_CONNECTIONS` environment variable, falling back to
+/// [`DEFAULT_MAX_CONNECTIONS`] when the variable is unset, unparseable, or zero.
+fn max_connections_from_env() -> u32 {
+    std::env::var("DATABASE_MAX_CONNECTIONS")
+        .ok()
+        .and_then(|val| val.parse::<u32>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(DEFAULT_MAX_CONNECTIONS)
+}
+
 /// Manages a pool of database connections.
 #[derive(Debug)]
 pub struct PostgresStore {
@@ -51,8 +70,14 @@ impl PostgresStore {
         logger: Arc<Logger>,
         wallet_name: String,
     ) -> Result<Self, StorageError> {
+        let max_connections = max_connections_from_env();
+        log_info!(
+            logger,
+            "Creating postgres pool. max_connections={}",
+            max_connections
+        );
         let pool = PoolOptions::<Postgres>::new()
-            .max_connections(5)
+            .max_connections(max_connections)
             .connect(url)
             .await
             .map_err(|e| StorageError::Sqlx(e.into()))?;

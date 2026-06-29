@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::time::Duration;
 
 use crate::error::{esplora_err_to_manager_err, Error};
 use crate::logger::Logger;
@@ -10,6 +9,26 @@ use bitcoin::Network;
 use bitcoin::{consensus::encode, Transaction, Txid};
 use ddk_manager::error::Error as ManagerError;
 use lightning::chain::chaininterface::{ConfirmationTarget, FeeEstimator};
+
+/// Default request timeout (in seconds) for the Esplora client.
+///
+/// Override with the `ESPLORA_TIMEOUT_SECONDS` environment variable for
+/// production deployments where chain queries against a remote or busy
+/// Esplora instance can exceed the default.
+pub const DEFAULT_ESPLORA_TIMEOUT_SECS: u64 = 5;
+
+/// Resolves the Esplora request timeout in seconds.
+///
+/// Reads the `ESPLORA_TIMEOUT_SECONDS` environment variable, falling back to
+/// [`DEFAULT_ESPLORA_TIMEOUT_SECS`] when the variable is unset, unparseable, or
+/// zero.
+fn esplora_timeout_secs() -> u64 {
+    std::env::var("ESPLORA_TIMEOUT_SECONDS")
+        .ok()
+        .and_then(|val| val.parse::<u64>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(DEFAULT_ESPLORA_TIMEOUT_SECS)
+}
 
 /// Esplora client for getting chain information.
 ///
@@ -28,7 +47,7 @@ impl EsploraClient {
         network: Network,
         logger: Arc<Logger>,
     ) -> Result<EsploraClient, Error> {
-        let builder = Builder::new(esplora_host).timeout(Duration::from_secs(5).as_secs());
+        let builder = Builder::new(esplora_host).timeout(esplora_timeout_secs());
         let async_client = builder.build_async()?;
         Ok(EsploraClient {
             async_client,
