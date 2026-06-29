@@ -535,6 +535,7 @@ where
         self.check_signed_contracts(&signed_contracts).await?;
         self.check_confirmed_contracts().await?;
         self.check_preclosed_contracts().await?;
+        self.recover_incorrectly_closed_contracts().await?;
 
         if check_channels {
             self.channel_checks().await?;
@@ -890,6 +891,30 @@ where
 
             let contract_id = funding_input.dlc_input.as_ref().unwrap().contract_id;
 
+            // Skip pre-close if the splice fund tx was dropped from the
+            // mempool (get_transaction_confirmations returns Err for
+            // dropped txs after the esplora fix). Mempool txs (Ok(0))
+            // and confirmed txs (Ok(n)) proceed normally.
+            let splice_fund_txid = contract
+                .accepted_contract
+                .dlc_transactions
+                .fund
+                .compute_txid();
+            if self
+                .blockchain
+                .get_transaction_confirmations(&splice_fund_txid)
+                .await
+                .is_err()
+            {
+                log_debug!(
+                    self.logger,
+                    "Splice fund tx not found, skipping pre-close of previous contract. splice_fund_txid={} contract_id={}",
+                    splice_fund_txid,
+                    contract_id.to_lower_hex_string(),
+                );
+                continue;
+            }
+
             let confirmed_contract_in_splice = match get_contract_in_state!(
                 self,
                 &contract_id,
@@ -899,14 +924,14 @@ where
                 Ok(c) => Ok(c),
                 Err(Error::InvalidState(e)) => {
                     log_trace!(self.logger,
-                        "The previouse contract referenced in a splice transaction is in an unexpected state. contract_id={} error={}", 
+                        "The previouse contract referenced in a splice transaction is in an unexpected state. contract_id={} error={}",
                         contract_id.to_lower_hex_string(), e.to_string(),
                     );
                     continue;
                 }
                 Err(e) => {
                     log_debug!(self.logger,
-                        "The previouse contract referenced in a splice transaction failed to retrieve. contract_id={} error={}", 
+                        "The previouse contract referenced in a splice transaction failed to retrieve. contract_id={} error={}",
                         contract_id.to_lower_hex_string(), e.to_string(),
                     );
                     Err(e)
@@ -920,8 +945,9 @@ where
             };
 
             log_debug!(self.logger,
-                "The previous contract that was spliced is now closed because the splice contract is confirmed. contract_id={}", 
+                "The previous contract that was spliced is now closed because the splice contract is confirmed. contract_id={} splice_fund_txid={}",
                 contract_id.to_lower_hex_string(),
+                splice_fund_txid,
             );
 
             self.store
@@ -1118,10 +1144,14 @@ where
             .dlc_transactions
             .pending_close_txs
         {
-            let confirmations = self
+            let confirmations = match self
                 .blockchain
                 .get_transaction_confirmations(&pending_close_tx.compute_txid())
-                .await?;
+                .await
+            {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
 
             log_debug!(
                 self.logger,
@@ -1300,10 +1330,32 @@ where
     #[tracing::instrument(skip_all, level = "debug")]
     async fn check_preclosed_contract(&self, contract: &PreClosedContract) -> Result<(), Error> {
         let broadcasted_txid = contract.signed_cet.compute_txid();
-        let confirmations = self
+        let confirmations = match self
             .blockchain
             .get_transaction_confirmations(&broadcasted_txid)
-            .await?;
+            .await
+        {
+            Ok(c) => c,
+            Err(e) => {
+                // For splice pre-closes (no attestations), a tx-not-found
+                // error means the splice funding tx was dropped from the
+                // mempool. Revert back to Confirmed.
+                if contract.attestations.is_none() {
+                    log_info!(
+                        self.logger,
+                        "Pre-closed splice contract closing tx not found, reverting to confirmed. broadcasted_txid={} contract_id={} error={}",
+                        broadcasted_txid,
+                        contract.signed_contract.accepted_contract.get_contract_id_string(),
+                        e
+                    );
+                    self.store
+                        .update_contract(&Contract::Confirmed(contract.signed_contract.clone()))
+                        .await?;
+                    return Ok(());
+                }
+                return Err(e);
+            }
+        };
         log_debug!(
             self.logger,
             "Checking pre-closed contract. broadcasted_txid={} contract_id={} confirmations={}",
@@ -1314,9 +1366,10 @@ where
                 .get_contract_id_string(),
             confirmations
         );
+
         if confirmations >= *NB_CONFIRMATIONS {
             log_debug!(self.logger,
-                "Pre-closed contract is fully confirmed. Moving to closed. broadcasted_txid={} contract_id={}", 
+                "Pre-closed contract is fully confirmed. Moving to closed. broadcasted_txid={} contract_id={}",
                 broadcasted_txid.to_string(),
                 contract.signed_contract.accepted_contract.get_contract_id_string()
             );
@@ -1356,6 +1409,39 @@ where
         Ok(())
     }
 
+    /// Recover splice-closed contracts whose closing tx was dropped from
+    /// the mempool. Only reverts contracts closed via splice (attestations
+    /// is None). Uses get_transaction to verify the tx is truly gone — not
+    /// just unconfirmed in the mempool.
+    #[tracing::instrument(skip_all, level = "debug")]
+    async fn recover_incorrectly_closed_contracts(&self) -> Result<(), Error> {
+        let contracts = self.store.get_contracts().await?;
+        for contract in contracts {
+            let Contract::Closed(ref closed) = contract else {
+                continue;
+            };
+            if closed.attestations.is_some() {
+                continue;
+            }
+            let Some(ref cet) = closed.signed_cet else {
+                continue;
+            };
+            let txid = cet.compute_txid();
+            if self.blockchain.get_transaction(&txid).await.is_err() {
+                log_info!(
+                    self.logger,
+                    "Splice-closed contract closing tx not found, reverting to confirmed. closing_txid={} contract_id={}",
+                    txid,
+                    closed.contract_id.to_lower_hex_string(),
+                );
+                self.store
+                    .update_contract(&Contract::Confirmed(closed.signed_contract.clone()))
+                    .await?;
+            }
+        }
+        Ok(())
+    }
+
     #[tracing::instrument(skip_all, level = "debug")]
     async fn close_contract(
         &self,
@@ -1366,7 +1452,8 @@ where
         let confirmations = self
             .blockchain
             .get_transaction_confirmations(&signed_cet.compute_txid())
-            .await?;
+            .await
+            .unwrap_or(0);
 
         if confirmations < 1 {
             log_info!(
@@ -1448,7 +1535,8 @@ where
             let confirmations = self
                 .blockchain
                 .get_transaction_confirmations(&refund.compute_txid())
-                .await?;
+                .await
+                .unwrap_or(0);
             if confirmations == 0 {
                 log_debug!(self.logger,
                     "Refund transaction has not been broadcast yet. Sending transaction txid={} contract_id={}", 
@@ -1494,7 +1582,8 @@ where
             let confirmations = self
                 .blockchain
                 .get_transaction_confirmations(&refund_txid)
-                .await?;
+                .await
+                .unwrap_or(0);
 
             if confirmations > 0 {
                 // Counterparty (or we) already broadcast the refund tx. Update state.
