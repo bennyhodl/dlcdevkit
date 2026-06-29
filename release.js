@@ -474,8 +474,22 @@ async function release() {
   // Step 10: GitHub release.
   await createGitHubRelease(version, releaseNotes);
 
-  // Step 11: back to master.
-  run("git checkout master");
+  // Step 11: back to master. cargo's per-crate publish verification re-resolves
+  // dependencies and can rewrite Cargo.lock with incidental transitive drift
+  // (e.g. a patch bump of a transitive dep) *after* cargo-workspaces made the
+  // release commit. That dirties the working tree and would abort the branch
+  // switch. The drift isn't part of the release — the published crates and the
+  // tag don't include it, and it re-resolves on the next build — so discard it.
+  // Everything important is already published/pushed, so keep this cleanup
+  // best-effort rather than failing the whole run on it.
+  run("git checkout -- Cargo.lock", { allowFailure: true });
+  if (run("git checkout master", { allowFailure: true }) === null) {
+    console.warn(
+      "⚠️  Could not switch back to master — the working tree still has local " +
+        "changes. The release itself is complete; run `git checkout master` " +
+        "manually after handling them."
+    );
+  }
 
   console.log("\n🎉 Release complete!");
   console.log("   - All crates published to crates.io");
