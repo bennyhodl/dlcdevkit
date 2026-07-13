@@ -1,7 +1,7 @@
 //! #Utils
 use std::ops::Deref;
 
-use bitcoin::{consensus::Encodable, Amount, ScriptBuf, Txid};
+use bitcoin::{consensus::Encodable, Address, Amount, ScriptBuf, Txid};
 use ddk_dlc::{dlc_input::DlcInputInfo, util::get_common_fee, PartyParams, TxInputInfo};
 use ddk_messages::{
     oracle_msgs::{OracleAnnouncement, OracleAttestation},
@@ -18,6 +18,11 @@ use crate::{
     error::Error,
     Blockchain, ContractSigner, ContractSignerProvider, Wallet,
 };
+
+pub struct PartyAddressOverride {
+    pub payout_address: Address,
+    pub change_address: Address,
+}
 
 macro_rules! get_object_in_state {
     ($manager: expr, $id: expr, $state: ident, $peer_id: expr, $object_type: ident, $get_call: ident) => {{
@@ -99,6 +104,7 @@ pub(crate) async fn get_party_params<W: Deref, B: Deref, X: ContractSigner, C: S
     wallet: &W,
     signer: &X,
     blockchain: &B,
+    address_override: Option<&PartyAddressOverride>,
 ) -> Result<(PartyParams, Vec<FundingInput>), Error>
 where
     W::Target: Wallet,
@@ -106,10 +112,16 @@ where
 {
     let funding_pubkey = signer.get_public_key(secp)?;
 
-    let payout_addr = wallet.get_new_address().await?;
+    let payout_addr = match address_override {
+        Some(address_override) => address_override.payout_address.clone(),
+        None => wallet.get_new_address().await?,
+    };
     let payout_spk = payout_addr.script_pubkey();
     let payout_serial_id = get_new_serial_id();
-    let change_addr = wallet.get_new_change_address().await?;
+    let change_addr = match address_override {
+        Some(address_override) => address_override.change_address.clone(),
+        None => wallet.get_new_change_address().await?,
+    };
     let change_spk = change_addr.script_pubkey();
     let change_serial_id = get_new_serial_id();
 

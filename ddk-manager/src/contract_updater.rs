@@ -20,6 +20,7 @@ use secp256k1_zkp::{
 };
 
 use crate::dlc_input::{get_dlc_inputs_from_funding_inputs, get_signature_for_dlc_input};
+use crate::utils::PartyAddressOverride;
 use crate::Storage;
 use crate::{
     contract::{
@@ -78,6 +79,7 @@ where
         wallet,
         &signer,
         blockchain,
+        None,
     )
     .await?;
 
@@ -120,6 +122,7 @@ pub async fn accept_contract<W: Deref, X: ContractSigner, SP: Deref, B: Deref, L
     signer_provider: &SP,
     blockchain: &B,
     logger: &L,
+    address_override: Option<&PartyAddressOverride>,
 ) -> Result<(AcceptedContract, AcceptDlc), Error>
 where
     W::Target: Wallet,
@@ -140,6 +143,7 @@ where
         wallet,
         &signer,
         blockchain,
+        address_override,
     )
     .await?;
 

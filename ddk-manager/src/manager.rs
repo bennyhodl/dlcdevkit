@@ -17,7 +17,7 @@ use crate::contract::{
 };
 use crate::contract_updater::{accept_contract, verify_accepted_and_sign_contract};
 use crate::error::Error;
-use crate::utils::get_object_in_state;
+use crate::utils::{get_object_in_state, PartyAddressOverride};
 use crate::{ChannelId, ContractId, ContractSignerProvider};
 use bitcoin::absolute::Height;
 use bitcoin::consensus::encode::serialize_hex;
@@ -461,6 +461,30 @@ where
         &self,
         contract_id: &ContractId,
     ) -> Result<(ContractId, PublicKey, AcceptDlc), Error> {
+        self.accept_contract_offer_with_address_override(contract_id, None)
+            .await
+    }
+
+    /// Accepts a DLC offer using explicit payout and change addresses for the accepting party.
+    pub async fn accept_contract_offer_with_addresses(
+        &self,
+        contract_id: &ContractId,
+        payout_address: Address,
+        change_address: Address,
+    ) -> Result<(ContractId, PublicKey, AcceptDlc), Error> {
+        let address_override = PartyAddressOverride {
+            payout_address,
+            change_address,
+        };
+        self.accept_contract_offer_with_address_override(contract_id, Some(&address_override))
+            .await
+    }
+
+    async fn accept_contract_offer_with_address_override(
+        &self,
+        contract_id: &ContractId,
+        address_override: Option<&PartyAddressOverride>,
+    ) -> Result<(ContractId, PublicKey, AcceptDlc), Error> {
         let offered_contract =
             get_contract_in_state!(self, contract_id, Offered, None as Option<PublicKey>)?;
 
@@ -473,6 +497,7 @@ where
             &self.signer_provider,
             &self.blockchain,
             &self.logger,
+            address_override,
         )
         .await?;
 

@@ -105,6 +105,7 @@ where
         wallet,
         &signer,
         blockchain,
+        None,
     )
     .await?;
     let party_points = crate::utils::get_party_base_points(secp, signer_provider)?;
@@ -176,6 +177,7 @@ where
         wallet,
         &signer,
         blockchain,
+        None,
     )
     .await?;
 
