@@ -122,6 +122,39 @@ pub async fn accept_contract<W: Deref, X: ContractSigner, SP: Deref, B: Deref, L
     signer_provider: &SP,
     blockchain: &B,
     logger: &L,
+) -> Result<(AcceptedContract, AcceptDlc), Error>
+where
+    W::Target: Wallet,
+    B::Target: Blockchain,
+    SP::Target: ContractSignerProvider<Signer = X>,
+    L::Target: Logger,
+{
+    accept_contract_with_address_override(
+        secp,
+        offered_contract,
+        wallet,
+        signer_provider,
+        blockchain,
+        logger,
+        None,
+    )
+    .await
+}
+
+/// Creates an [`AcceptedContract`] using explicit accepting-party payout and change addresses.
+pub async fn accept_contract_with_address_override<
+    W: Deref,
+    X: ContractSigner,
+    SP: Deref,
+    B: Deref,
+    L: Deref,
+>(
+    secp: &Secp256k1<All>,
+    offered_contract: &OfferedContract,
+    wallet: &W,
+    signer_provider: &SP,
+    blockchain: &B,
+    logger: &L,
     address_override: Option<&PartyAddressOverride>,
 ) -> Result<(AcceptedContract, AcceptDlc), Error>
 where

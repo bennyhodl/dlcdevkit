@@ -15,7 +15,9 @@ use crate::contract::{
     signed_contract::SignedContract, AdaptorInfo, ClosedContract, Contract, FailedAcceptContract,
     FailedSignContract, PreClosedContract,
 };
-use crate::contract_updater::{accept_contract, verify_accepted_and_sign_contract};
+use crate::contract_updater::{
+    accept_contract_with_address_override, verify_accepted_and_sign_contract,
+};
 use crate::error::Error;
 use crate::utils::{get_object_in_state, PartyAddressOverride};
 use crate::{ChannelId, ContractId, ContractSignerProvider};
@@ -490,7 +492,7 @@ where
 
         let counter_party = offered_contract.counter_party;
 
-        let (accepted_contract, accept_msg) = accept_contract(
+        let (accepted_contract, accept_msg) = accept_contract_with_address_override(
             &self.secp,
             &offered_contract,
             &self.wallet,
