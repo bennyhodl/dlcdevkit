@@ -47,6 +47,10 @@ pub enum ContractError {
     /// A DLC transaction or signature operation failed.
     #[error("DLC error: {0}")]
     Dlc(String),
+    /// Contract funding-key derivation failed (bad mnemonic, missing private
+    /// key, or an invalid derived key).
+    #[error("contract key error: {0}")]
+    Key(String),
 }
 
 impl From<bitcoin::bip32::Error> for ContractError {

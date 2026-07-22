@@ -9,7 +9,8 @@ use bitcoin::{
     Amount, Network, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Witness,
 };
 use ddk::contract::{
-    chain_hash_from_network, funding_input, CreateOfferParams, InputDerivation, PartyParams,
+    chain_hash_from_network, funding_input, ContractKeyProvider, CreateOfferParams,
+    InputDerivation, PartyParams,
 };
 use ddk_dlc::secp256k1_zkp::{All, Keypair, PublicKey, Secp256k1, SecretKey, XOnlyPublicKey};
 use ddk_messages::contract_msgs::{
@@ -25,9 +26,16 @@ use std::str::FromStr;
 
 pub const TOTAL_COLLATERAL: Amount = Amount::from_sat(100_000);
 
-/// One side of a contract: a DLC funding key plus a BIP84 wallet key
-/// controlling a single funding UTXO.
+/// The contract's temporary id. Each party's DLC funding key is derived
+/// deterministically from this via its [`ContractKeyProvider`], so the key can
+/// be recomputed later (for example to splice) without being stored.
+pub const CONTRACT_TEMP_ID: [u8; 32] = [0x5c; 32];
+
+/// One side of a contract: a deterministic contract-key provider (which yields
+/// the DLC funding key) plus a BIP84 wallet key controlling a single funding
+/// UTXO.
 pub struct PartySetup {
+    pub contract_keys: ContractKeyProvider,
     pub funding_secret_key: SecretKey,
     pub xpriv: Xpriv,
     pub derivation_path: DerivationPath,
@@ -36,8 +44,11 @@ pub struct PartySetup {
 
 impl PartySetup {
     pub fn new(secp: &Secp256k1<All>, seed_byte: u8, network: Network, utxo_value: Amount) -> Self {
-        let funding_secret_key = SecretKey::from_slice(&[seed_byte; 32]).unwrap();
         let xpriv = Xpriv::new_master(network, &[seed_byte.wrapping_add(100); 64]).unwrap();
+        // The DLC funding key is derived from the contract's temporary id, so it
+        // is recomputable on demand rather than stored.
+        let contract_keys = ContractKeyProvider::from_xprv(xpriv);
+        let funding_secret_key = contract_keys.funding_secret_key(CONTRACT_TEMP_ID).unwrap();
         let coin_type = if network == Network::Bitcoin { 0 } else { 1 };
         let derivation_path =
             DerivationPath::from_str(&format!("84h/{coin_type}h/0h/0/0")).unwrap();
@@ -52,6 +63,7 @@ impl PartySetup {
         )
         .unwrap();
         Self {
+            contract_keys,
             funding_secret_key,
             xpriv,
             derivation_path,
@@ -184,7 +196,7 @@ pub fn offer_params_with_party(
 ) -> CreateOfferParams {
     CreateOfferParams {
         chain_hash: chain_hash_from_network(network),
-        temporary_contract_id: None,
+        temporary_contract_id: Some(CONTRACT_TEMP_ID),
         contract_info: enum_contract_info(TOTAL_COLLATERAL),
         offer_collateral,
         party,
