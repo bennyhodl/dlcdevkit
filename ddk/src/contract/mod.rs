@@ -72,6 +72,20 @@
 //! signatures. External signers can fund with any script type they can
 //! finalize themselves.
 //!
+//! # Splicing
+//!
+//! A new contract can spend a previous contract's 2-of-2 funding output as an
+//! input (a *splice*), which is how rollovers and collateral changes are
+//! expressed. Only the offering party may contribute a splice input. Build it
+//! from the previous contract's messages with
+//! [`create_dlc_splice_input`](crate::contract::create_dlc_splice_input) and
+//! place it in the offering party's funding inputs. Signing the prior 2-of-2
+//! additionally requires each party's *previous-contract* funding secret key,
+//! supplied to [`sign_accept_spliced`](crate::contract::sign_accept_spliced)
+//! (offering party) and
+//! [`finalize_sign_spliced`](crate::contract::finalize_sign_spliced) (accepting
+//! party) as [`DlcInputSigningKey`](crate::contract::DlcInputSigningKey) values.
+//!
 //! # Broadcasting and storage stay with the caller
 //!
 //! [`finalize_sign`](crate::contract::finalize_sign) returns a fully signed [`bitcoin::Transaction`];
@@ -93,6 +107,7 @@ mod error;
 mod finalize;
 mod psbt;
 mod sign;
+mod splice;
 mod types;
 
 #[cfg(test)]
@@ -101,12 +116,13 @@ mod tests;
 pub use accept::{accept_offer, create_dlc_transactions};
 pub use create::{create_offer, validate_offer};
 pub use error::ContractError;
-pub use finalize::finalize_sign;
+pub use finalize::{finalize_sign, finalize_sign_spliced};
 pub use psbt::create_funding_psbt;
-pub use sign::sign_accept;
+pub use sign::{sign_accept, sign_accept_spliced};
+pub use splice::{create_dlc_splice_input, DLC_INPUT_MAX_WITNESS_LEN};
 pub use types::{
     chain_hash_from_network, funding_input, AcceptOfferParams, AcceptResult, CreateOfferParams,
-    DescriptorInput, InputDerivation, Party, PartyParams, SignResult,
+    DescriptorInput, DlcInputSigningKey, InputDerivation, Party, PartyParams, SignResult,
 };
 
 /// The current DLC protocol version used by DDK.

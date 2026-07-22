@@ -4,7 +4,7 @@ use bitcoin::blockdata::constants::ChainHash;
 use bitcoin::key::rand::{thread_rng, Rng};
 use bitcoin::psbt::Psbt;
 use bitcoin::{Amount, Network, ScriptBuf, Transaction};
-use ddk_dlc::secp256k1_zkp::PublicKey;
+use ddk_dlc::secp256k1_zkp::{PublicKey, SecretKey};
 use ddk_dlc::DlcTransactions;
 use ddk_messages::contract_msgs::ContractInfo;
 use ddk_messages::{AcceptDlc, FundingInput, SignDlc};
@@ -127,6 +127,21 @@ pub struct DescriptorInput {
     /// The wildcard derivation index of the input's script. Ignored for
     /// descriptors without a wildcard.
     pub derivation_index: u32,
+}
+
+/// A previous-contract DLC funding secret key used to sign a splice input.
+///
+/// Splicing spends the 2-of-2 funding output of a previous contract, which
+/// requires that contract's DLC funding secret key — distinct from the new
+/// contract's funding key. Each key is matched to its DLC funding input by
+/// serial id.
+#[derive(Clone, Debug)]
+pub struct DlcInputSigningKey {
+    /// The serial id of the DLC (splice) funding input this key signs.
+    pub input_serial_id: u64,
+    /// The funding secret key of the previous contract whose 2-of-2 funding
+    /// output is being spliced into the new contract.
+    pub prior_funding_secret_key: SecretKey,
 }
 
 /// Creates a funding input from a previous transaction and output index.

@@ -58,6 +58,11 @@ where
         Party::Accept => &accept.funding_inputs,
     };
     for input in inputs {
+        // DLC (splice) inputs are 2-of-2 multisig and are signed through the
+        // splice path, not the wallet; skip them here.
+        if input.dlc_input.is_some() {
+            continue;
+        }
         let input_index = funding_input_index(offer, accept, input.input_serial_id)?;
         wallet
             .sign_psbt_input(psbt, input_index)

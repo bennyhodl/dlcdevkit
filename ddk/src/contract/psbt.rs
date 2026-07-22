@@ -44,6 +44,12 @@ pub(crate) fn build_funding_psbt(
         .map_err(|e| ContractError::PsbtMismatch(format!("could not create PSBT: {e}")))?;
 
     for input in offer.funding_inputs.iter().chain(&accept.funding_inputs) {
+        // DLC (splice) inputs are 2-of-2 multisig, not wallet-signable. Leave
+        // them as bare PSBT inputs (no witness UTXO / sighash) so wallet signers
+        // cannot match them; their witness is completed by the combine step.
+        if input.dlc_input.is_some() {
+            continue;
+        }
         let input_index = funding_input_index(offer, accept, input.input_serial_id)?;
         let previous_transaction = decode_previous_transaction(input)?;
         let outpoint = psbt.unsigned_tx.input[input_index].previous_output;

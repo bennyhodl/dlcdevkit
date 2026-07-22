@@ -10,9 +10,11 @@ use bitcoin::psbt::Psbt;
 use bitcoin::transaction::Version;
 use bitcoin::{Amount, Network, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Witness};
 use ddk::contract::{
-    accept_offer, chain_hash_from_network, create_dlc_transactions, create_funding_psbt,
-    create_offer, finalize_sign, funding_input, sign_accept, signing, AcceptOfferParams,
-    ContractError, CreateOfferParams, DescriptorInput, InputDerivation, Party, PartyParams,
+    accept_offer, chain_hash_from_network, create_dlc_splice_input, create_dlc_transactions,
+    create_funding_psbt, create_offer, finalize_sign, finalize_sign_spliced, funding_input,
+    sign_accept, sign_accept_spliced, signing, AcceptOfferParams, ContractError, CreateOfferParams,
+    DescriptorInput, DlcInputSigningKey, InputDerivation, Party, PartyParams,
+    DLC_INPUT_MAX_WITNESS_LEN,
 };
 use ddk_dlc::secp256k1_zkp::{All, Keypair, PublicKey, Secp256k1, SecretKey, XOnlyPublicKey};
 use ddk_messages::contract_msgs::{
@@ -23,7 +25,7 @@ use ddk_messages::oracle_msgs::{
     tagged_announcement_msg, DigitDecompositionEventDescriptor, EnumEventDescriptor,
     EventDescriptor, OracleAnnouncement, OracleEvent, OracleInfo, SingleOracleInfo,
 };
-use ddk_messages::{AcceptDlc, FundingInput, OfferDlc};
+use ddk_messages::{AcceptDlc, FundingInput, OfferDlc, SignDlc, WitnessElement};
 use std::str::FromStr;
 
 const NETWORK: Network = Network::Regtest;
@@ -1041,4 +1043,290 @@ impl ddk_manager::Wallet for TestWallet {
     fn unreserve_utxos(&self, _outpoints: &[OutPoint]) -> Result<(), ddk_manager::error::Error> {
         Ok(())
     }
+}
+
+/// The offer-side signing state for a splice, produced by [`prepare_splice`]
+/// and finalized either by [`complete_splice`] or directly in a negative test.
+struct PreparedSplice {
+    offer_b: OfferDlc,
+    accept_b: AcceptDlc,
+    sign: SignDlc,
+    accept_psbt: Psbt,
+    unsigned_fund_b: Transaction,
+    splice_serial: u64,
+    splice_input: FundingInput,
+    prior_accept_key: SecretKey,
+    fund_outpoint_a: OutPoint,
+    fund_value_a: Amount,
+}
+
+/// Builds and fully signs contract A, then builds a single-funded contract B
+/// whose offer spends A's funding output as a splice input, and produces the
+/// offering party's sign message (with its half of the splice signature).
+fn prepare_splice(splice_in: bool) -> PreparedSplice {
+    let secp = Secp256k1::new();
+
+    // Contract A: an ordinary dual-funded enum contract, fully signed.
+    let (offerer_a, accepter_a, offer_a, accept_a) = enum_contract(&secp, NETWORK);
+    let funding_tx_a = complete_with_xpriv(&secp, &offerer_a, &accepter_a, &offer_a, &accept_a);
+    let transactions_a = create_dlc_transactions(&offer_a, &accept_a).unwrap();
+    let fund_value_a = transactions_a.get_fund_output().value;
+    let fund_outpoint_a = OutPoint {
+        txid: funding_tx_a.compute_txid(),
+        vout: transactions_a.get_fund_output_index() as u32,
+    };
+
+    // The splice input spends A's 2-of-2 funding output.
+    let splice_serial = 900;
+    let splice_input = create_dlc_splice_input(
+        &offer_a,
+        &accept_a,
+        Party::Offer,
+        Some(splice_serial),
+        DLC_INPUT_MAX_WITNESS_LEN,
+    )
+    .unwrap();
+
+    // Contract B is single-funded by the offering party with fresh funding keys.
+    let offerer_b = PartySetup::new(&secp, 5, NETWORK, Amount::from_sat(200_000), 10);
+    let accepter_b = PartySetup::new(&secp, 6, NETWORK, Amount::from_sat(200_000), 11);
+    let splice_amount = Amount::from_sat(40_000);
+    let (offer_collateral_b, offer_funding_inputs) = if splice_in {
+        (
+            fund_value_a + splice_amount,
+            vec![splice_input.clone(), offerer_b.funding_input.clone()],
+        )
+    } else {
+        (fund_value_a - splice_amount, vec![splice_input.clone()])
+    };
+
+    let offer_b = create_offer(offer_params(
+        &secp,
+        &offerer_b,
+        enum_contract_info(offer_collateral_b),
+        offer_collateral_b,
+        NETWORK,
+        offer_funding_inputs,
+    ))
+    .unwrap();
+    let accept_b = accept_offer(
+        &offer_b,
+        AcceptOfferParams {
+            party: accepter_b.party_params(&secp, vec![]),
+            min_timeout_interval: MIN_TIMEOUT,
+            max_timeout_interval: MAX_TIMEOUT,
+        },
+        &accepter_b.funding_secret_key,
+    )
+    .unwrap()
+    .accept;
+
+    // The offering party signs its wallet input (splice-in only) and its half of
+    // the prior 2-of-2 with the previous contract's funding key.
+    let mut offer_psbt = create_funding_psbt(&offer_b, &accept_b).unwrap();
+    if splice_in {
+        signing::sign_funding_psbt_with_xpriv(
+            &offer_b,
+            &accept_b,
+            &mut offer_psbt,
+            &offerer_b.xpriv,
+            &offerer_b.derivations(),
+        )
+        .unwrap();
+    }
+    let offer_splice_key = DlcInputSigningKey {
+        input_serial_id: splice_serial,
+        prior_funding_secret_key: offerer_a.funding_secret_key,
+    };
+    let sign = sign_accept_spliced(
+        &offer_b,
+        &accept_b,
+        &offerer_b.funding_secret_key,
+        &offer_psbt,
+        std::slice::from_ref(&offer_splice_key),
+    )
+    .unwrap()
+    .sign;
+
+    let accept_psbt = create_funding_psbt(&offer_b, &accept_b).unwrap();
+    let unsigned_fund_b = create_dlc_transactions(&offer_b, &accept_b).unwrap().fund;
+
+    PreparedSplice {
+        offer_b,
+        accept_b,
+        sign,
+        accept_psbt,
+        unsigned_fund_b,
+        splice_serial,
+        splice_input,
+        prior_accept_key: accepter_a.funding_secret_key,
+        fund_outpoint_a,
+        fund_value_a,
+    }
+}
+
+/// Runs [`prepare_splice`] and completes the funding transaction on the
+/// accepting side, contributing its half of the splice signature.
+fn complete_splice(splice_in: bool) -> (Transaction, PreparedSplice) {
+    let prepared = prepare_splice(splice_in);
+    let accept_splice_key = DlcInputSigningKey {
+        input_serial_id: prepared.splice_serial,
+        prior_funding_secret_key: prepared.prior_accept_key,
+    };
+    let funding_tx_b = finalize_sign_spliced(
+        &prepared.offer_b,
+        &prepared.accept_b,
+        &prepared.sign,
+        &prepared.accept_psbt,
+        std::slice::from_ref(&accept_splice_key),
+    )
+    .unwrap();
+    (funding_tx_b, prepared)
+}
+
+/// Asserts the completed funding transaction spends contract A's funding output
+/// with a valid, combined 2-of-2 witness.
+fn assert_splice_input_signed(funding_tx_b: &Transaction, prepared: &PreparedSplice) {
+    let input_index = funding_tx_b
+        .input
+        .iter()
+        .position(|tx_in| tx_in.previous_output == prepared.fund_outpoint_a)
+        .expect("splice funding transaction must spend contract A's funding output");
+    assert_eq!(
+        funding_tx_b.compute_txid(),
+        prepared.unsigned_fund_b.compute_txid()
+    );
+
+    let witness: Vec<Vec<u8>> = funding_tx_b.input[input_index]
+        .witness
+        .iter()
+        .map(|element| element.to_vec())
+        .collect();
+    assert_eq!(witness.len(), 4, "expected a 2-of-2 witness");
+    assert!(witness[0].is_empty(), "multisig witness must start empty");
+
+    let dlc_input_info: ddk_dlc::dlc_input::DlcInputInfo = (&prepared.splice_input).into();
+    let expected_script = ddk_dlc::make_funding_redeemscript(
+        &dlc_input_info.local_fund_pubkey,
+        &dlc_input_info.remote_fund_pubkey,
+    );
+    assert_eq!(witness[3], expected_script.to_bytes());
+
+    // Each half signature must verify against one of the prior 2-of-2 keys.
+    let secp = Secp256k1::new();
+    for pubkey in [
+        dlc_input_info.local_fund_pubkey,
+        dlc_input_info.remote_fund_pubkey,
+    ] {
+        assert!(
+            [&witness[1], &witness[2]].into_iter().any(|signature| {
+                ddk_dlc::dlc_input::verify_dlc_funding_input_signature(
+                    &secp,
+                    &prepared.unsigned_fund_b,
+                    input_index,
+                    &dlc_input_info,
+                    signature.clone(),
+                    &pubkey,
+                )
+                .is_ok()
+            }),
+            "no signature verifies against a prior funding key"
+        );
+    }
+}
+
+#[test]
+fn splice_in_completes_the_lifecycle() {
+    let (funding_tx_b, prepared) = complete_splice(true);
+    assert_splice_input_signed(&funding_tx_b, &prepared);
+    let fund_value_b = create_dlc_transactions(&prepared.offer_b, &prepared.accept_b)
+        .unwrap()
+        .get_fund_output()
+        .value;
+    assert!(
+        fund_value_b > prepared.fund_value_a,
+        "splice-in must increase the funded amount"
+    );
+}
+
+#[test]
+fn splice_out_completes_the_lifecycle() {
+    let (funding_tx_b, prepared) = complete_splice(false);
+    assert_splice_input_signed(&funding_tx_b, &prepared);
+    let fund_value_b = create_dlc_transactions(&prepared.offer_b, &prepared.accept_b)
+        .unwrap()
+        .get_fund_output()
+        .value;
+    assert!(
+        fund_value_b < prepared.fund_value_a,
+        "splice-out must decrease the funded amount"
+    );
+}
+
+#[test]
+fn finalize_sign_spliced_rejects_a_wrong_prior_key() {
+    let prepared = prepare_splice(true);
+    // A key that does not control the prior 2-of-2 output.
+    let wrong_key = DlcInputSigningKey {
+        input_serial_id: prepared.splice_serial,
+        prior_funding_secret_key: SecretKey::from_slice(&[9; 32]).unwrap(),
+    };
+    assert!(matches!(
+        finalize_sign_spliced(
+            &prepared.offer_b,
+            &prepared.accept_b,
+            &prepared.sign,
+            &prepared.accept_psbt,
+            std::slice::from_ref(&wrong_key),
+        ),
+        Err(ContractError::InvalidFundingInput(_))
+    ));
+}
+
+#[test]
+fn finalize_sign_spliced_rejects_a_tampered_offer_half() {
+    let prepared = prepare_splice(true);
+    let secp = Secp256k1::new();
+    let dlc_input_info: ddk_dlc::dlc_input::DlcInputInfo = (&prepared.splice_input).into();
+    let input_index = prepared
+        .unsigned_fund_b
+        .input
+        .iter()
+        .position(|tx_in| tx_in.previous_output == prepared.fund_outpoint_a)
+        .unwrap();
+    // A signature by the remote (accept) key verifies against remote_fund_pubkey,
+    // not local_fund_pubkey, so the offer-half verification must reject it.
+    let wrong_half = ddk_dlc::dlc_input::create_dlc_funding_input_signature(
+        &secp,
+        &prepared.unsigned_fund_b,
+        input_index,
+        &dlc_input_info,
+        &prepared.prior_accept_key,
+    )
+    .unwrap();
+    let mut tampered = prepared.sign.clone();
+    let position = prepared
+        .offer_b
+        .funding_inputs
+        .iter()
+        .position(|input| input.dlc_input.is_some())
+        .unwrap();
+    tampered.funding_signatures.funding_signatures[position].witness_elements =
+        vec![WitnessElement {
+            witness: wrong_half,
+        }];
+    let accept_splice_key = DlcInputSigningKey {
+        input_serial_id: prepared.splice_serial,
+        prior_funding_secret_key: prepared.prior_accept_key,
+    };
+    assert!(matches!(
+        finalize_sign_spliced(
+            &prepared.offer_b,
+            &prepared.accept_b,
+            &tampered,
+            &prepared.accept_psbt,
+            std::slice::from_ref(&accept_splice_key),
+        ),
+        Err(ContractError::InvalidSign(_))
+    ));
 }

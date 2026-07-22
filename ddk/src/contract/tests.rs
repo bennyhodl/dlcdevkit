@@ -15,9 +15,9 @@ use ddk_messages::oracle_msgs::{
     tagged_announcement_msg, EnumEventDescriptor, EventDescriptor, OracleAnnouncement, OracleEvent,
     OracleInfo, SingleOracleInfo,
 };
-use ddk_messages::{AcceptDlc, CetAdaptorSignatures, FundingInput, OfferDlc};
+use ddk_messages::{AcceptDlc, CetAdaptorSignatures, DlcInput, FundingInput, OfferDlc};
 
-use super::context::funding_input_index;
+use super::context::{ensure_no_dlc_inputs, funding_input_index, validate_offer_funding_inputs};
 use super::psbt::finalize_segwit_input;
 use super::types::{funding_input, network_from_chain_hash, random_serial_id};
 use super::*;
@@ -139,6 +139,73 @@ fn messages_with_serial_ids(offer_ids: &[u64], accept_ids: &[u64]) -> (OfferDlc,
         negotiation_fields: None,
     };
     (offer, accept)
+}
+
+/// Builds a DLC (splice) funding input whose previous output is the 2-of-2 of
+/// two fixed funding keys, unless `correct_script` is false.
+fn dlc_funding_input(
+    max_witness_len: u16,
+    redeem_script: ScriptBuf,
+    correct_script: bool,
+) -> FundingInput {
+    let secp = Secp256k1::new();
+    let local_fund_pubkey = SecretKey::from_slice(&[3; 32]).unwrap().public_key(&secp);
+    let remote_fund_pubkey = SecretKey::from_slice(&[4; 32]).unwrap().public_key(&secp);
+    let script_pubkey = if correct_script {
+        ddk_dlc::make_funding_redeemscript(&local_fund_pubkey, &remote_fund_pubkey).to_p2wsh()
+    } else {
+        ScriptBuf::new_p2wpkh(&bitcoin::WPubkeyHash::from_byte_array([7; 20]))
+    };
+    let previous_transaction = dummy_transaction(Amount::from_sat(100_000), script_pubkey);
+    FundingInput {
+        input_serial_id: 9,
+        prev_tx: bitcoin::consensus::serialize(&previous_transaction),
+        prev_tx_vout: 0,
+        sequence: u32::MAX,
+        max_witness_len,
+        redeem_script,
+        dlc_input: Some(DlcInput {
+            local_fund_pubkey,
+            remote_fund_pubkey,
+            contract_id: [5; 32],
+        }),
+    }
+}
+
+#[test]
+fn validate_offer_funding_inputs_accepts_a_valid_dlc_input() {
+    let input = dlc_funding_input(220, ScriptBuf::new(), true);
+    assert!(validate_offer_funding_inputs(&[input]).is_ok());
+}
+
+#[test]
+fn validate_offer_funding_inputs_rejects_malformed_dlc_inputs() {
+    // Witness length too small to be a 2-of-2.
+    assert!(matches!(
+        validate_offer_funding_inputs(&[dlc_funding_input(108, ScriptBuf::new(), true)]),
+        Err(ContractError::InvalidFundingInput(_))
+    ));
+    // A DLC input must not carry a redeem script.
+    let redeem = ScriptBuf::new_p2wpkh(&bitcoin::WPubkeyHash::from_byte_array([1; 20]));
+    assert!(matches!(
+        validate_offer_funding_inputs(&[dlc_funding_input(220, redeem, true)]),
+        Err(ContractError::InvalidFundingInput(_))
+    ));
+    // Previous output is not the 2-of-2 of the named funding keys.
+    assert!(matches!(
+        validate_offer_funding_inputs(&[dlc_funding_input(220, ScriptBuf::new(), false)]),
+        Err(ContractError::InvalidFundingInput(_))
+    ));
+}
+
+#[test]
+fn ensure_no_dlc_inputs_rejects_a_dlc_input() {
+    assert!(matches!(
+        ensure_no_dlc_inputs(&[dlc_funding_input(220, ScriptBuf::new(), true)]),
+        Err(ContractError::InvalidFundingInput(_))
+    ));
+    // Ordinary inputs are permitted.
+    assert!(ensure_no_dlc_inputs(&[dummy_funding_input(1)]).is_ok());
 }
 
 #[test]

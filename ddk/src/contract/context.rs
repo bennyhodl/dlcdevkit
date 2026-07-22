@@ -44,7 +44,7 @@ pub(crate) fn context_from_messages(
             "negotiation fields are not supported by the stateless API".to_string(),
         ));
     }
-    ensure_no_dlc_inputs(&offer.funding_inputs)?;
+    validate_offer_funding_inputs(&offer.funding_inputs)?;
     ensure_no_dlc_inputs(&accept.funding_inputs)?;
     ensure_unique_input_serial_ids(offer, accept)?;
 
@@ -92,17 +92,37 @@ pub(crate) fn build_context(
         info.validate()?;
     }
 
-    let mut transactions = ddk_dlc::create_dlc_transactions(
-        &offer_params,
-        accept_params,
-        &execution_infos[0].get_payouts(total_collateral)?,
-        offer.refund_locktime,
-        offer.fee_rate_per_vb,
-        0,
-        offer.cet_locktime,
-        offer.fund_output_serial_id,
-        offer.contract_flags,
-    )?;
+    let payouts = execution_infos[0].get_payouts(total_collateral)?;
+    // A splice input carries a `dlc_input`; when present the funding transaction
+    // spends the previous contract's 2-of-2 output and must be built through the
+    // spliced constructor. Only the offer side may contribute DLC inputs.
+    let has_dlc_inputs =
+        !offer_params.dlc_inputs.is_empty() || !accept_params.dlc_inputs.is_empty();
+    let mut transactions = if has_dlc_inputs {
+        ddk_dlc::create_spliced_dlc_transactions(
+            &offer_params,
+            accept_params,
+            &payouts,
+            offer.refund_locktime,
+            offer.fee_rate_per_vb,
+            0,
+            offer.cet_locktime,
+            offer.fund_output_serial_id,
+            offer.contract_flags,
+        )?
+    } else {
+        ddk_dlc::create_dlc_transactions(
+            &offer_params,
+            accept_params,
+            &payouts,
+            offer.refund_locktime,
+            offer.fee_rate_per_vb,
+            0,
+            offer.cet_locktime,
+            offer.fund_output_serial_id,
+            offer.contract_flags,
+        )?
+    };
     let mut cet_ranges = Vec::with_capacity(execution_infos.len());
     cet_ranges.push(0..transactions.cets.len());
     let cet_input = transactions
@@ -150,7 +170,11 @@ pub(crate) fn dlc_party_params(
         payout_script_pubkey,
         payout_serial_id,
         inputs,
-        dlc_inputs: vec![],
+        dlc_inputs: funding_inputs
+            .iter()
+            .filter(|input| input.dlc_input.is_some())
+            .map(|input| input.into())
+            .collect(),
         input_amount,
         collateral,
     })
@@ -294,6 +318,11 @@ pub(crate) fn apply_funding_signatures(
         )));
     }
     for (input, signature) in inputs.iter().zip(&signatures.funding_signatures) {
+        // DLC (splice) inputs are 2-of-2 and completed by the combine step in
+        // `finalize`; their positional signature slot is consumed but skipped here.
+        if input.dlc_input.is_some() {
+            continue;
+        }
         if signature.witness_elements.is_empty() {
             return Err(ContractError::InvalidFundingInput(format!(
                 "funding signature for input serial id {} has no witness elements",
@@ -382,11 +411,62 @@ pub(crate) fn ensure_funding_key(
     Ok(())
 }
 
+/// Rejects DLC (splice) inputs. Used for accept-side funding inputs, which must
+/// always be ordinary wallet UTXOs.
 pub(crate) fn ensure_no_dlc_inputs(funding_inputs: &[FundingInput]) -> Result<(), ContractError> {
     if funding_inputs.iter().any(|input| input.dlc_input.is_some()) {
         return Err(ContractError::InvalidFundingInput(
-            "DLC inputs and splicing require persisted previous-contract state".to_string(),
+            "DLC inputs (splicing) are only supported on the offer side".to_string(),
         ));
+    }
+    Ok(())
+}
+
+/// Validates the offering party's funding inputs, permitting DLC (splice) inputs.
+///
+/// Ordinary wallet inputs pass through untouched. Each DLC input is checked for
+/// consistency: a large-enough witness length, no redeem script, an in-range
+/// previous output, and a previous output that is the 2-of-2 funding output of
+/// the two funding public keys the input names.
+pub(crate) fn validate_offer_funding_inputs(
+    funding_inputs: &[FundingInput],
+) -> Result<(), ContractError> {
+    for input in funding_inputs {
+        let Some(dlc_input) = &input.dlc_input else {
+            continue;
+        };
+        if input.max_witness_len as usize <= 108 {
+            return Err(ContractError::InvalidFundingInput(
+                "DLC input max witness length must be greater than 108".to_string(),
+            ));
+        }
+        if !input.redeem_script.is_empty() {
+            return Err(ContractError::InvalidFundingInput(
+                "DLC input must not carry a redeem script".to_string(),
+            ));
+        }
+        let previous_transaction = decode_previous_transaction(input)?;
+        let prevout = previous_transaction
+            .output
+            .get(input.prev_tx_vout as usize)
+            .ok_or_else(|| {
+                ContractError::InvalidFundingInput(format!(
+                    "DLC input previous output {} does not exist",
+                    input.prev_tx_vout
+                ))
+            })?;
+        let expected_script_pubkey = ddk_dlc::make_funding_redeemscript(
+            &dlc_input.local_fund_pubkey,
+            &dlc_input.remote_fund_pubkey,
+        )
+        .to_p2wsh();
+        if prevout.script_pubkey != expected_script_pubkey {
+            return Err(ContractError::InvalidFundingInput(
+                "DLC input previous output is not the 2-of-2 funding output of its funding public \
+                 keys"
+                    .to_string(),
+            ));
+        }
     }
     Ok(())
 }

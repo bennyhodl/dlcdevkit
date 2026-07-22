@@ -3,7 +3,7 @@
 use ddk_dlc::secp256k1_zkp::Secp256k1;
 use ddk_messages::OfferDlc;
 
-use super::context::{ensure_no_dlc_inputs, ensure_protocol_version};
+use super::context::{ensure_protocol_version, validate_offer_funding_inputs};
 use super::error::ContractError;
 use super::types::{random_serial_id, random_temporary_contract_id, CreateOfferParams};
 use super::PROTOCOL_VERSION;
@@ -28,7 +28,7 @@ pub fn create_offer(params: CreateOfferParams) -> Result<OfferDlc, ContractError
         contract_flags,
     } = params;
 
-    ensure_no_dlc_inputs(&party.funding_inputs)?;
+    validate_offer_funding_inputs(&party.funding_inputs)?;
     ddk_dlc::util::validate_fee_rate(fee_rate_per_vb)
         .map_err(|e| ContractError::InvalidOffer(format!("invalid fee rate: {e}")))?;
     if cet_locktime >= refund_locktime {
@@ -97,7 +97,7 @@ pub fn validate_offer(
     max_timeout_interval: u32,
 ) -> Result<(), ContractError> {
     ensure_protocol_version(offer.protocol_version, ContractError::InvalidOffer)?;
-    ensure_no_dlc_inputs(&offer.funding_inputs)?;
+    validate_offer_funding_inputs(&offer.funding_inputs)?;
     ddk_dlc::util::validate_fee_rate(offer.fee_rate_per_vb)
         .map_err(|e| ContractError::InvalidOffer(format!("invalid fee rate: {e}")))?;
     if offer.offer_collateral > offer.get_total_collateral() {

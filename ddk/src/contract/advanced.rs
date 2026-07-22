@@ -17,7 +17,7 @@ use ddk_messages::{
 use super::context::{self, context_from_messages};
 use super::error::ContractError;
 use super::psbt;
-use super::types::{Party, SignResult};
+use super::types::{DlcInputSigningKey, Party, SignResult};
 
 /// Converts a Bitcoin witness into a wire funding signature.
 pub fn funding_signature_from_witness(witness: Witness) -> FundingSignature {
@@ -151,5 +151,21 @@ pub fn finalize_sign_with_funding_signatures(
     sign: &SignDlc,
     funding_signatures: FundingSignatures,
 ) -> Result<Transaction, ContractError> {
-    super::finalize::finalize_sign_internal(offer, accept, sign, funding_signatures)
+    super::finalize::finalize_sign_internal(offer, accept, sign, funding_signatures, &[])
+}
+
+/// Splice-aware variant of [`finalize_sign_with_funding_signatures`].
+///
+/// `dlc_input_keys` supplies this (accepting) party's previous contract funding
+/// secret key for each DLC (splice) funding input in the offer, matched by
+/// serial id. The offering party's DLC-input half signatures must already be
+/// present in `sign.funding_signatures`.
+pub fn finalize_sign_spliced_with_funding_signatures(
+    offer: &OfferDlc,
+    accept: &AcceptDlc,
+    sign: &SignDlc,
+    funding_signatures: FundingSignatures,
+    dlc_input_keys: &[DlcInputSigningKey],
+) -> Result<Transaction, ContractError> {
+    super::finalize::finalize_sign_internal(offer, accept, sign, funding_signatures, dlc_input_keys)
 }

@@ -1,16 +1,19 @@
 //! Sign message creation by the offering party.
 
 use bitcoin::psbt::Psbt;
-use ddk_dlc::secp256k1_zkp::{Secp256k1, SecretKey};
+use bitcoin::{Transaction, Witness};
+use ddk_dlc::dlc_input::DlcInputInfo;
+use ddk_dlc::secp256k1_zkp::{All, PublicKey, Secp256k1, SecretKey};
 use ddk_messages::{AcceptDlc, CetAdaptorSignatures, FundingSignatures, OfferDlc, SignDlc};
 
 use super::context::{
     context_from_messages, contract_id_from_transactions, create_adaptor_signatures,
-    create_refund_signature, ensure_funding_key, verify_counterparty_signatures, ContractContext,
+    create_refund_signature, ensure_funding_key, funding_input_index,
+    verify_counterparty_signatures, ContractContext,
 };
 use super::error::ContractError;
-use super::psbt::{ensure_psbt_matches_funding_transaction, extract_funding_signatures};
-use super::types::{Party, SignResult};
+use super::psbt::{ensure_psbt_matches_funding_transaction, funding_signature_from_witness};
+use super::types::{DlcInputSigningKey, SignResult};
 
 /// Verifies the accept message and creates the offering party's sign message.
 ///
@@ -27,10 +30,36 @@ pub fn sign_accept(
     funding_secret_key: &SecretKey,
     signed_funding_psbt: &Psbt,
 ) -> Result<SignResult, ContractError> {
+    sign_accept_spliced(offer, accept, funding_secret_key, signed_funding_psbt, &[])
+}
+
+/// Verifies the accept message and creates the offering party's sign message,
+/// including any splice (DLC) funding inputs.
+///
+/// Behaves like [`sign_accept`] for ordinary funding inputs. For each DLC
+/// (splice) input in the offer, `dlc_input_keys` must supply the previous
+/// contract's funding secret key (matched by serial id); this party produces
+/// its half of the prior 2-of-2 signature, which the accepting party verifies
+/// and completes in [`finalize_sign_spliced`](super::finalize_sign_spliced).
+/// Pass an empty slice when the contract has no splice inputs.
+pub fn sign_accept_spliced(
+    offer: &OfferDlc,
+    accept: &AcceptDlc,
+    funding_secret_key: &SecretKey,
+    signed_funding_psbt: &Psbt,
+    dlc_input_keys: &[DlcInputSigningKey],
+) -> Result<SignResult, ContractError> {
     let context = context_from_messages(offer, accept)?;
     ensure_psbt_matches_funding_transaction(signed_funding_psbt, &context.transactions.fund)?;
-    let funding_signatures =
-        extract_funding_signatures(offer, accept, Party::Offer, signed_funding_psbt)?;
+    let secp = Secp256k1::new();
+    let funding_signatures = build_offer_funding_signatures(
+        offer,
+        accept,
+        &context.transactions.fund,
+        signed_funding_psbt,
+        dlc_input_keys,
+        &secp,
+    )?;
     sign_with_context(
         offer,
         accept,
@@ -38,6 +67,63 @@ pub fn sign_accept(
         funding_signatures,
         context,
     )
+}
+
+/// Assembles the offering party's funding signatures in message order.
+///
+/// Ordinary inputs contribute their finalized PSBT witness; each DLC (splice)
+/// input contributes a single-element witness holding this party's half of the
+/// prior 2-of-2 signature, produced with the supplied prior funding secret key.
+fn build_offer_funding_signatures(
+    offer: &OfferDlc,
+    accept: &AcceptDlc,
+    funding_transaction: &Transaction,
+    signed_funding_psbt: &Psbt,
+    dlc_input_keys: &[DlcInputSigningKey],
+    secp: &Secp256k1<All>,
+) -> Result<FundingSignatures, ContractError> {
+    let mut funding_signatures = Vec::with_capacity(offer.funding_inputs.len());
+    for input in &offer.funding_inputs {
+        let input_index = funding_input_index(offer, accept, input.input_serial_id)?;
+        if let Some(dlc_input) = &input.dlc_input {
+            let signing_key = dlc_input_keys
+                .iter()
+                .find(|key| key.input_serial_id == input.input_serial_id)
+                .ok_or_else(|| {
+                    ContractError::InvalidFundingInput(format!(
+                        "missing prior funding secret key for DLC input serial id {}",
+                        input.input_serial_id
+                    ))
+                })?;
+            if PublicKey::from_secret_key(secp, &signing_key.prior_funding_secret_key)
+                != dlc_input.local_fund_pubkey
+            {
+                return Err(ContractError::InvalidFundingInput(
+                    "prior funding secret key does not match the DLC input local funding public key"
+                        .to_string(),
+                ));
+            }
+            let dlc_input_info: DlcInputInfo = input.into();
+            let signature = ddk_dlc::dlc_input::create_dlc_funding_input_signature(
+                secp,
+                funding_transaction,
+                input_index,
+                &dlc_input_info,
+                &signing_key.prior_funding_secret_key,
+            )?;
+            funding_signatures.push(funding_signature_from_witness(Witness::from_slice(&[
+                signature,
+            ])));
+        } else {
+            let witness = signed_funding_psbt.inputs[input_index]
+                .final_script_witness
+                .clone()
+                .filter(|witness| !witness.is_empty())
+                .ok_or(ContractError::MissingFinalizedInput { input_index })?;
+            funding_signatures.push(funding_signature_from_witness(witness));
+        }
+    }
+    Ok(FundingSignatures { funding_signatures })
 }
 
 /// Creates the sign message from already extracted offer-side funding witnesses.
