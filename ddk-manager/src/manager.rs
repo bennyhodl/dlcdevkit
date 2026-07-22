@@ -18,7 +18,7 @@ use crate::contract::{
 use crate::contract_updater::{accept_contract, verify_accepted_and_sign_contract};
 use crate::error::Error;
 use crate::utils::get_object_in_state;
-use crate::{ChannelId, ContractId, ContractSignerProvider};
+use crate::{ChannelId, ContractId, ContractSignerProvider, CET_NSEQUENCE};
 use bitcoin::absolute::Height;
 use bitcoin::consensus::encode::serialize_hex;
 use bitcoin::consensus::Decodable;
@@ -70,8 +70,6 @@ static AUTOMATIC_REFUND: Lazy<bool> = Lazy::new(|| match std::env::var("AUTOMATI
 
 /// The delay to set the refund value to.
 pub const REFUND_DELAY: u32 = 86400 * 7;
-/// The nSequence value used for CETs in DLC channels
-pub const CET_NSEQUENCE: u32 = 288;
 /// Timeout in seconds when waiting for a peer's reply, after which a DLC channel
 /// is forced closed.
 pub const PEER_TIMEOUT: u64 = 3600;

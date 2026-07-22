@@ -67,7 +67,7 @@ impl OfferedChannel {
             refund_locktime: offered_contract.refund_locktime,
             fee_rate_per_vb: offered_contract.fee_rate_per_vb,
             fund_output_serial_id: offered_contract.fund_output_serial_id,
-            cet_nsequence: crate::manager::CET_NSEQUENCE,
+            cet_nsequence: crate::CET_NSEQUENCE,
         }
     }
 

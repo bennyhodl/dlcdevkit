@@ -9,8 +9,13 @@ version.workspace = true
 edition.workspace = true
 
 [features]
-default = ["std"]
+default = ["std", "manager"]
 std = ["ddk-dlc/std", "ddk-messages/std", "ddk-trie/std", "bitcoin/std", "lightning/std"]
+# The async DLC application layer: the `Manager` and channel updater. This pulls
+# tokio (`sync`). Turn it OFF (`default-features = false`) for FFI/mobile
+# consumers that only need the pure protocol core — the `contract` types, the
+# `ContractSigner`/`ContractSignerProvider`/`Wallet` traits, and `error::Error`.
+manager = ["std", "dep:tokio"]
 fuzztarget = ["rand_chacha"]
 parallel = ["ddk-trie/parallel"]
 use-serde = ["serde", "ddk-dlc/use-serde", "ddk-messages/use-serde", "ddk-trie/use-serde"]
@@ -30,11 +35,11 @@ once_cell = "1.21.3"
 rand_chacha = { version = "0.3.1", optional = true }
 secp256k1-zkp = { workspace = true }
 serde = { workspace = true, optional = true }
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["sync"], optional = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
-ddk = { workspace = true }
+ddk = { workspace = true, features = ["manager"] }
 ddk-testenv = { workspace = true }
 bitcoincore-rpc = { workspace = true }
 bitcoincore-rpc-json = { workspace = true }
