@@ -12,9 +12,9 @@ use bitcoin::{Amount, Network, OutPoint, ScriptBuf, Sequence, Transaction, TxIn,
 use ddk::contract::{
     accept_offer, chain_hash_from_network, create_dlc_splice_input, create_dlc_transactions,
     create_funding_psbt, create_offer, finalize_sign, finalize_sign_spliced, funding_input,
-    sign_accept, sign_accept_spliced, signing, AcceptOfferParams, ContractError, CreateOfferParams,
-    DescriptorInput, DlcInputSigningKey, InputDerivation, Party, PartyParams,
-    DLC_INPUT_MAX_WITNESS_LEN,
+    sign_accept, sign_accept_spliced, sign_cet, sign_refund, signing, AcceptOfferParams,
+    ContractError, CreateOfferParams, DescriptorInput, DlcInputSigningKey, InputDerivation, Party,
+    PartyParams, DLC_INPUT_MAX_WITNESS_LEN,
 };
 use ddk_dlc::secp256k1_zkp::{All, Keypair, PublicKey, Secp256k1, SecretKey, XOnlyPublicKey};
 use ddk_messages::contract_msgs::{
@@ -22,8 +22,9 @@ use ddk_messages::contract_msgs::{
     EnumeratedContractDescriptor, NumericOutcomeContractDescriptor, SingleContractInfo,
 };
 use ddk_messages::oracle_msgs::{
-    tagged_announcement_msg, DigitDecompositionEventDescriptor, EnumEventDescriptor,
-    EventDescriptor, OracleAnnouncement, OracleEvent, OracleInfo, SingleOracleInfo,
+    tagged_announcement_msg, tagged_attestation_msg, DigitDecompositionEventDescriptor,
+    EnumEventDescriptor, EventDescriptor, OracleAnnouncement, OracleAttestation, OracleEvent,
+    OracleInfo, SingleOracleInfo,
 };
 use ddk_messages::{AcceptDlc, FundingInput, OfferDlc, SignDlc, WitnessElement};
 use std::str::FromStr;
@@ -294,12 +295,24 @@ fn enum_contract(
 /// Runs sign_accept and finalize_sign with xpriv-signed PSBTs and checks the
 /// completed funding transaction.
 fn complete_with_xpriv(
-    _secp: &Secp256k1<All>,
+    secp: &Secp256k1<All>,
     offerer: &PartySetup,
     accepter: &PartySetup,
     offer: &OfferDlc,
     accept: &AcceptDlc,
 ) -> Transaction {
+    fund_with_xpriv(secp, offerer, accepter, offer, accept).1
+}
+
+/// Like [`complete_with_xpriv`], but also returns the sign message, which the
+/// settlement functions need.
+fn fund_with_xpriv(
+    _secp: &Secp256k1<All>,
+    offerer: &PartySetup,
+    accepter: &PartySetup,
+    offer: &OfferDlc,
+    accept: &AcceptDlc,
+) -> (SignDlc, Transaction) {
     let mut offer_psbt = create_funding_psbt(offer, accept).unwrap();
     signing::sign_funding_psbt_with_xpriv(
         offer,
@@ -324,7 +337,7 @@ fn complete_with_xpriv(
         finalize_sign(offer, accept, &sign_result.sign, &accept_psbt).unwrap();
 
     assert_funding_transaction_complete(&funding_transaction, offer, accept);
-    funding_transaction
+    (sign_result.sign, funding_transaction)
 }
 
 /// Checks that every funding input carries a witness whose public key matches
@@ -975,6 +988,314 @@ fn accept_result_psbt_matches_create_funding_psbt() {
             .fund
             .compute_txid()
     );
+}
+
+/// Attests `outcomes` with the same oracle and nonce keys
+/// [`oracle_announcement`] publishes, producing an attestation the contract
+/// accepts as genuine.
+fn oracle_attestation(outcomes: Vec<String>) -> OracleAttestation {
+    let secp = Secp256k1::new();
+    let oracle_key = Keypair::from_secret_key(&secp, &SecretKey::from_slice(&[88; 32]).unwrap());
+    let signatures = outcomes
+        .iter()
+        .enumerate()
+        .map(|(index, outcome)| {
+            let nonce = SecretKey::from_slice(&[90 + index as u8; 32]).unwrap();
+            ddk_dlc::secp_utils::schnorrsig_sign_with_nonce(
+                &secp,
+                &tagged_attestation_msg(outcome),
+                &oracle_key,
+                &nonce.secret_bytes(),
+            )
+        })
+        .collect();
+    OracleAttestation {
+        event_id: "stateless-test".to_string(),
+        oracle_public_key: XOnlyPublicKey::from_keypair(&oracle_key).0,
+        signatures,
+        outcomes,
+    }
+}
+
+/// Decomposes `value` into the fixed-width binary digit strings a digit
+/// decomposition oracle attests.
+fn digit_outcomes(value: u64, nb_digits: usize) -> Vec<String> {
+    (0..nb_digits)
+        .rev()
+        .map(|position| ((value >> position) & 1).to_string())
+        .collect()
+}
+
+/// Checks that a settlement transaction spends the funding output with a
+/// complete 2-of-2 witness.
+fn assert_spends_funding_output(
+    settlement: &Transaction,
+    offer: &OfferDlc,
+    accept: &AcceptDlc,
+    funding_transaction: &Transaction,
+) {
+    let transactions = create_dlc_transactions(offer, accept).unwrap();
+    assert_eq!(settlement.input.len(), 1);
+    assert_eq!(
+        settlement.input[0].previous_output,
+        OutPoint {
+            txid: funding_transaction.compute_txid(),
+            vout: transactions.get_fund_output_index() as u32,
+        }
+    );
+    let witness = &settlement.input[0].witness;
+    assert_eq!(witness.len(), 4, "expected a 2-of-2 witness");
+    assert!(witness[0].is_empty(), "multisig witness must start empty");
+    assert_eq!(
+        witness[3],
+        transactions.funding_script_pubkey.to_bytes(),
+        "witness script is not the funding script"
+    );
+}
+
+#[test]
+fn either_party_can_settle_with_a_cet() {
+    let secp = Secp256k1::new();
+    let (offerer, accepter, offer, accept) = enum_contract(&secp, NETWORK);
+    let (sign, funding_transaction) = fund_with_xpriv(&secp, &offerer, &accepter, &offer, &accept);
+    let attestations = vec![(0, oracle_attestation(vec!["up".to_string()]))];
+
+    // "up" pays the whole contract to the offering party.
+    let cet = sign_cet(
+        &offer,
+        &accept,
+        &sign,
+        &offerer.funding_secret_key,
+        &attestations,
+    )
+    .unwrap();
+    assert_spends_funding_output(&cet, &offer, &accept, &funding_transaction);
+    assert_eq!(cet.output.len(), 1);
+    assert_eq!(cet.output[0].script_pubkey, offer.payout_spk);
+
+    // The accepting party settles the same outcome independently, and lands on
+    // the same transaction: the witness differs only by which half each party
+    // produced, and the txid does not commit to it.
+    let counterpart = sign_cet(
+        &offer,
+        &accept,
+        &sign,
+        &accepter.funding_secret_key,
+        &attestations,
+    )
+    .unwrap();
+    assert_spends_funding_output(&counterpart, &offer, &accept, &funding_transaction);
+    assert_eq!(cet.compute_txid(), counterpart.compute_txid());
+}
+
+#[test]
+fn the_attested_outcome_selects_the_cet() {
+    let secp = Secp256k1::new();
+    let (offerer, accepter, offer, accept) = enum_contract(&secp, NETWORK);
+    let (sign, _) = fund_with_xpriv(&secp, &offerer, &accepter, &offer, &accept);
+
+    // "down" pays the whole contract to the accepting party instead.
+    let cet = sign_cet(
+        &offer,
+        &accept,
+        &sign,
+        &accepter.funding_secret_key,
+        &[(0, oracle_attestation(vec!["down".to_string()]))],
+    )
+    .unwrap();
+    assert_eq!(cet.output.len(), 1);
+    assert_eq!(cet.output[0].script_pubkey, accept.payout_spk);
+}
+
+#[test]
+fn numerical_contracts_settle_with_a_cet() {
+    let secp = Secp256k1::new();
+    let offerer = PartySetup::new(&secp, 61, NETWORK, Amount::from_sat(150_000), 1);
+    let accepter = PartySetup::new(&secp, 62, NETWORK, Amount::from_sat(150_000), 2);
+    let offer = create_offer(offer_params(
+        &secp,
+        &offerer,
+        numerical_contract_info(Amount::from_sat(50_000), Amount::from_sat(50_000)),
+        Amount::from_sat(50_000),
+        NETWORK,
+        vec![offerer.funding_input.clone()],
+    ))
+    .unwrap();
+    let accept = accept_offer(
+        &offer,
+        AcceptOfferParams {
+            party: accepter.party_params(&secp, vec![accepter.funding_input.clone()]),
+            min_timeout_interval: MIN_TIMEOUT,
+            max_timeout_interval: MAX_TIMEOUT,
+        },
+        &accepter.funding_secret_key,
+    )
+    .unwrap()
+    .accept;
+    let (sign, funding_transaction) = fund_with_xpriv(&secp, &offerer, &accepter, &offer, &accept);
+
+    // A digit decomposition attestation may be consumed as a prefix, so the
+    // number of oracle signatures used is decided by the CET that matched.
+    let cet = sign_cet(
+        &offer,
+        &accept,
+        &sign,
+        &offerer.funding_secret_key,
+        &[(0, oracle_attestation(digit_outcomes(500, 10)))],
+    )
+    .unwrap();
+    assert_spends_funding_output(&cet, &offer, &accept, &funding_transaction);
+}
+
+#[test]
+fn either_party_can_settle_with_the_refund() {
+    let secp = Secp256k1::new();
+    let (offerer, accepter, offer, accept) = enum_contract(&secp, NETWORK);
+    let (sign, funding_transaction) = fund_with_xpriv(&secp, &offerer, &accepter, &offer, &accept);
+    let transactions = create_dlc_transactions(&offer, &accept).unwrap();
+
+    for funding_secret_key in [offerer.funding_secret_key, accepter.funding_secret_key] {
+        let refund = sign_refund(&offer, &accept, &sign, &funding_secret_key).unwrap();
+        assert_spends_funding_output(&refund, &offer, &accept, &funding_transaction);
+        assert_eq!(
+            refund.compute_txid(),
+            transactions.refund.compute_txid(),
+            "the refund must be the one rebuilt from the messages"
+        );
+        // Each party gets its own collateral back.
+        assert_eq!(refund.output.len(), 2);
+        assert!(refund
+            .output
+            .iter()
+            .any(|output| output.script_pubkey == offer.payout_spk));
+        assert!(refund
+            .output
+            .iter()
+            .any(|output| output.script_pubkey == accept.payout_spk));
+    }
+}
+
+#[test]
+fn settling_with_a_foreign_key_is_rejected() {
+    let secp = Secp256k1::new();
+    let (offerer, accepter, offer, accept) = enum_contract(&secp, NETWORK);
+    let (sign, _) = fund_with_xpriv(&secp, &offerer, &accepter, &offer, &accept);
+    let stranger = SecretKey::from_slice(&[77; 32]).unwrap();
+
+    assert!(matches!(
+        sign_cet(
+            &offer,
+            &accept,
+            &sign,
+            &stranger,
+            &[(0, oracle_attestation(vec!["up".to_string()]))],
+        ),
+        Err(ContractError::Key(_))
+    ));
+    assert!(matches!(
+        sign_refund(&offer, &accept, &sign, &stranger),
+        Err(ContractError::Key(_))
+    ));
+}
+
+#[test]
+fn an_unknown_outcome_has_no_cet() {
+    let secp = Secp256k1::new();
+    let (offerer, accepter, offer, accept) = enum_contract(&secp, NETWORK);
+    let (sign, _) = fund_with_xpriv(&secp, &offerer, &accepter, &offer, &accept);
+
+    assert!(matches!(
+        sign_cet(
+            &offer,
+            &accept,
+            &sign,
+            &offerer.funding_secret_key,
+            &[(0, oracle_attestation(vec!["sideways".to_string()]))],
+        ),
+        Err(ContractError::NoMatchingOutcome)
+    ));
+}
+
+#[test]
+fn a_forged_attestation_is_rejected() {
+    let secp = Secp256k1::new();
+    let (offerer, accepter, offer, accept) = enum_contract(&secp, NETWORK);
+    let (sign, _) = fund_with_xpriv(&secp, &offerer, &accepter, &offer, &accept);
+
+    // A well-formed attestation for a real outcome, signed by an oracle the
+    // contract does not use.
+    let impostor = Keypair::from_secret_key(&secp, &SecretKey::from_slice(&[13; 32]).unwrap());
+    let nonce = SecretKey::from_slice(&[14; 32]).unwrap();
+    let forged = OracleAttestation {
+        event_id: "stateless-test".to_string(),
+        oracle_public_key: XOnlyPublicKey::from_keypair(&impostor).0,
+        signatures: vec![ddk_dlc::secp_utils::schnorrsig_sign_with_nonce(
+            &secp,
+            &tagged_attestation_msg("up"),
+            &impostor,
+            &nonce.secret_bytes(),
+        )],
+        outcomes: vec!["up".to_string()],
+    };
+
+    assert!(matches!(
+        sign_cet(
+            &offer,
+            &accept,
+            &sign,
+            &offerer.funding_secret_key,
+            &[(0, forged)],
+        ),
+        Err(ContractError::InvalidAttestation(_))
+    ));
+}
+
+#[test]
+fn an_out_of_range_oracle_index_is_rejected() {
+    let secp = Secp256k1::new();
+    let (offerer, accepter, offer, accept) = enum_contract(&secp, NETWORK);
+    let (sign, _) = fund_with_xpriv(&secp, &offerer, &accepter, &offer, &accept);
+
+    // The contract uses a single oracle, so index 4 does not exist. The enum
+    // outcome lookup does not range check the index it is handed, so this is
+    // caught when the attestation is checked against the announcement it claims
+    // to come from — without which the CET would be signed with the wrong
+    // adaptor signature.
+    let error = sign_cet(
+        &offer,
+        &accept,
+        &sign,
+        &offerer.funding_secret_key,
+        &[(4, oracle_attestation(vec!["up".to_string()]))],
+    )
+    .unwrap_err();
+    assert!(
+        matches!(error, ContractError::InvalidAttestation(_)),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn settling_with_a_mismatched_sign_message_is_rejected() {
+    let secp = Secp256k1::new();
+    let (offerer, accepter, offer, accept) = enum_contract(&secp, NETWORK);
+    let (mut sign, _) = fund_with_xpriv(&secp, &offerer, &accepter, &offer, &accept);
+    sign.contract_id[0] ^= 0xff;
+
+    assert!(matches!(
+        sign_cet(
+            &offer,
+            &accept,
+            &sign,
+            &offerer.funding_secret_key,
+            &[(0, oracle_attestation(vec!["up".to_string()]))],
+        ),
+        Err(ContractError::InvalidSign(_))
+    ));
+    assert!(matches!(
+        sign_refund(&offer, &accept, &sign, &offerer.funding_secret_key),
+        Err(ContractError::InvalidSign(_))
+    ));
 }
 
 /// A minimal wallet implementing [`ddk_manager::Wallet`] over an in-memory

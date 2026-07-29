@@ -103,7 +103,7 @@ jobs:
             target/debug/build
           key: test-cache-${{ github.run_id }}-${{ github.run_number }}
       - id: set-matrix
-        run: cargo test --no-run --all-features && echo "matrix=$(testconfig/scripts/get_test_list.sh manager_execution manager_tests contract_updater)" >> "$GITHUB_OUTPUT"
+        run: cargo test --no-run --all-features && echo "matrix=$(testconfig/scripts/get_test_list.sh manager_execution manager_tests contract_updater stateless_execution)" >> "$GITHUB_OUTPUT"
   integration_tests:
     name: integration tests
     needs: integration_tests_prepare

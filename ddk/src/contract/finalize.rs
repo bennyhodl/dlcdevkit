@@ -7,8 +7,8 @@ use ddk_dlc::secp256k1_zkp::{PublicKey, Secp256k1};
 use ddk_messages::{AcceptDlc, FundingSignatures, OfferDlc, SignDlc};
 
 use super::context::{
-    apply_funding_signatures, context_from_messages, contract_id_from_transactions,
-    ensure_protocol_version, funding_input_index, verify_counterparty_signatures, ContractContext,
+    apply_funding_signatures, context_from_messages, ensure_sign_message, funding_input_index,
+    verify_counterparty_signatures, ContractContext,
 };
 use super::error::ContractError;
 use super::psbt::{ensure_psbt_matches_funding_transaction, extract_funding_signatures};
@@ -95,12 +95,7 @@ fn finalize_with_context(
             funding_signatures.funding_signatures.len()
         )));
     }
-    ensure_protocol_version(sign.protocol_version, ContractError::InvalidSign)?;
-    if sign.protocol_version != offer.protocol_version {
-        return Err(ContractError::InvalidSign(
-            "offer and sign protocol versions differ".to_string(),
-        ));
-    }
+    ensure_sign_message(offer, sign, &context)?;
     if sign.funding_signatures.funding_signatures.len() != offer.funding_inputs.len() {
         return Err(ContractError::InvalidSign(format!(
             "sign message carries {} funding signatures but the offer has {} funding inputs",
@@ -109,13 +104,6 @@ fn finalize_with_context(
         )));
     }
 
-    let expected_contract_id =
-        contract_id_from_transactions(&context.transactions, &offer.temporary_contract_id);
-    if sign.contract_id != expected_contract_id {
-        return Err(ContractError::InvalidSign(
-            "sign message contract id does not match the rebuilt funding transaction".to_string(),
-        ));
-    }
     let secp = Secp256k1::new();
     verify_counterparty_signatures(
         &secp,

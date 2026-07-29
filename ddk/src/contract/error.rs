@@ -35,6 +35,14 @@ pub enum ContractError {
         /// The index of the input in the funding transaction.
         input_index: usize,
     },
+    /// An oracle attestation is malformed, forged, or does not correspond to
+    /// the announcement of the oracle it claims to come from.
+    #[error("invalid attestation: {0}")]
+    InvalidAttestation(String),
+    /// No contract outcome corresponds to the supplied oracle attestations, so
+    /// there is no CET to sign.
+    #[error("no contract outcome matches the given attestations")]
+    NoMatchingOutcome,
     /// Descriptor parsing, derivation, or signing failed.
     #[error("descriptor error: {0}")]
     Descriptor(String),

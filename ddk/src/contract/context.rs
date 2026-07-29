@@ -397,6 +397,29 @@ pub(crate) fn ensure_protocol_version(
     Ok(())
 }
 
+/// Checks that a sign message belongs to the contract rebuilt from the offer
+/// and accept messages.
+pub(crate) fn ensure_sign_message(
+    offer: &OfferDlc,
+    sign: &ddk_messages::SignDlc,
+    context: &ContractContext,
+) -> Result<(), ContractError> {
+    ensure_protocol_version(sign.protocol_version, ContractError::InvalidSign)?;
+    if sign.protocol_version != offer.protocol_version {
+        return Err(ContractError::InvalidSign(
+            "offer and sign protocol versions differ".to_string(),
+        ));
+    }
+    let expected_contract_id =
+        contract_id_from_transactions(&context.transactions, &offer.temporary_contract_id);
+    if sign.contract_id != expected_contract_id {
+        return Err(ContractError::InvalidSign(
+            "sign message contract id does not match the rebuilt funding transaction".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) fn ensure_funding_key(
     secp: &Secp256k1<All>,
     secret_key: &SecretKey,

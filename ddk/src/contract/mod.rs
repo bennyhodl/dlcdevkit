@@ -3,9 +3,9 @@
 //! This module completes a DLC using only wire messages, explicit party data,
 //! and PSBTs. There is no contract manager, no persisted contract state, no
 //! storage backend, and no blockchain client: every operation rebuilds and
-//! validates what it needs from the [`OfferDlc`](ddk_messages::OfferDlc) and
-//! [`AcceptDlc`](ddk_messages::AcceptDlc) messages, which are the
-//! authoritative state.
+//! validates what it needs from the [`OfferDlc`](ddk_messages::OfferDlc),
+//! [`AcceptDlc`](ddk_messages::AcceptDlc), and [`SignDlc`](ddk_messages::SignDlc)
+//! messages, which are the authoritative state.
 //!
 //! # Lifecycle
 //!
@@ -21,15 +21,25 @@
 //! │                                          sign own inputs (signing::*)
 //! │                                          finalize_sign ──► Transaction
 //! │                                          broadcast via chain client
+//! │
+//! │ ... the oracles attest, or the refund locktime passes ...
+//! │
+//! └─ sign_cet / sign_refund ──► Transaction   sign_cet / sign_refund ──► Transaction
+//!    broadcast via chain client               broadcast via chain client
 //! ```
 //!
-//! Between messages each party only needs to retain:
+//! Either party can settle on its own, and neither needs the other's
+//! cooperation to do it: the counterparty's half of the 2-of-2 spend was
+//! committed in the messages it already sent.
 //!
-//! | Party | After | Must retain |
-//! |-------|-------|-------------|
-//! | offer | `create_offer` | the `OfferDlc`, its DLC funding secret key, and access to the keys of its funding inputs |
-//! | accept | `accept_offer` | the `OfferDlc`, the `AcceptDlc`, its DLC funding secret key, and access to the keys of its funding inputs |
-//! | offer | `sign_accept` | nothing further; the CETs and refund transaction are rebuilt from the messages whenever needed |
+//! Each party retains only the three wire messages, its DLC funding secret key,
+//! and access to the keys of its funding inputs. Everything else — the funding
+//! transaction, the CETs, the refund transaction, the contract id, the adaptor
+//! information — is rebuilt from those messages whenever it is needed.
+//!
+//! The `SignDlc` matters to each side differently: the accepting party settles
+//! with the signatures it carries, while for the offering party it only
+//! confirms that the three messages describe one contract.
 //!
 //! # PSBT as the signing boundary
 //!
@@ -86,6 +96,34 @@
 //! [`finalize_sign_spliced`](crate::contract::finalize_sign_spliced) (accepting
 //! party) as [`DlcInputSigningKey`](crate::contract::DlcInputSigningKey) values.
 //!
+//! # Settlement
+//!
+//! A funded contract ends in one of two transactions, both of which spend the
+//! 2-of-2 funding output and are built entirely from the wire messages:
+//!
+//! | Outcome | Function | Counterparty's half comes from |
+//! |---------|----------|-------------------------------|
+//! | the oracles attest | [`sign_cet`](crate::contract::sign_cet) | its CET adaptor signature, decrypted with the oracle signatures |
+//! | nobody attests | [`sign_refund`](crate::contract::sign_refund) | its refund signature, sent with the accept or sign message |
+//!
+//! Both take the settling party's DLC funding secret key, which supplies this
+//! party's half of the 2-of-2 spend and identifies which side is settling — so
+//! the same call works for either party. [`sign_cet`](crate::contract::sign_cet)
+//! additionally takes the oracle attestations, each paired with the index of
+//! its oracle in the contract's announcements; it selects the matching CET,
+//! verifies the attestations against the announcements they claim to come from,
+//! and returns the signed transaction.
+//!
+//! Neither function enforces *when* a transaction may be broadcast. CETs carry
+//! the offer's `cet_locktime` and the refund its `refund_locktime`; the chain
+//! enforces those, and deciding which settlement path to take is the caller's
+//! policy.
+//!
+//! Settling is the most expensive operation in the module: selecting a CET
+//! means reconstructing the contract's adaptor information, which for a
+//! large numeric contract is the same order of work as accepting it. That is
+//! the cost of keeping no state.
+//!
 //! # Broadcasting and storage stay with the caller
 //!
 //! [`finalize_sign`](crate::contract::finalize_sign) returns a fully signed [`bitcoin::Transaction`];
@@ -107,6 +145,7 @@ mod error;
 mod finalize;
 mod keys;
 mod psbt;
+mod settle;
 mod sign;
 mod splice;
 mod types;
@@ -120,6 +159,7 @@ pub use error::ContractError;
 pub use finalize::{finalize_sign, finalize_sign_spliced};
 pub use keys::ContractKeyProvider;
 pub use psbt::create_funding_psbt;
+pub use settle::{sign_cet, sign_refund};
 pub use sign::{sign_accept, sign_accept_spliced};
 pub use splice::{create_dlc_splice_input, DLC_INPUT_MAX_WITNESS_LEN};
 pub use types::{

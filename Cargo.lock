@@ -1202,7 +1202,7 @@ dependencies = [
 
 [[package]]
 name = "ddk-testenv"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "bitcoin",
  "bitcoincore-rpc",
