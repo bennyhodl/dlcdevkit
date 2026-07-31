@@ -26,8 +26,15 @@ type TestManager = Manager<
 >;
 
 async fn get_manager(logger: Arc<Logger>) -> TestManager {
+    // These tests reject offers before anything reaches the chain and never
+    // mine, so the backends shared across this binary are enough.
     let blockchain = Arc::new(
-        EsploraClient::new("http://localhost:30000", Network::Regtest, logger.clone()).unwrap(),
+        EsploraClient::new(
+            ddk_testenv::env().esplora_host(),
+            Network::Regtest,
+            logger.clone(),
+        )
+        .unwrap(),
     );
     let store = Arc::new(MemoryStorage::new());
     let mut seed = [0u8; 64];
