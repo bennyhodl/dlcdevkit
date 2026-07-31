@@ -62,11 +62,7 @@ pub async fn test_ddk(
 }
 
 pub fn get_bitcoind_client() -> Client {
-    let bitcoind_user = std::env::var("BITCOIND_USER").expect("BITCOIND_USER must be set");
-    let bitcoind_pass = std::env::var("BITCOIND_PASS").expect("BITCOIND_PASS must be set");
-    let bitcoind_host = std::env::var("BITCOIND_HOST").expect("BITCOIND_HOST must be set");
-    let auth = bitcoincore_rpc::Auth::UserPass(bitcoind_user, bitcoind_pass);
-    bitcoincore_rpc::Client::new(&bitcoind_host, auth).unwrap()
+    ddk_testenv::env().rpc()
 }
 
 pub fn fund_addresses(
@@ -102,16 +98,7 @@ pub fn fund_addresses(
 }
 
 pub fn generate_blocks(num: u64) {
-    let client = get_bitcoind_client();
-    let previous_height = client.get_block_count().unwrap();
-
-    let address = client.get_new_address(None, None).unwrap().assume_checked();
-    client.generate_to_address(num, &address).unwrap();
-    let mut cur_block_height = previous_height;
-    while cur_block_height < previous_height + num {
-        sleep(Duration::from_secs(5));
-        cur_block_height = client.get_block_count().unwrap();
-    }
+    ddk_testenv::env().generate_blocks(num);
 }
 
 pub struct TestSuite {
@@ -128,7 +115,7 @@ impl TestSuite {
         let mut seed = [0u8; 64];
         seed.try_fill(&mut bitcoin::key::rand::thread_rng())
             .unwrap();
-        let esplora_host = std::env::var("ESPLORA_HOST").expect("ESPLORA_HOST must be set");
+        let esplora_host = ddk_testenv::env().esplora_host().to_string();
 
         let transport = Arc::new(MemoryTransport::new(secp, logger.clone()));
         let storage = Arc::new(MemoryStorage::new());

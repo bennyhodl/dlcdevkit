@@ -14,29 +14,26 @@ mod nostr_test {
     use ddk::DlcDevKit;
     use ddk::{builder::Builder, Transport};
     use ddk_dlc::{EnumerationPayout, Payout};
+    use ddk_testenv::nostr::TestRelay;
     use std::sync::Arc;
 
     type NostrDlcDevKit = DlcDevKit<NostrDlc, MemoryStorage, MemoryOracle>;
 
     async fn nostr_ddk(
         name: &str,
+        relay_url: &str,
         oracle: Arc<MemoryOracle>,
         logger: Arc<Logger>,
     ) -> NostrDlcDevKit {
         let mut seed = [0u8; 64];
         seed.try_fill(&mut bitcoin::key::rand::thread_rng())
             .unwrap();
-        let esplora_host = "http://127.0.0.1:30000".to_string();
+        let esplora_host = ddk_testenv::env().esplora_host().to_string();
 
         let transport = Arc::new(
-            NostrDlc::new(
-                &seed,
-                "ws://127.0.0.1:8081",
-                Network::Regtest,
-                logger.clone(),
-            )
-            .await
-            .unwrap(),
+            NostrDlc::new(&seed, relay_url, Network::Regtest, logger.clone())
+                .await
+                .unwrap(),
         );
         let storage = Arc::new(MemoryStorage::new());
 
@@ -62,8 +59,10 @@ mod nostr_test {
     async fn nostr_contract() {
         let oracle = Arc::new(MemoryOracle::default());
         let logger = Arc::new(Logger::console("nostr-test".to_string(), LogLevel::Info));
-        let alice = nostr_ddk("alice-nostr", oracle.clone(), logger.clone()).await;
-        let bob = nostr_ddk("bob-nostr", oracle.clone(), logger.clone()).await;
+        // Held for the duration of the test: the relay shuts down when dropped.
+        let relay = TestRelay::start().await;
+        let alice = nostr_ddk("alice-nostr", relay.url(), oracle.clone(), logger.clone()).await;
+        let bob = nostr_ddk("bob-nostr", relay.url(), oracle.clone(), logger.clone()).await;
 
         let alice_address = alice.wallet.new_external_address().await.unwrap().address;
         let bob_address = bob.wallet.new_external_address().await.unwrap().address;

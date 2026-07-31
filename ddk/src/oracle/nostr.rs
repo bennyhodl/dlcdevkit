@@ -284,7 +284,10 @@ mod tests {
 
     use super::*;
 
-    async fn test_send_announcement(key: nostr_rs::key::Keys) -> (OracleAnnouncement, Event) {
+    async fn test_send_announcement(
+        key: nostr_rs::key::Keys,
+        relay_url: &str,
+    ) -> (OracleAnnouncement, Event) {
         let xpriv =
             Xpriv::new_master(bitcoin::Network::Regtest, &key.secret_key().secret_bytes()).unwrap();
         let storage = kormir::storage::MemoryStorage::default();
@@ -310,7 +313,7 @@ mod tests {
                 .unwrap();
 
         let nostr_client = nostr_sdk::Client::new(key);
-        nostr_client.add_relay("ws://localhost:8081").await.unwrap();
+        nostr_client.add_relay(relay_url).await.unwrap();
         nostr_client.connect().await;
         nostr_client.send_event(&ann_event).await.unwrap();
         (announcement, ann_event)
@@ -318,8 +321,10 @@ mod tests {
 
     #[tokio::test]
     async fn handle_oracle_announcement_test() {
+        // Held for the duration of the test: the relay shuts down when dropped.
+        let relay = ddk_testenv::nostr::TestRelay::start().await;
         let nostr_keys = nostr_rs::key::Keys::generate();
-        let (announcement, event) = test_send_announcement(nostr_keys).await;
+        let (announcement, event) = test_send_announcement(nostr_keys, relay.url()).await;
         let decoded = decode_base64::<OracleAnnouncement>(&event.content).unwrap();
         assert_eq!(announcement, decoded);
     }
