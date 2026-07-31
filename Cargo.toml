@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["ddk", "dlc", "dlc-messages", "dlc-trie", "payouts", "ddk-node", "ddk-manager", "kormir"]
+members = ["ddk", "dlc", "dlc-messages", "dlc-trie", "payouts", "ddk-node", "ddk-manager", "kormir", "testenv"]
 
 [workspace.package]
 version = "1.1.1"
@@ -19,6 +19,8 @@ ddk-trie = { version = "1.0.11", path = "dlc-trie", default-features = false }
 ddk-manager = { version = "1.0.11", path = "ddk-manager", default-features = false }
 ddk-payouts = { version = "1.0.11", path = "payouts" }
 kormir = { version = "1.0.11", path = "kormir" }
+# Path-only (no version): cargo strips it from the published manifests.
+ddk-testenv = { path = "testenv" }
 
 bitcoin = { version = "0.32.6", default-features = false }
 lightning = { version = "0.2.2", default-features = false }
@@ -48,3 +50,7 @@ chrono = "0.4.39"
 bitcoincore-rpc = "0.19.0"
 bitcoincore-rpc-json = "0.19.0"
 dotenvy = "0.15.7"
+# Managed regtest backends for integration tests. `download` fetches the
+# bitcoind / electrs binaries at build time into OUT_DIR.
+bitcoind = { version = "0.41.0", default-features = false, features = ["28_2", "download"] }
+electrsd = { version = "0.41.0", default-features = false, features = ["esplora_a33e97e1", "download"] }
