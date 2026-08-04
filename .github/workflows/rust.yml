@@ -9,16 +9,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# The test suites manage their own bitcoind, electrs, postgres and nostr relay
+# (see the `ddk-testenv` crate), so no service containers or connection
+# environment variables are needed here.
 env:
   CARGO_TERM_COLOR: always
-  POSTGRES_USER: dlcdevkit
-  POSTGRES_PASS: dlcdevkit
-  DATABASE_URL: postgresql://dlcdevkit:dlcdevkit@localhost:5432/postgres
-  BITCOIND_HOST: http://localhost:18443
-  BITCOIND_USER: dlcdevkit
-  BITCOIND_PASS: dlcdevkit
-  ESPLORA_HOST: http://localhost:30000
-  RPC_WALLET: ddk
   NB_CONFIRMATIONS: 6
 
 jobs:
@@ -73,21 +68,13 @@ jobs:
           rustup toolchain install 1.88.0 --profile minimal
           rustup default 1.88.0
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-      - name: Start Docker Compose services
-        run: docker compose up -d
-      - name: Wait for Bitcoin container
-        run: |
-          chmod +x ./testconfig/scripts/wait_for_container.sh
-          ./testconfig/scripts/wait_for_container.sh bitcoin
-      - name: Wait for Electrs to be ready
-        run: |
-          chmod +x ./testconfig/scripts/wait_for_electrs.sh
-          ./testconfig/scripts/wait_for_electrs.sh
+      - name: Cache embedded postgres binaries
+        uses: actions/cache@v4
+        with:
+          path: ~/.theseus/postgresql
+          key: theseus-postgresql-${{ runner.os }}
       - name: Run unit tests
         run: cargo test --all-features
-      - name: Stop Docker Compose services
-        if: always()
-        run: docker compose down -v
   integration_tests_prepare:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -104,10 +91,16 @@ jobs:
       # rust-cache is declared first so that its post-step (which prunes target/)
       # runs AFTER the run_id cache below saves the freshly compiled test binaries.
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      # `target/debug/build` carries the bitcoind and electrs executables that
+      # the build scripts downloaded. The test binaries resolve them through the
+      # OUT_DIR path baked in at compile time, so both directories have to be
+      # restored together for the matrix jobs to find them.
       - name: Cache compiled test binaries for the matrix jobs
         uses: actions/cache@v4
         with:
-          path: target/debug/deps
+          path: |
+            target/debug/deps
+            target/debug/build
           key: test-cache-${{ github.run_id }}-${{ github.run_number }}
       - id: set-matrix
         run: cargo test --no-run --all-features && echo "matrix=$(testconfig/scripts/get_test_list.sh manager_execution manager_tests contract_updater)" >> "$GITHUB_OUTPUT"
@@ -123,22 +116,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/cache@v4
         with:
-          path: target/debug/deps
+          path: |
+            target/debug/deps
+            target/debug/build
           key: test-cache-${{ github.run_id }}-${{ github.run_number }}
-      - name: Start bitcoin node
-        run: docker compose up -d bitcoin electrs
-      - name: Wait for container to run
-        run: |
-          chmod +x ./testconfig/scripts/wait_for_container.sh
-          ./testconfig/scripts/wait_for_container.sh bitcoin
-      - name: Wait for electrs to be ready
-        run: |
-          chmod +x ./testconfig/scripts/wait_for_electrs.sh
-          ./testconfig/scripts/wait_for_electrs.sh
       - name: Run test
         run: RUST_BACKTRACE=1 RUST_MIN_STACK=8388608 ${{ matrix.tests }} --ignored
-      - name: Stop bitcoin node
-        run: docker compose down -v
 
   test_splicing:
     name: test splicing
@@ -147,17 +130,5 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-      - name: Start bitcoin node
-        run: docker compose up -d bitcoin electrs
-      - name: Wait for container to run
-        run: |
-          chmod +x ./testconfig/scripts/wait_for_container.sh
-          ./testconfig/scripts/wait_for_container.sh bitcoin
-      - name: Wait for electrs to be ready
-        run: |
-          chmod +x ./testconfig/scripts/wait_for_electrs.sh
-          ./testconfig/scripts/wait_for_electrs.sh
       - name: Run test
         run: RUST_MIN_STACK=8388608 cargo test -p ddk-manager splice -- --nocapture --ignored
-      - name: Stop bitcoin node
-        run: docker compose down -v

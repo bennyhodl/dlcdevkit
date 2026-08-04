@@ -3,7 +3,6 @@
 mod test_utils;
 
 use bitcoin::Amount;
-use ddk::chain::EsploraClient;
 use ddk::logger::Logger;
 use ddk_manager::payout_curve::PayoutFunctionPiece;
 use test_utils::*;
@@ -727,11 +726,11 @@ async fn get_attestations(test_params: &TestParams) -> Vec<(usize, OracleAttesta
 
 async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_close: bool) {
     env_logger::try_init().ok();
-    let esplora_host = std::env::var("ESPLORA_HOST").expect("ESPLORA_HOST must be set");
     let logger = Arc::new(Logger::disabled("test_manager_execution".to_string()));
-    let electrs = Arc::new(
-        EsploraClient::new(&esplora_host, bitcoin::Network::Regtest, logger.clone()).unwrap(),
-    );
+    // Held for the whole test: these assertions depend on the chain advancing
+    // only when this test mines.
+    let env = test_utils::test_env();
+    let electrs = test_utils::esplora_client(&env, logger.clone());
 
     let (alice_send, mut bob_receive) = channel::<Option<Message>>(100);
     let (bob_send, mut alice_receive) = channel::<Option<Message>>(100);
@@ -740,7 +739,7 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
     let bob_sync_send = sync_send;
     let amount = Amount::from_btc(2.1).unwrap();
     let (bob_wallet, bob_storage, alice_wallet, alice_storage, sink_rpc) =
-        init_clients(logger.clone(), electrs.clone(), amount, amount).await;
+        init_clients(&env, logger.clone(), electrs.clone(), amount, amount).await;
     let alice_wallet = Arc::new(alice_wallet);
     let bob_wallet = Arc::new(bob_wallet);
     let sink = Arc::new(sink_rpc);

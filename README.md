@@ -74,10 +74,38 @@ You can create a custom DDK instance by implementing the required traits defined
 
 ## Development
 
-A bitcoin node, esplora server, and oracle server are required to run DDK. Developers can spin up a development environment with the `justfile` provided.
+### Tests
+
+Tests need nothing running beforehand:
 
 ```
-$ cp .env.example .env
+$ cargo test --all-features
+```
+
+Each test binary starts and tears down its own regtest bitcoind, electrs
+(serving the esplora HTTP API), PostgreSQL server, and nostr relay on ephemeral
+ports. The bitcoind and electrs executables are downloaded once at build time by
+the [`ddk-testenv`](./testenv) crate's dependencies; PostgreSQL is fetched on
+first use and cached under `~/.theseus/postgresql`.
+
+The long-running integration tests are marked `#[ignore]`; run them with:
+
+```
+$ NB_CONFIRMATIONS=6 cargo test --all-features -- --ignored
+```
+
+`NB_CONFIRMATIONS` is not optional here. It sets the depth at which the manager
+treats a contract as confirmed, and the cooperative close tests assume 6; at the
+default of 3 they fail.
+
+### Running a node
+
+A bitcoin node, esplora server, and oracle server are required to *run* DDK
+(as opposed to testing it). Developers can spin up a development environment
+with the `justfile` provided.
+
+```
+$ cp .env.sample .env
 $ just deps
 ```
 

@@ -4,8 +4,7 @@ mod test_utils;
 
 use std::sync::Arc;
 
-use bitcoin::{Amount, Network};
-use ddk::chain::EsploraClient;
+use bitcoin::Amount;
 use ddk::logger::Logger;
 use ddk_manager::contract::offered_contract::OfferedContract;
 use secp256k1_zkp::rand::Fill;
@@ -26,13 +25,12 @@ async fn accept_contract_test() {
         .unwrap();
     let offered_contract =
         OfferedContract::try_from_offer_dlc(&offer_dlc, dummy_pubkey, keys_id).unwrap();
-    let blockchain = Arc::new(
-        EsploraClient::new("http://localhost:30000", Network::Regtest, logger.clone()).unwrap(),
-    );
+    let env = test_utils::test_env();
+    let blockchain = test_utils::esplora_client(&env, logger.clone());
 
     let amount = Amount::from_btc(2.1).unwrap();
     let stuff =
-        test_utils::create_and_fund_wallet(logger.clone(), blockchain.clone(), amount).await;
+        test_utils::create_and_fund_wallet(&env, logger.clone(), blockchain.clone(), amount).await;
     let wallet = Arc::new(stuff.0);
     wallet.sync().await.unwrap();
 

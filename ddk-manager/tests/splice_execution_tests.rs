@@ -1,7 +1,7 @@
 use bitcoin::Amount;
 use bitcoincore_rpc::RpcApi;
 use ddk::logger::LogLevel;
-use ddk::{chain::EsploraClient, logger::Logger, oracle::memory::MemoryOracle};
+use ddk::{logger::Logger, oracle::memory::MemoryOracle};
 use ddk_dlc::{EnumerationPayout, Payout};
 use ddk_manager::contract::Contract;
 use ddk_manager::{
@@ -40,13 +40,14 @@ async fn splice_execution_test(test_params: test_utils::TestParams) {
         "splice_execution_tests".to_string(),
         LogLevel::Debug,
     ));
-    let electrs_host = std::env::var("ESPLORA_HOST").expect("ESPLORA_HOST must be set");
-    let electrs = Arc::new(
-        EsploraClient::new(&electrs_host, bitcoin::Network::Regtest, logger.clone()).unwrap(),
-    );
+    // Held for the whole test: these assertions depend on the chain advancing
+    // only when this test mines.
+    let env = test_utils::test_env();
+    let electrs = test_utils::esplora_client(&env, logger.clone());
 
     let (alice_wallet, alice_storage, bob_wallet, bob_storage, sink_rpc) =
         test_utils::init_clients(
+            &env,
             logger.clone(),
             electrs.clone(),
             funding_collateral,

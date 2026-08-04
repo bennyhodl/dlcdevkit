@@ -4,7 +4,7 @@ use bitcoin::{
     consensus::{Decodable, Encodable},
     Amount, Network, Transaction,
 };
-use bitcoincore_rpc::{Auth, Client, RpcApi};
+use bitcoincore_rpc::{Client, RpcApi};
 use bitcoincore_rpc_json::AddressType;
 use ddk::{chain::EsploraClient, logger::Logger, wallet::DlcDevKitWallet};
 use ddk::{oracle::memory::MemoryOracle, storage::memory::MemoryStorage};
@@ -24,6 +24,7 @@ use ddk_manager::{
     },
     payout_curve::HyperbolaPayoutCurvePiece,
 };
+use ddk_testenv::TestEnv;
 use ddk_trie::OracleNumericInfo;
 use secp256k1_zkp::rand::{seq::SliceRandom, thread_rng, Fill, RngCore};
 use std::fmt::Write;
@@ -817,15 +818,26 @@ pub async fn refresh_wallet(wallet: &DlcDevKitWallet, expected_funds: u64) {
     }
 }
 
-pub fn rpc_client() -> Client {
-    let user = std::env::var("BITCOIND_USER").expect("BITCOIND_USER must be set");
-    let pass = std::env::var("BITCOIND_PASS").expect("BITCOIND_PASS must be set");
-    let host =
-        std::env::var("BITCOIND_HOST").unwrap_or_else(|_| "http://localhost:18443".to_owned());
-    Client::new(&host, Auth::UserPass(user, pass)).unwrap()
+/// Starts regtest backends private to one test.
+///
+/// These tests assert on contract state as blocks advance, so they cannot share
+/// a chain: blocks a sibling test mines would drive a contract past its locktime
+/// early. Every test owns its own bitcoind and electrs, and drops them at the
+/// end.
+pub fn test_env() -> TestEnv {
+    TestEnv::new()
+}
+
+/// An esplora client pointed at `env`.
+pub fn esplora_client(env: &TestEnv, logger: Arc<Logger>) -> Arc<EsploraClient> {
+    Arc::new(
+        EsploraClient::new(env.esplora_host(), Network::Regtest, logger)
+            .expect("could not build the Esplora client"),
+    )
 }
 
 pub async fn init_clients(
+    env: &TestEnv,
     logger: Arc<Logger>,
     esplora: Arc<EsploraClient>,
     offer_amount: Amount,
@@ -837,11 +849,13 @@ pub async fn init_clients(
     Arc<MemoryStorage>,
     Client,
 ) {
-    let sink_rpc = rpc_client();
+    let sink_rpc = env.rpc();
 
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    let offer_rpc = create_and_fund_wallet(logger.clone(), esplora.clone(), offer_amount).await;
-    let accept_rpc = create_and_fund_wallet(logger.clone(), esplora.clone(), accept_amount).await;
+    let offer_rpc =
+        create_and_fund_wallet(env, logger.clone(), esplora.clone(), offer_amount).await;
+    let accept_rpc =
+        create_and_fund_wallet(env, logger.clone(), esplora.clone(), accept_amount).await;
 
     let sink_address = sink_rpc
         .get_new_address(None, Some(AddressType::Bech32))
@@ -860,11 +874,12 @@ pub async fn init_clients(
 }
 
 pub async fn create_and_fund_wallet(
+    env: &TestEnv,
     logger: Arc<Logger>,
     esplora: Arc<EsploraClient>,
     amount: Amount,
 ) -> (DlcDevKitWallet, Arc<MemoryStorage>) {
-    let sink_rpc = rpc_client();
+    let sink_rpc = env.rpc();
     let sink_address = sink_rpc
         .get_new_address(None, None)
         .unwrap()

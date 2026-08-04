@@ -1,0 +1,30 @@
+[package]
+name = "ddk-testenv"
+description = "Managed regtest backends for the dlcdevkit test suites."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+# Test-only helper crate. Never goes to crates.io; `ddk` and `ddk-manager`
+# depend on it through a path-only dev-dependency, which cargo strips when
+# packaging them.
+publish = false
+
+[features]
+default = []
+# In-process nostr relay, for the `nostr` transport tests.
+nostr = ["dep:nostr-relay-builder"]
+# Embedded PostgreSQL server, for the `postgres` storage tests.
+postgres = ["dep:postgresql_embedded"]
+
+[dependencies]
+bitcoin = { workspace = true, features = ["std"] }
+bitcoincore-rpc = { workspace = true }
+bitcoind = { workspace = true }
+electrsd = { workspace = true }
+libc = "0.2"
+
+nostr-relay-builder = { version = "0.44.1", optional = true }
+# Pinned to 0.19: 0.20+ raise the MSRV to 1.94, above this workspace's toolchain.
+postgresql_embedded = { version = "0.19.0", optional = true }

@@ -1,3 +1,7 @@
+# Development stack for *running* a ddk-node (`just deps`).
+#
+# The test suites do not use this: they start their own bitcoind, electrs,
+# postgres and nostr relay on ephemeral ports. See the `testenv` crate.
 name: "dlcdevkit"
 services:
   bitcoin:

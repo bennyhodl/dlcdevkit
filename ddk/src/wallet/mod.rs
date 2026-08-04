@@ -1006,7 +1006,7 @@ impl Debug for DlcDevKitWallet {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashSet, str::FromStr, sync::Arc, time::Duration};
+    use std::{collections::HashSet, str::FromStr, sync::Arc};
 
     use crate::chain::EsploraClient;
     use crate::logger::{LogLevel, Logger};
@@ -1018,13 +1018,12 @@ mod tests {
         secp256k1::{PublicKey, SecretKey},
         Address, AddressType, Amount, FeeRate, Network,
     };
-    use bitcoincore_rpc::RpcApi;
     use ddk_manager::{ContractSigner, ContractSignerProvider};
 
     use super::DlcDevKitWallet;
 
     async fn create_wallet() -> DlcDevKitWallet {
-        let esplora = std::env::var("ESPLORA_HOST").expect("ESPLORA_HOST must be set");
+        let esplora = ddk_testenv::env().esplora_host().to_string();
         let storage = Arc::new(MemoryStorage::new());
         let logger = Arc::new(Logger::console(
             "console_logger".to_string(),
@@ -1049,43 +1048,12 @@ mod tests {
     }
 
     fn generate_blocks(num: u64) {
-        let bitcoind =
-            std::env::var("BITCOIND_HOST").unwrap_or("http://localhost:18443".to_string());
-        let user = std::env::var("BITCOIND_USER").expect("BITCOIND_USER must be set");
-        let pass = std::env::var("BITCOIND_PASS").expect("BITCOIND_PASS must be set");
-        let auth = bitcoincore_rpc::Auth::UserPass(user, pass);
-        let client = bitcoincore_rpc::Client::new(&bitcoind, auth).unwrap();
-        let previous_height = client.get_block_count().unwrap();
-
-        let address = client.get_new_address(None, None).unwrap().assume_checked();
-        client.generate_to_address(num, &address).unwrap();
-        let mut cur_block_height = previous_height;
-        while cur_block_height < previous_height + num {
-            std::thread::sleep(Duration::from_secs(5));
-            cur_block_height = client.get_block_count().unwrap();
-        }
+        ddk_testenv::env().generate_blocks(num);
     }
 
     fn fund_address(address: &Address<NetworkChecked>) {
-        let bitcoind =
-            std::env::var("BITCOIND_HOST").unwrap_or("http://localhost:18443".to_string());
-        let user = std::env::var("BITCOIND_USER").expect("BITCOIND_USER must be set");
-        let pass = std::env::var("BITCOIND_PASS").expect("BITCOIND_PASS must be set");
-        let auth = bitcoincore_rpc::Auth::UserPass(user, pass);
-        let client = bitcoincore_rpc::Client::new(&bitcoind, auth).unwrap();
-        client
-            .send_to_address(
-                address,
-                Amount::from_btc(1.0).unwrap(),
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-            )
-            .unwrap();
-        generate_blocks(5)
+        ddk_testenv::env().fund_address(address, Amount::from_btc(1.0).unwrap());
+        generate_blocks(4)
     }
 
     #[tokio::test]
@@ -1585,9 +1553,9 @@ mod tests {
             "console_logger".to_string(),
             LogLevel::Info,
         ));
-        let esplora_host = std::env::var("ESPLORA_HOST").expect("ESPLORA_HOST must be set");
+        let esplora_host = ddk_testenv::env().esplora_host();
         let esplora =
-            Arc::new(EsploraClient::new(&esplora_host, Network::Regtest, logger.clone()).unwrap());
+            Arc::new(EsploraClient::new(esplora_host, Network::Regtest, logger.clone()).unwrap());
 
         let mut seed = [0u8; 64];
         seed.try_fill(&mut bitcoin::key::rand::thread_rng())

@@ -13,8 +13,7 @@ mkdir -p ${DEST}
 
 echo "Starting enumeration contract binary generation..."
 
-./testconfig/scripts/wait_for_electrs.sh
-
+# The test starts its own bitcoind and electrs, so nothing needs to be running.
 # Run the enumeration test with serialization enabled
 echo "Running enumeration test with contract serialization..."
 GENERATE_SERIALIZED_CONTRACT=1 cargo test -p ddk --test enumeration enumeration_contract -- --ignored

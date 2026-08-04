@@ -1013,12 +1013,14 @@ mod tests {
     use super::*;
     use crate::{logger::LogLevel, util::ser::deserialize_contract};
     use ddk_manager::Storage;
+    use ddk_testenv::postgres::TestPostgres;
 
-    async fn seed_db() -> PostgresStore {
-        let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
-        println!("database_url: {database_url}");
+    /// Returns the store alongside the server backing it: the server stops when
+    /// dropped, so the caller has to keep it alive.
+    async fn seed_db() -> (TestPostgres, PostgresStore) {
+        let server = TestPostgres::start("ddk").await;
         let store = PostgresStore::new(
-            &database_url,
+            server.url(),
             true,
             Arc::new(Logger::console(
                 "console_logger".to_string(),
@@ -1072,13 +1074,12 @@ mod tests {
             .await
             .expect("Failed to update closed contract");
 
-        store
+        (server, store)
     }
 
     #[tokio::test]
     async fn postgres() {
-        dotenvy::dotenv().ok();
-        let db = seed_db().await;
+        let (_server, db) = seed_db().await;
 
         let confirmed_rows = db.get_contract_metadata(None).await.unwrap();
         assert_eq!(confirmed_rows.len(), 1);
