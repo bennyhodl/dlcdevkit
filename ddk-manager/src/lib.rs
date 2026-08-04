@@ -11,18 +11,28 @@
 #![deny(dead_code)]
 #![deny(unused_imports)]
 #![deny(missing_docs)]
+// Without the `manager` feature the async application layer (`manager` /
+// `channel_updater`) is compiled out, leaving some protocol helpers with no
+// callers in this subset build. The default build compiles the superset and
+// keeps `deny`, so genuinely-dead code is still caught there.
+#![cfg_attr(
+    not(feature = "manager"),
+    allow(dead_code, unused_imports, unused_macros)
+)]
 
 #[macro_use]
 extern crate ddk_messages;
 
 pub mod chain_monitor;
 pub mod channel;
+#[cfg(feature = "manager")]
 pub mod channel_updater;
 pub mod contract;
 pub mod contract_updater;
 mod conversion_utils;
 mod dlc_input;
 pub mod error;
+#[cfg(feature = "manager")]
 pub mod manager;
 pub mod payout_curve;
 mod utils;
@@ -55,6 +65,9 @@ pub type KeysId = [u8; 32];
 
 /// Type alias for a channel id.
 pub type ChannelId = [u8; 32];
+
+/// The nSequence value used for CETs in DLC channels.
+pub const CET_NSEQUENCE: u32 = 288;
 
 /// Time trait to provide current unix time. Mainly defined to facilitate testing.
 pub trait Time {

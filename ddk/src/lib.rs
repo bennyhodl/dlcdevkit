@@ -2,45 +2,75 @@
 // #![doc = include_str!("../README.md")]
 #![allow(clippy::result_large_err)]
 
+/// Stateless DLC contract operations.
+///
+/// This is the only module available without the `manager` feature; it depends
+/// on nothing heavier than `ddk-manager` and is what FFI/mobile consumers bind.
+pub mod contract;
+
 /// Build a DDK application.
+#[cfg(feature = "manager")]
 pub mod builder;
 /// Working with the bitcoin chain.
+#[cfg(feature = "manager")]
 pub mod chain;
+#[cfg(feature = "manager")]
 mod ddk;
 /// DDK error types
+#[cfg(feature = "manager")]
 pub mod error;
 /// JSON structs
+#[cfg(feature = "manager")]
 pub mod json;
 /// Logging infrastructure
+#[cfg(feature = "manager")]
 pub mod logger;
 /// Nostr related functions.
 #[cfg(feature = "nostr")]
 pub mod nostr;
 /// Oracle clients.
+#[cfg(feature = "manager")]
 pub mod oracle;
 /// Storage implementations.
+#[cfg(feature = "manager")]
 pub mod storage;
 /// Transport services.
+#[cfg(feature = "manager")]
 pub mod transport;
 /// DLC utilities.
+#[cfg(feature = "manager")]
 pub mod util;
 /// The internal [`bdk_wallet::PersistedWallet`].
+#[cfg(feature = "manager")]
 pub mod wallet;
 
-/// DDK object with all services
-pub use ddk::DlcDevKit;
-pub use ddk::DlcManagerMessage;
 pub use ddk_manager;
 
+/// DDK object with all services
+#[cfg(feature = "manager")]
+pub use ddk::DlcDevKit;
+#[cfg(feature = "manager")]
+pub use ddk::DlcManagerMessage;
+
+#[cfg(feature = "manager")]
 use async_trait::async_trait;
+#[cfg(feature = "manager")]
 use bdk_wallet::ChangeSet;
+#[cfg(feature = "manager")]
 use bitcoin::secp256k1::{PublicKey, SecretKey};
+#[cfg(feature = "manager")]
 use bitcoin::Amount;
+#[cfg(feature = "manager")]
 use ddk::DlcDevKitDlcManager;
+#[cfg(feature = "manager")]
 use ddk_messages::Message;
+#[cfg(feature = "manager")]
 use error::TransportError;
+#[cfg(feature = "manager")]
 use error::WalletError;
+#[cfg(feature = "manager")]
 use std::sync::Arc;
+#[cfg(feature = "manager")]
 use tokio::sync::watch;
 
 /// Transport layer for DLC message communication.
@@ -66,6 +96,7 @@ use tokio::sync::watch;
 /// 3. Receive and process incoming messages
 /// 4. Maintain connection state
 #[async_trait]
+#[cfg(feature = "manager")]
 pub trait Transport: Send + Sync + 'static {
     /// Returns a unique identifier for this transport implementation.
     fn name(&self) -> String;
@@ -122,6 +153,7 @@ pub trait Transport: Send + Sync + 'static {
 /// - Sled storage (persistent, embedded)
 /// - In-memory storage (temporary, testing)
 #[async_trait]
+#[cfg(feature = "manager")]
 pub trait Storage: ddk_manager::Storage + Send + Sync + std::fmt::Debug + 'static {
     /// Initializes the BDK wallet storage and returns initial state.
     ///
@@ -150,6 +182,7 @@ pub trait Storage: ddk_manager::Storage + Send + Sync + std::fmt::Debug + 'stati
 /// - Key derivation paths
 /// - Multi-signature support
 /// - Key rotation policies
+#[cfg(feature = "manager")]
 pub trait KeyStorage {
     /// Retrieves a secret key by its identifier.
     fn get_secret_key(&self, key_id: [u8; 32]) -> Result<SecretKey, WalletError>;
@@ -170,6 +203,7 @@ pub trait KeyStorage {
 /// - Nostr-based oracles
 /// - API-based oracles
 /// - Local testing oracles
+#[cfg(feature = "manager")]
 pub trait Oracle: ddk_manager::Oracle + Send + Sync + 'static {
     /// Returns the name of this oracle implementation.
     fn name(&self) -> String;
@@ -187,6 +221,7 @@ pub trait Oracle: ddk_manager::Oracle + Send + Sync + 'static {
 /// - Contract fund tracking
 /// - Performance monitoring
 /// - Risk assessment
+#[cfg(feature = "manager")]
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct Balance {
     /// Total confirmed balance in the wallet
