@@ -14,6 +14,11 @@ const readline = require("node:readline/promises");
 //   node release.js 2.0.0-rc.1      # explicit version (overrides bump flag)
 //   node release.js --minor --dry   # validate without publishing
 //   node release.js --yes           # skip the confirmation prompt
+//
+// Pre-releases go through the explicit-version form. crates.io treats them as
+// opt-in (a `2.0` requirement never resolves to `2.0.0-rc.1`), the GitHub
+// release is flagged as a prerelease, and a later `node release.js` finalizes
+// it to the base version (2.0.0-rc.1 -> 2.0.0) rather than skipping past it.
 // ---------------------------------------------------------------------------
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry");
@@ -93,12 +98,72 @@ function currentVersion() {
   return m[1];
 }
 
-// Compute the next version from a bump keyword. Drops any pre-release suffix.
+// Compute the next version from a bump keyword. A patch bump off a pre-release
+// finalizes it (2.0.0-rc.1 -> 2.0.0) instead of stepping past the version the
+// release candidate was a candidate *for*.
 function nextVersion(cur, kind) {
-  const [maj, min, pat] = cur.split("-")[0].split(".").map(Number);
+  const base = cur.split("-")[0];
+  const [maj, min, pat] = base.split(".").map(Number);
   if (kind === "major") return `${maj + 1}.0.0`;
   if (kind === "minor") return `${maj}.${min + 1}.0`;
-  return `${maj}.${min}.${pat + 1}`;
+  return cur.includes("-") ? base : `${maj}.${min}.${pat + 1}`;
+}
+
+// Write `version` into [workspace.package]. Only the dry run calls this — it
+// stages the release state in the working tree and restores it afterwards. The
+// real run lets `cargo ws version` do the bump so Cargo.lock gets refreshed too.
+function setWorkspaceVersion(version) {
+  const content = fs.readFileSync("Cargo.toml", "utf8");
+  fs.writeFileSync(
+    "Cargo.toml",
+    content.replace(
+      /^(\[workspace\.package\][\s\S]*?^version = )".*"$/m,
+      `$1"${version}"`
+    )
+  );
+}
+
+// Re-pin the workspace-internal crates in [workspace.dependencies] to `version`.
+//
+// cargo-workspaces bumps [workspace.package] version but never touches
+// [workspace.dependencies]: every intra-workspace dep is declared
+// `workspace = true`, so there is nothing in the member manifests for it to
+// rewrite. The published manifests carry whatever requirement was last written
+// by hand.
+//
+// That is benign for a stable release — an older caret range still resolves to
+// the new version — but it silently breaks pre-releases, because `^1.0.11`
+// never matches `2.0.0-rc.1`. Without this, an rc of `ddk` would depend on the
+// last *stable* ddk-manager rather than the rc published alongside it.
+//
+// Returns true if anything changed.
+function pinWorkspaceDeps(version) {
+  let inSection = false;
+  let changed = 0;
+
+  const updated = fs
+    .readFileSync("Cargo.toml", "utf8")
+    .split("\n")
+    .map((line) => {
+      if (line.startsWith("[")) {
+        inSection = line.trim() === "[workspace.dependencies]";
+        return line;
+      }
+      // Only the workspace's own crates carry a `path`; third-party pins stay.
+      if (!inSection || !/\bpath\s*=/.test(line)) return line;
+      const pinned = line.replace(
+        /\bversion\s*=\s*"[^"]*"/,
+        `version = "${version}"`
+      );
+      if (pinned !== line) changed++;
+      return pinned;
+    })
+    .join("\n");
+
+  if (!changed) return false;
+  fs.writeFileSync("Cargo.toml", updated);
+  console.log(`   Pinned ${changed} workspace dependencies to ${version}`);
+  return true;
 }
 
 function checkCargoWs() {
@@ -278,7 +343,12 @@ Please create release notes with:
 5. Other notable changes
 6. Installation instructions showing how to add ddk = "${version}" to Cargo.toml
 
-Format as clean markdown suitable for a GitHub release. Be concise but informative.`;
+Format as clean markdown suitable for a GitHub release. Be concise but informative.
+
+Output the release notes and nothing else: the very first line must be the
+top-level heading, and the last line must be the last line of the notes. No
+preamble, no commentary addressed to whoever ran this, no trailing questions —
+the output is written verbatim into the GitHub release body.`;
 
   if (dryRun) {
     console.log("   [DRY RUN] Would generate release notes using Claude");
@@ -286,14 +356,21 @@ Format as clean markdown suitable for a GitHub release. Be concise but informati
   }
 
   try {
-    console.log("   Using Claude to generate release notes...");
+    // Measured at ~130s for a 12-commit range, so the ceiling is generous: the
+    // cost of waiting is a slow release, the cost of timing out is silently
+    // shipping the bare commit-list fallback below.
+    console.log("   Using Claude to generate release notes (up to 5 min)...");
     const tempPromptFile = `/tmp/release-prompt-${version}.txt`;
     fs.writeFileSync(tempPromptFile, prompt);
-    const claudeOutput = run(`claude -p "$(cat ${tempPromptFile})"`, {
-      allowFailure: true,
-      timeout: 60000,
-    });
-    fs.unlinkSync(tempPromptFile);
+    let claudeOutput;
+    try {
+      claudeOutput = run(`claude -p "$(cat ${tempPromptFile})"`, {
+        allowFailure: true,
+        timeout: 300000,
+      });
+    } finally {
+      fs.unlinkSync(tempPromptFile);
+    }
 
     if (!claudeOutput) throw new Error("Claude returned no output");
 
@@ -314,6 +391,50 @@ Format as clean markdown suitable for a GitHub release. Be concise but informati
   }
 }
 
+// Confirm every publishable crate actually landed on crates.io.
+//
+// cargo-workspaces reports a crate it couldn't publish as `warn publish failed
+// <crate>` and still exits 0 with `info success ok`. Without this check a
+// partial publish would sail straight into tagging, pushing, and cutting a
+// GitHub release for a version that isn't fully on the registry.
+function verifyPublished(version) {
+  const meta = JSON.parse(run("cargo metadata --no-deps --format-version 1"));
+  // `publish` is null when unrestricted and [] for `publish = false`.
+  const crates = meta.packages
+    .filter((p) => p.publish === null || p.publish.length > 0)
+    .map((p) => p.name)
+    .sort();
+
+  console.log(`\n🔎 Verifying ${crates.length} crates on crates.io...`);
+  const missing = [];
+  for (const name of crates) {
+    let found = false;
+    // The index lags the upload by a moment, so give each crate a few tries.
+    for (let attempt = 0; attempt < 5 && !found; attempt++) {
+      if (attempt > 0) run("sleep 5");
+      // crates.io rejects requests without a User-Agent with a 403.
+      const code = run(
+        `curl -s -A 'dlcdevkit-release-script' -o /dev/null -w '%{http_code}' ` +
+          `https://crates.io/api/v1/crates/${name}/${version}`,
+        { allowFailure: true }
+      );
+      found = code === "200";
+    }
+    console.log(`   ${found ? "✅" : "❌"} ${name} ${version}`);
+    if (!found) missing.push(name);
+  }
+
+  if (missing.length) {
+    console.error(
+      `\n❌ Not on crates.io: ${missing.join(", ")}\n` +
+        `   Stopping before the tag, push, and GitHub release. Re-run the same\n` +
+        `   command to resume — cargo-workspaces skips crates already published.`
+    );
+    process.exit(1);
+  }
+  console.log("✅ All crates verified on crates.io");
+}
+
 async function createGitHubRelease(version, releaseNotes) {
   console.log("\n🚀 Creating GitHub release...");
 
@@ -329,8 +450,10 @@ async function createGitHubRelease(version, releaseNotes) {
   try {
     const tempFile = `/tmp/release-notes-${version}.md`;
     fs.writeFileSync(tempFile, releaseNotes);
+    // Pre-releases must not displace the last stable release as "Latest".
+    const prerelease = version.includes("-") ? " --prerelease" : "";
     run(
-      `gh release create v${version} --title "v${version}" --notes-file ${tempFile}`
+      `gh release create v${version} --title "v${version}"${prerelease} --notes-file ${tempFile}`
     );
     fs.unlinkSync(tempFile);
     console.log(`✅ GitHub release v${version} created`);
@@ -384,10 +507,21 @@ async function release() {
     generateReleaseNotes(version);
 
     console.log("\n📦 Validating publish via cargo-workspaces (--dry-run)...");
-    runLive(
-      `cargo ws publish custom ${version} --force '*' --allow-branch '*' ` +
-        `--no-git-tag --no-git-push --dry-run --allow-dirty -y`
-    );
+    // Stage the exact manifest state the real run publishes — bumped version
+    // *and* re-pinned intra-workspace deps — so the dry run validates what will
+    // actually go to crates.io, then put Cargo.toml back byte-for-byte.
+    const original = fs.readFileSync("Cargo.toml", "utf8");
+    try {
+      setWorkspaceVersion(version);
+      pinWorkspaceDeps(version);
+      runLive(
+        `cargo ws publish --publish-as-is --allow-branch '*' ` +
+          `--no-git-tag --no-git-push --dry-run --allow-dirty -y`
+      );
+    } finally {
+      fs.writeFileSync("Cargo.toml", original);
+      console.log("   Restored Cargo.toml (Cargo.lock may have been refreshed)");
+    }
 
     console.log("\n🎉 Dry run complete. To perform the real release:");
     console.log(
@@ -421,21 +555,33 @@ async function release() {
   // If the branch is already bumped (resume after a mid-publish failure),
   // publish the existing versions as-is instead of re-versioning.
   const alreadyBumped = currentVersion() === version;
-  console.log("\n📦 Publishing crates to crates.io via cargo-workspaces...");
   if (alreadyBumped) {
-    console.log(`   (versions already at ${version} — publishing as-is)`);
-    runLive(
-      `cargo ws publish --publish-as-is --allow-branch 'release-*' ` +
-        `--no-git-tag --no-git-push -y`
-    );
+    console.log(`\n📦 Versions already at ${version} — skipping the bump`);
   } else {
+    console.log("\n📦 Bumping crate versions via cargo-workspaces...");
     runLive(
-      `cargo ws publish custom ${version} --force '*' ` +
+      `cargo ws version custom ${version} --force '*' ` +
         `--allow-branch 'release-*' --no-git-tag --no-git-push -y ` +
         `-m "chore: release v%v"`
     );
   }
+
+  // Pin [workspace.dependencies] to the version just bumped to. This has to
+  // happen *after* the bump — pinning first would leave the manifest asking for
+  // a version the local path crates don't yet have, which `cargo metadata`
+  // refuses to resolve. Idempotent, so a resumed run is a no-op here.
+  if (pinWorkspaceDeps(version)) {
+    run(`git commit -m "chore: pin workspace deps to v${version}" -- Cargo.toml`);
+    console.log("✅ Workspace dependency pins committed");
+  }
+
+  console.log("\n📦 Publishing crates to crates.io via cargo-workspaces...");
+  runLive(
+    `cargo ws publish --publish-as-is --allow-branch 'release-*' ` +
+      `--no-git-tag --no-git-push -y`
+  );
   console.log("✅ All crates published");
+  verifyPublished(version);
 
   // Step 7: tag the release commit (cargo ws tagging is disabled above so this
   // is the single source of truth and is idempotent across resumes).
