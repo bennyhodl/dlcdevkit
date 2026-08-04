@@ -3,7 +3,7 @@ resolver = "2"
 members = ["ddk", "dlc", "dlc-messages", "dlc-trie", "payouts", "ddk-node", "ddk-manager", "kormir", "testenv"]
 
 [workspace.package]
-version = "1.1.2"
+version = "2.0.0-rc.1"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/bennyhodl/dlcdevkit"
@@ -12,13 +12,13 @@ homepage = "https://github.com/bennyhodl/dlcdevkit"
 [workspace.dependencies]
 # Default-features are disabled here so no-std crates (dlc, dlc-messages, dlc-trie)
 # don't pull std. Std-using crates must opt in via `features = ["std"]`.
-ddk = { version = "1.0.11", path = "ddk", default-features = false }
-ddk-dlc = { version = "1.0.11", path = "dlc", default-features = false }
-ddk-messages = { version = "1.0.11", path = "dlc-messages", default-features = false }
-ddk-trie = { version = "1.0.11", path = "dlc-trie", default-features = false }
-ddk-manager = { version = "1.0.11", path = "ddk-manager", default-features = false }
-ddk-payouts = { version = "1.0.11", path = "payouts" }
-kormir = { version = "1.0.11", path = "kormir" }
+ddk = { version = "2.0.0-rc.1", path = "ddk", default-features = false }
+ddk-dlc = { version = "2.0.0-rc.1", path = "dlc", default-features = false }
+ddk-messages = { version = "2.0.0-rc.1", path = "dlc-messages", default-features = false }
+ddk-trie = { version = "2.0.0-rc.1", path = "dlc-trie", default-features = false }
+ddk-manager = { version = "2.0.0-rc.1", path = "ddk-manager", default-features = false }
+ddk-payouts = { version = "2.0.0-rc.1", path = "payouts" }
+kormir = { version = "2.0.0-rc.1", path = "kormir" }
 # Path-only (no version): cargo strips it from the published manifests.
 ddk-testenv = { path = "testenv" }
 
