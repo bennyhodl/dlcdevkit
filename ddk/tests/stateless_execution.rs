@@ -53,7 +53,7 @@ async fn enum_close(
     )
     .await;
 
-    let attestations = oracles.attest_enum("a").await;
+    let attestations = oracles.attest_enum(SETTLEMENT_OUTCOME).await;
     close_with_cet(&ctx, &contract, closer, &attestations).await;
 }
 
@@ -92,8 +92,9 @@ async fn numeric_close(
     )
     .await;
 
-    // Well inside the payout curve so the tolerated oracle spread stays in range.
-    let attestations = oracles.attest_numeric(500, with_difference).await;
+    let attestations = oracles
+        .attest_numeric(SETTLEMENT_VALUE, with_difference)
+        .await;
     close_with_cet(&ctx, &contract, closer, &attestations).await;
 }
 
@@ -445,68 +446,135 @@ async fn multiple_inputs_with_interleaved_serial_ids_close() {
 // A splice spends the previous contract's 2-of-2 funding output as an input to
 // the new contract. Both parties' previous funding keys are recomputed from the
 // previous contract's temporary id, never stored.
+//
+// The matrix mirrors the splice paths of
+// `ddk-manager/tests/manager_execution_tests.rs`: both contract shapes and a
+// disjoint one, one and several oracles, thresholds below the oracle count,
+// either party offering the splice, either party settling what it produced,
+// collateral going in and out, and chains of several splices before
+// settlement.
 
-/// Funds a contract, splices its funding output into a second single-funded
-/// contract with `delta` added to (or removed from) the funded amount, and
-/// settles the second contract.
+/// The collateral each round adds to or removes from the funding output.
+const SPLICE_AMOUNT: Amount = Amount::from_sat(100_000);
+
+/// One round of a splice chain: who offers the replacement contract, and which
+/// way the collateral moves.
+#[derive(Clone, Copy)]
+struct SpliceRound {
+    /// The side of the contract being spliced that offers the replacement.
+    ///
+    /// Both sides can splice: the party that offers the replacement is credited
+    /// with the whole of the previous funding output, whichever side of that
+    /// contract it was, so it also puts up the whole of the new collateral.
+    splicer: Party,
+    splice_in: bool,
+}
+
+impl SpliceRound {
+    fn splice_in(splicer: Party) -> Self {
+        Self {
+            splicer,
+            splice_in: true,
+        }
+    }
+
+    fn splice_out(splicer: Party) -> Self {
+        Self {
+            splicer,
+            splice_in: false,
+        }
+    }
+}
+
+/// Funds a contract of `shape`, replaces it once per round by splicing its
+/// funding output into the next one, and settles whatever the last round
+/// produced from `closer`.
 ///
-/// `splicer` names the side of the first contract that offers the second. Both
-/// sides can splice: the party that offers the replacement is credited with the
-/// whole of the previous funding output, whichever side of that contract it
-/// was.
-async fn splice_and_close(label: &str, splice_in: bool, splicer: Party) {
+/// Every contract in the chain has the shape the scenario named, over oracles
+/// and an event of its own, so each round settles on its own attestation. Each
+/// replacement is single-funded by the party that offers it: the splice input
+/// carries the previous contract's whole funded amount, with
+/// [`SPLICE_AMOUNT`] added from that party's wallet or returned to it.
+async fn splice_chain_and_close(
+    label: &str,
+    shape: ContractShape,
+    rounds: &[SpliceRound],
+    closer: Party,
+) {
     let ctx = ChainContext::new(label).await;
 
-    // The contract being spliced.
-    let previous_id = temporary_contract_id(&format!("{label}-previous"));
-    let previous_oracles = TestOracles::enums(1, 1, &format!("{label}-previous")).await;
-    let previous = fund_contract(
+    // The contract the first round splices.
+    let first_label = format!("{label}-0");
+    let first_id = temporary_contract_id(&first_label);
+    let first = ShapedContract::new(shape, &first_label, OFFER_COLLATERAL, ACCEPT_COLLATERAL).await;
+    let mut previous = fund_contract(
         &ctx,
         ContractSetup::new(
-            enum_contract_info(&previous_oracles, TOTAL_COLLATERAL),
+            first.contract_info.clone(),
             OFFER_COLLATERAL,
-            previous_id,
-            TestParty::new(&ctx, PartySpec::new(Party::Offer, 41, 1), previous_id).await,
-            TestParty::new(&ctx, PartySpec::new(Party::Accept, 42, 2), previous_id).await,
+            first_id,
+            TestParty::new(&ctx, PartySpec::new(Party::Offer, 41, 1), first_id).await,
+            TestParty::new(&ctx, PartySpec::new(Party::Accept, 42, 2), first_id).await,
         ),
     )
     .await;
 
-    let splice_serial_id = 900;
-    let splice = previous.splice_setup_by(splicer, splice_serial_id);
-    let delta = Amount::from_sat(100_000);
-    let collateral = if splice_in {
-        previous.fund_value() + delta
-    } else {
-        previous.fund_value() - delta
-    };
+    let mut settled = None;
+    for (index, round) in rounds.iter().enumerate() {
+        let number = index + 1;
+        let round_label = format!("{label}-{number}");
+        let collateral = if round.splice_in {
+            previous.fund_value() + SPLICE_AMOUNT
+        } else {
+            previous.fund_value() - SPLICE_AMOUNT
+        };
+        // Only a numeric payout curve reads the split between the two sides;
+        // every shape locks their sum.
+        let offer_share = collateral / 2;
+        let spliced_shape =
+            ShapedContract::new(shape, &round_label, offer_share, collateral - offer_share).await;
 
-    // The spliced contract is single-funded by the offering party: the splice
-    // input carries the previous contract's whole funded amount.
-    let spliced_id = temporary_contract_id(&format!("{label}-spliced"));
-    let spliced_oracles = TestOracles::enums(1, 1, &format!("{label}-spliced")).await;
-    let offer_spec = if splice_in {
-        PartySpec::new(Party::Offer, 43, 10)
-    } else {
-        PartySpec::unfunded(Party::Offer, 43)
-    };
-    let spliced = fund_contract(
-        &ctx,
-        ContractSetup::new(
-            enum_contract_info(&spliced_oracles, collateral),
-            collateral,
-            spliced_id,
-            TestParty::new(&ctx, offer_spec, spliced_id).await,
-            TestParty::new(&ctx, PartySpec::unfunded(Party::Accept, 44), spliced_id).await,
+        let spliced_id = temporary_contract_id(&round_label);
+        let seed_byte = 43 + index as u8 * 2;
+        let offer_spec = if round.splice_in {
+            PartySpec::new(Party::Offer, seed_byte, 20 + number as u64)
+        } else {
+            PartySpec::unfunded(Party::Offer, seed_byte)
+        };
+        let spliced = fund_contract(
+            &ctx,
+            ContractSetup::new(
+                spliced_shape.contract_info.clone(),
+                collateral,
+                spliced_id,
+                TestParty::new(&ctx, offer_spec, spliced_id).await,
+                TestParty::new(
+                    &ctx,
+                    PartySpec::unfunded(Party::Accept, seed_byte + 1),
+                    spliced_id,
+                )
+                .await,
+            )
+            .with_splice(previous.splice_setup_by(round.splicer, 900 + number as u64)),
         )
-        .with_splice(splice),
-    )
-    .await;
+        .await;
 
-    assert_splice(&ctx, &previous, &spliced, splice_in).await;
+        assert_splice(&ctx, &previous, &spliced, round.splice_in).await;
 
-    let attestations = spliced_oracles.attest_enum("a").await;
-    close_with_cet(&ctx, &spliced, Party::Offer, &attestations).await;
+        previous = spliced;
+        settled = Some(spliced_shape);
+    }
+
+    let attestations = settled
+        .expect("a splice chain to have run a round")
+        .attest()
+        .await;
+    close_with_cet(&ctx, &previous, closer, &attestations).await;
+}
+
+/// A single splice of a contract of `shape`, settled by `closer`.
+async fn splice_and_close(label: &str, shape: ContractShape, round: SpliceRound, closer: Party) {
+    splice_chain_and_close(label, shape, &[round], closer).await;
 }
 
 /// Asserts that `spliced` replaced `previous`: it spends the previous funding
@@ -542,29 +610,183 @@ async fn assert_splice(
     }
 }
 
-#[tokio::test]
-#[ignore]
-async fn splice_in_funds_and_closes() {
-    splice_and_close("splice_in_funds_and_closes", true, Party::Offer).await;
-}
+// Enum contracts, one and several oracles.
 
 #[tokio::test]
 #[ignore]
-async fn splice_out_funds_and_closes() {
-    splice_and_close("splice_out_funds_and_closes", false, Party::Offer).await;
-}
-
-/// The side that *accepted* the contract can splice it too.
-///
-/// This is the case the stateful manager got wrong: the two keys in a
-/// [`DlcInput`] are ordered by who offers the splice, not by who offered the
-/// contract being spliced, and the party that reads them has to agree.
-#[tokio::test]
-#[ignore]
-async fn splice_in_by_accept_party_funds_and_closes() {
+async fn splice_in_enum_single_oracle_closes() {
     splice_and_close(
-        "splice_in_by_accept_party_funds_and_closes",
-        true,
+        "splice_in_enum_single_oracle_closes",
+        ContractShape::enums(1, 1),
+        SpliceRound::splice_in(Party::Offer),
+        Party::Offer,
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn splice_out_enum_single_oracle_closes() {
+    splice_and_close(
+        "splice_out_enum_single_oracle_closes",
+        ContractShape::enums(1, 1),
+        SpliceRound::splice_out(Party::Offer),
+        Party::Offer,
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn splice_in_enum_three_of_three_oracles_closes() {
+    splice_and_close(
+        "splice_in_enum_three_of_three_oracles_closes",
+        ContractShape::enums(3, 3),
+        SpliceRound::splice_in(Party::Offer),
+        Party::Offer,
+    )
+    .await;
+}
+
+/// A threshold below the oracle count, settled by the accepting party.
+#[tokio::test]
+#[ignore]
+async fn splice_out_enum_three_of_five_oracles_closes() {
+    splice_and_close(
+        "splice_out_enum_three_of_five_oracles_closes",
+        ContractShape::enums(5, 3),
+        SpliceRound::splice_out(Party::Offer),
+        Party::Accept,
+    )
+    .await;
+}
+
+// Numeric contracts, with and without a tolerated oracle spread.
+
+#[tokio::test]
+#[ignore]
+async fn splice_in_numeric_single_oracle_closes() {
+    splice_and_close(
+        "splice_in_numeric_single_oracle_closes",
+        ContractShape::numeric(1, 1),
+        SpliceRound::splice_in(Party::Offer),
+        Party::Offer,
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn splice_out_numeric_single_oracle_closes() {
+    splice_and_close(
+        "splice_out_numeric_single_oracle_closes",
+        ContractShape::numeric(1, 1),
+        SpliceRound::splice_out(Party::Offer),
+        Party::Offer,
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn splice_in_numeric_three_of_three_oracles_closes() {
+    splice_and_close(
+        "splice_in_numeric_three_of_three_oracles_closes",
+        ContractShape::numeric(3, 3),
+        SpliceRound::splice_in(Party::Offer),
+        Party::Offer,
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn splice_in_numeric_with_difference_three_of_five_oracles_closes() {
+    splice_and_close(
+        "splice_in_numeric_with_difference_three_of_five_oracles_closes",
+        ContractShape::numeric_with_difference(5, 3),
+        SpliceRound::splice_in(Party::Offer),
+        Party::Offer,
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn splice_out_numeric_with_difference_three_of_five_oracles_closes() {
+    splice_and_close(
+        "splice_out_numeric_with_difference_three_of_five_oracles_closes",
+        ContractShape::numeric_with_difference(5, 3),
+        SpliceRound::splice_out(Party::Offer),
+        Party::Accept,
+    )
+    .await;
+}
+
+// Disjoint contracts: the spliced contract settles on whichever of its two
+// events is attested.
+
+#[tokio::test]
+#[ignore]
+async fn splice_in_disjoint_three_of_five_oracles_closes_on_the_enum_event() {
+    splice_and_close(
+        "splice_in_disjoint_three_of_five_oracles_closes_on_the_enum_event",
+        ContractShape::disjoint(5, 3, DisjointEvent::Enum),
+        SpliceRound::splice_in(Party::Offer),
+        Party::Offer,
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn splice_out_disjoint_three_of_five_oracles_closes_on_the_numeric_event() {
+    splice_and_close(
+        "splice_out_disjoint_three_of_five_oracles_closes_on_the_numeric_event",
+        ContractShape::disjoint(5, 3, DisjointEvent::Numeric),
+        SpliceRound::splice_out(Party::Offer),
+        Party::Accept,
+    )
+    .await;
+}
+
+// Splices offered by the accepting party.
+//
+// This is the case the stateful manager got wrong: the two keys in a
+// [`DlcInput`] are ordered by who offers the splice, not by who offered the
+// contract being spliced, and the party that reads them has to agree.
+
+#[tokio::test]
+#[ignore]
+async fn splice_in_by_accept_party_closes() {
+    splice_and_close(
+        "splice_in_by_accept_party_closes",
+        ContractShape::enums(1, 1),
+        SpliceRound::splice_in(Party::Accept),
+        Party::Offer,
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn splice_out_by_accept_party_closes() {
+    splice_and_close(
+        "splice_out_by_accept_party_closes",
+        ContractShape::enums(1, 1),
+        SpliceRound::splice_out(Party::Accept),
+        Party::Offer,
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn splice_in_enum_three_of_five_oracles_by_accept_party_closes() {
+    splice_and_close(
+        "splice_in_enum_three_of_five_oracles_by_accept_party_closes",
+        ContractShape::enums(5, 3),
+        SpliceRound::splice_in(Party::Accept),
         Party::Accept,
     )
     .await;
@@ -572,94 +794,31 @@ async fn splice_in_by_accept_party_funds_and_closes() {
 
 #[tokio::test]
 #[ignore]
-async fn splice_out_by_accept_party_funds_and_closes() {
+async fn splice_out_numeric_with_difference_three_of_five_oracles_by_accept_party_closes() {
     splice_and_close(
-        "splice_out_by_accept_party_funds_and_closes",
-        false,
+        "splice_out_numeric_with_difference_three_of_five_oracles_by_accept_party_closes",
+        ContractShape::numeric_with_difference(5, 3),
+        SpliceRound::splice_out(Party::Accept),
         Party::Accept,
     )
     .await;
 }
 
-/// Splices a contract twice, with the given side offering each round, and
-/// settles whatever the last round produced.
-///
-/// Each round splices the contract the previous round produced, so the second
-/// round proves a spliced contract is itself spliceable.
-async fn splice_chain_and_close(label: &str, rounds: [(bool, Party); 2]) {
-    let ctx = ChainContext::new(label).await;
-
-    let first_id = temporary_contract_id(&format!("{label}-0"));
-    let first_oracles = TestOracles::enums(1, 1, &format!("{label}-0")).await;
-    let mut previous = fund_contract(
-        &ctx,
-        ContractSetup::new(
-            enum_contract_info(&first_oracles, TOTAL_COLLATERAL),
-            OFFER_COLLATERAL,
-            first_id,
-            TestParty::new(&ctx, PartySpec::new(Party::Offer, 91, 1), first_id).await,
-            TestParty::new(&ctx, PartySpec::new(Party::Accept, 92, 2), first_id).await,
-        ),
-    )
-    .await;
-
-    let delta = Amount::from_sat(100_000);
-    let mut oracles = None;
-
-    for (index, (splice_in, splicer)) in rounds.iter().enumerate() {
-        let round = index + 1;
-        let serial_id = 900 + round as u64;
-        let splice = previous.splice_setup_by(*splicer, serial_id);
-        let collateral = if *splice_in {
-            previous.fund_value() + delta
-        } else {
-            previous.fund_value() - delta
-        };
-
-        let spliced_id = temporary_contract_id(&format!("{label}-{round}"));
-        let spliced_oracles = TestOracles::enums(1, 1, &format!("{label}-{round}")).await;
-        let offer_spec = if *splice_in {
-            PartySpec::new(Party::Offer, 93 + round as u8 * 2, 20 + round as u64)
-        } else {
-            PartySpec::unfunded(Party::Offer, 93 + round as u8 * 2)
-        };
-        let spliced = fund_contract(
-            &ctx,
-            ContractSetup::new(
-                enum_contract_info(&spliced_oracles, collateral),
-                collateral,
-                spliced_id,
-                TestParty::new(&ctx, offer_spec, spliced_id).await,
-                TestParty::new(
-                    &ctx,
-                    PartySpec::unfunded(Party::Accept, 94 + round as u8 * 2),
-                    spliced_id,
-                )
-                .await,
-            )
-            .with_splice(splice),
-        )
-        .await;
-
-        assert_splice(&ctx, &previous, &spliced, *splice_in).await;
-
-        previous = spliced;
-        oracles = Some(spliced_oracles);
-    }
-
-    let attestations = oracles
-        .expect("a splice chain to have run a round")
-        .attest_enum("a")
-        .await;
-    close_with_cet(&ctx, &previous, Party::Offer, &attestations).await;
-}
+// Chains: each round splices the contract the previous round produced, so
+// every round after the first proves a spliced contract is itself spliceable.
 
 #[tokio::test]
 #[ignore]
-async fn splice_chain_in_then_out_funds_and_closes() {
+async fn splice_chain_in_out_in_enum_closes() {
     splice_chain_and_close(
-        "splice_chain_in_then_out_funds_and_closes",
-        [(true, Party::Offer), (false, Party::Offer)],
+        "splice_chain_in_out_in_enum_closes",
+        ContractShape::enums(1, 1),
+        &[
+            SpliceRound::splice_in(Party::Offer),
+            SpliceRound::splice_out(Party::Offer),
+            SpliceRound::splice_in(Party::Offer),
+        ],
+        Party::Offer,
     )
     .await;
 }
@@ -667,10 +826,46 @@ async fn splice_chain_in_then_out_funds_and_closes() {
 /// A chain where the two sides take turns splicing.
 #[tokio::test]
 #[ignore]
-async fn splice_chain_alternating_parties_funds_and_closes() {
+async fn splice_chain_alternating_parties_closes() {
     splice_chain_and_close(
-        "splice_chain_alternating_parties_funds_and_closes",
-        [(true, Party::Offer), (false, Party::Accept)],
+        "splice_chain_alternating_parties_closes",
+        ContractShape::enums(1, 1),
+        &[
+            SpliceRound::splice_in(Party::Offer),
+            SpliceRound::splice_out(Party::Accept),
+            SpliceRound::splice_in(Party::Accept),
+        ],
+        Party::Offer,
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn splice_chain_multi_oracle_enum_closes() {
+    splice_chain_and_close(
+        "splice_chain_multi_oracle_enum_closes",
+        ContractShape::enums(3, 3),
+        &[
+            SpliceRound::splice_in(Party::Offer),
+            SpliceRound::splice_out(Party::Accept),
+        ],
+        Party::Accept,
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn splice_chain_numeric_closes() {
+    splice_chain_and_close(
+        "splice_chain_numeric_closes",
+        ContractShape::numeric(1, 1),
+        &[
+            SpliceRound::splice_in(Party::Offer),
+            SpliceRound::splice_out(Party::Accept),
+        ],
+        Party::Accept,
     )
     .await;
 }

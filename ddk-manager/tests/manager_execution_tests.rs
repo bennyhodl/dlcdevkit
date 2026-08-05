@@ -189,9 +189,9 @@ enum TestPath {
     Refund,
     ManualRefund,
     CooperativeClose,
-    /// Splice the funded contract one round per entry, then settle whatever the
-    /// last round produced.
-    Splice(Vec<SpliceRound>),
+    /// Splice the funded contract, then settle whatever the last round
+    /// produced.
+    Splice(SplicePath),
     BadAcceptCetSignature,
     BadAcceptRefundSignature,
     BadSignCetSignature,
@@ -215,6 +215,18 @@ impl Party {
             Party::Alice => Party::Bob,
         }
     }
+}
+
+/// A splice path: the rounds to run, and the party that settles the contract
+/// the last round produced.
+///
+/// The settling party matters whether it closes by hand or by periodic check:
+/// it is the one that broadcasts the CET, leaving the other to pick up its
+/// counterparty's close from the chain.
+#[derive(Eq, PartialEq, Clone, Debug)]
+struct SplicePath {
+    rounds: Vec<SpliceRound>,
+    closer: Party,
 }
 
 /// One round of a splice chain: who offers it, and how it moves the collateral.
@@ -714,19 +726,41 @@ async fn single_funded_dlc_test() {
 // A splice replaces a funded contract with another one, funded by spending the
 // first contract's 2-of-2 output. These run the same harness as every other
 // path, so a splice is asserted against the same state machine: the tests below
-// cover both contract shapes, one and several oracles, thresholds below the
-// oracle count, both parties initiating, collateral going both in and out, and
-// chains of several splices before settlement.
+// cover both contract shapes and a disjoint one, one and several oracles,
+// thresholds below the oracle count, both parties initiating, both parties
+// settling what a splice produced, collateral going both in and out, and chains
+// of several splices before settlement.
 // ---------------------------------------------------------------------------
 
-/// One splice-in offered by the party that offered the contract.
-fn splice_in() -> TestPath {
-    TestPath::Splice(vec![SpliceRound::splice_in(Party::Bob, SPLICE_AMOUNT)])
+/// A chain of splices, settled by `closer`.
+fn splice_chain(rounds: Vec<SpliceRound>, closer: Party) -> TestPath {
+    TestPath::Splice(SplicePath { rounds, closer })
 }
 
-/// One splice-out offered by the party that offered the contract.
+/// One splice-in offered by `initiator` and settled by `closer`.
+fn splice_in_by(initiator: Party, closer: Party) -> TestPath {
+    splice_chain(
+        vec![SpliceRound::splice_in(initiator, SPLICE_AMOUNT)],
+        closer,
+    )
+}
+
+/// One splice-out offered by `initiator` and settled by `closer`.
+fn splice_out_by(initiator: Party, closer: Party) -> TestPath {
+    splice_chain(
+        vec![SpliceRound::splice_out(initiator, SPLICE_AMOUNT)],
+        closer,
+    )
+}
+
+/// One splice-in offered and settled by the party that offered the contract.
+fn splice_in() -> TestPath {
+    splice_in_by(Party::Bob, Party::Bob)
+}
+
+/// One splice-out offered and settled by the party that offered the contract.
 fn splice_out() -> TestPath {
-    TestPath::Splice(vec![SpliceRound::splice_out(Party::Bob, SPLICE_AMOUNT)])
+    splice_out_by(Party::Bob, Party::Bob)
 }
 
 #[tokio::test]
@@ -905,7 +939,7 @@ async fn splice_out_enum_and_numerical_3_of_5_test() {
 async fn splice_in_by_accept_party_test() {
     manager_execution_test(
         get_enum_test_params(1, 1, None).await,
-        TestPath::Splice(vec![SpliceRound::splice_in(Party::Alice, SPLICE_AMOUNT)]),
+        splice_in_by(Party::Alice, Party::Bob),
         false,
     )
     .await;
@@ -916,8 +950,85 @@ async fn splice_in_by_accept_party_test() {
 async fn splice_out_by_accept_party_test() {
     manager_execution_test(
         get_enum_test_params(1, 1, None).await,
-        TestPath::Splice(vec![SpliceRound::splice_out(Party::Alice, SPLICE_AMOUNT)]),
+        splice_out_by(Party::Alice, Party::Bob),
         false,
+    )
+    .await;
+}
+
+/// The accepting party splicing a contract that several oracles settle.
+#[tokio::test]
+#[ignore]
+async fn splice_in_enum_3_of_5_by_accept_party_test() {
+    manager_execution_test(
+        get_enum_test_params(5, 3, None).await,
+        splice_in_by(Party::Alice, Party::Bob),
+        false,
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn splice_out_numerical_with_diff_3_of_5_by_accept_party_test() {
+    numerical_common(
+        5,
+        3,
+        get_polynomial_payout_curve_pieces,
+        Some(get_difference_params()),
+        false,
+        splice_out_by(Party::Alice, Party::Bob),
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn splice_in_enum_and_numerical_3_of_5_by_accept_party_test() {
+    manager_execution_test(
+        get_enum_and_numerical_test_params(5, 3, false, None).await,
+        splice_in_by(Party::Alice, Party::Bob),
+        false,
+    )
+    .await;
+}
+
+/// The accepting party settles what a splice produced, whichever side offered
+/// it: it broadcasts the CET and the offering party picks the close up from the
+/// chain.
+#[tokio::test]
+#[ignore]
+async fn splice_in_enum_3_of_3_closed_by_accept_party_test() {
+    manager_execution_test(
+        get_enum_test_params(3, 3, None).await,
+        splice_in_by(Party::Bob, Party::Alice),
+        false,
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn splice_out_numerical_3_of_3_closed_by_accept_party_test() {
+    numerical_common(
+        3,
+        3,
+        get_polynomial_payout_curve_pieces,
+        None,
+        false,
+        splice_out_by(Party::Bob, Party::Alice),
+    )
+    .await;
+}
+
+/// The accepting party both splices and settles, and closes it by hand.
+#[tokio::test]
+#[ignore]
+async fn splice_in_by_accept_party_manual_close_test() {
+    manager_execution_test(
+        get_enum_test_params(1, 1, None).await,
+        splice_in_by(Party::Alice, Party::Alice),
+        true,
     )
     .await;
 }
@@ -929,11 +1040,14 @@ async fn splice_out_by_accept_party_test() {
 async fn splice_chain_in_out_in_enum_test() {
     manager_execution_test(
         get_enum_test_params(1, 1, None).await,
-        TestPath::Splice(vec![
-            SpliceRound::splice_in(Party::Bob, SPLICE_AMOUNT),
-            SpliceRound::splice_out(Party::Bob, SPLICE_AMOUNT),
-            SpliceRound::splice_in(Party::Bob, SPLICE_AMOUNT),
-        ]),
+        splice_chain(
+            vec![
+                SpliceRound::splice_in(Party::Bob, SPLICE_AMOUNT),
+                SpliceRound::splice_out(Party::Bob, SPLICE_AMOUNT),
+                SpliceRound::splice_in(Party::Bob, SPLICE_AMOUNT),
+            ],
+            Party::Bob,
+        ),
         false,
     )
     .await;
@@ -945,11 +1059,14 @@ async fn splice_chain_in_out_in_enum_test() {
 async fn splice_chain_alternating_parties_test() {
     manager_execution_test(
         get_enum_test_params(1, 1, None).await,
-        TestPath::Splice(vec![
-            SpliceRound::splice_in(Party::Bob, SPLICE_AMOUNT),
-            SpliceRound::splice_out(Party::Alice, SPLICE_AMOUNT),
-            SpliceRound::splice_in(Party::Alice, SPLICE_AMOUNT),
-        ]),
+        splice_chain(
+            vec![
+                SpliceRound::splice_in(Party::Bob, SPLICE_AMOUNT),
+                SpliceRound::splice_out(Party::Alice, SPLICE_AMOUNT),
+                SpliceRound::splice_in(Party::Alice, SPLICE_AMOUNT),
+            ],
+            Party::Bob,
+        ),
         false,
     )
     .await;
@@ -960,10 +1077,13 @@ async fn splice_chain_alternating_parties_test() {
 async fn splice_chain_multi_oracle_enum_test() {
     manager_execution_test(
         get_enum_test_params(3, 3, None).await,
-        TestPath::Splice(vec![
-            SpliceRound::splice_in(Party::Bob, SPLICE_AMOUNT),
-            SpliceRound::splice_out(Party::Alice, SPLICE_AMOUNT),
-        ]),
+        splice_chain(
+            vec![
+                SpliceRound::splice_in(Party::Bob, SPLICE_AMOUNT),
+                SpliceRound::splice_out(Party::Alice, SPLICE_AMOUNT),
+            ],
+            Party::Alice,
+        ),
         false,
     )
     .await;
@@ -978,10 +1098,13 @@ async fn splice_chain_numerical_test() {
         get_polynomial_payout_curve_pieces,
         None,
         false,
-        TestPath::Splice(vec![
-            SpliceRound::splice_in(Party::Bob, SPLICE_AMOUNT),
-            SpliceRound::splice_out(Party::Alice, SPLICE_AMOUNT),
-        ]),
+        splice_chain(
+            vec![
+                SpliceRound::splice_in(Party::Bob, SPLICE_AMOUNT),
+                SpliceRound::splice_out(Party::Alice, SPLICE_AMOUNT),
+            ],
+            Party::Alice,
+        ),
     )
     .await;
 }
@@ -992,10 +1115,13 @@ async fn splice_chain_numerical_test() {
 async fn splice_chain_manual_close_test() {
     manager_execution_test(
         get_enum_test_params(1, 1, None).await,
-        TestPath::Splice(vec![
-            SpliceRound::splice_in(Party::Bob, SPLICE_AMOUNT),
-            SpliceRound::splice_in(Party::Alice, SPLICE_AMOUNT),
-        ]),
+        splice_chain(
+            vec![
+                SpliceRound::splice_in(Party::Bob, SPLICE_AMOUNT),
+                SpliceRound::splice_in(Party::Alice, SPLICE_AMOUNT),
+            ],
+            Party::Bob,
+        ),
         true,
     )
     .await;
@@ -1357,9 +1483,9 @@ async fn manager_execution_test_inner(test_params: TestParams, path: TestPath, m
             fund_contract(&mut ctx, contract_id, accept_msg).await;
             refund_path(&mut ctx, contract_id, &path, manual_close).await
         }
-        TestPath::Splice(rounds) => {
+        TestPath::Splice(splice) => {
             fund_contract(&mut ctx, contract_id, accept_msg).await;
-            splice_path(&mut ctx, &test_params, contract_id, rounds, manual_close).await
+            splice_path(&mut ctx, &test_params, contract_id, splice, manual_close).await
         }
     }
 
@@ -1814,9 +1940,10 @@ async fn splice_path(
     ctx: &mut TestContext,
     test_params: &TestParams,
     contract_id: ContractId,
-    rounds: &[SpliceRound],
+    path: &SplicePath,
     manual_close: bool,
 ) {
+    let rounds = &path.rounds;
     assert!(!rounds.is_empty(), "a splice path needs at least one round");
 
     // A splice offer names the contract it replaces. One this node does not
@@ -1863,7 +1990,7 @@ async fn splice_path(
         .expect_err("a splice offer for an already replaced contract must be refused");
 
     let splice_params = current_params.expect("a splice chain to have run a round");
-    settle_spliced_contract(ctx, &splice_params, current, manual_close).await;
+    settle_spliced_contract(ctx, &splice_params, current, path.closer, manual_close).await;
 
     // Every contract the chain replaced stays closed.
     for previous in replaced.iter().take(replaced.len() - 1) {
@@ -1872,15 +1999,20 @@ async fn splice_path(
     }
 }
 
-/// Settles the last contract of a splice chain and asserts its CET spends the
-/// splice funding output and pays only the two parties.
+/// Settles the last contract of a splice chain from `closer` and asserts its
+/// CET spends the splice funding output and pays only the two parties.
+///
+/// `closer` is the party that broadcasts the CET; the other one only learns of
+/// the close from the chain.
 async fn settle_spliced_contract(
     ctx: &mut TestContext,
     splice_params: &TestParams,
     contract_id: ContractId,
+    closer: Party,
     manual_close: bool,
 ) {
-    let spliced = signed_or_confirmed(ctx.contract(Party::Bob, &contract_id).await);
+    let other = closer.other();
+    let spliced = signed_or_confirmed(ctx.contract(closer, &contract_id).await);
     let splice_funding_txid = spliced
         .accepted_contract
         .dlc_transactions
@@ -1903,7 +2035,7 @@ async fn settle_spliced_contract(
     if manual_close {
         let attestations = get_attestations(splice_params).await;
         let contract = ctx
-            .bob
+            .manager(closer)
             .lock()
             .await
             .close_confirmed_contract(&contract_id, attestations)
@@ -1914,29 +2046,29 @@ async fn settle_spliced_contract(
             panic!("Invalid contract state {:?}", contract);
         };
 
-        let alice_contract = ctx.contract(Party::Alice, &contract_id).await;
-        let Contract::Confirmed(signed) = alice_contract else {
-            panic!("Invalid contract state: {:?}", alice_contract);
+        let other_contract = ctx.contract(other, &contract_id).await;
+        let Contract::Confirmed(signed) = other_contract else {
+            panic!("Invalid contract state: {:?}", other_contract);
         };
 
-        ctx.alice
+        ctx.manager(other)
             .lock()
             .await
             .on_counterparty_close(&signed, contract.signed_cet, 0)
             .await
             .expect("Error registering counterparty close");
     } else {
-        periodic_check!(ctx.bob, contract_id, PreClosed);
-        periodic_check!(ctx.alice, contract_id, PreClosed);
+        periodic_check!(ctx.manager(closer), contract_id, PreClosed);
+        periodic_check!(ctx.manager(other), contract_id, PreClosed);
     }
 
     ctx.mine(10).await;
     ctx.sync_wallets().await;
 
-    periodic_check!(ctx.bob, contract_id, Closed);
-    periodic_check!(ctx.alice, contract_id, Closed);
+    periodic_check!(ctx.manager(closer), contract_id, Closed);
+    periodic_check!(ctx.manager(other), contract_id, Closed);
 
-    let Contract::Closed(closed) = ctx.contract(Party::Bob, &contract_id).await else {
+    let Contract::Closed(closed) = ctx.contract(closer, &contract_id).await else {
         panic!("Spliced contract is not closed");
     };
     let closed_cet = closed.signed_cet.expect("a closed contract to have a CET");

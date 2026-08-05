@@ -583,6 +583,193 @@ pub fn difference_params() -> DifferenceParams {
     }
 }
 
+/// The enum outcome a scenario settles on. Index 0 of [`enum_outcomes`], so it
+/// pays the offering party the whole of the collateral.
+pub const SETTLEMENT_OUTCOME: &str = "a";
+
+/// The numeric outcome a scenario settles on.
+///
+/// Well inside the payout curve, so the spread a contract with difference
+/// params tolerates stays in range on both sides.
+pub const SETTLEMENT_VALUE: i64 = 500;
+
+/// Which event of a disjoint contract settles it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DisjointEvent {
+    Enum,
+    Numeric,
+}
+
+/// A contract shape, with the collateral left out: which events settle it, over
+/// how many oracles, and how many of them have to agree.
+///
+/// A splice chain builds a contract per round, each with its own oracles and
+/// its own collateral. A scenario names the shape once and every round
+/// instantiates it through [`ShapedContract::new`].
+#[derive(Clone, Copy, Debug)]
+pub enum ContractShape {
+    Enum {
+        nb_oracles: usize,
+        threshold: u16,
+    },
+    Numeric {
+        nb_oracles: usize,
+        threshold: u16,
+        with_difference: bool,
+    },
+    /// An enum event and a numeric event, either of which settles the contract;
+    /// `settle_on` names the one the scenario attests.
+    Disjoint {
+        nb_oracles: usize,
+        threshold: u16,
+        settle_on: DisjointEvent,
+    },
+}
+
+impl ContractShape {
+    pub fn enums(nb_oracles: usize, threshold: u16) -> Self {
+        ContractShape::Enum {
+            nb_oracles,
+            threshold,
+        }
+    }
+
+    pub fn numeric(nb_oracles: usize, threshold: u16) -> Self {
+        ContractShape::Numeric {
+            nb_oracles,
+            threshold,
+            with_difference: false,
+        }
+    }
+
+    /// A numeric contract that tolerates the oracles disagreeing by a bounded
+    /// amount, which only means anything above one oracle.
+    pub fn numeric_with_difference(nb_oracles: usize, threshold: u16) -> Self {
+        ContractShape::Numeric {
+            nb_oracles,
+            threshold,
+            with_difference: true,
+        }
+    }
+
+    pub fn disjoint(nb_oracles: usize, threshold: u16, settle_on: DisjointEvent) -> Self {
+        ContractShape::Disjoint {
+            nb_oracles,
+            threshold,
+            settle_on,
+        }
+    }
+}
+
+/// A [`ContractShape`] instantiated over its own oracles, for one collateral.
+///
+/// It holds the oracles it announced with, so the scenario that funded the
+/// contract can attest the event afterwards without tracking them itself.
+pub struct ShapedContract {
+    pub contract_info: ContractInfo,
+    enum_oracles: Option<TestOracles>,
+    numeric_oracles: Option<TestOracles>,
+    with_difference: bool,
+    settle_on: DisjointEvent,
+}
+
+impl ShapedContract {
+    /// Announces the events `shape` needs under event ids derived from `label`,
+    /// and builds the contract info locking
+    /// `offer_collateral + accept_collateral`.
+    ///
+    /// The split between the two collaterals only reaches the payout curve of a
+    /// numeric contract; every shape locks their sum.
+    pub async fn new(
+        shape: ContractShape,
+        label: &str,
+        offer_collateral: Amount,
+        accept_collateral: Amount,
+    ) -> Self {
+        match shape {
+            ContractShape::Enum {
+                nb_oracles,
+                threshold,
+            } => {
+                let oracles = TestOracles::enums(nb_oracles, threshold, label).await;
+                let contract_info =
+                    enum_contract_info(&oracles, offer_collateral + accept_collateral);
+                Self {
+                    contract_info,
+                    enum_oracles: Some(oracles),
+                    numeric_oracles: None,
+                    with_difference: false,
+                    settle_on: DisjointEvent::Enum,
+                }
+            }
+            ContractShape::Numeric {
+                nb_oracles,
+                threshold,
+                with_difference,
+            } => {
+                let oracles = TestOracles::numerics(nb_oracles, threshold, label).await;
+                let contract_info = numeric_contract_info(
+                    &oracles,
+                    offer_collateral,
+                    accept_collateral,
+                    with_difference.then(difference_params),
+                );
+                Self {
+                    contract_info,
+                    enum_oracles: None,
+                    numeric_oracles: Some(oracles),
+                    with_difference,
+                    settle_on: DisjointEvent::Numeric,
+                }
+            }
+            ContractShape::Disjoint {
+                nb_oracles,
+                threshold,
+                settle_on,
+            } => {
+                let enum_oracles =
+                    TestOracles::enums(nb_oracles, threshold, &format!("{label}-enum")).await;
+                let numeric_oracles =
+                    TestOracles::numerics(nb_oracles, threshold, &format!("{label}-numeric")).await;
+                let contract_info = disjoint_contract_info(
+                    &enum_oracles,
+                    &numeric_oracles,
+                    offer_collateral,
+                    accept_collateral,
+                );
+                Self {
+                    contract_info,
+                    enum_oracles: Some(enum_oracles),
+                    numeric_oracles: Some(numeric_oracles),
+                    with_difference: false,
+                    settle_on,
+                }
+            }
+        }
+    }
+
+    /// Attests the event this contract settles on, with as many oracles as its
+    /// threshold asks for.
+    pub async fn attest(&self) -> Vec<(usize, OracleAttestation)> {
+        match self.settle_on {
+            DisjointEvent::Enum => {
+                self.enum_oracles
+                    .as_ref()
+                    .expect("a contract settling on an enum event to have enum oracles")
+                    .attest_enum(SETTLEMENT_OUTCOME)
+                    .await
+            }
+            DisjointEvent::Numeric => {
+                self.numeric_oracles
+                    .as_ref()
+                    .expect("a contract settling on a numeric event to have numeric oracles")
+                    .attest_numeric(SETTLEMENT_VALUE, self.with_difference)
+                    .await
+            }
+        }
+    }
+}
+
 /// A funding input together with the derivation index of the key controlling it.
 pub struct PartyInput {
     pub funding_input: FundingInput,
