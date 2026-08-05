@@ -96,7 +96,7 @@ dotenvy = { workspace = true }
 # The `nostr`/`postgres` backends are enabled unconditionally rather than from
 # ddk's own features of the same name: a feature can't forward to a path-only
 # dev-dependency, because cargo strips that dependency when packaging.
-ddk-testenv = { workspace = true, features = ["nostr", "postgres"] }
+ddk-testenv = { workspace = true, features = ["dlc", "nostr", "postgres"] }
 
 [[example]]
 name = "lightning"

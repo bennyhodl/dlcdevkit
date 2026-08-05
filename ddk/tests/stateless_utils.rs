@@ -42,32 +42,23 @@ use ddk::storage::memory::MemoryStorage;
 use ddk::wallet::DlcDevKitWallet;
 use ddk_dlc::secp256k1_zkp::{All, PublicKey, Secp256k1, SecretKey};
 use ddk_dlc::DlcTransactions;
-use ddk_manager::contract::numerical_descriptor::{DifferenceParams, NumericalDescriptor};
-use ddk_manager::payout_curve::{RoundingInterval, RoundingIntervals};
-use ddk_manager::{Blockchain, Oracle};
-use ddk_messages::contract_msgs::{
-    ContractDescriptor, ContractInfo, ContractInfoInner, ContractOutcome, DisjointContractInfo,
-    EnumeratedContractDescriptor, NumericOutcomeContractDescriptor, SingleContractInfo,
-};
-use ddk_messages::oracle_msgs::{
-    MultiOracleInfo, OracleAnnouncement, OracleAttestation, OracleInfo, OracleParams,
-    SingleOracleInfo,
-};
+use ddk_manager::contract::numerical_descriptor::DifferenceParams;
+use ddk_manager::Blockchain;
+use ddk_messages::contract_msgs::ContractInfo;
+use ddk_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
 use ddk_messages::{AcceptDlc, FundingInput, OfferDlc, SignDlc};
+use ddk_testenv::dlc;
 use ddk_testenv::TestEnv;
-use ddk_trie::OracleNumericInfo;
 use std::str::FromStr;
+
+// Oracles, events and contract descriptors are the same in both DLC test
+// suites, so they come from [`ddk_testenv::dlc`] rather than from here.
+pub use ddk_testenv::dlc::{
+    difference_params, max_value as max_numeric_value, SpliceDelta, EVENT_MATURITY, NB_DIGITS,
+};
 
 /// The chain every test runs against.
 pub const NETWORK: Network = Network::Regtest;
-
-/// Oracle event maturity, deliberately in the past.
-///
-/// CET and refund locktimes are derived from it, and regtest block timestamps
-/// track the real wall clock, so both are already spendable the moment the
-/// funding transaction confirms. This is the same trick the manager execution
-/// tests use.
-pub const EVENT_MATURITY: u32 = 1_623_133_104;
 
 /// Distance between the oracle maturity and the refund locktime.
 pub const REFUND_DELAY: u32 = 604_800;
@@ -75,11 +66,6 @@ pub const REFUND_DELAY: u32 = 604_800;
 /// The accepting party's timeout policy, satisfied exactly by [`REFUND_DELAY`].
 pub const MIN_TIMEOUT_INTERVAL: u32 = REFUND_DELAY;
 pub const MAX_TIMEOUT_INTERVAL: u32 = REFUND_DELAY;
-
-pub const BASE: u32 = 2;
-pub const NB_DIGITS: u16 = 10;
-pub const MIN_SUPPORT_EXP: usize = 1;
-pub const MAX_ERROR_EXP: usize = 2;
 
 pub const OFFER_COLLATERAL: Amount = Amount::from_sat(1_000_000);
 pub const ACCEPT_COLLATERAL: Amount = Amount::from_sat(1_000_000);
@@ -323,18 +309,8 @@ pub struct TestOracles {
 impl TestOracles {
     /// Creates `nb_oracles` oracles announcing the same enum event.
     pub async fn enums(nb_oracles: usize, threshold: u16, event_id: &str) -> Self {
-        let mut oracles = Vec::with_capacity(nb_oracles);
-        let mut announcements = Vec::with_capacity(nb_oracles);
-        for _ in 0..nb_oracles {
-            let oracle = MemoryOracle::default();
-            let announcement = oracle
-                .oracle
-                .create_enum_event(event_id.to_string(), enum_outcomes(), EVENT_MATURITY)
-                .await
-                .unwrap();
-            announcements.push(announcement);
-            oracles.push(oracle);
-        }
+        let oracles = dlc::new_oracles(nb_oracles);
+        let announcements = dlc::announce_enum_event(&oracles, event_id, EVENT_MATURITY).await;
         Self {
             oracles,
             announcements,
@@ -345,25 +321,14 @@ impl TestOracles {
 
     /// Creates `nb_oracles` oracles announcing the same digit decomposition event.
     pub async fn numerics(nb_oracles: usize, threshold: u16, event_id: &str) -> Self {
-        let mut oracles = Vec::with_capacity(nb_oracles);
-        let mut announcements = Vec::with_capacity(nb_oracles);
-        for _ in 0..nb_oracles {
-            let oracle = MemoryOracle::default();
-            let announcement = oracle
-                .oracle
-                .create_numeric_event(
-                    event_id.to_string(),
-                    NB_DIGITS,
-                    false,
-                    0,
-                    "sats".to_string(),
-                    EVENT_MATURITY,
-                )
-                .await
-                .unwrap();
-            announcements.push(announcement);
-            oracles.push(oracle);
-        }
+        let oracles = dlc::new_oracles(nb_oracles);
+        let announcements = dlc::announce_numeric_event(
+            &oracles,
+            event_id,
+            &vec![NB_DIGITS as usize; nb_oracles],
+            EVENT_MATURITY,
+        )
+        .await;
         Self {
             oracles,
             announcements,
@@ -372,28 +337,23 @@ impl TestOracles {
         }
     }
 
-    /// Attests `outcome` with the first `threshold` oracles and returns the
-    /// attestations paired with their index in [`Self::announcements`].
-    pub async fn attest_enum(&self, outcome: &str) -> Vec<(usize, OracleAttestation)> {
-        let mut attestations = Vec::new();
-        for index in 0..self.threshold as usize {
-            self.oracles[index]
-                .oracle
-                .sign_enum_event(self.event_id.clone(), outcome.to_string())
-                .await
-                .unwrap();
-            attestations.push((
-                index,
-                self.oracles[index]
-                    .get_attestation(&self.event_id)
-                    .await
-                    .unwrap(),
-            ));
-        }
-        attestations
+    /// The oracles that settle a contract: the first `threshold` of them.
+    ///
+    /// Which oracles sign is this suite's own policy — the manager tests pick a
+    /// random subset above the threshold instead.
+    fn signers(&self) -> Vec<usize> {
+        (0..self.threshold as usize).collect()
     }
 
-    /// Attests a numeric outcome with the first `threshold` oracles.
+    /// Attests `outcome` with the settling oracles and returns the attestations
+    /// paired with their index in [`Self::announcements`].
+    pub async fn attest_enum(&self, outcome: &str) -> Vec<(usize, OracleAttestation)> {
+        let signers = self.signers();
+        dlc::sign_enum_event(&self.oracles, &self.event_id, &signers, outcome).await;
+        dlc::attestations(&self.oracles, &self.event_id, &signers).await
+    }
+
+    /// Attests a numeric outcome with the settling oracles.
     ///
     /// When `spread` is set the oracles after the first alternate one unit
     /// either side of `outcome`, which is the disagreement a contract with
@@ -403,9 +363,9 @@ impl TestOracles {
         outcome: i64,
         spread: bool,
     ) -> Vec<(usize, OracleAttestation)> {
-        let mut attestations = Vec::new();
-        for index in 0..self.threshold as usize {
-            let signed_outcome = if spread && index > 0 {
+        let signers = self.signers();
+        for index in &signers {
+            let signed_outcome = if spread && *index > 0 {
                 if index % 2 == 0 {
                     outcome + 1
                 } else {
@@ -414,74 +374,31 @@ impl TestOracles {
             } else {
                 outcome
             };
-            self.oracles[index]
-                .oracle
-                .sign_numeric_event(self.event_id.clone(), signed_outcome)
-                .await
-                .unwrap();
-            attestations.push((
-                index,
-                self.oracles[index]
-                    .get_attestation(&self.event_id)
-                    .await
-                    .unwrap(),
-            ));
+            dlc::sign_numeric_event(
+                &self.oracles,
+                &self.event_id,
+                std::slice::from_ref(index),
+                signed_outcome,
+            )
+            .await;
         }
-        attestations
+        dlc::attestations(&self.oracles, &self.event_id, &signers).await
     }
 
-    fn oracle_info(&self, oracle_params: Option<OracleParams>) -> OracleInfo {
-        if self.announcements.len() == 1 && oracle_params.is_none() {
-            OracleInfo::Single(SingleOracleInfo {
-                oracle_announcement: self.announcements[0].clone(),
-            })
-        } else {
-            OracleInfo::Multi(MultiOracleInfo {
-                threshold: self.threshold,
-                oracle_announcements: self.announcements.clone(),
-                oracle_params,
-            })
-        }
+    /// One event of a contract: `descriptor`, settled by these oracles.
+    fn leg(&self, descriptor: ddk_manager::contract::ContractDescriptor) -> dlc::ContractLeg {
+        dlc::ContractLeg::new(descriptor, self.announcements.clone(), self.threshold)
     }
 }
 
-pub fn enum_outcomes() -> Vec<String> {
-    vec![
-        "a".to_string(),
-        "b".to_string(),
-        "c".to_string(),
-        "d".to_string(),
-    ]
-}
-
-pub fn max_numeric_value() -> u64 {
-    (BASE as u64).pow(NB_DIGITS as u32) - 1
-}
-
-/// A two-outcome-per-side enum descriptor over [`enum_outcomes`].
-fn enum_descriptor(total_collateral: Amount) -> ContractDescriptor {
-    ContractDescriptor::EnumeratedContractDescriptor(EnumeratedContractDescriptor {
-        payouts: enum_outcomes()
-            .into_iter()
-            .enumerate()
-            .map(|(index, outcome)| ContractOutcome {
-                outcome,
-                offer_payout: if index % 2 == 0 {
-                    total_collateral
-                } else {
-                    Amount::ZERO
-                },
-            })
-            .collect(),
-    })
-}
-
+/// The payout curve every numeric contract in this suite runs on: a straight
+/// line from nothing to the whole collateral over the first 900 outcomes.
 fn numeric_descriptor(
-    nb_oracles: usize,
+    oracles: &TestOracles,
     offer_collateral: Amount,
     accept_collateral: Amount,
     difference_params: Option<DifferenceParams>,
-) -> ContractDescriptor {
+) -> ddk_manager::contract::ContractDescriptor {
     let payout_function = ddk_payouts::generate_payout_curve(
         0,
         900,
@@ -491,34 +408,19 @@ fn numeric_descriptor(
         max_numeric_value(),
     )
     .unwrap();
-    let numerical = NumericalDescriptor {
+    dlc::numeric_descriptor(
         payout_function,
-        rounding_intervals: RoundingIntervals {
-            intervals: vec![RoundingInterval {
-                begin_interval: 0,
-                rounding_mod: 1,
-            }],
-        },
+        dlc::numeric_infos(oracles.announcements.len()),
         difference_params,
-        oracle_numeric_infos: OracleNumericInfo {
-            base: BASE as usize,
-            nb_digits: vec![NB_DIGITS as usize; nb_oracles],
-        },
-    };
-    ContractDescriptor::NumericOutcomeContractDescriptor(NumericOutcomeContractDescriptor::from(
-        &numerical,
-    ))
+    )
 }
 
 /// A single-event enum contract.
 pub fn enum_contract_info(oracles: &TestOracles, total_collateral: Amount) -> ContractInfo {
-    ContractInfo::SingleContractInfo(SingleContractInfo {
+    dlc::contract_info(
+        &[oracles.leg(dlc::enum_descriptor(total_collateral))],
         total_collateral,
-        contract_info: ContractInfoInner {
-            contract_descriptor: enum_descriptor(total_collateral),
-            oracle_info: oracles.oracle_info(None),
-        },
-    })
+    )
 }
 
 /// A single-event numeric contract, optionally tolerating oracle disagreement.
@@ -528,23 +430,16 @@ pub fn numeric_contract_info(
     accept_collateral: Amount,
     difference_params: Option<DifferenceParams>,
 ) -> ContractInfo {
-    let oracle_params = difference_params.as_ref().map(|params| OracleParams {
-        max_error_exp: params.max_error_exp as u16,
-        min_fail_exp: params.min_support_exp as u16,
-        maximize_coverage: params.maximize_coverage,
-    });
-    ContractInfo::SingleContractInfo(SingleContractInfo {
-        total_collateral: offer_collateral + accept_collateral,
-        contract_info: ContractInfoInner {
-            contract_descriptor: numeric_descriptor(
-                oracles.announcements.len(),
-                offer_collateral,
-                accept_collateral,
-                difference_params,
-            ),
-            oracle_info: oracles.oracle_info(oracle_params),
-        },
-    })
+    let descriptor = numeric_descriptor(
+        oracles,
+        offer_collateral,
+        accept_collateral,
+        difference_params,
+    );
+    dlc::contract_info(
+        &[oracles.leg(descriptor)],
+        offer_collateral + accept_collateral,
+    )
 }
 
 /// A disjoint contract: either the enum event or the numeric event can settle it.
@@ -555,31 +450,200 @@ pub fn disjoint_contract_info(
     accept_collateral: Amount,
 ) -> ContractInfo {
     let total_collateral = offer_collateral + accept_collateral;
-    ContractInfo::DisjointContractInfo(DisjointContractInfo {
-        total_collateral,
-        contract_infos: vec![
-            ContractInfoInner {
-                contract_descriptor: enum_descriptor(total_collateral),
-                oracle_info: enum_oracles.oracle_info(None),
-            },
-            ContractInfoInner {
-                contract_descriptor: numeric_descriptor(
-                    numeric_oracles.announcements.len(),
-                    offer_collateral,
-                    accept_collateral,
-                    None,
-                ),
-                oracle_info: numeric_oracles.oracle_info(None),
-            },
+    let numeric = numeric_descriptor(numeric_oracles, offer_collateral, accept_collateral, None);
+    dlc::contract_info(
+        &[
+            enum_oracles.leg(dlc::enum_descriptor(total_collateral)),
+            numeric_oracles.leg(numeric),
         ],
-    })
+        total_collateral,
+    )
 }
 
-pub fn difference_params() -> DifferenceParams {
-    DifferenceParams {
-        max_error_exp: MAX_ERROR_EXP,
-        min_support_exp: MIN_SUPPORT_EXP,
-        maximize_coverage: false,
+/// The enum outcome a scenario settles on. Index 0 of [`enum_outcomes`], so it
+/// pays the offering party the whole of the collateral.
+pub const SETTLEMENT_OUTCOME: &str = "a";
+
+/// The numeric outcome a scenario settles on.
+///
+/// Well inside the payout curve, so the spread a contract with difference
+/// params tolerates stays in range on both sides.
+pub const SETTLEMENT_VALUE: i64 = 500;
+
+/// Which event of a disjoint contract settles it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DisjointEvent {
+    Enum,
+    Numeric,
+}
+
+/// A contract shape, with the collateral left out: which events settle it, over
+/// how many oracles, and how many of them have to agree.
+///
+/// A splice chain builds a contract per round, each with its own oracles and
+/// its own collateral. A scenario names the shape once and every round
+/// instantiates it through [`ShapedContract::new`].
+#[derive(Clone, Copy, Debug)]
+pub enum ContractShape {
+    Enum {
+        nb_oracles: usize,
+        threshold: u16,
+    },
+    Numeric {
+        nb_oracles: usize,
+        threshold: u16,
+        with_difference: bool,
+    },
+    /// An enum event and a numeric event, either of which settles the contract;
+    /// `settle_on` names the one the scenario attests.
+    Disjoint {
+        nb_oracles: usize,
+        threshold: u16,
+        settle_on: DisjointEvent,
+    },
+}
+
+impl ContractShape {
+    pub fn enums(nb_oracles: usize, threshold: u16) -> Self {
+        ContractShape::Enum {
+            nb_oracles,
+            threshold,
+        }
+    }
+
+    pub fn numeric(nb_oracles: usize, threshold: u16) -> Self {
+        ContractShape::Numeric {
+            nb_oracles,
+            threshold,
+            with_difference: false,
+        }
+    }
+
+    /// A numeric contract that tolerates the oracles disagreeing by a bounded
+    /// amount, which only means anything above one oracle.
+    pub fn numeric_with_difference(nb_oracles: usize, threshold: u16) -> Self {
+        ContractShape::Numeric {
+            nb_oracles,
+            threshold,
+            with_difference: true,
+        }
+    }
+
+    pub fn disjoint(nb_oracles: usize, threshold: u16, settle_on: DisjointEvent) -> Self {
+        ContractShape::Disjoint {
+            nb_oracles,
+            threshold,
+            settle_on,
+        }
+    }
+}
+
+/// A [`ContractShape`] instantiated over its own oracles, for one collateral.
+///
+/// It holds the oracles it announced with, so the scenario that funded the
+/// contract can attest the event afterwards without tracking them itself.
+pub struct ShapedContract {
+    pub contract_info: ContractInfo,
+    enum_oracles: Option<TestOracles>,
+    numeric_oracles: Option<TestOracles>,
+    with_difference: bool,
+    settle_on: DisjointEvent,
+}
+
+impl ShapedContract {
+    /// Announces the events `shape` needs under event ids derived from `label`,
+    /// and builds the contract info locking
+    /// `offer_collateral + accept_collateral`.
+    ///
+    /// The split between the two collaterals only reaches the payout curve of a
+    /// numeric contract; every shape locks their sum.
+    pub async fn new(
+        shape: ContractShape,
+        label: &str,
+        offer_collateral: Amount,
+        accept_collateral: Amount,
+    ) -> Self {
+        match shape {
+            ContractShape::Enum {
+                nb_oracles,
+                threshold,
+            } => {
+                let oracles = TestOracles::enums(nb_oracles, threshold, label).await;
+                let contract_info =
+                    enum_contract_info(&oracles, offer_collateral + accept_collateral);
+                Self {
+                    contract_info,
+                    enum_oracles: Some(oracles),
+                    numeric_oracles: None,
+                    with_difference: false,
+                    settle_on: DisjointEvent::Enum,
+                }
+            }
+            ContractShape::Numeric {
+                nb_oracles,
+                threshold,
+                with_difference,
+            } => {
+                let oracles = TestOracles::numerics(nb_oracles, threshold, label).await;
+                let contract_info = numeric_contract_info(
+                    &oracles,
+                    offer_collateral,
+                    accept_collateral,
+                    with_difference.then(difference_params),
+                );
+                Self {
+                    contract_info,
+                    enum_oracles: None,
+                    numeric_oracles: Some(oracles),
+                    with_difference,
+                    settle_on: DisjointEvent::Numeric,
+                }
+            }
+            ContractShape::Disjoint {
+                nb_oracles,
+                threshold,
+                settle_on,
+            } => {
+                let enum_oracles =
+                    TestOracles::enums(nb_oracles, threshold, &format!("{label}-enum")).await;
+                let numeric_oracles =
+                    TestOracles::numerics(nb_oracles, threshold, &format!("{label}-numeric")).await;
+                let contract_info = disjoint_contract_info(
+                    &enum_oracles,
+                    &numeric_oracles,
+                    offer_collateral,
+                    accept_collateral,
+                );
+                Self {
+                    contract_info,
+                    enum_oracles: Some(enum_oracles),
+                    numeric_oracles: Some(numeric_oracles),
+                    with_difference: false,
+                    settle_on,
+                }
+            }
+        }
+    }
+
+    /// Attests the event this contract settles on, with as many oracles as its
+    /// threshold asks for.
+    pub async fn attest(&self) -> Vec<(usize, OracleAttestation)> {
+        match self.settle_on {
+            DisjointEvent::Enum => {
+                self.enum_oracles
+                    .as_ref()
+                    .expect("a contract settling on an enum event to have enum oracles")
+                    .attest_enum(SETTLEMENT_OUTCOME)
+                    .await
+            }
+            DisjointEvent::Numeric => {
+                self.numeric_oracles
+                    .as_ref()
+                    .expect("a contract settling on a numeric event to have numeric oracles")
+                    .attest_numeric(SETTLEMENT_VALUE, self.with_difference)
+                    .await
+            }
+        }
     }
 }
 
