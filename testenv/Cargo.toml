@@ -17,6 +17,11 @@ default = []
 nostr = ["dep:nostr-relay-builder"]
 # Embedded PostgreSQL server, for the `postgres` storage tests.
 postgres = ["dep:postgresql_embedded"]
+# Oracles, events and contract shapes, shared by the `ddk` and `ddk-manager`
+# test suites. This depends on `ddk`, which depends on `ddk-manager`, both of
+# which depend on this crate in turn — a cycle cargo allows because theirs are
+# dev-dependencies.
+dlc = ["dep:ddk", "dep:ddk-dlc", "dep:ddk-manager", "dep:ddk-messages", "dep:ddk-trie"]
 
 [dependencies]
 bitcoin = { workspace = true, features = ["std"] }
@@ -24,6 +29,12 @@ bitcoincore-rpc = { workspace = true }
 bitcoind = { workspace = true }
 electrsd = { workspace = true }
 libc = "0.2"
+
+ddk = { workspace = true, features = ["manager"], optional = true }
+ddk-dlc = { workspace = true, optional = true }
+ddk-manager = { workspace = true, features = ["manager"], optional = true }
+ddk-messages = { workspace = true, optional = true }
+ddk-trie = { workspace = true, optional = true }
 
 nostr-relay-builder = { version = "0.44.1", optional = true }
 # Pinned to 0.19: 0.20+ raise the MSRV to 1.94, above this workspace's toolchain.

@@ -40,7 +40,7 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 ddk = { workspace = true, features = ["manager"] }
-ddk-testenv = { workspace = true }
+ddk-testenv = { workspace = true, features = ["dlc"] }
 bitcoincore-rpc = { workspace = true }
 bitcoincore-rpc-json = { workspace = true }
 criterion = "0.8.2"

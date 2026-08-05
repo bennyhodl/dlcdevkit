@@ -8,39 +8,41 @@ use bitcoincore_rpc::{Client, RpcApi};
 use bitcoincore_rpc_json::AddressType;
 use ddk::{chain::EsploraClient, logger::Logger, wallet::DlcDevKitWallet};
 use ddk::{oracle::memory::MemoryOracle, storage::memory::MemoryStorage};
-use ddk_dlc::{EnumerationPayout, Payout};
 use ddk_manager::payout_curve::{
-    PayoutFunction, PayoutFunctionPiece, PayoutPoint, PolynomialPayoutCurvePiece, RoundingInterval,
-    RoundingIntervals,
+    PayoutFunction, PayoutFunctionPiece, PayoutPoint, PolynomialPayoutCurvePiece,
 };
 use ddk_manager::Oracle;
 use ddk_manager::Time;
 use ddk_manager::{
     contract::{
-        contract_input::{ContractInput, ContractInputInfo, OracleInput},
-        enum_descriptor::EnumDescriptor,
-        numerical_descriptor::{DifferenceParams, NumericalDescriptor},
-        ContractDescriptor,
+        contract_input::ContractInput, numerical_descriptor::DifferenceParams, ContractDescriptor,
     },
     payout_curve::HyperbolaPayoutCurvePiece,
 };
+use ddk_messages::oracle_msgs::OracleAnnouncement;
+use ddk_testenv::dlc::{self, ContractLeg};
 use ddk_testenv::TestEnv;
 use ddk_trie::OracleNumericInfo;
 use secp256k1_zkp::rand::{seq::SliceRandom, thread_rng, Fill, RngCore};
 use std::fmt::Write;
 use std::{cell::RefCell, sync::Arc};
 
-pub const NB_DIGITS: u32 = 10;
-pub const MIN_SUPPORT_EXP: usize = 1;
-pub const MAX_ERROR_EXP: usize = 2;
-pub const BASE: u32 = 2;
-pub const EVENT_MATURITY: u32 = 1623133104;
+// Oracles, events and contract descriptors are the same in both DLC test
+// suites, so they come from [`ddk_testenv::dlc`] rather than from here.
+//
+// Several test binaries include this module, and each uses a different part of
+// it, so an item one of them leaves alone is not an unused import.
+#[allow(unused_imports)]
+pub use ddk_testenv::dlc::{
+    enum_outcomes, max_value_from_digits, SpliceDelta, BASE, EVENT_MATURITY, MIN_SUPPORT_EXP,
+};
+
+pub const NB_DIGITS: u32 = dlc::NB_DIGITS as u32;
 pub const EVENT_ID: &str = "Test";
 pub const OFFER_COLLATERAL: u64 = 90000000;
 pub const ACCEPT_COLLATERAL: u64 = 11000000;
 pub const TOTAL_COLLATERAL: Amount = Amount::from_sat(OFFER_COLLATERAL + ACCEPT_COLLATERAL);
 pub const MID_POINT: u64 = 5;
-pub const ROUNDING_MOD: u64 = 1;
 
 #[macro_export]
 macro_rules! receive_loop {
@@ -194,21 +196,8 @@ macro_rules! assert_channel_state_unlocked {
     }};
 }
 
-pub fn enum_outcomes() -> Vec<String> {
-    vec![
-        "a".to_owned(),
-        "b".to_owned(),
-        "c".to_owned(),
-        "d".to_owned(),
-    ]
-}
-
 pub fn max_value() -> u32 {
-    BASE.pow(NB_DIGITS) - 1
-}
-
-pub fn max_value_from_digits(nb_digits: usize) -> u32 {
-    BASE.pow(nb_digits as u32) - 1
+    max_value_from_digits(NB_DIGITS as usize) as u32
 }
 
 pub fn select_active_oracles(nb_oracles: usize, threshold: usize) -> Vec<usize> {
@@ -231,42 +220,11 @@ pub struct TestParams {
 }
 
 pub fn get_difference_params() -> DifferenceParams {
-    DifferenceParams {
-        max_error_exp: MAX_ERROR_EXP,
-        min_support_exp: MIN_SUPPORT_EXP,
-        maximize_coverage: false,
-    }
+    dlc::difference_params()
 }
 
 pub fn get_enum_contract_descriptor() -> ContractDescriptor {
-    enum_contract_descriptor(TOTAL_COLLATERAL)
-}
-
-/// An enum descriptor over [`enum_outcomes`] that pays the whole of
-/// `total_collateral` to alternating parties.
-pub fn enum_contract_descriptor(total_collateral: Amount) -> ContractDescriptor {
-    let outcome_payouts: Vec<_> = enum_outcomes()
-        .iter()
-        .enumerate()
-        .map(|(i, x)| {
-            let payout = if i % 2 == 0 {
-                Payout {
-                    offer: total_collateral,
-                    accept: Amount::ZERO,
-                }
-            } else {
-                Payout {
-                    offer: Amount::ZERO,
-                    accept: total_collateral,
-                }
-            };
-            EnumerationPayout {
-                outcome: x.to_owned(),
-                payout,
-            }
-        })
-        .collect();
-    ContractDescriptor::Enum(EnumDescriptor { outcome_payouts })
+    dlc::enum_descriptor(TOTAL_COLLATERAL)
 }
 
 pub async fn generate_blocks(nb_blocks: u32, electrs: Arc<EsploraClient>, sink: Arc<Client>) {
@@ -293,27 +251,26 @@ pub async fn generate_blocks(nb_blocks: u32, electrs: Arc<EsploraClient>, sink: 
 }
 
 pub async fn get_enum_oracle() -> MemoryOracle {
-    let oracle = MemoryOracle::default();
-
-    announce_enum_event(std::slice::from_ref(&oracle), EVENT_ID, EVENT_MATURITY).await;
-
-    oracle
+    let oracles = dlc::new_oracles(1);
+    announce_enum_event(&oracles, EVENT_ID, EVENT_MATURITY).await;
+    oracles.into_iter().next().expect("one oracle")
 }
 
 /// Announces `event_id` on every oracle as an enum event over
 /// [`enum_outcomes`], maturing at `maturity`.
-pub async fn announce_enum_event(oracles: &[MemoryOracle], event_id: &str, maturity: u32) {
-    for oracle in oracles {
-        oracle
-            .oracle
-            .create_enum_event(event_id.to_string(), enum_outcomes(), maturity)
-            .await
-            .unwrap();
-    }
+pub async fn announce_enum_event(
+    oracles: &[MemoryOracle],
+    event_id: &str,
+    maturity: u32,
+) -> Vec<OracleAnnouncement> {
+    dlc::announce_enum_event(oracles, event_id, maturity).await
 }
 
 /// Attests `event_id` on enough of `oracles` to satisfy `threshold`, and
 /// returns the outcome they signed.
+///
+/// Which oracles sign is this suite's own policy: a random subset at or above
+/// the threshold, on a random outcome.
 pub async fn attest_enum_event(
     oracles: &[MemoryOracle],
     event_id: &str,
@@ -321,26 +278,15 @@ pub async fn attest_enum_event(
 ) -> String {
     let outcomes = enum_outcomes();
     let outcome = outcomes[(thread_rng().next_u32() as usize) % outcomes.len()].clone();
-    for index in select_active_oracles(oracles.len(), threshold) {
-        oracles[index]
-            .oracle
-            .sign_enum_event(event_id.to_string(), outcome.clone())
-            .await
-            .unwrap();
-    }
-
+    let signers = select_active_oracles(oracles.len(), threshold);
+    dlc::sign_enum_event(oracles, event_id, &signers, &outcome).await;
     outcome
 }
 
 pub async fn get_enum_oracles(nb_oracles: usize, threshold: usize) -> Vec<MemoryOracle> {
-    let mut oracles: Vec<_> = vec![];
-    for _ in 0..nb_oracles {
-        let oracle = get_enum_oracle().await;
-        oracles.push(oracle);
-    }
-
+    let oracles = dlc::new_oracles(nb_oracles);
+    announce_enum_event(&oracles, EVENT_ID, EVENT_MATURITY).await;
     attest_enum_event(&oracles, EVENT_ID, threshold).await;
-
     oracles
 }
 
@@ -354,48 +300,43 @@ pub async fn get_enum_test_params(
         None => get_enum_oracles(nb_oracles, threshold).await,
     };
 
-    let contract_descriptor = get_enum_contract_descriptor();
-    let contract_info = ContractInputInfo {
-        contract_descriptor,
-        oracles: OracleInput {
-            public_keys: oracles.iter().map(|x| x.get_public_key()).collect(),
-            event_id: EVENT_ID.to_owned(),
-            threshold: threshold as u16,
-        },
-    };
-
-    let contract_input = ContractInput {
-        offer_collateral: Amount::from_sat(OFFER_COLLATERAL),
-        accept_collateral: Amount::from_sat(ACCEPT_COLLATERAL),
-        fee_rate: 2,
-        contract_flags: 0,
-        contract_infos: vec![contract_info],
-    };
+    let leg = ContractLeg::new(
+        get_enum_contract_descriptor(),
+        announcements(&oracles, EVENT_ID).await,
+        threshold as u16,
+    );
 
     TestParams {
+        contract_input: contract_input(&[leg]),
         oracles,
-        contract_input,
     }
 }
 
-/// How one splice round changes the collateral locked in a contract.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SpliceDelta {
-    /// Lock this much more, paid in from the splicing party's wallet.
-    In(Amount),
-    /// Release this much, paid back to the splicing party's change address.
-    Out(Amount),
+/// The announcements `oracles` made for `event_id`.
+///
+/// A [`ContractLeg`] is built from them: they name the oracles the manager has
+/// to ask, and they are what the wire form of the same contract carries.
+pub async fn announcements(oracles: &[MemoryOracle], event_id: &str) -> Vec<OracleAnnouncement> {
+    let mut announcements = Vec::with_capacity(oracles.len());
+    for oracle in oracles {
+        announcements.push(
+            oracle
+                .get_announcement(event_id)
+                .await
+                .expect("oracle announced this event"),
+        );
+    }
+    announcements
 }
 
-impl SpliceDelta {
-    /// The total collateral this round produces from a contract holding
-    /// `total`.
-    pub fn apply(self, total: Amount) -> Amount {
-        match self {
-            SpliceDelta::In(amount) => total + amount,
-            SpliceDelta::Out(amount) => total - amount,
-        }
-    }
+/// The dual funded contract this suite offers, over `legs`.
+fn contract_input(legs: &[ContractLeg]) -> ContractInput {
+    dlc::contract_input(
+        legs,
+        Amount::from_sat(OFFER_COLLATERAL),
+        Amount::from_sat(ACCEPT_COLLATERAL),
+        2,
+    )
 }
 
 /// The offering party's share of `total_collateral`, in the proportion the base
@@ -422,7 +363,7 @@ pub async fn splice_test_params(
     total_collateral: Amount,
     maturity: u32,
 ) -> TestParams {
-    let mut contract_infos = Vec::with_capacity(base.contract_input.contract_infos.len());
+    let mut legs = Vec::with_capacity(base.contract_input.contract_infos.len());
 
     for (index, info) in base.contract_input.contract_infos.iter().enumerate() {
         let event_id = format!("{EVENT_ID}-splice-{round}-{index}");
@@ -440,15 +381,16 @@ pub async fn splice_test_params(
             })
             .collect();
 
-        let contract_descriptor = match &info.contract_descriptor {
+        let (contract_descriptor, announcements) = match &info.contract_descriptor {
             ContractDescriptor::Enum(_) => {
-                announce_enum_event(&oracles, &event_id, maturity).await;
+                let announcements = announce_enum_event(&oracles, &event_id, maturity).await;
                 attest_enum_event(&oracles, &event_id, threshold).await;
-                enum_contract_descriptor(total_collateral)
+                (dlc::enum_descriptor(total_collateral), announcements)
             }
             ContractDescriptor::Numerical(numerical) => {
                 let numeric_infos = &numerical.oracle_numeric_infos;
-                announce_numeric_event(&oracles, &event_id, numeric_infos, maturity).await;
+                let announcements =
+                    announce_numeric_event(&oracles, &event_id, numeric_infos, maturity).await;
                 attest_numeric_event(
                     &oracles,
                     &event_id,
@@ -461,65 +403,44 @@ pub async fn splice_test_params(
                 // The curve is rebuilt rather than scaled: a spliced contract is
                 // a new contract, and only its family has to match the one it
                 // replaces.
-                ContractDescriptor::Numerical(NumericalDescriptor {
-                    payout_function: PayoutFunction::new(polynomial_payout_curve_pieces(
+                let descriptor = dlc::numeric_descriptor(
+                    PayoutFunction::new(polynomial_payout_curve_pieces(
                         numeric_infos.get_min_nb_digits(),
                         offer_share(total_collateral),
                         total_collateral,
                     ))
                     .unwrap(),
-                    rounding_intervals: numerical.rounding_intervals.clone(),
-                    oracle_numeric_infos: numeric_infos.clone(),
-                    difference_params: numerical.difference_params.clone(),
-                })
+                    numeric_infos.clone(),
+                    numerical.difference_params.clone(),
+                );
+                (descriptor, announcements)
             }
         };
 
-        contract_infos.push(ContractInputInfo {
+        legs.push(ContractLeg::new(
             contract_descriptor,
-            oracles: OracleInput {
-                public_keys: info.oracles.public_keys.clone(),
-                event_id,
-                threshold: info.oracles.threshold,
-            },
-        });
+            announcements,
+            info.oracles.threshold,
+        ));
     }
 
     TestParams {
         oracles: base.oracles.clone(),
-        contract_input: ContractInput {
-            offer_collateral: total_collateral,
-            accept_collateral: Amount::ZERO,
-            fee_rate: 2,
-            contract_flags: 0,
-            contract_infos,
-        },
+        contract_input: dlc::contract_input(&legs, total_collateral, Amount::ZERO, 2),
     }
 }
 
 pub async fn get_single_funded_test_params(nb_oracles: usize, threshold: usize) -> TestParams {
     let oracles = get_enum_oracles(nb_oracles, threshold).await;
-    let contract_descriptor = get_enum_contract_descriptor();
-    let contract_info = ContractInputInfo {
-        contract_descriptor,
-        oracles: OracleInput {
-            public_keys: oracles.iter().map(|x| x.get_public_key()).collect(),
-            event_id: EVENT_ID.to_owned(),
-            threshold: 1,
-        },
-    };
-
-    let contract_input = ContractInput {
-        offer_collateral: TOTAL_COLLATERAL,
-        accept_collateral: Amount::ZERO,
-        fee_rate: 5,
-        contract_flags: 0,
-        contract_infos: vec![contract_info],
-    };
+    let leg = ContractLeg::new(
+        get_enum_contract_descriptor(),
+        announcements(&oracles, EVENT_ID).await,
+        1,
+    );
 
     TestParams {
+        contract_input: dlc::contract_input(&[leg], TOTAL_COLLATERAL, Amount::ZERO, 5),
         oracles,
-        contract_input,
     }
 }
 
@@ -607,35 +528,17 @@ pub fn get_numerical_contract_descriptor(
     function_pieces: Vec<PayoutFunctionPiece>,
     difference_params: Option<DifferenceParams>,
 ) -> ContractDescriptor {
-    ContractDescriptor::Numerical(NumericalDescriptor {
-        payout_function: PayoutFunction::new(function_pieces).unwrap(),
-        rounding_intervals: RoundingIntervals {
-            intervals: vec![RoundingInterval {
-                begin_interval: 0,
-                rounding_mod: ROUNDING_MOD,
-            }],
-        },
+    dlc::numeric_descriptor(
+        PayoutFunction::new(function_pieces).unwrap(),
         oracle_numeric_infos,
         difference_params,
-    })
+    )
 }
 
 pub async fn get_digit_decomposition_oracle(nb_digits: u16) -> MemoryOracle {
-    let oracle = MemoryOracle::default();
-
-    oracle
-        .oracle
-        .create_numeric_event(
-            EVENT_ID.to_string(),
-            nb_digits,
-            false,
-            0,
-            "sats/sec".to_owned(),
-            EVENT_MATURITY,
-        )
-        .await
-        .unwrap();
-    oracle
+    let oracles = dlc::new_oracles(1);
+    dlc::announce_numeric_event(&oracles, EVENT_ID, &[nb_digits as usize], EVENT_MATURITY).await;
+    oracles.into_iter().next().expect("one oracle")
 }
 
 /// Announces `event_id` on every oracle as a digit decomposition event, sized
@@ -645,21 +548,8 @@ pub async fn announce_numeric_event(
     event_id: &str,
     oracle_numeric_infos: &OracleNumericInfo,
     maturity: u32,
-) {
-    for (oracle, nb_digits) in oracles.iter().zip(oracle_numeric_infos.nb_digits.iter()) {
-        oracle
-            .oracle
-            .create_numeric_event(
-                event_id.to_string(),
-                *nb_digits as u16,
-                false,
-                0,
-                "sats/sec".to_owned(),
-                maturity,
-            )
-            .await
-            .unwrap();
-    }
+) -> Vec<OracleAnnouncement> {
+    dlc::announce_numeric_event(oracles, event_id, &oracle_numeric_infos.nb_digits, maturity).await
 }
 
 pub async fn get_digit_decomposition_oracles(
@@ -668,10 +558,8 @@ pub async fn get_digit_decomposition_oracles(
     with_diff: bool,
     use_max_value: bool,
 ) -> Vec<MemoryOracle> {
-    let mut oracles = vec![];
-    for digit in &oracle_numeric_infos.nb_digits {
-        oracles.push(get_digit_decomposition_oracle(*digit as u16).await);
-    }
+    let oracles = dlc::new_oracles(oracle_numeric_infos.nb_digits.len());
+    announce_numeric_event(&oracles, EVENT_ID, oracle_numeric_infos, EVENT_MATURITY).await;
 
     attest_numeric_event(
         &oracles,
@@ -705,6 +593,7 @@ pub async fn attest_numeric_event(
         (thread_rng().next_u32() % max_value()) as usize
     };
     let oracle_indexes = select_active_oracles(oracle_numeric_infos.nb_digits.len(), threshold);
+    let all_oracles: Vec<usize> = (0..oracles.len()).collect();
 
     for (i, index) in oracle_indexes.iter().enumerate() {
         let cur_outcome: usize = if !use_max_value && (i == 0 || !with_diff) {
@@ -736,12 +625,10 @@ pub async fn attest_numeric_event(
             }
         };
 
-        for oracle in oracles {
-            let _sign_even_if_it_fails_spent_an_hour_tracking_ci_bug = oracle
-                .oracle
-                .sign_numeric_event(event_id.to_string(), cur_outcome as i64)
-                .await;
-        }
+        // Every oracle is offered every candidate outcome, and the one that
+        // takes it keeps it: an oracle that has already signed this event
+        // refuses the rest.
+        dlc::sign_numeric_event(oracles, event_id, &all_oracles, cur_outcome as i64).await;
     }
 }
 
@@ -755,26 +642,15 @@ pub async fn get_numerical_test_params(
     let oracles =
         get_digit_decomposition_oracles(oracle_numeric_infos, threshold, with_diff, use_max_value)
             .await;
-    let contract_info = ContractInputInfo {
-        oracles: OracleInput {
-            public_keys: oracles.iter().map(|x| x.get_public_key()).collect(),
-            event_id: EVENT_ID.to_owned(),
-            threshold: threshold as u16,
-        },
+    let leg = ContractLeg::new(
         contract_descriptor,
-    };
-
-    let contract_input = ContractInput {
-        offer_collateral: Amount::from_sat(OFFER_COLLATERAL),
-        accept_collateral: Amount::from_sat(ACCEPT_COLLATERAL),
-        fee_rate: 2,
-        contract_flags: 0,
-        contract_infos: vec![contract_info],
-    };
+        announcements(&oracles, EVENT_ID).await,
+        threshold as u16,
+    );
 
     TestParams {
+        contract_input: contract_input(&[leg]),
         oracles,
-        contract_input,
     }
 }
 
@@ -786,61 +662,40 @@ pub async fn get_enum_and_numerical_test_params(
 ) -> TestParams {
     let oracle_numeric_infos = get_same_num_digits_oracle_numeric_infos(nb_oracles);
     let enum_oracles = get_enum_oracles(nb_oracles, threshold).await;
-    let enum_contract_descriptor = get_enum_contract_descriptor();
-    let enum_contract_info = ContractInputInfo {
-        oracles: OracleInput {
-            public_keys: enum_oracles.iter().map(|x| x.get_public_key()).collect(),
-            event_id: EVENT_ID.to_owned(),
-            threshold: threshold as u16,
-        },
-        contract_descriptor: enum_contract_descriptor,
-    };
+    let enum_leg = ContractLeg::new(
+        get_enum_contract_descriptor(),
+        announcements(&enum_oracles, EVENT_ID).await,
+        threshold as u16,
+    );
+
     let numerical_oracles =
         get_digit_decomposition_oracles(&oracle_numeric_infos, threshold, with_diff, false).await;
-    let numerical_contract_descriptor = get_numerical_contract_descriptor(
-        get_same_num_digits_oracle_numeric_infos(nb_oracles),
-        get_polynomial_payout_curve_pieces(oracle_numeric_infos.get_min_nb_digits()),
-        difference_params,
+    let numerical_leg = ContractLeg::new(
+        get_numerical_contract_descriptor(
+            get_same_num_digits_oracle_numeric_infos(nb_oracles),
+            get_polynomial_payout_curve_pieces(oracle_numeric_infos.get_min_nb_digits()),
+            difference_params,
+        ),
+        announcements(&numerical_oracles, EVENT_ID).await,
+        threshold as u16,
     );
-    let numerical_contract_info = ContractInputInfo {
-        oracles: OracleInput {
-            public_keys: numerical_oracles
-                .iter()
-                .map(|x| x.get_public_key())
-                .collect(),
-            event_id: EVENT_ID.to_owned(),
-            threshold: threshold as u16,
-        },
-        contract_descriptor: numerical_contract_descriptor,
-    };
 
-    let contract_infos = if thread_rng().next_u32() % 2 == 0 {
-        vec![enum_contract_info, numerical_contract_info]
+    // Which event comes first is not fixed: a disjoint contract settles on
+    // whichever attests, in whatever order it was offered.
+    let legs = if thread_rng().next_u32() % 2 == 0 {
+        [enum_leg, numerical_leg]
     } else {
-        vec![numerical_contract_info, enum_contract_info]
-    };
-
-    let contract_input = ContractInput {
-        offer_collateral: Amount::from_sat(OFFER_COLLATERAL),
-        accept_collateral: Amount::from_sat(ACCEPT_COLLATERAL),
-        fee_rate: 2,
-        contract_flags: 0,
-        contract_infos,
+        [numerical_leg, enum_leg]
     };
 
     TestParams {
+        contract_input: contract_input(&legs),
         oracles: enum_oracles.into_iter().chain(numerical_oracles).collect(),
-        contract_input,
     }
 }
 
 pub fn get_same_num_digits_oracle_numeric_infos(nb_oracles: usize) -> OracleNumericInfo {
-    OracleNumericInfo {
-        nb_digits: std::iter::repeat(NB_DIGITS as usize)
-            .take(nb_oracles)
-            .collect(),
-        base: BASE as usize,
-    }
+    dlc::numeric_infos(nb_oracles)
 }
 
 pub fn get_variable_oracle_numeric_infos(nb_digits: &[usize]) -> OracleNumericInfo {
