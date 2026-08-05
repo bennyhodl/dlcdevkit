@@ -850,10 +850,14 @@ pub fn get_variable_oracle_numeric_infos(nb_digits: &[usize]) -> OracleNumericIn
     }
 }
 
+/// Syncs `wallet` until it sees `expected_funds` confirmed.
+///
+/// The balance is read inside the condition. Reading it once before the loop
+/// means the loop either never runs or runs to the retry limit against a value
+/// that can no longer change, so the wait it is there to perform never happens.
 pub async fn refresh_wallet(wallet: &DlcDevKitWallet, expected_funds: u64) {
     let mut retry = 0;
-    let balance = wallet.get_balance().await.unwrap().confirmed.to_sat();
-    while balance < expected_funds {
+    while wallet.get_balance().await.unwrap().confirmed.to_sat() < expected_funds {
         if retry > 30 {
             panic!("Wallet refresh taking too long.")
         }

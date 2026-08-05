@@ -447,9 +447,14 @@ async fn multiple_inputs_with_interleaved_serial_ids_close() {
 // previous contract's temporary id, never stored.
 
 /// Funds a contract, splices its funding output into a second single-funded
-/// contract with `collateral_delta` added to (or removed from) the funded
-/// amount, and settles the second contract.
-async fn splice_and_close(label: &str, splice_in: bool) {
+/// contract with `delta` added to (or removed from) the funded amount, and
+/// settles the second contract.
+///
+/// `splicer` names the side of the first contract that offers the second. Both
+/// sides can splice: the party that offers the replacement is credited with the
+/// whole of the previous funding output, whichever side of that contract it
+/// was.
+async fn splice_and_close(label: &str, splice_in: bool, splicer: Party) {
     let ctx = ChainContext::new(label).await;
 
     // The contract being spliced.
@@ -468,7 +473,7 @@ async fn splice_and_close(label: &str, splice_in: bool) {
     .await;
 
     let splice_serial_id = 900;
-    let splice = previous.splice_setup(splice_serial_id);
+    let splice = previous.splice_setup_by(splicer, splice_serial_id);
     let delta = Amount::from_sat(100_000);
     let collateral = if splice_in {
         previous.fund_value() + delta
@@ -498,8 +503,21 @@ async fn splice_and_close(label: &str, splice_in: bool) {
     )
     .await;
 
-    // The spliced funding transaction must spend the previous funding output
-    // with a complete 2-of-2 witness, which the node has now validated.
+    assert_splice(&ctx, &previous, &spliced, splice_in).await;
+
+    let attestations = spliced_oracles.attest_enum("a").await;
+    close_with_cet(&ctx, &spliced, Party::Offer, &attestations).await;
+}
+
+/// Asserts that `spliced` replaced `previous`: it spends the previous funding
+/// output with a complete 2-of-2 witness, and moves the funded amount the way
+/// the splice asked for.
+async fn assert_splice(
+    ctx: &ChainContext,
+    previous: &FundedContract,
+    spliced: &FundedContract,
+    splice_in: bool,
+) {
     ctx.assert_spent_by(previous.fund_outpoint(), &spliced.funding_transaction)
         .await;
     let splice_input = spliced
@@ -522,21 +540,139 @@ async fn splice_and_close(label: &str, splice_in: bool) {
             "a splice-out must decrease the funded amount"
         );
     }
-
-    let attestations = spliced_oracles.attest_enum("a").await;
-    close_with_cet(&ctx, &spliced, Party::Offer, &attestations).await;
 }
 
 #[tokio::test]
 #[ignore]
 async fn splice_in_funds_and_closes() {
-    splice_and_close("splice_in_funds_and_closes", true).await;
+    splice_and_close("splice_in_funds_and_closes", true, Party::Offer).await;
 }
 
 #[tokio::test]
 #[ignore]
 async fn splice_out_funds_and_closes() {
-    splice_and_close("splice_out_funds_and_closes", false).await;
+    splice_and_close("splice_out_funds_and_closes", false, Party::Offer).await;
+}
+
+/// The side that *accepted* the contract can splice it too.
+///
+/// This is the case the stateful manager got wrong: the two keys in a
+/// [`DlcInput`] are ordered by who offers the splice, not by who offered the
+/// contract being spliced, and the party that reads them has to agree.
+#[tokio::test]
+#[ignore]
+async fn splice_in_by_accept_party_funds_and_closes() {
+    splice_and_close(
+        "splice_in_by_accept_party_funds_and_closes",
+        true,
+        Party::Accept,
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn splice_out_by_accept_party_funds_and_closes() {
+    splice_and_close(
+        "splice_out_by_accept_party_funds_and_closes",
+        false,
+        Party::Accept,
+    )
+    .await;
+}
+
+/// Splices a contract twice, with the given side offering each round, and
+/// settles whatever the last round produced.
+///
+/// Each round splices the contract the previous round produced, so the second
+/// round proves a spliced contract is itself spliceable.
+async fn splice_chain_and_close(label: &str, rounds: [(bool, Party); 2]) {
+    let ctx = ChainContext::new(label).await;
+
+    let first_id = temporary_contract_id(&format!("{label}-0"));
+    let first_oracles = TestOracles::enums(1, 1, &format!("{label}-0")).await;
+    let mut previous = fund_contract(
+        &ctx,
+        ContractSetup::new(
+            enum_contract_info(&first_oracles, TOTAL_COLLATERAL),
+            OFFER_COLLATERAL,
+            first_id,
+            TestParty::new(&ctx, PartySpec::new(Party::Offer, 91, 1), first_id).await,
+            TestParty::new(&ctx, PartySpec::new(Party::Accept, 92, 2), first_id).await,
+        ),
+    )
+    .await;
+
+    let delta = Amount::from_sat(100_000);
+    let mut oracles = None;
+
+    for (index, (splice_in, splicer)) in rounds.iter().enumerate() {
+        let round = index + 1;
+        let serial_id = 900 + round as u64;
+        let splice = previous.splice_setup_by(*splicer, serial_id);
+        let collateral = if *splice_in {
+            previous.fund_value() + delta
+        } else {
+            previous.fund_value() - delta
+        };
+
+        let spliced_id = temporary_contract_id(&format!("{label}-{round}"));
+        let spliced_oracles = TestOracles::enums(1, 1, &format!("{label}-{round}")).await;
+        let offer_spec = if *splice_in {
+            PartySpec::new(Party::Offer, 93 + round as u8 * 2, 20 + round as u64)
+        } else {
+            PartySpec::unfunded(Party::Offer, 93 + round as u8 * 2)
+        };
+        let spliced = fund_contract(
+            &ctx,
+            ContractSetup::new(
+                enum_contract_info(&spliced_oracles, collateral),
+                collateral,
+                spliced_id,
+                TestParty::new(&ctx, offer_spec, spliced_id).await,
+                TestParty::new(
+                    &ctx,
+                    PartySpec::unfunded(Party::Accept, 94 + round as u8 * 2),
+                    spliced_id,
+                )
+                .await,
+            )
+            .with_splice(splice),
+        )
+        .await;
+
+        assert_splice(&ctx, &previous, &spliced, *splice_in).await;
+
+        previous = spliced;
+        oracles = Some(spliced_oracles);
+    }
+
+    let attestations = oracles
+        .expect("a splice chain to have run a round")
+        .attest_enum("a")
+        .await;
+    close_with_cet(&ctx, &previous, Party::Offer, &attestations).await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn splice_chain_in_then_out_funds_and_closes() {
+    splice_chain_and_close(
+        "splice_chain_in_then_out_funds_and_closes",
+        [(true, Party::Offer), (false, Party::Offer)],
+    )
+    .await;
+}
+
+/// A chain where the two sides take turns splicing.
+#[tokio::test]
+#[ignore]
+async fn splice_chain_alternating_parties_funds_and_closes() {
+    splice_chain_and_close(
+        "splice_chain_alternating_parties_funds_and_closes",
+        [(true, Party::Offer), (false, Party::Accept)],
+    )
+    .await;
 }
 
 // --- Funding input signers ------------------------------------------------
@@ -772,7 +908,7 @@ async fn splice_recovers_prior_keys_from_a_mnemonic() {
         previous.offerer.funding_pubkey(),
         "the spliced contract must use a fresh funding key"
     );
-    let splice = splice_from(&previous, &offerer, &accepter, 900);
+    let splice = splice_from(&previous, Party::Offer, &offerer, &accepter, 900);
 
     let spliced = fund_contract(
         &ctx,

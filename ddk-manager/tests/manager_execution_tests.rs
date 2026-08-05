@@ -1819,6 +1819,20 @@ async fn splice_path(
 ) {
     assert!(!rounds.is_empty(), "a splice path needs at least one round");
 
+    // A splice offer names the contract it replaces. One this node does not
+    // hold cannot be spliced, however well formed the rest of the offer is.
+    let unknown_contract_id: ContractId = [0xff; 32];
+    ctx.bob
+        .lock()
+        .await
+        .send_splice_offer(
+            &test_params.contract_input,
+            counter_party(),
+            &unknown_contract_id,
+        )
+        .await
+        .expect_err("a splice offer for an unknown contract must be refused");
+
     let mut replaced = vec![contract_id];
     let mut current = contract_id;
     let mut total = TOTAL_COLLATERAL;
@@ -1838,6 +1852,15 @@ async fn splice_path(
     // maturity settles it and nothing else.
     let last_maturity = EVENT_MATURITY + (rounds.len() as u32) * SPLICE_MATURITY_STEP;
     test_utils::set_time(last_maturity as u64 + 1);
+
+    // Every contract the chain replaced is closed, and a closed contract cannot
+    // be spliced a second time.
+    ctx.bob
+        .lock()
+        .await
+        .send_splice_offer(&test_params.contract_input, counter_party(), &contract_id)
+        .await
+        .expect_err("a splice offer for an already replaced contract must be refused");
 
     let splice_params = current_params.expect("a splice chain to have run a round");
     settle_spliced_contract(ctx, &splice_params, current, manual_close).await;
