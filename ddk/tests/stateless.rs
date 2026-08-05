@@ -1377,6 +1377,11 @@ struct PreparedSplice {
     splice_serial: u64,
     splice_input: FundingInput,
     prior_accept_key: SecretKey,
+    prior_offer_key: SecretKey,
+    /// The offering party's funding key and PSBT for contract B, so a test can
+    /// re-run the signing step with a different splice key.
+    offerer_b_funding_secret_key: SecretKey,
+    offer_psbt: Psbt,
     fund_outpoint_a: OutPoint,
     fund_value_a: Amount,
 }
@@ -1481,6 +1486,9 @@ fn prepare_splice(splice_in: bool) -> PreparedSplice {
         splice_serial,
         splice_input,
         prior_accept_key: accepter_a.funding_secret_key,
+        prior_offer_key: offerer_a.funding_secret_key,
+        offerer_b_funding_secret_key: offerer_b.funding_secret_key,
+        offer_psbt,
         fund_outpoint_a,
         fund_value_a,
     }
@@ -1599,6 +1607,52 @@ fn finalize_sign_spliced_rejects_a_wrong_prior_key() {
             &prepared.sign,
             &prepared.accept_psbt,
             std::slice::from_ref(&wrong_key),
+        ),
+        Err(ContractError::InvalidFundingInput(_))
+    ));
+}
+
+/// The two keys in a [`DlcInput`] are ordered by who offers the splice. A
+/// caller that gets that order wrong — by naming the wrong side of the previous
+/// contract — holds a key that controls the 2-of-2 but is the wrong half of it,
+/// and the signing side must say so rather than produce a signature nobody can
+/// use.
+#[test]
+fn sign_accept_spliced_rejects_the_counterparty_prior_key() {
+    let prepared = prepare_splice(true);
+    // A real key for the prior 2-of-2, but the other half of it.
+    let counterparty_key = DlcInputSigningKey {
+        input_serial_id: prepared.splice_serial,
+        prior_funding_secret_key: prepared.prior_accept_key,
+    };
+    assert!(matches!(
+        sign_accept_spliced(
+            &prepared.offer_b,
+            &prepared.accept_b,
+            &prepared.offerer_b_funding_secret_key,
+            &prepared.offer_psbt,
+            std::slice::from_ref(&counterparty_key),
+        ),
+        Err(ContractError::InvalidFundingInput(_))
+    ));
+}
+
+/// The same inversion on the accepting side: a key that controls the prior
+/// 2-of-2 but matches `local_fund_pubkey` rather than `remote_fund_pubkey`.
+#[test]
+fn finalize_sign_spliced_rejects_the_counterparty_prior_key() {
+    let prepared = prepare_splice(true);
+    let counterparty_key = DlcInputSigningKey {
+        input_serial_id: prepared.splice_serial,
+        prior_funding_secret_key: prepared.prior_offer_key,
+    };
+    assert!(matches!(
+        finalize_sign_spliced(
+            &prepared.offer_b,
+            &prepared.accept_b,
+            &prepared.sign,
+            &prepared.accept_psbt,
+            std::slice::from_ref(&counterparty_key),
         ),
         Err(ContractError::InvalidFundingInput(_))
     ));

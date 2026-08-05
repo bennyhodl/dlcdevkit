@@ -1012,7 +1012,31 @@ impl FundedContract {
     /// Builds the splice input that spends this contract's funding output,
     /// with each party recovering its own key for it.
     pub fn splice_setup(&self, input_serial_id: u64) -> SpliceSetup {
-        splice_from(self, &self.offerer, &self.accepter, input_serial_id)
+        self.splice_setup_by(Party::Offer, input_serial_id)
+    }
+
+    /// A splice of this contract offered by the side `splicer` names.
+    ///
+    /// The keys travel with the roles: `local_fund_pubkey` is the splicing
+    /// party's key in this contract, so the party that recovers it is the one
+    /// that offers the replacement.
+    pub fn splice_setup_by(&self, splicer: Party, input_serial_id: u64) -> SpliceSetup {
+        match splicer {
+            Party::Offer => splice_from(
+                self,
+                splicer,
+                &self.offerer,
+                &self.accepter,
+                input_serial_id,
+            ),
+            Party::Accept => splice_from(
+                self,
+                splicer,
+                &self.accepter,
+                &self.offerer,
+                input_serial_id,
+            ),
+        }
     }
 }
 
@@ -1020,11 +1044,18 @@ impl FundedContract {
 /// `accepter` each recovering their previous-contract funding key from their
 /// own key source.
 ///
+/// `splicer` names the side of `previous` that offers the replacement contract.
+/// It decides the order of the two keys in the [`DlcInput`], so `offerer` must
+/// be the party that held `previous`'s `splicer` side, and `accepter` the other
+/// one. Getting that pair the wrong way round is what the API's own key checks
+/// catch.
+///
 /// The parties passed here are the ones signing the *new* contract; they may be
 /// freshly constructed, which is the point — nothing about the previous
 /// contract's keys was carried over, only its temporary id and wire messages.
 pub fn splice_from(
     previous: &FundedContract,
+    splicer: Party,
     offerer: &TestParty,
     accepter: &TestParty,
     input_serial_id: u64,
@@ -1033,7 +1064,7 @@ pub fn splice_from(
         funding_input: create_dlc_splice_input(
             &previous.offer,
             &previous.accept,
-            Party::Offer,
+            splicer,
             Some(input_serial_id),
             DLC_INPUT_MAX_WITNESS_LEN,
         )

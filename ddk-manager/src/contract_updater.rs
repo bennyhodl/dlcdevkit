@@ -910,23 +910,41 @@ where
         // from the offer party is their half of the DLC input and we can build the valid redeem script.
         if let Some(dlc_input) = &funding_input.dlc_input {
             let dlc_input_info: DlcInputInfo = funding_input.into();
+
+            // The two keys are named for the roles in the contract being
+            // spliced, not for the roles in the splice. Either party may offer
+            // the splice, so resolve which key is ours before using the other
+            // one to verify.
+            let own_fund_pubkey = crate::dlc_input::get_fund_pubkey_for_dlc_input(
+                secp,
+                &dlc_input.contract_id,
+                storage,
+                signer_provider,
+            )
+            .await?;
+            let counter_party_fund_pubkey = if dlc_input.local_fund_pubkey == own_fund_pubkey {
+                dlc_input.remote_fund_pubkey
+            } else {
+                dlc_input.local_fund_pubkey
+            };
+
             log_debug!(
                 logger,
-                "Verifying DLC input signature. contract_id={} input_index={} remote_fund_pubkey={} local_fund_pubkey={}",
+                "Verifying DLC input signature. contract_id={} input_index={} own_fund_pubkey={} counter_party_fund_pubkey={}",
                 accepted_contract.get_contract_id_string(),
                 input_index,
-                dlc_input.remote_fund_pubkey.to_string(),
-                dlc_input.local_fund_pubkey.to_string(),
+                own_fund_pubkey.to_string(),
+                counter_party_fund_pubkey.to_string(),
             );
 
-            // Verify the signature from the offer party is valid for the DLC input.
+            // Verify the signature from the party that offered the splice.
             ddk_dlc::dlc_input::verify_dlc_funding_input_signature(
                 secp,
                 fund_tx,
                 input_index,
                 &dlc_input_info,
                 funding_signatures.witness_elements[0].witness.clone(),
-                &dlc_input.local_fund_pubkey,
+                &counter_party_fund_pubkey,
             )?;
 
             log_debug!(
@@ -947,13 +965,15 @@ where
             )
             .await?;
 
-            // Build the redeem script for the DLC input.
+            // Build the redeem script for the DLC input. The witness orders the
+            // two signatures by public key, so both keys have to be the ones
+            // that actually produced them.
             let completed_witness = ddk_dlc::dlc_input::combine_dlc_input_signatures(
                 &dlc_input_info,
                 &my_dlc_input_signature,
                 &funding_signatures.witness_elements[0].witness,
-                &dlc_input.remote_fund_pubkey,
-                &dlc_input.local_fund_pubkey,
+                &own_fund_pubkey,
+                &counter_party_fund_pubkey,
             );
 
             log_debug!(
