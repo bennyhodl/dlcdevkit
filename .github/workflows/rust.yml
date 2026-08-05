@@ -102,8 +102,13 @@ jobs:
             target/debug/deps
             target/debug/build
           key: test-cache-${{ github.run_id }}-${{ github.run_number }}
+      # Not --all-features: that turns on ddk-manager's `fuzztarget`, which
+      # replaces the contract id and serial id generators with constants. A test
+      # that creates a second contract, as every splice does, then collides with
+      # the first. The features named here are the ones the integration tests
+      # actually want.
       - id: set-matrix
-        run: cargo test --no-run --all-features && echo "matrix=$(testconfig/scripts/get_test_list.sh manager_execution manager_tests contract_updater stateless_execution)" >> "$GITHUB_OUTPUT"
+        run: cargo test --no-run --features ddk-manager/parallel,ddk-manager/use-serde && echo "matrix=$(testconfig/scripts/get_test_list.sh manager_execution manager_tests contract_updater stateless_execution)" >> "$GITHUB_OUTPUT"
   integration_tests:
     name: integration tests
     needs: integration_tests_prepare
@@ -120,15 +125,8 @@ jobs:
             target/debug/deps
             target/debug/build
           key: test-cache-${{ github.run_id }}-${{ github.run_number }}
+      # --exact, because a matrix entry names one test. Without it the name is
+      # a substring filter, and a job for `enum_single_oracle_test` would also
+      # run `splice_in_enum_single_oracle_test`.
       - name: Run test
-        run: RUST_BACKTRACE=1 RUST_MIN_STACK=8388608 ${{ matrix.tests }} --ignored
-
-  test_splicing:
-    name: test splicing
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-      - name: Run test
-        run: RUST_MIN_STACK=8388608 cargo test -p ddk-manager splice -- --nocapture --ignored
+        run: RUST_BACKTRACE=1 ${{ matrix.tests }} --ignored --exact

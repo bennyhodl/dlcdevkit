@@ -239,19 +239,25 @@ pub fn get_difference_params() -> DifferenceParams {
 }
 
 pub fn get_enum_contract_descriptor() -> ContractDescriptor {
+    enum_contract_descriptor(TOTAL_COLLATERAL)
+}
+
+/// An enum descriptor over [`enum_outcomes`] that pays the whole of
+/// `total_collateral` to alternating parties.
+pub fn enum_contract_descriptor(total_collateral: Amount) -> ContractDescriptor {
     let outcome_payouts: Vec<_> = enum_outcomes()
         .iter()
         .enumerate()
         .map(|(i, x)| {
             let payout = if i % 2 == 0 {
                 Payout {
-                    offer: TOTAL_COLLATERAL,
+                    offer: total_collateral,
                     accept: Amount::ZERO,
                 }
             } else {
                 Payout {
                     offer: Amount::ZERO,
-                    accept: TOTAL_COLLATERAL,
+                    accept: total_collateral,
                 }
             };
             EnumerationPayout {
@@ -289,13 +295,41 @@ pub async fn generate_blocks(nb_blocks: u32, electrs: Arc<EsploraClient>, sink: 
 pub async fn get_enum_oracle() -> MemoryOracle {
     let oracle = MemoryOracle::default();
 
-    oracle
-        .oracle
-        .create_enum_event(EVENT_ID.to_string(), enum_outcomes(), EVENT_MATURITY)
-        .await
-        .unwrap();
+    announce_enum_event(std::slice::from_ref(&oracle), EVENT_ID, EVENT_MATURITY).await;
 
     oracle
+}
+
+/// Announces `event_id` on every oracle as an enum event over
+/// [`enum_outcomes`], maturing at `maturity`.
+pub async fn announce_enum_event(oracles: &[MemoryOracle], event_id: &str, maturity: u32) {
+    for oracle in oracles {
+        oracle
+            .oracle
+            .create_enum_event(event_id.to_string(), enum_outcomes(), maturity)
+            .await
+            .unwrap();
+    }
+}
+
+/// Attests `event_id` on enough of `oracles` to satisfy `threshold`, and
+/// returns the outcome they signed.
+pub async fn attest_enum_event(
+    oracles: &[MemoryOracle],
+    event_id: &str,
+    threshold: usize,
+) -> String {
+    let outcomes = enum_outcomes();
+    let outcome = outcomes[(thread_rng().next_u32() as usize) % outcomes.len()].clone();
+    for index in select_active_oracles(oracles.len(), threshold) {
+        oracles[index]
+            .oracle
+            .sign_enum_event(event_id.to_string(), outcome.clone())
+            .await
+            .unwrap();
+    }
+
+    outcome
 }
 
 pub async fn get_enum_oracles(nb_oracles: usize, threshold: usize) -> Vec<MemoryOracle> {
@@ -305,18 +339,7 @@ pub async fn get_enum_oracles(nb_oracles: usize, threshold: usize) -> Vec<Memory
         oracles.push(oracle);
     }
 
-    let active_oracles = select_active_oracles(nb_oracles, threshold);
-    let outcomes = enum_outcomes();
-    let outcome = outcomes[(thread_rng().next_u32() as usize) % outcomes.len()].clone();
-    for index in active_oracles {
-        oracles
-            .get_mut(index)
-            .unwrap()
-            .oracle
-            .sign_enum_event(EVENT_ID.to_string(), outcome.clone())
-            .await
-            .unwrap();
-    }
+    attest_enum_event(&oracles, EVENT_ID, threshold).await;
 
     oracles
 }
@@ -355,162 +378,122 @@ pub async fn get_enum_test_params(
     }
 }
 
-pub fn get_splice_in_enum_contract_descriptor(collateral: Amount) -> ContractDescriptor {
-    let outcome_payouts: Vec<_> = enum_outcomes()
-        .iter()
-        .enumerate()
-        .map(|(i, x)| {
-            let payout = if i % 2 == 0 {
-                Payout {
-                    offer: collateral,
-                    accept: Amount::ZERO,
-                }
-            } else {
-                Payout {
-                    offer: Amount::ZERO,
-                    accept: collateral,
-                }
-            };
-            EnumerationPayout {
-                outcome: x.to_owned(),
-                payout,
-            }
-        })
-        .collect();
-    ContractDescriptor::Enum(EnumDescriptor { outcome_payouts })
+/// How one splice round changes the collateral locked in a contract.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SpliceDelta {
+    /// Lock this much more, paid in from the splicing party's wallet.
+    In(Amount),
+    /// Release this much, paid back to the splicing party's change address.
+    Out(Amount),
 }
 
-pub fn get_splice_out_enum_contract_descriptor(collateral: Amount) -> ContractDescriptor {
-    let outcome_payouts: Vec<_> = enum_outcomes()
-        .iter()
-        .enumerate()
-        .map(|(i, x)| {
-            let payout = if i % 2 == 0 {
-                Payout {
-                    offer: collateral,
-                    accept: Amount::ZERO,
-                }
-            } else {
-                Payout {
-                    offer: Amount::ZERO,
-                    accept: collateral,
-                }
-            };
-            EnumerationPayout {
-                outcome: x.to_owned(),
-                payout,
-            }
-        })
-        .collect();
-    ContractDescriptor::Enum(EnumDescriptor { outcome_payouts })
+impl SpliceDelta {
+    /// The total collateral this round produces from a contract holding
+    /// `total`.
+    pub fn apply(self, total: Amount) -> Amount {
+        match self {
+            SpliceDelta::In(amount) => total + amount,
+            SpliceDelta::Out(amount) => total - amount,
+        }
+    }
 }
 
-pub async fn get_splice_in_test_params_with_maturity(
-    oracles: Vec<MemoryOracle>,
+/// The offering party's share of `total_collateral`, in the proportion the base
+/// contract splits [`TOTAL_COLLATERAL`].
+fn offer_share(total_collateral: Amount) -> Amount {
+    Amount::from_sat(total_collateral.to_sat() * OFFER_COLLATERAL / TOTAL_COLLATERAL.to_sat())
+}
+
+/// Builds the contract for splice round `round` of `base`, holding
+/// `total_collateral` and settling on an event maturing at `maturity`.
+///
+/// The spliced contract keeps the shape of the contract it replaces: the same
+/// oracles, the same descriptor kind, and the same threshold. Only the
+/// collateral and the event change. Every round announces and attests its own
+/// event, so an attestation for one round can never close the contract of
+/// another.
+///
+/// A splice is single funded. The previous funding output is credited in full
+/// to whichever party offers the splice, so that party puts up the whole new
+/// collateral and takes the difference out of, or back into, its own wallet.
+pub async fn splice_test_params(
+    base: &TestParams,
+    round: usize,
+    total_collateral: Amount,
     maturity: u32,
 ) -> TestParams {
-    let splice_event_id = format!("{}-splice-in", EVENT_ID);
+    let mut contract_infos = Vec::with_capacity(base.contract_input.contract_infos.len());
 
-    // Create enum announcements for the splice event with future maturity
-    for oracle in &oracles {
-        oracle
-            .oracle
-            .create_enum_event(splice_event_id.clone(), enum_outcomes(), maturity)
-            .await
-            .unwrap();
+    for (index, info) in base.contract_input.contract_infos.iter().enumerate() {
+        let event_id = format!("{EVENT_ID}-splice-{round}-{index}");
+        let threshold = info.oracles.threshold as usize;
+        let oracles: Vec<MemoryOracle> = info
+            .oracles
+            .public_keys
+            .iter()
+            .map(|key| {
+                base.oracles
+                    .iter()
+                    .find(|oracle| oracle.get_public_key() == *key)
+                    .expect("splice oracle to be one of the base contract oracles")
+                    .clone()
+            })
+            .collect();
+
+        let contract_descriptor = match &info.contract_descriptor {
+            ContractDescriptor::Enum(_) => {
+                announce_enum_event(&oracles, &event_id, maturity).await;
+                attest_enum_event(&oracles, &event_id, threshold).await;
+                enum_contract_descriptor(total_collateral)
+            }
+            ContractDescriptor::Numerical(numerical) => {
+                let numeric_infos = &numerical.oracle_numeric_infos;
+                announce_numeric_event(&oracles, &event_id, numeric_infos, maturity).await;
+                attest_numeric_event(
+                    &oracles,
+                    &event_id,
+                    numeric_infos,
+                    threshold,
+                    numerical.difference_params.is_some(),
+                    false,
+                )
+                .await;
+                // The curve is rebuilt rather than scaled: a spliced contract is
+                // a new contract, and only its family has to match the one it
+                // replaces.
+                ContractDescriptor::Numerical(NumericalDescriptor {
+                    payout_function: PayoutFunction::new(polynomial_payout_curve_pieces(
+                        numeric_infos.get_min_nb_digits(),
+                        offer_share(total_collateral),
+                        total_collateral,
+                    ))
+                    .unwrap(),
+                    rounding_intervals: numerical.rounding_intervals.clone(),
+                    oracle_numeric_infos: numeric_infos.clone(),
+                    difference_params: numerical.difference_params.clone(),
+                })
+            }
+        };
+
+        contract_infos.push(ContractInputInfo {
+            contract_descriptor,
+            oracles: OracleInput {
+                public_keys: info.oracles.public_keys.clone(),
+                event_id,
+                threshold: info.oracles.threshold,
+            },
+        });
     }
-
-    // Sign the splice enum events (similar to get_enum_oracles)
-    let active_oracles = select_active_oracles(oracles.len(), 1); // threshold = 1 for splice
-    let outcomes = enum_outcomes();
-    let outcome = outcomes[(thread_rng().next_u32() as usize) % outcomes.len()].clone();
-    for index in active_oracles {
-        oracles
-            .get(index)
-            .unwrap()
-            .oracle
-            .sign_enum_event(splice_event_id.clone(), outcome.clone())
-            .await
-            .unwrap();
-    }
-
-    let offer_collateral = TOTAL_COLLATERAL + Amount::from_sat(50_000_000);
-    let contract_descriptor = get_splice_in_enum_contract_descriptor(offer_collateral);
-    let contract_info = ContractInputInfo {
-        contract_descriptor,
-        oracles: OracleInput {
-            public_keys: oracles.iter().map(|x| x.get_public_key()).collect(),
-            event_id: splice_event_id,
-            threshold: 1,
-        },
-    };
-
-    let contract_input = ContractInput {
-        offer_collateral,
-        accept_collateral: Amount::ZERO,
-        fee_rate: 2,
-        contract_flags: 0,
-        contract_infos: vec![contract_info],
-    };
 
     TestParams {
-        oracles,
-        contract_input,
-    }
-}
-
-pub async fn get_splice_out_test_params_with_maturity(
-    oracles: Vec<MemoryOracle>,
-    maturity: u32,
-) -> TestParams {
-    let splice_event_id = format!("{}-splice-out", EVENT_ID);
-
-    // Create enum announcements for the splice event with future maturity
-    for oracle in &oracles {
-        oracle
-            .oracle
-            .create_enum_event(splice_event_id.clone(), enum_outcomes(), maturity)
-            .await
-            .unwrap();
-    }
-
-    // Sign the splice enum events (similar to get_enum_oracles)
-    let active_oracles = select_active_oracles(oracles.len(), 1); // threshold = 1 for splice
-    let outcomes = enum_outcomes();
-    let outcome = outcomes[(thread_rng().next_u32() as usize) % outcomes.len()].clone();
-    for index in active_oracles {
-        oracles
-            .get(index)
-            .unwrap()
-            .oracle
-            .sign_enum_event(splice_event_id.clone(), outcome.clone())
-            .await
-            .unwrap();
-    }
-
-    let offer_collateral = Amount::from_sat(500_000);
-
-    let contract_descriptor = get_splice_out_enum_contract_descriptor(offer_collateral);
-    let contract_info = ContractInputInfo {
-        contract_descriptor,
-        oracles: OracleInput {
-            public_keys: oracles.iter().map(|x| x.get_public_key()).collect(),
-            event_id: splice_event_id,
-            threshold: 1,
+        oracles: base.oracles.clone(),
+        contract_input: ContractInput {
+            offer_collateral: total_collateral,
+            accept_collateral: Amount::ZERO,
+            fee_rate: 2,
+            contract_flags: 0,
+            contract_infos,
         },
-    };
-
-    let contract_input = ContractInput {
-        offer_collateral,
-        accept_collateral: Amount::ZERO,
-        fee_rate: 2,
-        contract_flags: 0,
-        contract_infos: vec![contract_info],
-    };
-
-    TestParams {
-        oracles,
-        contract_input,
     }
 }
 
@@ -541,6 +524,20 @@ pub async fn get_single_funded_test_params(nb_oracles: usize, threshold: usize) 
 }
 
 pub fn get_polynomial_payout_curve_pieces(min_nb_digits: usize) -> Vec<PayoutFunctionPiece> {
+    polynomial_payout_curve_pieces(
+        min_nb_digits,
+        Amount::from_sat(OFFER_COLLATERAL),
+        TOTAL_COLLATERAL,
+    )
+}
+
+/// The polynomial curve of [`get_polynomial_payout_curve_pieces`], stated
+/// against an arbitrary collateral so a spliced contract can reuse the shape.
+pub fn polynomial_payout_curve_pieces(
+    min_nb_digits: usize,
+    offer_collateral: Amount,
+    total_collateral: Amount,
+) -> Vec<PayoutFunctionPiece> {
     vec![
         PayoutFunctionPiece::PolynomialPayoutCurvePiece(
             PolynomialPayoutCurvePiece::new(vec![
@@ -551,12 +548,12 @@ pub fn get_polynomial_payout_curve_pieces(min_nb_digits: usize) -> Vec<PayoutFun
                 },
                 PayoutPoint {
                     event_outcome: 3,
-                    outcome_payout: Amount::from_sat(OFFER_COLLATERAL),
+                    outcome_payout: offer_collateral,
                     extra_precision: 0,
                 },
                 PayoutPoint {
                     event_outcome: MID_POINT,
-                    outcome_payout: TOTAL_COLLATERAL,
+                    outcome_payout: total_collateral,
                     extra_precision: 0,
                 },
             ])
@@ -566,12 +563,12 @@ pub fn get_polynomial_payout_curve_pieces(min_nb_digits: usize) -> Vec<PayoutFun
             PolynomialPayoutCurvePiece::new(vec![
                 PayoutPoint {
                     event_outcome: MID_POINT,
-                    outcome_payout: TOTAL_COLLATERAL,
+                    outcome_payout: total_collateral,
                     extra_precision: 0,
                 },
                 PayoutPoint {
                     event_outcome: max_value_from_digits(min_nb_digits) as u64,
-                    outcome_payout: TOTAL_COLLATERAL,
+                    outcome_payout: total_collateral,
                     extra_precision: 0,
                 },
             ])
@@ -641,6 +638,30 @@ pub async fn get_digit_decomposition_oracle(nb_digits: u16) -> MemoryOracle {
     oracle
 }
 
+/// Announces `event_id` on every oracle as a digit decomposition event, sized
+/// from that oracle's entry in `oracle_numeric_infos`.
+pub async fn announce_numeric_event(
+    oracles: &[MemoryOracle],
+    event_id: &str,
+    oracle_numeric_infos: &OracleNumericInfo,
+    maturity: u32,
+) {
+    for (oracle, nb_digits) in oracles.iter().zip(oracle_numeric_infos.nb_digits.iter()) {
+        oracle
+            .oracle
+            .create_numeric_event(
+                event_id.to_string(),
+                *nb_digits as u16,
+                false,
+                0,
+                "sats/sec".to_owned(),
+                maturity,
+            )
+            .await
+            .unwrap();
+    }
+}
+
 pub async fn get_digit_decomposition_oracles(
     oracle_numeric_infos: &OracleNumericInfo,
     threshold: usize,
@@ -652,6 +673,32 @@ pub async fn get_digit_decomposition_oracles(
         oracles.push(get_digit_decomposition_oracle(*digit as u16).await);
     }
 
+    attest_numeric_event(
+        &oracles,
+        EVENT_ID,
+        oracle_numeric_infos,
+        threshold,
+        with_diff,
+        use_max_value,
+    )
+    .await;
+
+    oracles
+}
+
+/// Attests `event_id` on enough of `oracles` to satisfy `threshold`.
+///
+/// With `with_diff` the attested values are spread within the tolerance the
+/// contract's difference params allow; `use_max_value` pins them to the top of
+/// the range instead.
+pub async fn attest_numeric_event(
+    oracles: &[MemoryOracle],
+    event_id: &str,
+    oracle_numeric_infos: &OracleNumericInfo,
+    threshold: usize,
+    with_diff: bool,
+    use_max_value: bool,
+) {
     let outcome_value = if use_max_value {
         max_value_from_digits(oracle_numeric_infos.get_min_nb_digits()) as usize
     } else {
@@ -689,15 +736,13 @@ pub async fn get_digit_decomposition_oracles(
             }
         };
 
-        for oracle in &oracles {
+        for oracle in oracles {
             let _sign_even_if_it_fails_spent_an_hour_tracking_ci_bug = oracle
                 .oracle
-                .sign_numeric_event(EVENT_ID.to_string(), cur_outcome as i64)
+                .sign_numeric_event(event_id.to_string(), cur_outcome as i64)
                 .await;
         }
     }
-
-    oracles
 }
 
 pub async fn get_numerical_test_params(
@@ -988,4 +1033,40 @@ pub fn set_time(time: u64) {
     MOCK_TIME.with(|f| {
         *f.borrow_mut() = time;
     });
+}
+
+/// The stack the execution harness runs on.
+///
+/// Measured worst case is a little over 2 MiB for a splice chain, against the
+/// 2 MiB a test thread gets by default. The margin is generous because the
+/// figure is a debug build's, and debug frame sizes move with the compiler.
+const EXECUTION_TEST_STACK_SIZE: usize = 8 * 1024 * 1024;
+
+/// Runs `test` to completion on a thread with a stack sized for the execution
+/// harness.
+///
+/// These tests drive nested async state machines whose frames, unoptimised,
+/// outgrow the default test thread stack. Asking for the stack here instead of
+/// through `RUST_MIN_STACK` keeps `cargo test` working with nothing set in the
+/// environment, including when CI runs the test binary directly.
+///
+/// The caller blocks while the test runs. That is deliberate: the runtime the
+/// test itself needs is the one built here, on the thread that has the stack.
+pub fn on_big_stack<F>(test: F) -> F::Output
+where
+    F: std::future::Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    std::thread::Builder::new()
+        .stack_size(EXECUTION_TEST_STACK_SIZE)
+        .spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("to build the test runtime")
+                .block_on(test)
+        })
+        .expect("to spawn the test thread")
+        .join()
+        .unwrap_or_else(|payload| std::panic::resume_unwind(payload))
 }

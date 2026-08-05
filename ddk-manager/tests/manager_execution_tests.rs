@@ -3,20 +3,29 @@
 mod test_utils;
 
 use bitcoin::Amount;
+use bitcoincore_rpc::Client;
+use ddk::chain::EsploraClient;
 use ddk::logger::Logger;
+use ddk::oracle::memory::MemoryOracle;
+use ddk::storage::memory::MemoryStorage;
+use ddk::wallet::DlcDevKitWallet;
 use ddk_manager::payout_curve::PayoutFunctionPiece;
 use test_utils::*;
 
-use ddk_manager::contract::{numerical_descriptor::DifferenceParams, Contract};
+use ddk_manager::contract::{
+    numerical_descriptor::DifferenceParams, signed_contract::SignedContract, Contract,
+};
 use ddk_manager::manager::Manager;
-use ddk_manager::{Blockchain, Oracle, Storage};
+use ddk_manager::{
+    Blockchain, CachedContractSignerProvider, ContractId, Oracle, SimpleSigner, Storage,
+};
 use ddk_messages::oracle_msgs::OracleAttestation;
 use ddk_messages::{AcceptDlc, OfferDlc, SignDlc};
 use ddk_messages::{CetAdaptorSignatures, Message};
 use lightning::ln::wire::Type;
 use lightning::util::ser::Writeable;
 use secp256k1_zkp::rand::{thread_rng, RngCore};
-use secp256k1_zkp::{ecdsa::Signature, EcdsaAdaptorSignature};
+use secp256k1_zkp::{ecdsa::Signature, EcdsaAdaptorSignature, PublicKey};
 use serde_json::from_str;
 use std::collections::HashMap;
 use std::sync::{
@@ -24,7 +33,7 @@ use std::sync::{
     Arc,
 };
 use test_utils::init_clients;
-use tokio::sync::mpsc::channel;
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::Mutex;
 #[derive(serde::Serialize, serde::Deserialize)]
 struct TestVectorPart<T> {
@@ -174,16 +183,183 @@ async fn numerical_common_diff_nb_digits(
     .await;
 }
 
-#[derive(Eq, PartialEq, Clone)]
+#[derive(Eq, PartialEq, Clone, Debug)]
 enum TestPath {
     Close,
     Refund,
     ManualRefund,
     CooperativeClose,
+    /// Splice the funded contract one round per entry, then settle whatever the
+    /// last round produced.
+    Splice(Vec<SpliceRound>),
     BadAcceptCetSignature,
     BadAcceptRefundSignature,
     BadSignCetSignature,
     BadSignRefundSignature,
+}
+
+/// Which of the two parties in the test acts.
+///
+/// Bob offers the contract the test funds and Alice accepts it, so `Bob` is the
+/// offering party throughout.
+#[derive(Eq, PartialEq, Clone, Copy, Debug)]
+enum Party {
+    Bob,
+    Alice,
+}
+
+impl Party {
+    fn other(self) -> Party {
+        match self {
+            Party::Bob => Party::Alice,
+            Party::Alice => Party::Bob,
+        }
+    }
+}
+
+/// One round of a splice chain: who offers it, and how it moves the collateral.
+#[derive(Eq, PartialEq, Clone, Copy, Debug)]
+struct SpliceRound {
+    /// The party that offers the replacement contract. It spends the previous
+    /// funding output, so it is also the party whose wallet the collateral
+    /// moves in from or out to.
+    initiator: Party,
+    delta: SpliceDelta,
+}
+
+impl SpliceRound {
+    fn splice_in(initiator: Party, amount: Amount) -> SpliceRound {
+        SpliceRound {
+            initiator,
+            delta: SpliceDelta::In(amount),
+        }
+    }
+
+    fn splice_out(initiator: Party, amount: Amount) -> SpliceRound {
+        SpliceRound {
+            initiator,
+            delta: SpliceDelta::Out(amount),
+        }
+    }
+}
+
+/// The amount a splice round adds to or removes from the locked collateral.
+const SPLICE_AMOUNT: Amount = Amount::from_sat(25_000_000);
+
+/// How far a wallet balance may move beyond the spliced amount and still be
+/// explained by transaction fees.
+const FEE_SLACK: Amount = Amount::from_sat(100_000);
+
+/// The gap between the maturity of one spliced contract and the next.
+///
+/// Every round settles on its own event, and the chain only advances the clock
+/// once, at the end. Spacing the maturities keeps the assertion that a round
+/// closes on its own attestation honest.
+const SPLICE_MATURITY_STEP: u32 = 60;
+
+/// How far before [`EVENT_MATURITY`] a splice test starts.
+///
+/// A splice chain has to stay below every maturity in the chain until the last
+/// contract is the one being settled, so it starts further back than the other
+/// paths do.
+const SPLICE_TIME_HEADROOM: u64 = 3600;
+
+/// The manager the tests drive, with the concrete backends `test_utils` builds.
+type TestManager = Manager<
+    Arc<DlcDevKitWallet>,
+    Arc<CachedContractSignerProvider<Arc<DlcDevKitWallet>, SimpleSigner>>,
+    Arc<EsploraClient>,
+    Arc<MemoryStorage>,
+    Arc<MemoryOracle>,
+    Arc<test_utils::MockTime>,
+    Arc<EsploraClient>,
+    SimpleSigner,
+    Arc<Logger>,
+>;
+
+/// The two parties, the chain they share, and the wires between them.
+///
+/// The paths below take this instead of a dozen arguments each. Keeping every
+/// path in its own `async fn` also keeps the harness off the stack: a single
+/// function holding all of them needs a frame big enough for the largest
+/// branch of every one at once.
+struct TestContext {
+    bob: Arc<Mutex<TestManager>>,
+    alice: Arc<Mutex<TestManager>>,
+    bob_wallet: Arc<DlcDevKitWallet>,
+    alice_wallet: Arc<DlcDevKitWallet>,
+    electrs: Arc<EsploraClient>,
+    sink: Arc<Client>,
+    /// Carries what Bob sends to Alice.
+    bob_send: Sender<Option<Message>>,
+    /// Carries what Alice sends to Bob.
+    alice_send: Sender<Option<Message>>,
+    /// Fires once every time either receive loop finishes with a message.
+    sync_receive: Receiver<()>,
+}
+
+impl TestContext {
+    /// Waits for one receive loop to finish handling one message.
+    async fn sync(&mut self) {
+        self.sync_receive.recv().await.expect("Error synchronizing");
+    }
+
+    async fn mine(&self, nb_blocks: u32) {
+        generate_blocks(nb_blocks, self.electrs.clone(), self.sink.clone()).await;
+    }
+
+    async fn sync_wallets(&self) {
+        self.bob_wallet.sync().await.unwrap();
+        self.alice_wallet.sync().await.unwrap();
+    }
+
+    fn manager(&self, party: Party) -> &Arc<Mutex<TestManager>> {
+        match party {
+            Party::Bob => &self.bob,
+            Party::Alice => &self.alice,
+        }
+    }
+
+    fn wallet(&self, party: Party) -> &Arc<DlcDevKitWallet> {
+        match party {
+            Party::Bob => &self.bob_wallet,
+            Party::Alice => &self.alice_wallet,
+        }
+    }
+
+    /// The channel `party` sends on.
+    fn sender(&self, party: Party) -> &Sender<Option<Message>> {
+        match party {
+            Party::Bob => &self.bob_send,
+            Party::Alice => &self.alice_send,
+        }
+    }
+
+    async fn send(&self, party: Party, message: Message) {
+        self.sender(party).send(Some(message)).await.unwrap();
+    }
+
+    async fn confirmed_balance(&self, party: Party) -> Amount {
+        self.wallet(party).get_balance().await.unwrap().confirmed
+    }
+
+    async fn contract(&self, party: Party, contract_id: &ContractId) -> Contract {
+        self.manager(party)
+            .lock()
+            .await
+            .get_store()
+            .get_contract(contract_id)
+            .await
+            .expect("Could not retrieve contract")
+            .expect("Contract does not exist in store")
+    }
+}
+
+/// The counter party key both managers are configured with.
+fn counter_party() -> PublicKey {
+    "0218845781f631c48f1c9709e23092067d06837f30aa0cd0544ac887fe91ddd166"
+        .parse()
+        .unwrap()
 }
 
 #[tokio::test]
@@ -532,55 +708,298 @@ async fn single_funded_dlc_test() {
     .await;
 }
 
-// #[tokio::test]
-// #[ignore]
-// async fn single_oracle_numerical_splice_test_manual() {
-//     numerical_common(
-//         1,
-//         1,
-//         get_polynomial_payout_curve_pieces,
-//         None,
-//         true,
-//         TestPath::Splice,
-//     )
-//     .await;
-// }
+// ---------------------------------------------------------------------------
+// Splices
+//
+// A splice replaces a funded contract with another one, funded by spending the
+// first contract's 2-of-2 output. These run the same harness as every other
+// path, so a splice is asserted against the same state machine: the tests below
+// cover both contract shapes, one and several oracles, thresholds below the
+// oracle count, both parties initiating, collateral going both in and out, and
+// chains of several splices before settlement.
+// ---------------------------------------------------------------------------
 
-// #[tokio::test]
-// #[ignore]
-// async fn single_oracle_numerical_splice_test() {
-//     numerical_common(
-//         1,
-//         1,
-//         get_polynomial_payout_curve_pieces,
-//         None,
-//         false,
-//         TestPath::Splice,
-//     )
-//     .await;
-// }
+/// One splice-in offered by the party that offered the contract.
+fn splice_in() -> TestPath {
+    TestPath::Splice(vec![SpliceRound::splice_in(Party::Bob, SPLICE_AMOUNT)])
+}
 
-// #[tokio::test]
-// #[ignore]
-// async fn single_oracle_enum_splice_test() {
-//     manager_execution_test(
-//         get_enum_test_params(1, 1, None).await,
-//         TestPath::Splice,
-//         true,
-//     )
-//     .await;
-// }
+/// One splice-out offered by the party that offered the contract.
+fn splice_out() -> TestPath {
+    TestPath::Splice(vec![SpliceRound::splice_out(Party::Bob, SPLICE_AMOUNT)])
+}
 
-// #[tokio::test]
-// #[ignore]
-// async fn multi_oracle_enum_splice_test() {
-//     manager_execution_test(
-//         get_enum_test_params(3, 3, None).await,
-//         TestPath::Splice,
-//         false,
-//     )
-//     .await;
-// }
+#[tokio::test]
+#[ignore]
+async fn splice_in_enum_single_oracle_test() {
+    manager_execution_test(get_enum_test_params(1, 1, None).await, splice_in(), false).await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn splice_out_enum_single_oracle_test() {
+    manager_execution_test(get_enum_test_params(1, 1, None).await, splice_out(), false).await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn splice_in_enum_single_oracle_manual_test() {
+    manager_execution_test(get_enum_test_params(1, 1, None).await, splice_in(), true).await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn splice_out_enum_single_oracle_manual_test() {
+    manager_execution_test(get_enum_test_params(1, 1, None).await, splice_out(), true).await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn splice_in_enum_3_of_3_test() {
+    manager_execution_test(get_enum_test_params(3, 3, None).await, splice_in(), false).await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn splice_out_enum_3_of_3_test() {
+    manager_execution_test(get_enum_test_params(3, 3, None).await, splice_out(), false).await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn splice_in_enum_3_of_5_test() {
+    manager_execution_test(get_enum_test_params(5, 3, None).await, splice_in(), false).await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn splice_out_enum_3_of_5_test() {
+    manager_execution_test(get_enum_test_params(5, 3, None).await, splice_out(), false).await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn splice_in_numerical_single_oracle_test() {
+    numerical_common(
+        1,
+        1,
+        get_polynomial_payout_curve_pieces,
+        None,
+        false,
+        splice_in(),
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn splice_out_numerical_single_oracle_test() {
+    numerical_common(
+        1,
+        1,
+        get_polynomial_payout_curve_pieces,
+        None,
+        false,
+        splice_out(),
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn splice_in_numerical_single_oracle_manual_test() {
+    numerical_common(
+        1,
+        1,
+        get_polynomial_payout_curve_pieces,
+        None,
+        true,
+        splice_in(),
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn splice_in_numerical_3_of_3_test() {
+    numerical_common(
+        3,
+        3,
+        get_polynomial_payout_curve_pieces,
+        None,
+        false,
+        splice_in(),
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn splice_out_numerical_3_of_3_test() {
+    numerical_common(
+        3,
+        3,
+        get_polynomial_payout_curve_pieces,
+        None,
+        false,
+        splice_out(),
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn splice_in_numerical_with_diff_3_of_5_test() {
+    numerical_common(
+        5,
+        3,
+        get_polynomial_payout_curve_pieces,
+        Some(get_difference_params()),
+        false,
+        splice_in(),
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn splice_out_numerical_with_diff_3_of_5_test() {
+    numerical_common(
+        5,
+        3,
+        get_polynomial_payout_curve_pieces,
+        Some(get_difference_params()),
+        false,
+        splice_out(),
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn splice_in_enum_and_numerical_3_of_5_test() {
+    manager_execution_test(
+        get_enum_and_numerical_test_params(5, 3, false, None).await,
+        splice_in(),
+        false,
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn splice_out_enum_and_numerical_3_of_5_test() {
+    manager_execution_test(
+        get_enum_and_numerical_test_params(5, 3, false, None).await,
+        splice_out(),
+        false,
+    )
+    .await;
+}
+
+/// The party that accepted the contract can splice it too. It puts up the whole
+/// of the new collateral, because the funding output it spends is credited to
+/// whoever offers the replacement.
+#[tokio::test]
+#[ignore]
+async fn splice_in_by_accept_party_test() {
+    manager_execution_test(
+        get_enum_test_params(1, 1, None).await,
+        TestPath::Splice(vec![SpliceRound::splice_in(Party::Alice, SPLICE_AMOUNT)]),
+        false,
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn splice_out_by_accept_party_test() {
+    manager_execution_test(
+        get_enum_test_params(1, 1, None).await,
+        TestPath::Splice(vec![SpliceRound::splice_out(Party::Alice, SPLICE_AMOUNT)]),
+        false,
+    )
+    .await;
+}
+
+/// Collateral in, then out, then in again: each round splices the contract the
+/// previous round produced.
+#[tokio::test]
+#[ignore]
+async fn splice_chain_in_out_in_enum_test() {
+    manager_execution_test(
+        get_enum_test_params(1, 1, None).await,
+        TestPath::Splice(vec![
+            SpliceRound::splice_in(Party::Bob, SPLICE_AMOUNT),
+            SpliceRound::splice_out(Party::Bob, SPLICE_AMOUNT),
+            SpliceRound::splice_in(Party::Bob, SPLICE_AMOUNT),
+        ]),
+        false,
+    )
+    .await;
+}
+
+/// The two parties take turns splicing the same chain.
+#[tokio::test]
+#[ignore]
+async fn splice_chain_alternating_parties_test() {
+    manager_execution_test(
+        get_enum_test_params(1, 1, None).await,
+        TestPath::Splice(vec![
+            SpliceRound::splice_in(Party::Bob, SPLICE_AMOUNT),
+            SpliceRound::splice_out(Party::Alice, SPLICE_AMOUNT),
+            SpliceRound::splice_in(Party::Alice, SPLICE_AMOUNT),
+        ]),
+        false,
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn splice_chain_multi_oracle_enum_test() {
+    manager_execution_test(
+        get_enum_test_params(3, 3, None).await,
+        TestPath::Splice(vec![
+            SpliceRound::splice_in(Party::Bob, SPLICE_AMOUNT),
+            SpliceRound::splice_out(Party::Alice, SPLICE_AMOUNT),
+        ]),
+        false,
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn splice_chain_numerical_test() {
+    numerical_common(
+        1,
+        1,
+        get_polynomial_payout_curve_pieces,
+        None,
+        false,
+        TestPath::Splice(vec![
+            SpliceRound::splice_in(Party::Bob, SPLICE_AMOUNT),
+            SpliceRound::splice_out(Party::Alice, SPLICE_AMOUNT),
+        ]),
+    )
+    .await;
+}
+
+/// A chain settled by hand rather than by the periodic check.
+#[tokio::test]
+#[ignore]
+async fn splice_chain_manual_close_test() {
+    manager_execution_test(
+        get_enum_test_params(1, 1, None).await,
+        TestPath::Splice(vec![
+            SpliceRound::splice_in(Party::Bob, SPLICE_AMOUNT),
+            SpliceRound::splice_in(Party::Alice, SPLICE_AMOUNT),
+        ]),
+        true,
+    )
+    .await;
+}
 
 #[tokio::test]
 #[ignore]
@@ -724,7 +1143,19 @@ async fn get_attestations(test_params: &TestParams) -> Vec<(usize, OracleAttesta
     panic!("No attestations found");
 }
 
+/// Runs one execution path end to end against its own regtest backends.
+///
+/// The body runs on a thread of its own so it gets a stack sized for the nested
+/// async state machines it drives; see [`test_utils::on_big_stack`].
 async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_close: bool) {
+    test_utils::on_big_stack(manager_execution_test_inner(
+        test_params,
+        path,
+        manual_close,
+    ))
+}
+
+async fn manager_execution_test_inner(test_params: TestParams, path: TestPath, manual_close: bool) {
     env_logger::try_init().ok();
     let logger = Arc::new(Logger::disabled("test_manager_execution".to_string()));
     // Held for the whole test: these assertions depend on the chain advancing
@@ -734,7 +1165,7 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
 
     let (alice_send, mut bob_receive) = channel::<Option<Message>>(100);
     let (bob_send, mut alice_receive) = channel::<Option<Message>>(100);
-    let (sync_send, mut sync_receive) = channel::<()>(100);
+    let (sync_send, sync_receive) = channel::<()>(100);
     let alice_sync_send = sync_send.clone();
     let bob_sync_send = sync_send;
     let amount = Amount::from_btc(2.1).unwrap();
@@ -754,8 +1185,12 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
     }
 
     let mock_time = Arc::new(test_utils::MockTime {});
-    // For splice tests, set time much earlier to keep original DLC far from maturity
-    let initial_time = (EVENT_MATURITY as u64) - 1;
+    // A splice chain has to stay below every maturity in the chain until the
+    // last contract is the one being settled, so it starts further back.
+    let initial_time = match path {
+        TestPath::Splice(_) => (EVENT_MATURITY as u64) - SPLICE_TIME_HEADROOM,
+        _ => (EVENT_MATURITY as u64) - 1,
+    };
 
     test_utils::set_time(initial_time);
 
@@ -780,7 +1215,6 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
     ));
 
     let alice_manager_loop = Arc::clone(&alice_manager);
-    let alice_manager_send = Arc::clone(&alice_manager);
 
     let bob_manager = Arc::new(Mutex::new(
         Manager::new(
@@ -798,9 +1232,10 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
     ));
 
     let bob_manager_loop = Arc::clone(&bob_manager);
-    let bob_manager_send = Arc::clone(&bob_manager);
     let alice_send_loop = alice_send.clone();
     let bob_send_loop = bob_send.clone();
+    let alice_send_shutdown = alice_send.clone();
+    let bob_send_shutdown = bob_send.clone();
 
     let alice_expect_error = Arc::new(AtomicBool::new(false));
     let bob_expect_error = Arc::new(AtomicBool::new(false));
@@ -851,32 +1286,38 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
         msg_callback
     );
 
-    let offer_msg = bob_manager_send
+    let mut ctx = TestContext {
+        bob: bob_manager,
+        alice: alice_manager,
+        bob_wallet: Arc::clone(&bob_wallet),
+        alice_wallet: Arc::clone(&alice_wallet),
+        electrs: Arc::clone(&electrs),
+        sink: Arc::clone(&sink),
+        bob_send,
+        alice_send,
+        sync_receive,
+    };
+
+    let offer_msg = ctx
+        .bob
         .lock()
         .await
-        .send_offer(
-            &test_params.contract_input,
-            "0218845781f631c48f1c9709e23092067d06837f30aa0cd0544ac887fe91ddd166"
-                .parse()
-                .unwrap(),
-        )
+        .send_offer(&test_params.contract_input, counter_party())
         .await
         .expect("Send offer error");
 
     write_message("offer_message", offer_msg.clone());
     let temporary_contract_id = offer_msg.temporary_contract_id;
-    bob_send
-        .send(Some(Message::Offer(offer_msg)))
-        .await
-        .unwrap();
+    ctx.send(Party::Bob, Message::Offer(offer_msg)).await;
 
-    assert_contract_state!(bob_manager_send, temporary_contract_id, Offered);
+    assert_contract_state!(ctx.bob, temporary_contract_id, Offered);
 
-    sync_receive.recv().await.expect("Error synchronizing");
+    ctx.sync().await;
 
-    assert_contract_state!(alice_manager_send, temporary_contract_id, Offered);
+    assert_contract_state!(ctx.alice, temporary_contract_id, Offered);
 
-    let (contract_id, _, mut accept_msg) = alice_manager_send
+    let (contract_id, _, accept_msg) = ctx
+        .alice
         .lock()
         .await
         .accept_contract_offer(&temporary_contract_id)
@@ -885,359 +1326,635 @@ async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_
 
     write_message("accept_message", accept_msg.clone());
 
-    assert_contract_state!(alice_manager_send, contract_id, Accepted);
+    assert_contract_state!(ctx.alice, contract_id, Accepted);
 
-    (|| async {
-        match path {
-            TestPath::BadAcceptCetSignature | TestPath::BadAcceptRefundSignature => {
-                match path {
-                    TestPath::BadAcceptCetSignature => {
-                        alter_adaptor_sig(&mut accept_msg.cet_adaptor_signatures)
-                    }
-                    TestPath::BadAcceptRefundSignature => {
-                        accept_msg.refund_signature =
-                            alter_refund_sig(&accept_msg.refund_signature);
-                    }
-                    _ => {}
-                };
-                bob_expect_error.store(true, Ordering::Relaxed);
-                alice_send
-                    .send(Some(Message::Accept(accept_msg)))
-                    .await
-                    .unwrap();
-                sync_receive.recv().await.expect("Error synchronizing");
-                assert_contract_state!(bob_manager_send, temporary_contract_id, FailedAccept);
-            }
-            TestPath::BadSignCetSignature | TestPath::BadSignRefundSignature => {
-                alice_expect_error.store(true, Ordering::Relaxed);
-                alice_send
-                    .send(Some(Message::Accept(accept_msg)))
-                    .await
-                    .unwrap();
-                // Bob receives accept message
-                sync_receive.recv().await.expect("Error synchronizing");
-                // Alice receives sign message
-                sync_receive.recv().await.expect("Error synchronizing");
-                assert_contract_state!(alice_manager_send, contract_id, FailedSign);
-            }
-            TestPath::Close | TestPath::Refund | TestPath::ManualRefund => {
-                alice_send
-                    .send(Some(Message::Accept(accept_msg)))
-                    .await
-                    .unwrap();
-                sync_receive.recv().await.expect("Error synchronizing");
-
-                assert_contract_state!(bob_manager_send, contract_id, Signed);
-
-                // Should not change state and should not error
-                periodic_check!(bob_manager_send, contract_id, Signed);
-
-                sync_receive.recv().await.expect("Error synchronizing");
-
-                assert_contract_state!(alice_manager_send, contract_id, Signed);
-
-                alice_wallet.sync().await.unwrap();
-                bob_wallet.sync().await.unwrap();
-
-                generate_blocks(10, electrs.clone(), sink.clone()).await;
-
-                periodic_check!(alice_manager_send, contract_id, Confirmed);
-                periodic_check!(bob_manager_send, contract_id, Confirmed);
-
-                alice_wallet.sync().await.unwrap();
-                bob_wallet.sync().await.unwrap();
-                match path {
-                    TestPath::Close | TestPath::Refund | TestPath::ManualRefund => {
-                        if !manual_close {
-                            test_utils::set_time((EVENT_MATURITY as u64) + 1);
-                        }
-
-                        // Select the first one to close or refund randomly
-                        let (first, second) = if thread_rng().next_u32() % 2 == 0 {
-                            (alice_manager_send, bob_manager_send)
-                        } else {
-                            (bob_manager_send, alice_manager_send)
-                        };
-                        match path {
-                            TestPath::Close => {
-                                let case = thread_rng().next_u64() % 3;
-                                let blocks: Option<u32> = if case == 2 {
-                                    Some(10)
-                                } else if case == 1 {
-                                    Some(1)
-                                } else {
-                                    None
-                                };
-
-                                if manual_close {
-                                    periodic_check!(first, contract_id, Confirmed);
-
-                                    let attestations = get_attestations(&test_params).await;
-
-                                    let f = first.lock().await;
-                                    let contract = f
-                                        .close_confirmed_contract(&contract_id, attestations)
-                                        .await
-                                        .expect("Error closing contract");
-
-                                    alice_wallet.sync().await.unwrap();
-                                    bob_wallet.sync().await.unwrap();
-
-                                    if let Contract::PreClosed(contract) = contract {
-                                        let mut s = second.lock().await;
-                                        let second_contract = s
-                                            .get_store()
-                                            .get_contract(&contract_id)
-                                            .await
-                                            .unwrap()
-                                            .unwrap();
-                                        if let Contract::Confirmed(signed) = second_contract {
-                                            s.on_counterparty_close(
-                                                &signed,
-                                                contract.signed_cet,
-                                                blocks.unwrap_or(0),
-                                            )
-                                            .await
-                                            .expect("Error registering counterparty close");
-                                            alice_wallet.sync().await.unwrap();
-                                            bob_wallet.sync().await.unwrap();
-                                        } else {
-                                            panic!("Invalid contract state: {:?}", second_contract);
-                                        }
-                                    } else {
-                                        panic!("Invalid contract state {:?}", contract);
-                                    }
-                                } else {
-                                    alice_wallet.sync().await.unwrap();
-                                    bob_wallet.sync().await.unwrap();
-                                    periodic_check!(first, contract_id, PreClosed);
-                                }
-
-                                // mine blocks for the CET to be confirmed
-                                if let Some(b) = blocks {
-                                    generate_blocks(b as u32, electrs.clone(), sink.clone()).await;
-                                }
-
-                                alice_wallet.sync().await.unwrap();
-                                bob_wallet.sync().await.unwrap();
-
-                                // Randomly check with or without having the CET mined
-                                if case == 2 {
-                                    // cet becomes fully confirmed to blockchain
-                                    periodic_check!(first, contract_id, Closed);
-                                    periodic_check!(second, contract_id, Closed);
-                                } else {
-                                    periodic_check!(first, contract_id, PreClosed);
-                                    periodic_check!(second, contract_id, PreClosed);
-                                }
-                            }
-                            TestPath::Refund => {
-                                alice_wallet.sync().await.unwrap();
-                                bob_wallet.sync().await.unwrap();
-                                periodic_check!(first, contract_id, Confirmed);
-
-                                periodic_check!(second, contract_id, Confirmed);
-
-                                test_utils::set_time(
-                                    ((EVENT_MATURITY + ddk_manager::manager::REFUND_DELAY) as u64)
-                                        + 1,
-                                );
-
-                                generate_blocks(10, electrs.clone(), sink.clone()).await;
-
-                                alice_wallet.sync().await.unwrap();
-                                bob_wallet.sync().await.unwrap();
-
-                                periodic_check!(first, contract_id, Refunded);
-
-                                // Randomly check with or without having the Refund mined.
-                                if thread_rng().next_u32() % 2 == 0 {
-                                    generate_blocks(1, electrs.clone(), sink.clone()).await;
-                                }
-
-                                alice_wallet.sync().await.unwrap();
-                                bob_wallet.sync().await.unwrap();
-
-                                periodic_check!(second, contract_id, Refunded);
-                            }
-                            TestPath::ManualRefund => {
-                                alice_wallet.sync().await.unwrap();
-                                bob_wallet.sync().await.unwrap();
-                                periodic_check!(first, contract_id, Confirmed);
-                                periodic_check!(second, contract_id, Confirmed);
-
-                                test_utils::set_time(
-                                    ((EVENT_MATURITY + ddk_manager::manager::REFUND_DELAY) as u64)
-                                        + 1,
-                                );
-
-                                generate_blocks(10, electrs.clone(), sink.clone()).await;
-
-                                alice_wallet.sync().await.unwrap();
-                                bob_wallet.sync().await.unwrap();
-
-                                // Manually broadcast the refund for the first party.
-                                first
-                                    .lock()
-                                    .await
-                                    .check_and_broadcast_refund(&contract_id)
-                                    .await
-                                    .expect("Error manually broadcasting refund");
-                                assert_contract_state!(first, contract_id, Refunded);
-
-                                // Randomly check with or without having the Refund mined.
-                                if thread_rng().next_u32() % 2 == 0 {
-                                    generate_blocks(1, electrs.clone(), sink.clone()).await;
-                                }
-
-                                alice_wallet.sync().await.unwrap();
-                                bob_wallet.sync().await.unwrap();
-
-                                // Second party picks it up via periodic check.
-                                periodic_check!(second, contract_id, Refunded);
-                            }
-                            _ => unreachable!(),
-                        }
-                    }
-                    _ => unreachable!(),
-                }
-            }
-            TestPath::CooperativeClose => {
-                alice_send
-                    .send(Some(Message::Accept(accept_msg)))
-                    .await
-                    .unwrap();
-                sync_receive.recv().await.expect("Error synchronizing");
-
-                periodic_check!(bob_manager_send, contract_id, Signed);
-
-                // Should not change state and should not error
-                periodic_check!(bob_manager_send, contract_id, Signed);
-
-                sync_receive.recv().await.expect("Error synchronizing");
-
-                periodic_check!(alice_manager_send, contract_id, Signed);
-
-                generate_blocks(7, electrs.clone(), sink.clone()).await;
-
-                periodic_check!(alice_manager_send, contract_id, Confirmed);
-                periodic_check!(bob_manager_send, contract_id, Confirmed);
-                // Don't advance time for cooperative close to avoid oracle attestations
-                // being available, which would trigger automatic CET closure
-                // Test cooperative close flow
-
-                // First, ensure the funding transaction is confirmed
-                // Get the funding transaction and verify it's on the blockchain
-                let funding_txid = {
-                    let alice_contract = alice_manager_send
-                        .lock()
-                        .await
-                        .get_store()
-                        .get_contract(&contract_id)
-                        .await
-                        .unwrap()
-                        .unwrap();
-                    if let Contract::Confirmed(ref signed_contract) = alice_contract {
-                        signed_contract
-                            .accepted_contract
-                            .dlc_transactions
-                            .fund
-                            .compute_txid()
-                    } else {
-                        panic!("Contract should be confirmed");
-                    }
-                };
-
-                // Verify funding transaction exists on blockchain
-                let confirmations = electrs
-                    .get_transaction_confirmations(&funding_txid)
-                    .await
-                    .unwrap();
-                assert!(
-                    confirmations > 0,
-                    "Funding transaction should be confirmed on blockchain"
-                );
-
-                // Alice initiates cooperative close
-                let counter_payout = Amount::from_sat(ACCEPT_COLLATERAL / 2); // Split half to counter party
-
-                let (close_msg, _counter_party_pubkey) = alice_manager_send
-                    .lock()
-                    .await
-                    .cooperative_close_contract(&contract_id, counter_payout)
-                    .await
-                    .expect("Error initiating cooperative close");
-
-                // Alice should still be in Confirmed state (not updated until broadcast)
-                // assert_contract_state!(alice_manager_send, contract_id, Confirmed);
-
-                // Bob receives and accepts the cooperative close
-                bob_manager_send
-                    .lock()
-                    .await
-                    .accept_cooperative_close(&contract_id, &close_msg)
-                    .await
-                    .expect("Error accepting cooperative close");
-
-                // Bob should now be in PreClosed state (he broadcast the transaction)
-                periodic_check!(bob_manager_send, contract_id, PreClosed);
-
-                // Alice should still be in Confirmed state (she doesn't know about the close yet)
-                periodic_check!(alice_manager_send, contract_id, Confirmed);
-
-                // Mine a few blocks to partially confirm the close transaction
-                generate_blocks(3, electrs.clone(), sink.clone()).await;
-
-                // Alice should now detect the pending close transaction and move to PreClosed
-                alice_manager_send
-                    .lock()
-                    .await
-                    .periodic_check(true)
-                    .await
-                    .expect("Periodic check error");
-
-                periodic_check!(alice_manager_send, contract_id, PreClosed);
-
-                // Bob should still be in PreClosed (not enough confirmations yet)
-                periodic_check!(bob_manager_send, contract_id, PreClosed);
-
-                // Mine more blocks to reach full confirmation (6 total)
-                generate_blocks(5, electrs.clone(), sink.clone()).await;
-
-                // Both parties should now move to Closed state after full confirmations
-                periodic_check!(bob_manager_send, contract_id, Closed);
-                periodic_check!(alice_manager_send, contract_id, Closed);
-
-                // Verify the close transaction was properly broadcast and confirmed
-                let _close_txid = {
-                    let bob_contract = bob_manager_send
-                        .lock()
-                        .await
-                        .get_store()
-                        .get_contract(&contract_id)
-                        .await
-                        .unwrap()
-                        .unwrap();
-                    if let Contract::Closed(ref closed_contract) = bob_contract {
-                        assert!(
-                            closed_contract.attestations.is_none(),
-                            "Cooperative close should not have attestations"
-                        );
-                    } else {
-                        panic!("Bob's contract should be in Closed state");
-                    }
-                };
-                println!("Cooperative close test completed successfully!");
-            }
+    // Each path lives in its own `async fn` rather than a branch of one big
+    // body. That keeps this function's stack frame to the size of a call
+    // instead of the largest branch of every path at once.
+    match &path {
+        TestPath::BadAcceptCetSignature | TestPath::BadAcceptRefundSignature => {
+            bad_accept_path(
+                &mut ctx,
+                &path,
+                temporary_contract_id,
+                accept_msg,
+                &bob_expect_error,
+            )
+            .await
         }
-    })()
-    .await;
+        TestPath::BadSignCetSignature | TestPath::BadSignRefundSignature => {
+            bad_sign_path(&mut ctx, contract_id, accept_msg, &alice_expect_error).await
+        }
+        TestPath::CooperativeClose => {
+            fund_contract(&mut ctx, contract_id, accept_msg).await;
+            cooperative_close_path(&mut ctx, contract_id).await
+        }
+        TestPath::Close => {
+            fund_contract(&mut ctx, contract_id, accept_msg).await;
+            close_path(&mut ctx, &test_params, contract_id, manual_close).await
+        }
+        TestPath::Refund | TestPath::ManualRefund => {
+            fund_contract(&mut ctx, contract_id, accept_msg).await;
+            refund_path(&mut ctx, contract_id, &path, manual_close).await
+        }
+        TestPath::Splice(rounds) => {
+            fund_contract(&mut ctx, contract_id, accept_msg).await;
+            splice_path(&mut ctx, &test_params, contract_id, rounds, manual_close).await
+        }
+    }
 
-    alice_send.send(None).await.unwrap();
-    bob_send.send(None).await.unwrap();
+    alice_send_shutdown.send(None).await.unwrap();
+    bob_send_shutdown.send(None).await.unwrap();
 
     alice_handle.await.unwrap();
     bob_handle.await.unwrap();
 
     create_test_vector().await;
+}
+
+/// Drives the accepted offer through sign to a confirmed funding transaction.
+async fn fund_contract(ctx: &mut TestContext, contract_id: ContractId, accept_msg: AcceptDlc) {
+    ctx.send(Party::Alice, Message::Accept(accept_msg)).await;
+    ctx.sync().await;
+
+    assert_contract_state!(ctx.bob, contract_id, Signed);
+
+    // Should not change state and should not error
+    periodic_check!(ctx.bob, contract_id, Signed);
+
+    ctx.sync().await;
+
+    assert_contract_state!(ctx.alice, contract_id, Signed);
+
+    ctx.sync_wallets().await;
+
+    ctx.mine(10).await;
+
+    periodic_check!(ctx.alice, contract_id, Confirmed);
+    periodic_check!(ctx.bob, contract_id, Confirmed);
+
+    ctx.sync_wallets().await;
+}
+
+/// Sends an accept message with a corrupted signature and asserts that the
+/// offering party rejects it.
+async fn bad_accept_path(
+    ctx: &mut TestContext,
+    path: &TestPath,
+    temporary_contract_id: ContractId,
+    mut accept_msg: AcceptDlc,
+    bob_expect_error: &AtomicBool,
+) {
+    match path {
+        TestPath::BadAcceptCetSignature => {
+            alter_adaptor_sig(&mut accept_msg.cet_adaptor_signatures)
+        }
+        TestPath::BadAcceptRefundSignature => {
+            accept_msg.refund_signature = alter_refund_sig(&accept_msg.refund_signature);
+        }
+        _ => unreachable!(),
+    }
+
+    bob_expect_error.store(true, Ordering::Relaxed);
+    ctx.send(Party::Alice, Message::Accept(accept_msg)).await;
+    ctx.sync().await;
+    assert_contract_state!(ctx.bob, temporary_contract_id, FailedAccept);
+}
+
+/// Lets the offering party corrupt its own sign message, and asserts that the
+/// accepting party rejects it. The corruption happens in Bob's receive loop.
+async fn bad_sign_path(
+    ctx: &mut TestContext,
+    contract_id: ContractId,
+    accept_msg: AcceptDlc,
+    alice_expect_error: &AtomicBool,
+) {
+    alice_expect_error.store(true, Ordering::Relaxed);
+    ctx.send(Party::Alice, Message::Accept(accept_msg)).await;
+    // Bob receives accept message
+    ctx.sync().await;
+    // Alice receives sign message
+    ctx.sync().await;
+    assert_contract_state!(ctx.alice, contract_id, FailedSign);
+}
+
+/// Settles a confirmed contract with a CET built from oracle attestations.
+async fn close_path(
+    ctx: &mut TestContext,
+    test_params: &TestParams,
+    contract_id: ContractId,
+    manual_close: bool,
+) {
+    if !manual_close {
+        test_utils::set_time((EVENT_MATURITY as u64) + 1);
+    }
+
+    // Select the first one to close randomly
+    let first = random_party();
+    let second = first.other();
+
+    let case = thread_rng().next_u64() % 3;
+    let blocks: Option<u32> = if case == 2 {
+        Some(10)
+    } else if case == 1 {
+        Some(1)
+    } else {
+        None
+    };
+
+    if manual_close {
+        periodic_check!(ctx.manager(first), contract_id, Confirmed);
+
+        let attestations = get_attestations(test_params).await;
+
+        let contract = ctx
+            .manager(first)
+            .lock()
+            .await
+            .close_confirmed_contract(&contract_id, attestations)
+            .await
+            .expect("Error closing contract");
+
+        ctx.sync_wallets().await;
+
+        let Contract::PreClosed(contract) = contract else {
+            panic!("Invalid contract state {:?}", contract);
+        };
+
+        let second_contract = ctx.contract(second, &contract_id).await;
+        let Contract::Confirmed(signed) = second_contract else {
+            panic!("Invalid contract state: {:?}", second_contract);
+        };
+
+        ctx.manager(second)
+            .lock()
+            .await
+            .on_counterparty_close(&signed, contract.signed_cet, blocks.unwrap_or(0))
+            .await
+            .expect("Error registering counterparty close");
+
+        ctx.sync_wallets().await;
+    } else {
+        ctx.sync_wallets().await;
+        periodic_check!(ctx.manager(first), contract_id, PreClosed);
+    }
+
+    // mine blocks for the CET to be confirmed
+    if let Some(b) = blocks {
+        ctx.mine(b).await;
+    }
+
+    ctx.sync_wallets().await;
+
+    // Randomly check with or without having the CET mined
+    if case == 2 {
+        periodic_check!(ctx.manager(first), contract_id, Closed);
+        periodic_check!(ctx.manager(second), contract_id, Closed);
+    } else {
+        periodic_check!(ctx.manager(first), contract_id, PreClosed);
+        periodic_check!(ctx.manager(second), contract_id, PreClosed);
+    }
+}
+
+/// Runs a confirmed contract past its refund locktime, either letting the
+/// periodic check broadcast the refund or broadcasting it by hand.
+async fn refund_path(
+    ctx: &mut TestContext,
+    contract_id: ContractId,
+    path: &TestPath,
+    manual_close: bool,
+) {
+    if !manual_close {
+        test_utils::set_time((EVENT_MATURITY as u64) + 1);
+    }
+
+    let first = random_party();
+    let second = first.other();
+
+    ctx.sync_wallets().await;
+    periodic_check!(ctx.manager(first), contract_id, Confirmed);
+    periodic_check!(ctx.manager(second), contract_id, Confirmed);
+
+    test_utils::set_time(((EVENT_MATURITY + ddk_manager::manager::REFUND_DELAY) as u64) + 1);
+
+    ctx.mine(10).await;
+    ctx.sync_wallets().await;
+
+    if path == &TestPath::ManualRefund {
+        // Manually broadcast the refund for the first party.
+        ctx.manager(first)
+            .lock()
+            .await
+            .check_and_broadcast_refund(&contract_id)
+            .await
+            .expect("Error manually broadcasting refund");
+        assert_contract_state!(ctx.manager(first), contract_id, Refunded);
+    } else {
+        periodic_check!(ctx.manager(first), contract_id, Refunded);
+    }
+
+    // Randomly check with or without having the Refund mined.
+    if thread_rng().next_u32() % 2 == 0 {
+        ctx.mine(1).await;
+    }
+
+    ctx.sync_wallets().await;
+
+    // Second party picks it up via periodic check.
+    periodic_check!(ctx.manager(second), contract_id, Refunded);
+}
+
+/// Settles a confirmed contract by agreement instead of by attestation.
+async fn cooperative_close_path(ctx: &mut TestContext, contract_id: ContractId) {
+    // Don't advance time for cooperative close to avoid oracle attestations
+    // being available, which would trigger automatic CET closure.
+
+    // First, ensure the funding transaction is confirmed on the blockchain.
+    let funding_txid = {
+        let alice_contract = ctx.contract(Party::Alice, &contract_id).await;
+        let Contract::Confirmed(ref signed_contract) = alice_contract else {
+            panic!("Contract should be confirmed");
+        };
+        signed_contract
+            .accepted_contract
+            .dlc_transactions
+            .fund
+            .compute_txid()
+    };
+
+    let confirmations = ctx
+        .electrs
+        .get_transaction_confirmations(&funding_txid)
+        .await
+        .unwrap();
+    assert!(
+        confirmations > 0,
+        "Funding transaction should be confirmed on blockchain"
+    );
+
+    // Alice initiates cooperative close, splitting half to the counter party.
+    let counter_payout = Amount::from_sat(ACCEPT_COLLATERAL / 2);
+
+    let (close_msg, _counter_party_pubkey) = ctx
+        .alice
+        .lock()
+        .await
+        .cooperative_close_contract(&contract_id, counter_payout)
+        .await
+        .expect("Error initiating cooperative close");
+
+    // Bob receives and accepts the cooperative close.
+    ctx.bob
+        .lock()
+        .await
+        .accept_cooperative_close(&contract_id, &close_msg)
+        .await
+        .expect("Error accepting cooperative close");
+
+    // Bob broadcast the transaction, so he is the one in PreClosed.
+    periodic_check!(ctx.bob, contract_id, PreClosed);
+
+    // Alice does not know about the close yet.
+    periodic_check!(ctx.alice, contract_id, Confirmed);
+
+    // Mine a few blocks to partially confirm the close transaction.
+    ctx.mine(3).await;
+
+    // Alice now detects the pending close transaction.
+    periodic_check!(ctx.alice, contract_id, PreClosed);
+
+    // Bob is still in PreClosed, there are not enough confirmations yet.
+    periodic_check!(ctx.bob, contract_id, PreClosed);
+
+    // Mine more blocks to reach full confirmation.
+    ctx.mine(5).await;
+
+    periodic_check!(ctx.bob, contract_id, Closed);
+    periodic_check!(ctx.alice, contract_id, Closed);
+
+    let bob_contract = ctx.contract(Party::Bob, &contract_id).await;
+    let Contract::Closed(ref closed_contract) = bob_contract else {
+        panic!("Bob's contract should be in Closed state");
+    };
+    assert!(
+        closed_contract.attestations.is_none(),
+        "Cooperative close should not have attestations"
+    );
+}
+
+/// Replaces a confirmed contract with one holding more or less collateral, by
+/// spending its funding output into the funding transaction of a new contract.
+///
+/// Returns the contract id of the replacement and the parameters it settles
+/// on.
+///
+/// Everything the round claims is asserted here: the replacement reaches
+/// Signed while the contract it replaces goes to PreClosed, the replacement
+/// confirms while the contract it replaces closes against the very
+/// transaction that funded it, the new contract locks exactly the requested
+/// collateral, the funding output moves in the requested direction, and the
+/// difference comes out of, or goes back into, the splicing party's wallet.
+async fn splice_round(
+    ctx: &mut TestContext,
+    base_params: &TestParams,
+    contract_id: ContractId,
+    round: usize,
+    round_spec: SpliceRound,
+    previous_total: Amount,
+) -> (ContractId, TestParams) {
+    let initiator = round_spec.initiator;
+    let acceptor = initiator.other();
+    let total_collateral = round_spec.delta.apply(previous_total);
+    let maturity = EVENT_MATURITY + (round as u32) * SPLICE_MATURITY_STEP;
+
+    let previous = signed_or_confirmed(ctx.contract(initiator, &contract_id).await);
+    let previous_fund = previous
+        .accepted_contract
+        .dlc_transactions
+        .get_fund_output();
+    let previous_fund_value = previous_fund.value;
+    let previous_funding_txid = previous
+        .accepted_contract
+        .dlc_transactions
+        .fund
+        .compute_txid();
+
+    let splice_params = splice_test_params(base_params, round, total_collateral, maturity).await;
+    let balance_before = ctx.confirmed_balance(initiator).await;
+
+    let offer_msg = ctx
+        .manager(initiator)
+        .lock()
+        .await
+        .send_splice_offer(&splice_params.contract_input, counter_party(), &contract_id)
+        .await
+        .expect("Send splice offer error");
+
+    let temporary_contract_id = offer_msg.temporary_contract_id;
+    ctx.send(initiator, Message::Offer(offer_msg)).await;
+
+    assert_contract_state!(ctx.manager(initiator), temporary_contract_id, Offered);
+    ctx.sync().await;
+    assert_contract_state!(ctx.manager(acceptor), temporary_contract_id, Offered);
+
+    let (splice_contract_id, _, accept_msg) = ctx
+        .manager(acceptor)
+        .lock()
+        .await
+        .accept_contract_offer(&temporary_contract_id)
+        .await
+        .expect("Error accepting splice offer");
+
+    assert_contract_state!(ctx.manager(acceptor), splice_contract_id, Accepted);
+
+    ctx.send(acceptor, Message::Accept(accept_msg)).await;
+    ctx.sync().await;
+
+    // The replacement is signed but not yet mined, so the contract it replaces
+    // is spent but not yet closed.
+    periodic_check!(ctx.manager(initiator), splice_contract_id, Signed);
+    assert_contract_state!(ctx.manager(initiator), contract_id, PreClosed);
+
+    ctx.sync().await;
+
+    periodic_check!(ctx.manager(acceptor), splice_contract_id, Signed);
+    assert_contract_state!(ctx.manager(acceptor), contract_id, PreClosed);
+
+    ctx.sync_wallets().await;
+    ctx.mine(10).await;
+    ctx.sync_wallets().await;
+
+    periodic_check!(ctx.manager(initiator), splice_contract_id, Confirmed);
+    periodic_check!(ctx.manager(acceptor), splice_contract_id, Confirmed);
+    periodic_check!(ctx.manager(initiator), contract_id, Closed);
+    periodic_check!(ctx.manager(acceptor), contract_id, Closed);
+
+    let spliced = signed_or_confirmed(ctx.contract(initiator, &splice_contract_id).await);
+    let splice_funding_transaction = spliced.accepted_contract.dlc_transactions.fund.clone();
+    let splice_fund_value = spliced
+        .accepted_contract
+        .dlc_transactions
+        .get_fund_output()
+        .value;
+
+    assert!(
+        splice_funding_transaction
+            .input
+            .iter()
+            .any(|input| input.previous_output.txid == previous_funding_txid),
+        "the splice funding transaction must spend the previous funding transaction"
+    );
+
+    let dlc_input = spliced
+        .accepted_contract
+        .offered_contract
+        .funding_inputs
+        .iter()
+        .find_map(|input| input.dlc_input.as_ref())
+        .expect("the spliced offer must carry a DLC input");
+    assert_eq!(
+        dlc_input.contract_id, contract_id,
+        "the DLC input must name the contract it replaces"
+    );
+
+    assert_eq!(
+        spliced.accepted_contract.offered_contract.total_collateral, total_collateral,
+        "the spliced contract must lock the requested collateral"
+    );
+
+    // The contract that was replaced closes against the transaction that funded
+    // its replacement.
+    let closed_previous = ctx.contract(initiator, &contract_id).await;
+    assert_eq!(
+        closed_previous.get_cet_txid().unwrap(),
+        splice_funding_transaction.compute_txid(),
+        "the replaced contract must close against the splice funding transaction"
+    );
+
+    let balance_after = ctx.confirmed_balance(initiator).await;
+    match round_spec.delta {
+        SpliceDelta::In(amount) => {
+            assert!(
+                splice_fund_value > previous_fund_value,
+                "a splice in must grow the funding output: {previous_fund_value} -> {splice_fund_value}"
+            );
+            let paid = balance_before.checked_sub(balance_after).unwrap_or_else(|| {
+                panic!(
+                    "a splice in must not grow the splicing party's wallet: {balance_before} -> {balance_after}"
+                )
+            });
+            assert!(
+                paid >= amount && paid <= amount + FEE_SLACK,
+                "a splice in of {amount} must come out of the splicing party's wallet, paid {paid}"
+            );
+        }
+        SpliceDelta::Out(amount) => {
+            assert!(
+                splice_fund_value < previous_fund_value,
+                "a splice out must shrink the funding output: {previous_fund_value} -> {splice_fund_value}"
+            );
+            let received = balance_after.checked_sub(balance_before).unwrap_or_else(|| {
+                panic!(
+                    "a splice out must not shrink the splicing party's wallet: {balance_before} -> {balance_after}"
+                )
+            });
+            assert!(
+                received <= amount && received + FEE_SLACK >= amount,
+                "a splice out of {amount} must go back to the splicing party's wallet, received {received}"
+            );
+        }
+    }
+
+    (splice_contract_id, splice_params)
+}
+
+/// Splices a confirmed contract once per round, then settles the contract the
+/// last round produced and asserts every contract in the chain stayed closed.
+async fn splice_path(
+    ctx: &mut TestContext,
+    test_params: &TestParams,
+    contract_id: ContractId,
+    rounds: &[SpliceRound],
+    manual_close: bool,
+) {
+    assert!(!rounds.is_empty(), "a splice path needs at least one round");
+
+    let mut replaced = vec![contract_id];
+    let mut current = contract_id;
+    let mut total = TOTAL_COLLATERAL;
+    let mut current_params = None;
+
+    for (index, round_spec) in rounds.iter().enumerate() {
+        let round = index + 1;
+        let (spliced_id, spliced_params) =
+            splice_round(ctx, test_params, current, round, *round_spec, total).await;
+        current = spliced_id;
+        total = round_spec.delta.apply(total);
+        current_params = Some(spliced_params);
+        replaced.push(current);
+    }
+
+    // Only the last contract in the chain is still open, so advancing past its
+    // maturity settles it and nothing else.
+    let last_maturity = EVENT_MATURITY + (rounds.len() as u32) * SPLICE_MATURITY_STEP;
+    test_utils::set_time(last_maturity as u64 + 1);
+
+    let splice_params = current_params.expect("a splice chain to have run a round");
+    settle_spliced_contract(ctx, &splice_params, current, manual_close).await;
+
+    // Every contract the chain replaced stays closed.
+    for previous in replaced.iter().take(replaced.len() - 1) {
+        assert_contract_state!(ctx.bob, *previous, Closed);
+        assert_contract_state!(ctx.alice, *previous, Closed);
+    }
+}
+
+/// Settles the last contract of a splice chain and asserts its CET spends the
+/// splice funding output and pays only the two parties.
+async fn settle_spliced_contract(
+    ctx: &mut TestContext,
+    splice_params: &TestParams,
+    contract_id: ContractId,
+    manual_close: bool,
+) {
+    let spliced = signed_or_confirmed(ctx.contract(Party::Bob, &contract_id).await);
+    let splice_funding_txid = spliced
+        .accepted_contract
+        .dlc_transactions
+        .fund
+        .compute_txid();
+    let offer_payout_spk = spliced
+        .accepted_contract
+        .offered_contract
+        .offer_params
+        .payout_script_pubkey
+        .clone();
+    let accept_payout_spk = spliced
+        .accepted_contract
+        .accept_params
+        .payout_script_pubkey
+        .clone();
+
+    ctx.sync_wallets().await;
+
+    if manual_close {
+        let attestations = get_attestations(splice_params).await;
+        let contract = ctx
+            .bob
+            .lock()
+            .await
+            .close_confirmed_contract(&contract_id, attestations)
+            .await
+            .expect("Error closing spliced contract");
+
+        let Contract::PreClosed(contract) = contract else {
+            panic!("Invalid contract state {:?}", contract);
+        };
+
+        let alice_contract = ctx.contract(Party::Alice, &contract_id).await;
+        let Contract::Confirmed(signed) = alice_contract else {
+            panic!("Invalid contract state: {:?}", alice_contract);
+        };
+
+        ctx.alice
+            .lock()
+            .await
+            .on_counterparty_close(&signed, contract.signed_cet, 0)
+            .await
+            .expect("Error registering counterparty close");
+    } else {
+        periodic_check!(ctx.bob, contract_id, PreClosed);
+        periodic_check!(ctx.alice, contract_id, PreClosed);
+    }
+
+    ctx.mine(10).await;
+    ctx.sync_wallets().await;
+
+    periodic_check!(ctx.bob, contract_id, Closed);
+    periodic_check!(ctx.alice, contract_id, Closed);
+
+    let Contract::Closed(closed) = ctx.contract(Party::Bob, &contract_id).await else {
+        panic!("Spliced contract is not closed");
+    };
+    let closed_cet = closed.signed_cet.expect("a closed contract to have a CET");
+
+    assert!(
+        closed_cet
+            .input
+            .iter()
+            .any(|input| input.previous_output.txid == splice_funding_txid),
+        "the CET must spend the splice funding output"
+    );
+    assert!(
+        closed_cet
+            .output
+            .iter()
+            .all(|output| output.script_pubkey == offer_payout_spk
+                || output.script_pubkey == accept_payout_spk),
+        "the CET must pay only the two parties"
+    );
+
+    let status = ctx
+        .electrs
+        .async_client
+        .get_tx_status(&closed_cet.compute_txid())
+        .await
+        .unwrap();
+    assert!(status.confirmed, "the CET must be mined");
+}
+
+/// The signed contract inside a `Signed` or `Confirmed` contract.
+fn signed_or_confirmed(contract: Contract) -> SignedContract {
+    match contract {
+        Contract::Signed(signed) | Contract::Confirmed(signed) => signed,
+        other => panic!("Contract is neither signed nor confirmed: {:?}", other),
+    }
+}
+
+fn random_party() -> Party {
+    if thread_rng().next_u32() % 2 == 0 {
+        Party::Alice
+    } else {
+        Party::Bob
+    }
 }
