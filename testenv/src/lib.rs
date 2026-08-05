@@ -37,6 +37,8 @@ pub use bitcoincore_rpc;
 pub use bitcoind;
 pub use electrsd;
 
+#[cfg(feature = "dlc")]
+pub mod dlc;
 #[cfg(feature = "nostr")]
 pub mod nostr;
 #[cfg(feature = "postgres")]

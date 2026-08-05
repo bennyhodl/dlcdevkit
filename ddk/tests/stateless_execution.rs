@@ -467,21 +467,21 @@ struct SpliceRound {
     /// with the whole of the previous funding output, whichever side of that
     /// contract it was, so it also puts up the whole of the new collateral.
     splicer: Party,
-    splice_in: bool,
+    delta: SpliceDelta,
 }
 
 impl SpliceRound {
     fn splice_in(splicer: Party) -> Self {
         Self {
             splicer,
-            splice_in: true,
+            delta: SpliceDelta::In(SPLICE_AMOUNT),
         }
     }
 
     fn splice_out(splicer: Party) -> Self {
         Self {
             splicer,
-            splice_in: false,
+            delta: SpliceDelta::Out(SPLICE_AMOUNT),
         }
     }
 }
@@ -523,11 +523,7 @@ async fn splice_chain_and_close(
     for (index, round) in rounds.iter().enumerate() {
         let number = index + 1;
         let round_label = format!("{label}-{number}");
-        let collateral = if round.splice_in {
-            previous.fund_value() + SPLICE_AMOUNT
-        } else {
-            previous.fund_value() - SPLICE_AMOUNT
-        };
+        let collateral = round.delta.apply(previous.fund_value());
         // Only a numeric payout curve reads the split between the two sides;
         // every shape locks their sum.
         let offer_share = collateral / 2;
@@ -536,7 +532,7 @@ async fn splice_chain_and_close(
 
         let spliced_id = temporary_contract_id(&round_label);
         let seed_byte = 43 + index as u8 * 2;
-        let offer_spec = if round.splice_in {
+        let offer_spec = if round.delta.is_in() {
             PartySpec::new(Party::Offer, seed_byte, 20 + number as u64)
         } else {
             PartySpec::unfunded(Party::Offer, seed_byte)
@@ -559,7 +555,7 @@ async fn splice_chain_and_close(
         )
         .await;
 
-        assert_splice(&ctx, &previous, &spliced, round.splice_in).await;
+        assert_splice(&ctx, &previous, &spliced, round.delta.is_in()).await;
 
         previous = spliced;
         settled = Some(spliced_shape);
