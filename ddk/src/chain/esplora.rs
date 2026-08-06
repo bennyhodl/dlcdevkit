@@ -173,12 +173,12 @@ impl ddk_manager::Blockchain for EsploraClient {
             .get_tx_status(tx_id)
             .await
             .map_err(esplora_err_to_manager_err)?;
-        let tip_height = self
-            .async_client
-            .get_height()
-            .await
-            .map_err(esplora_err_to_manager_err)?;
         if txn.confirmed {
+            let tip_height = self
+                .async_client
+                .get_height()
+                .await
+                .map_err(esplora_err_to_manager_err)?;
             match txn.block_height {
                 Some(height) => Ok(tip_height
                     .checked_sub(height)
@@ -187,7 +187,20 @@ impl ddk_manager::Blockchain for EsploraClient {
                 None => Ok(0),
             }
         } else {
-            Ok(0)
+            // tx is unconfirmed — check if it's in the mempool or truly gone
+            match self.async_client.get_tx(tx_id).await {
+                Ok(Some(_)) => Ok(0),
+                _ => {
+                    log_warn!(
+                        self.logger,
+                        "Transaction not found in mempool or on-chain. txid={}",
+                        tx_id,
+                    );
+                    Err(esplora_err_to_manager_err(
+                        EsploraError::TransactionNotFound(*tx_id),
+                    ))
+                }
+            }
         }
     }
 }
