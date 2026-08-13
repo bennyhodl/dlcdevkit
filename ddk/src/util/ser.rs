@@ -201,3 +201,96 @@ pub fn message_variant_name(message: &Message) -> String {
 
     str.to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every contract state, serialized by an earlier release and checked in.
+    ///
+    /// Each embeds at least one [`ddk_messages::oracle_msgs::OracleAnnouncement`],
+    /// which is what makes these the evidence that matters for oracle serialization.
+    const FIXTURES: &[(&str, &[u8])] = &[
+        (
+            "Offered",
+            include_bytes!("../../../testconfig/contract_binaries/Offered"),
+        ),
+        (
+            "Accepted",
+            include_bytes!("../../../testconfig/contract_binaries/Accepted"),
+        ),
+        (
+            "Signed",
+            include_bytes!("../../../testconfig/contract_binaries/Signed"),
+        ),
+        (
+            "Confirmed",
+            include_bytes!("../../../testconfig/contract_binaries/Confirmed"),
+        ),
+        (
+            "PreClosed",
+            include_bytes!("../../../testconfig/contract_binaries/PreClosed"),
+        ),
+        (
+            "Closed",
+            include_bytes!("../../../testconfig/contract_binaries/Closed"),
+        ),
+    ];
+
+    /// Stored contracts must survive a read and a write with every byte intact.
+    ///
+    /// A contract carries its oracle announcements in the embedded body form, so any
+    /// change to how those are written shows up here as a diff against bytes an
+    /// earlier release produced. This is what a stored `BYTEA` column would have to
+    /// be migrated for; while it passes, there is nothing to migrate.
+    #[test]
+    fn stored_contracts_round_trip_byte_for_byte() {
+        for (state, stored) in FIXTURES {
+            let contract = deserialize_contract(&stored.to_vec())
+                .unwrap_or_else(|e| panic!("{state} contract failed to deserialize: {e:?}"));
+
+            let reserialized = serialize_contract(&contract)
+                .unwrap_or_else(|e| panic!("{state} contract failed to serialize: {e:?}"));
+
+            assert_eq!(
+                reserialized,
+                stored.to_vec(),
+                "{state} contract did not round trip; the storage format changed"
+            );
+        }
+    }
+
+    /// The oldest offered contract we keep a fixture for still reads.
+    ///
+    /// Only `old/Offered` is asserted. The other fixtures under `old/` predate
+    /// unrelated changes to the contract structs and have not deserialized for
+    /// some time, which is a separate matter from how oracle messages are written.
+    #[test]
+    fn oldest_offered_contract_still_deserializes() {
+        let stored = include_bytes!("../../../testconfig/contract_binaries/old/Offered");
+        deserialize_contract(&stored.to_vec()).expect("oldest offered contract to deserialize");
+    }
+
+    /// The announcement inside a stored contract is the one the oracle signed.
+    ///
+    /// Reading it out and writing it back as a standalone TLV record must reproduce
+    /// the hex an oracle would serve, which is the round trip consumers were doing
+    /// by hand.
+    #[test]
+    fn announcement_inside_a_stored_contract_survives_as_a_standalone_record() {
+        use ddk_messages::TlvRecord;
+
+        let stored = include_bytes!("../../../testconfig/contract_binaries/Offered");
+        let Contract::Offered(offered) = deserialize_contract(&stored.to_vec()).unwrap() else {
+            panic!("fixture is not an offered contract");
+        };
+
+        let announcement = &offered.contract_info[0].oracle_announcements[0];
+        let tlv = announcement.to_tlv_bytes();
+
+        assert_eq!(
+            ddk_messages::oracle_msgs::OracleAnnouncement::from_tlv_bytes(&tlv).unwrap(),
+            *announcement
+        );
+    }
+}

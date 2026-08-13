@@ -18,6 +18,8 @@ extern crate secp256k1_zkp;
 pub mod ser_macros;
 pub mod ser_impls;
 
+pub use ser_impls::{TlvRecord, TlvType};
+
 #[cfg(any(test, feature = "use-serde"))]
 extern crate serde;
 

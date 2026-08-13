@@ -1,5 +1,6 @@
 //! Set of utility functions to help with serialization.
 
+use bitcoin::hex::{DisplayHex, FromHex};
 use bitcoin::Address;
 use bitcoin::Network;
 use bitcoin::SignedAmount;
@@ -593,7 +594,136 @@ pub fn read_signed_amount<R: ::lightning::io::Read>(
     Ok(SignedAmount::from_sat(signed_amount))
 }
 
+/// A type that is framed as a TLV record: its record type and body length, both as
+/// [`BigSize`], ahead of the body.
+///
+/// # Not the same as [`Type`]
+///
+/// [`Type`] marks a *wire message* — a `u16` type followed by the body, with no length,
+/// which is how the DLC protocol messages travel between peers. This trait marks a *TLV
+/// record*, which carries a length as well. The two framings are not interchangeable, so
+/// a type declares whichever one describes it. A type may hold both marks, but only when
+/// it genuinely appears in both framings.
+///
+/// # Why the constant
+///
+/// [`Type`] gives the record type through `&self`, so a reader holding only a byte stream
+/// has nothing to compare the type it reads against. This associated constant supplies it,
+/// which lets [`read_as_tlv`] reject a record whose type does not match the type being read
+/// instead of decoding it into nonsense.
+///
+/// Declare it with [`impl_dlc_tlv_record!`](crate::impl_dlc_tlv_record) rather than by hand;
+/// that macro also derives the [`Type`] impl from the same constant so the two cannot drift.
+pub trait TlvType {
+    /// The TLV record type of this message, as assigned by the DLC specification.
+    const TYPE_ID: u16;
+}
+
+/// A TLV record that also travels on its own, outside any containing message.
+///
+/// # The problem this solves
+///
+/// A type in this position has two jobs that pull in opposite directions. Nested inside
+/// another message, its [`Writeable`] impl must write the body *alone*, because the
+/// container adds the header through [`write_as_tlv`]; an impl that wrote its own header
+/// would double-wrap the field and invalidate every previously stored message. Travelling
+/// alone — an HTTP response, a nostr event, a `BYTEA` column, a hex string in an RPC — it
+/// needs the header, because nothing else is there to add it.
+///
+/// One [`Writeable`] impl cannot do both, so callers who reached for [`Readable::read`] on
+/// standalone bytes found it failed and hand-rolled the two [`BigSize`] reads to strip the
+/// header. This trait is the second entry point, so nobody writes those lines again.
+///
+/// `oracle_announcement` is the case in the DLC specification today. It is not obviously
+/// the last one, so this is a blanket impl: any type that declares [`TlvType`] and is
+/// readable and writeable gets the standalone form for free, with nothing to remember.
+///
+/// ```
+/// use ddk_messages::oracle_msgs::OracleAnnouncement;
+/// use ddk_messages::TlvRecord;
+///
+/// # fn example(hex_from_oracle: &str) -> Result<(), lightning::ln::msgs::DecodeError> {
+/// let announcement = OracleAnnouncement::from_tlv_hex(hex_from_oracle)?;
+/// let bytes_for_storage = announcement.to_tlv_bytes();
+/// # Ok(())
+/// # }
+/// ```
+pub trait TlvRecord: TlvType + Readable + Writeable {
+    /// Serializes the value as a TLV record, header included.
+    fn to_tlv_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(self.serialized_length() + 8);
+        BigSize(Self::TYPE_ID as u64)
+            .write(&mut bytes)
+            .expect("writing to a Vec cannot fail");
+        BigSize(self.serialized_length() as u64)
+            .write(&mut bytes)
+            .expect("writing to a Vec cannot fail");
+        self.write(&mut bytes)
+            .expect("writing to a Vec cannot fail");
+        bytes
+    }
+
+    /// Deserializes a TLV record produced by [`Self::to_tlv_bytes`].
+    ///
+    /// The record type and the declared length are both checked, and the record must use
+    /// up `bytes` exactly. Trailing bytes are an error rather than something to ignore,
+    /// because a record that does not account for its whole buffer was not understood.
+    fn from_tlv_bytes(bytes: &[u8]) -> Result<Self, DecodeError> {
+        let mut cursor = lightning::io::Cursor::new(bytes);
+        let value = read_as_tlv(&mut cursor)?;
+        if (cursor.position() as usize) != bytes.len() {
+            return Err(DecodeError::InvalidValue);
+        }
+        Ok(value)
+    }
+
+    /// Serializes the value as a lowercase hex TLV record.
+    ///
+    /// This is the interchange format oracles use over HTTP and the one the DLC
+    /// specification's test vectors are written in.
+    fn to_tlv_hex(&self) -> String {
+        self.to_tlv_bytes().to_lower_hex_string()
+    }
+
+    /// Deserializes a hex TLV record produced by [`Self::to_tlv_hex`].
+    fn from_tlv_hex(hex: &str) -> Result<Self, DecodeError> {
+        let bytes = Vec::<u8>::from_hex(hex).map_err(|_| DecodeError::InvalidValue)?;
+        Self::from_tlv_bytes(&bytes)
+    }
+
+    /// Deserializes a TLV record, falling back to a bare body if no TLV header is present.
+    ///
+    /// Use this, and only this, to read bytes persisted before a type gained its standalone
+    /// form: a store written through [`Writeable::encode`] holds header-less bodies, one
+    /// written from a producer's own bytes holds full TLV records, and a store that has seen
+    /// both holds a mix.
+    ///
+    /// The fallback is sound only where a body cannot begin with this record's own type id
+    /// as a [`BigSize`] followed by a length that accounts for the buffer exactly. That
+    /// holds for the oracle messages, whose bodies open with a Schnorr signature or a string
+    /// length. Check it before relying on this for a new type.
+    ///
+    /// New writes should always go through [`Self::to_tlv_bytes`], leaving this needed only
+    /// until the last legacy row is migrated.
+    fn from_tlv_bytes_or_legacy(bytes: &[u8]) -> Result<Self, DecodeError> {
+        if let Ok(value) = Self::from_tlv_bytes(bytes) {
+            return Ok(value);
+        }
+        let mut cursor = lightning::io::Cursor::new(bytes);
+        let value = Self::read(&mut cursor)?;
+        if (cursor.position() as usize) != bytes.len() {
+            return Err(DecodeError::InvalidValue);
+        }
+        Ok(value)
+    }
+}
+
+impl<T: TlvType + Readable + Writeable> TlvRecord for T {}
+
 /// Writes a [`lightning::util::ser::Writeable`] value to the given writer as a TLV.
+///
+/// The value is prefixed by its record type and by the length of its body, both as
+/// [`BigSize`]. [`read_as_tlv`] is the matching reader.
 pub fn write_as_tlv<T: Type + Writeable, W: Writer>(
     e: &T,
     writer: &mut W,
@@ -603,14 +733,33 @@ pub fn write_as_tlv<T: Type + Writeable, W: Writer>(
     e.write(writer)
 }
 
-/// Read a [`lightning::util::ser::Writeable`] value from the given reader as a TLV.
-pub fn read_as_tlv<T: Type + Readable, R: Read>(reader: &mut R) -> Result<T, DecodeError> {
-    // TODO(tibo): consider checking type here.
-    // This retrieves type as BigSize. Will be u16 once specs are updated.
-    let _: BigSize = Readable::read(reader)?;
-    // This retrieves the length, will be removed once oracle specs are updated.
-    let _: BigSize = Readable::read(reader)?;
-    Readable::read(reader)
+/// Reads a [`lightning::util::ser::Readable`] value from the given reader as a TLV.
+///
+/// Both halves of the TLV header are enforced: the record type must be [`TlvType::TYPE_ID`],
+/// and the body must consume exactly the number of bytes the header declares. Without those
+/// checks a truncated or mistyped record decodes into a plausible-looking value and, worse,
+/// leaves the reader mid-record so that everything after it in the stream is garbage.
+pub fn read_as_tlv<T: TlvType + Readable, R: Read>(reader: &mut R) -> Result<T, DecodeError> {
+    let tlv_type: BigSize = Readable::read(reader)?;
+    if tlv_type.0 != T::TYPE_ID as u64 {
+        return Err(DecodeError::InvalidValue);
+    }
+    let len: BigSize = Readable::read(reader)?;
+    read_tlv_body(reader, len.0)
+}
+
+/// Reads the body of a TLV record whose header has already been consumed.
+///
+/// The value is read through a reader bounded to `len` bytes, so a body that reads past
+/// its declared length fails rather than stealing bytes from the next record, and a body
+/// that stops short is rejected instead of leaving the remainder to be misread.
+pub fn read_tlv_body<T: Readable, R: Read>(reader: &mut R, len: u64) -> Result<T, DecodeError> {
+    let mut body = lightning::util::ser::FixedLengthReader::new(reader, len);
+    let value = T::read(&mut body)?;
+    if body.bytes_remain() {
+        return Err(DecodeError::InvalidValue);
+    }
+    Ok(value)
 }
 
 /// Writes a [`HashMap`].

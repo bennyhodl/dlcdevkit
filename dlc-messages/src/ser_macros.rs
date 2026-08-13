@@ -194,6 +194,38 @@ macro_rules! impl_dlc_writeable_external_enum {
     };
 }
 
+/// Declares a type as a TLV record, giving it its record type in one place.
+///
+/// Use this for any type the DLC specification assigns a TLV record type to. It
+/// implements [`TlvType`](crate::ser_impls::TlvType) with the given constant and derives
+/// [`Type`](lightning::ln::wire::Type) from it, so the two can never disagree.
+///
+/// Declaring it also brings in [`TlvRecord`](crate::ser_impls::TlvRecord) through that
+/// trait's blanket impl, which is what lets the type be read and written on its own
+/// as well as nested. A type that only ever appears nested loses nothing by having it.
+///
+/// ```ignore
+/// impl_dlc_tlv_record!(OracleAnnouncement, ANNOUNCEMENT_TYPE);
+/// ```
+///
+/// Do not reach for this to mark a peer-to-peer protocol message. Those are wire
+/// messages — a `u16` type and no length — and want a bare
+/// [`Type`](lightning::ln::wire::Type) impl instead.
+#[macro_export]
+macro_rules! impl_dlc_tlv_record {
+    ($st:ident, $type_id:expr) => {
+        impl $crate::ser_impls::TlvType for $st {
+            const TYPE_ID: u16 = $type_id;
+        }
+
+        impl ::lightning::ln::wire::Type for $st {
+            fn type_id(&self) -> u16 {
+                <$st as $crate::ser_impls::TlvType>::TYPE_ID
+            }
+        }
+    };
+}
+
 /// Implements the [`lightning::util::ser::Writeable`] trait for an enum as a TLV.
 #[macro_export]
 macro_rules! impl_dlc_writeable_enum_as_tlv {
@@ -216,8 +248,8 @@ macro_rules! impl_dlc_writeable_enum_as_tlv {
                 let id: $crate::ser_impls::BigSize = Readable::read(r)?;
                 match id.0 {
                     $($variant_id => {
-                        let _ : $crate::ser_impls::BigSize = Readable::read(r)?;
-						Ok($st::$variant_name(Readable::read(r)?))
+                        let len : $crate::ser_impls::BigSize = Readable::read(r)?;
+						Ok($st::$variant_name($crate::ser_impls::read_tlv_body(r, len.0)?))
 					}),*
 					_ => {
 						Err(DecodeError::UnknownRequiredFeature)

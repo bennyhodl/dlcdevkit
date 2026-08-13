@@ -8,8 +8,7 @@ use crate::logger::{log_debug, log_error, log_info, log_warn, WriteLog};
 use bitcoin::XOnlyPublicKey;
 use ddk_manager::error::Error as ManagerError;
 use ddk_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
-use lightning::io::Cursor;
-use lightning::util::ser::Readable;
+use ddk_messages::TlvRecord;
 use nostr_database::MemoryDatabase;
 use nostr_database::NostrDatabase;
 use nostr_rs::event::EventId;
@@ -268,13 +267,18 @@ impl ddk_manager::Oracle for NostrOracle {
     }
 }
 
-fn decode_base64<T: Readable>(content: &str) -> Result<T, OracleError> {
+/// Decodes an oracle message from the base64 content of a nostr event.
+///
+/// Events carry the message in its standalone TLV form. Events published before that
+/// was settled carry the TLV body alone, and a relay keeps them forever, so both forms
+/// are accepted here.
+fn decode_base64<T: TlvRecord>(content: &str) -> Result<T, OracleError> {
     use base64::Engine as _;
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(content)
         .map_err(|_| OracleError::Custom("Failed to decode base64.".to_string()))?;
-    let mut cursor = Cursor::new(bytes);
-    T::read(&mut cursor).map_err(|_| OracleError::Custom("Failed to read event.".to_string()))
+    T::from_tlv_bytes_or_legacy(&bytes)
+        .map_err(|_| OracleError::Custom("Failed to read event.".to_string()))
 }
 
 #[cfg(test)]
@@ -283,6 +287,32 @@ mod tests {
     use nostr_rs::event::Event;
 
     use super::*;
+
+    const REAL_ANNOUNCEMENT_HEX: &str = "fdd824fd012a73740e61118e5d1c2c223c986b859a42c2cca56cb621d13ff8880ea856caf24aa29bc36a1e0d5c471b6a2baa68f98a413362c4e6a97f13c04b186395e9e0d8fcc3d07289c2ade25405c1c421b38c9322cd73fb2c89f42ce0730a35fae1f8875dfdd822c60001529fadc9958e1e1cf8ea29f05a25d67e04a0c21dcbfcb99b8b24d32f274795eb68e81101fdd8064e0004086e6f742d70616964067265706169641d6c6971756964617465642d62792d6d617475726174696f6e2d646174651d6c6971756964617465642d62792d70726963652d7468726573686f6c644d6c6f616e2d6d6174757265642d38313233313935633631653439376631323465623764336266626531323232613530326233306162343139363766306466323036306133656533366635623063";
+
+    /// Announcements published to a relay before this crate wrote the TLV form
+    /// carry the bare body. A relay keeps them forever, so a client upgrading to
+    /// this version must still be able to read what is already out there.
+    #[test]
+    fn legacy_body_form_nostr_events_still_decode() {
+        use base64::Engine as _;
+        use lightning::util::ser::Writeable;
+
+        let announcement = OracleAnnouncement::from_tlv_hex(REAL_ANNOUNCEMENT_HEX).unwrap();
+
+        let legacy = base64::engine::general_purpose::STANDARD.encode(announcement.encode());
+        let current = base64::engine::general_purpose::STANDARD.encode(announcement.to_tlv_bytes());
+        assert_ne!(legacy, current, "the two forms must actually differ");
+
+        assert_eq!(
+            decode_base64::<OracleAnnouncement>(&legacy).unwrap(),
+            announcement
+        );
+        assert_eq!(
+            decode_base64::<OracleAnnouncement>(&current).unwrap(),
+            announcement
+        );
+    }
 
     async fn test_send_announcement(
         key: nostr_rs::key::Keys,
