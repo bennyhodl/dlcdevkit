@@ -2,12 +2,11 @@
 
 use crate::ser_impls::{
     read_as_tlv, read_i32, read_schnorr_pubkey, read_schnorrsig, read_strings_u16, write_as_tlv,
-    write_i32, write_schnorr_pubkey, write_schnorrsig, write_strings_u16, BigSize,
+    write_i32, write_schnorr_pubkey, write_schnorrsig, write_strings_u16, TlvRecord,
 };
 use bitcoin::hashes::{Hash, HashEngine};
 use ddk_dlc::{Error, OracleInfo as DlcOracleInfo};
 use lightning::ln::msgs::DecodeError;
-use lightning::ln::wire::Type;
 use lightning::util::ser::{Readable, Writeable, Writer};
 use secp256k1_zkp::Verification;
 use secp256k1_zkp::{schnorr::Signature, Message, Secp256k1, XOnlyPublicKey};
@@ -16,6 +15,8 @@ use serde::{Deserialize, Serialize};
 
 /// The type of the announcement struct.
 pub const ANNOUNCEMENT_TYPE: u16 = 55332;
+/// The type of the oracle event struct.
+pub const ORACLE_EVENT_TYPE: u16 = 55330;
 /// The type of the attestation struct.
 pub const ATTESTATION_TYPE: u16 = 55400;
 
@@ -165,35 +166,17 @@ pub struct OracleAnnouncement {
     pub oracle_event: OracleEvent,
 }
 
-impl Type for OracleAnnouncement {
-    fn type_id(&self) -> u16 {
-        ANNOUNCEMENT_TYPE
-    }
-}
-
-/// TODO: this should be handled by the read/write macros. They do not append
-/// the tagged hash to the event. As well, [`crate::Message`]
-///
-/// It should end up being back to original:
-///
-/// self.event.write(&mut event_hex)?;
-///
-fn write_oracle_event(event: &OracleEvent) -> Result<Vec<u8>, lightning::io::Error> {
-    let mut event_hex = Vec::new();
-    BigSize(event.type_id() as u64).write(&mut event_hex)?;
-    BigSize(event.serialized_length() as u64).write(&mut event_hex)?;
-    event
-        .write(&mut event_hex)
-        .expect("Error writing oracle event");
-    Ok(event_hex)
-}
+impl_dlc_tlv_record!(OracleAnnouncement, ANNOUNCEMENT_TYPE);
 
 /// Returns the message to be signed for an oracle announcement.
 ///
 /// Follows the signing validation rules from the [DLC spec](https://github.com/discreetlogcontracts/dlcspecs/blob/master/Oracle.md#signing-algorithm).
+///
+/// The event is hashed in its standalone TLV form, header included, which is what
+/// oracles in the wild sign over.
 pub fn tagged_announcement_msg(event: &OracleEvent) -> Message {
     let tag_hash = bitcoin::hashes::sha256::Hash::hash(ORACLE_ANNOUNCEMENT_TAG);
-    let event_hex = write_oracle_event(event).expect("Error writing oracle event");
+    let event_hex = event.to_tlv_bytes();
     let mut hash_engine = bitcoin::hashes::sha256::Hash::engine();
     hash_engine.input(&tag_hash[..]);
     hash_engine.input(&tag_hash[..]);
@@ -284,11 +267,7 @@ impl OracleEvent {
     }
 }
 
-impl Type for OracleEvent {
-    fn type_id(&self) -> u16 {
-        55330
-    }
-}
+impl_dlc_tlv_record!(OracleEvent, ORACLE_EVENT_TYPE);
 
 impl_dlc_writeable!(OracleEvent, {
     (oracle_nonces, {vec_u16_cb, write_schnorr_pubkey, read_schnorr_pubkey}),
@@ -440,11 +419,7 @@ impl OracleAttestation {
     }
 }
 
-impl Type for OracleAttestation {
-    fn type_id(&self) -> u16 {
-        ATTESTATION_TYPE
-    }
-}
+impl_dlc_tlv_record!(OracleAttestation, ATTESTATION_TYPE);
 
 impl_dlc_writeable!(OracleAttestation, {
     (event_id, string),
@@ -456,7 +431,9 @@ impl_dlc_writeable!(OracleAttestation, {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ser_impls::TlvType;
     use bitcoin::bip32::{ChildNumber, Xpriv};
+    use bitcoin::hex::FromHex;
     use bitcoin::Network;
     use secp256k1_zkp::rand::Fill;
     use secp256k1_zkp::SecretKey;
@@ -533,6 +510,210 @@ mod tests {
         let nonce_xpub = nonce_priv.x_only_public_key(SECP256K1).0;
 
         (nonce_priv, nonce_xpub)
+    }
+
+    /// A real announcement served by a production oracle, in the standalone hex form
+    /// its HTTP API returns.
+    const REAL_ANNOUNCEMENT_HEX: &str = "fdd824fd012a73740e61118e5d1c2c223c986b859a42c2cca56cb621d13ff8880ea856caf24aa29bc36a1e0d5c471b6a2baa68f98a413362c4e6a97f13c04b186395e9e0d8fcc3d07289c2ade25405c1c421b38c9322cd73fb2c89f42ce0730a35fae1f8875dfdd822c60001529fadc9958e1e1cf8ea29f05a25d67e04a0c21dcbfcb99b8b24d32f274795eb68e81101fdd8064e0004086e6f742d70616964067265706169641d6c6971756964617465642d62792d6d617475726174696f6e2d646174651d6c6971756964617465642d62792d70726963652d7468726573686f6c644d6c6f616e2d6d6174757265642d38313233313935633631653439376631323465623764336266626531323232613530326233306162343139363766306466323036306133656533366635623063";
+
+    /// The matching attestation from the same oracle.
+    const REAL_ATTESTATION_HEX: &str = "fdd868d04d6c6f616e2d6d6174757265642d39666235336365663365663134383863626230373532643036636263373738633237353532663963373666656634353436653637343038353935626532363832dde465c101a1aaa5a88c0d35d21744eb5352c62b7c7665d62d5f20c770ddfd8f00010c914fa0638767ee55ef16ea009f85548ac43c3d447b47c1ff22724fd0a48b159c9690d0cec7e7ae47a1ceb232b0a2c13404173b9f5e9dc16fe63d31c78c615100011d6c6971756964617465642d62792d6d617475726174696f6e2d64617465";
+
+    /// A numeric announcement, taken from node-dlc's own test vectors.
+    ///
+    /// This is the only fixture covering `digit_decomposition_event_descriptor`
+    /// (55306) in bytes another implementation produced. The enum fixtures all
+    /// take the 55302 branch, so without this the descriptor read path is
+    /// exercised only against announcements this crate wrote itself.
+    const NODE_DLC_NUMERIC_ANNOUNCEMENT_HEX: &str = "fdd824fd02ab1efe41fa42ea1dcd103a0251929dd2b192d2daece8a4ce4d81f68a183b750d92d6f02d796965dc79adf4e7786e08f861a1ecc897afbba2dab9cff6eb0a81937eb8b005b07acf849ad2cec22107331dedbf5a607654fad4eafe39c278e27dde68fdd822fd02450011f9313f1edd903fab297d5350006b669506eb0ffda0bb58319b4df89ac24e14fd15f9791dc78d1596b06f4969bdb37d9e394dc9fedaa18d694027fa32b5ea2a5e60080c58e13727367c3a4ce1ad65dfb3c7e3ca1ea912b0299f6e383bab2875058aa96a1c74633130af6fbd008788de6ac9db76da4ecc7303383cc1a49f525316413850f7e3ac385019d560e84c5b3a3e9ae6c83f59fe4286ddfd23ea46d7ae04610a175cd28a9bf5f574e245c3dfe230dc4b0adf4daaea96780e594f6464f676505f4b74cfe3ffc33415a23de795bf939ce64c0c02033bbfc6c9ff26fb478943a1ece775f38f5db067ca4b2a9168b40792398def9164bfe5c46838472dc3c162af16c811b7a116e9417d5bccb9e5b8a5d7d26095aba993696188c3f85a02f7ab8d12ada171c352785eb63417228c7e248909fc2d673e1bb453140bf8bf429375819afb5e9556663b76ff09c2a7ba9779855ffddc6d360cb459cf8c42a2b949d0de19fe96163d336fd66a4ce2f1791110e679572a20036ffae50204ef520c01058ff4bef28218d1c0e362ee3694ad8b2ae83a51c86c4bc1630ed6202a158810096726f809fc828fafdcf053496affdf887ae8c54b6ca4323ccecf6a51121c4f0c60e790536dab41b221db1c6b35065dc19a9d31cf75901aa35eefecbb6fefd07296cda13cb34ce3b58eba20a0eb8f9614994ec7fee3cc290e30e6b1e3211ae1f3a85b6de6abdbb77d6d9ed33a1cee3bd5cd93a71f12c9c45e385d744ad0e7286660305100fdd80a11000200076274632f75736400000000001109425443205072696365";
+
+    /// An enum announcement, also from node-dlc's test vectors.
+    const NODE_DLC_ENUM_ANNOUNCEMENT_HEX: &str = "fdd824a4fab22628f6e2602e1671c286a2f63a9246794008627a1749639217f4214cb4a9494c93d1a852221080f44f697adb4355df59eb339f6ba0f9b01ba661a8b108d4da078bbb1d34e7729e38e2ae34236e776da121af442626fa31e31ae55a279a0bfdd8224000013cfba011378411b20a5ab773cb95daab93e9bcd1e4cce44986a7dda84e01841b00000000fdd8061000020664756d6d79310664756d6d79320564756d6d79";
+
+    /// The record types are consensus. Pinning them here means a rename or a
+    /// refactor that changes one is a test failure rather than a wire break
+    /// discovered by a peer.
+    #[test]
+    fn record_types_match_the_specification() {
+        assert_eq!(<OracleAnnouncement as TlvType>::TYPE_ID, 55332);
+        assert_eq!(<OracleEvent as TlvType>::TYPE_ID, 55330);
+        assert_eq!(<OracleAttestation as TlvType>::TYPE_ID, 55400);
+    }
+
+    /// The JSON shape is a separate wire format with its own consumers: oracle
+    /// HTTP APIs exchange announcements and attestations this way, and it is what
+    /// `KormirOracleClient` deserializes. Nothing here changed it, and this pins
+    /// that so a future serialization change cannot break it unnoticed.
+    #[cfg(feature = "use-serde")]
+    #[test]
+    fn json_representation_is_unchanged() {
+        let announcement = OracleAnnouncement::from_tlv_hex(REAL_ANNOUNCEMENT_HEX).unwrap();
+        let value = serde_json::to_value(&announcement).unwrap();
+
+        // camelCase keys, hex-encoded keys and signatures.
+        assert!(value.get("announcementSignature").is_some());
+        assert!(value.get("oraclePublicKey").is_some());
+        let event = value.get("oracleEvent").expect("oracleEvent");
+        assert!(event.get("oracleNonces").is_some());
+        assert!(event.get("eventMaturityEpoch").is_some());
+        assert!(event.get("eventDescriptor").is_some());
+        assert_eq!(
+            event.get("eventId").and_then(|v| v.as_str()),
+            Some("loan-matured-8123195c61e497f124eb7d3bfbe1222a502b30ab41967f0df2060a3ee36f5b0c")
+        );
+
+        let back: OracleAnnouncement = serde_json::from_value(value).unwrap();
+        assert_eq!(back, announcement);
+        assert_eq!(back.to_tlv_hex(), REAL_ANNOUNCEMENT_HEX);
+
+        let attestation = OracleAttestation::from_tlv_hex(REAL_ATTESTATION_HEX).unwrap();
+        let back: OracleAttestation =
+            serde_json::from_value(serde_json::to_value(&attestation).unwrap()).unwrap();
+        assert_eq!(back, attestation);
+        assert_eq!(back.to_tlv_hex(), REAL_ATTESTATION_HEX);
+    }
+
+    #[test]
+    fn node_dlc_announcements_round_trip() {
+        for hex in [
+            NODE_DLC_NUMERIC_ANNOUNCEMENT_HEX,
+            NODE_DLC_ENUM_ANNOUNCEMENT_HEX,
+        ] {
+            let announcement =
+                OracleAnnouncement::from_tlv_hex(hex).expect("a node-dlc announcement to parse");
+            assert_eq!(announcement.to_tlv_hex(), hex);
+        }
+    }
+
+    #[test]
+    fn node_dlc_numeric_announcement_reads_its_digit_decomposition_descriptor() {
+        let announcement = OracleAnnouncement::from_tlv_hex(NODE_DLC_NUMERIC_ANNOUNCEMENT_HEX)
+            .expect("a node-dlc numeric announcement to parse");
+
+        let EventDescriptor::DigitDecompositionEvent(descriptor) =
+            &announcement.oracle_event.event_descriptor
+        else {
+            panic!("expected a digit decomposition descriptor");
+        };
+
+        assert_eq!(descriptor.base, 2);
+        assert!(!descriptor.is_signed);
+        assert_eq!(descriptor.unit, "btc/usd");
+        assert_eq!(descriptor.precision, 0);
+        assert_eq!(descriptor.nb_digits, 17);
+        assert_eq!(announcement.oracle_event.event_id, "BTC Price");
+        assert_eq!(announcement.oracle_event.oracle_nonces.len(), 17);
+
+        // One nonce per digit, which is what the announcement claims and what a
+        // contract built from it will rely on.
+        announcement.oracle_event.validate().expect("a valid event");
+    }
+
+    #[test]
+    fn real_oracle_announcement_reads_from_its_standalone_hex() {
+        let announcement = OracleAnnouncement::from_tlv_hex(REAL_ANNOUNCEMENT_HEX)
+            .expect("a production announcement to parse");
+
+        assert_eq!(
+            announcement.oracle_event.event_id,
+            "loan-matured-8123195c61e497f124eb7d3bfbe1222a502b30ab41967f0df2060a3ee36f5b0c"
+        );
+        announcement
+            .validate(SECP256K1)
+            .expect("a production announcement to carry a valid signature");
+
+        // The bytes we write back must be the exact bytes the oracle signed over.
+        assert_eq!(announcement.to_tlv_hex(), REAL_ANNOUNCEMENT_HEX);
+    }
+
+    #[test]
+    fn real_oracle_attestation_reads_from_its_standalone_hex() {
+        let attestation = OracleAttestation::from_tlv_hex(REAL_ATTESTATION_HEX)
+            .expect("a production attestation to parse");
+
+        assert_eq!(attestation.outcomes, vec!["liquidated-by-maturation-date"]);
+        assert_eq!(attestation.signatures.len(), 1);
+        assert_eq!(attestation.to_tlv_hex(), REAL_ATTESTATION_HEX);
+    }
+
+    #[test]
+    fn tlv_form_and_body_form_are_distinct_and_neither_reads_as_the_other() {
+        let announcement = OracleAnnouncement::from_tlv_hex(REAL_ANNOUNCEMENT_HEX).unwrap();
+        let tlv = announcement.to_tlv_bytes();
+        let body = announcement.encode();
+
+        // The TLV form is the body behind a type and length header, and each reader
+        // accepts only its own form. This is the mismatch that made callers strip
+        // the header by hand; `TlvRecord` is what they should reach for instead.
+        let mut header = Vec::new();
+        crate::ser_impls::BigSize(ANNOUNCEMENT_TYPE as u64)
+            .write(&mut header)
+            .unwrap();
+        crate::ser_impls::BigSize(body.len() as u64)
+            .write(&mut header)
+            .unwrap();
+        assert_eq!(tlv, [header.as_slice(), body.as_slice()].concat());
+        assert!(OracleAnnouncement::read(&mut lightning::io::Cursor::new(&tlv)).is_err());
+        assert!(OracleAnnouncement::from_tlv_bytes(&body).is_err());
+    }
+
+    #[test]
+    fn legacy_body_bytes_still_read_through_the_compatibility_reader() {
+        let announcement = OracleAnnouncement::from_tlv_hex(REAL_ANNOUNCEMENT_HEX).unwrap();
+        let attestation = OracleAttestation::from_tlv_hex(REAL_ATTESTATION_HEX).unwrap();
+
+        // Both the stored form written before the standalone form was settled...
+        assert_eq!(
+            OracleAnnouncement::from_tlv_bytes_or_legacy(&announcement.encode()).unwrap(),
+            announcement
+        );
+        assert_eq!(
+            OracleAttestation::from_tlv_bytes_or_legacy(&attestation.encode()).unwrap(),
+            attestation
+        );
+
+        // ...and the current one are readable, so a store holding a mix of the two
+        // migrates without anyone having to know which row is which.
+        assert_eq!(
+            OracleAnnouncement::from_tlv_bytes_or_legacy(&announcement.to_tlv_bytes()).unwrap(),
+            announcement
+        );
+        assert_eq!(
+            OracleAttestation::from_tlv_bytes_or_legacy(&attestation.to_tlv_bytes()).unwrap(),
+            attestation
+        );
+    }
+
+    #[test]
+    fn a_record_of_the_wrong_type_is_rejected_rather_than_misread() {
+        let announcement_bytes = Vec::<u8>::from_hex(REAL_ANNOUNCEMENT_HEX).unwrap();
+        let attestation_bytes = Vec::<u8>::from_hex(REAL_ATTESTATION_HEX).unwrap();
+
+        assert!(OracleAttestation::from_tlv_bytes(&announcement_bytes).is_err());
+        assert!(OracleAnnouncement::from_tlv_bytes(&attestation_bytes).is_err());
+
+        // The lenient reader must not paper over a type mismatch by falling through
+        // to the body reader and decoding the header as message content.
+        assert!(OracleAttestation::from_tlv_bytes_or_legacy(&announcement_bytes).is_err());
+    }
+
+    #[test]
+    fn truncated_and_overlong_records_are_rejected() {
+        let bytes = Vec::<u8>::from_hex(REAL_ANNOUNCEMENT_HEX).unwrap();
+
+        let mut truncated = bytes.clone();
+        truncated.pop();
+        assert!(OracleAnnouncement::from_tlv_bytes(&truncated).is_err());
+
+        let mut trailing = bytes.clone();
+        trailing.push(0x00);
+        assert!(OracleAnnouncement::from_tlv_bytes(&trailing).is_err());
+
+        // A header that claims a shorter body than the record actually holds must
+        // fail, not silently return a value and leave the reader mid-record.
+        let mut short_length = bytes.clone();
+        short_length[4] = 0x2a - 1;
+        assert!(OracleAnnouncement::from_tlv_bytes(&short_length).is_err());
     }
 
     #[test]
