@@ -1712,7 +1712,8 @@ async fn cooperative_close_path(ctx: &mut TestContext, contract_id: ContractId) 
         .electrs
         .get_transaction_confirmations(&funding_txid)
         .await
-        .unwrap();
+        .unwrap()
+        .confirmations();
     assert!(
         confirmations > 0,
         "Funding transaction should be confirmed on blockchain"

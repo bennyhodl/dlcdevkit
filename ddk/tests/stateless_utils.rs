@@ -255,7 +255,7 @@ impl ChainContext {
                 .esplora
                 .get_transaction_confirmations(&txid)
                 .await
-                .unwrap_or(0);
+                .map_or(0, |status| status.confirmations());
             if confirmations >= nb_blocks {
                 return;
             }
@@ -271,7 +271,7 @@ impl ChainContext {
                 .esplora
                 .get_transaction_confirmations(txid)
                 .await
-                .unwrap_or(0)
+                .map_or(0, |status| status.confirmations())
                 > 0
             {
                 return;

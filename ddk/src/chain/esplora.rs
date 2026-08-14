@@ -2,12 +2,13 @@ use std::sync::Arc;
 
 use crate::error::{esplora_err_to_manager_err, Error};
 use crate::logger::Logger;
-use crate::logger::{log_error, log_info, log_warn, WriteLog};
+use crate::logger::{log_debug, log_error, log_info, log_warn, WriteLog};
 use bdk_esplora::esplora_client::Error as EsploraError;
 use bdk_esplora::esplora_client::{AsyncClient, Builder};
 use bitcoin::Network;
 use bitcoin::{consensus::encode, Transaction, Txid};
 use ddk_manager::error::Error as ManagerError;
+use ddk_manager::ConfirmationStatus;
 use lightning::chain::chaininterface::{ConfirmationTarget, FeeEstimator};
 
 /// Default request timeout (in seconds) for the Esplora client.
@@ -167,27 +168,46 @@ impl ddk_manager::Blockchain for EsploraClient {
     async fn get_transaction_confirmations(
         &self,
         tx_id: &bitcoin::Txid,
-    ) -> Result<u32, ManagerError> {
+    ) -> Result<ConfirmationStatus, ManagerError> {
         let txn = self
             .async_client
             .get_tx_status(tx_id)
             .await
             .map_err(esplora_err_to_manager_err)?;
-        let tip_height = self
-            .async_client
-            .get_height()
-            .await
-            .map_err(esplora_err_to_manager_err)?;
         if txn.confirmed {
-            match txn.block_height {
-                Some(height) => Ok(tip_height
+            let tip_height = self
+                .async_client
+                .get_height()
+                .await
+                .map_err(esplora_err_to_manager_err)?;
+            let confirmations = match txn.block_height {
+                Some(height) => tip_height
                     .checked_sub(height)
                     .map(|diff| diff + 1)
-                    .unwrap_or(0)),
-                None => Ok(0),
-            }
+                    .unwrap_or(0),
+                None => 0,
+            };
+            Ok(ConfirmationStatus::Confirmed(confirmations))
         } else {
-            Ok(0)
+            // Esplora reports `confirmed: false` both for transactions in the
+            // mempool and for transactions it does not know. Query the
+            // transaction itself to tell the two apart.
+            match self
+                .async_client
+                .get_tx(tx_id)
+                .await
+                .map_err(esplora_err_to_manager_err)?
+            {
+                Some(_) => Ok(ConfirmationStatus::InMempool),
+                None => {
+                    log_debug!(
+                        self.logger,
+                        "Transaction not found in mempool or on-chain. txid={}",
+                        tx_id.to_string()
+                    );
+                    Ok(ConfirmationStatus::NotFound)
+                }
+            }
         }
     }
 }
