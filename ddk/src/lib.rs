@@ -170,6 +170,28 @@ pub trait Storage: ddk_manager::Storage + Send + Sync + std::fmt::Debug + 'stati
     /// - Updating UTXO set
     /// - Maintaining wallet metadata
     async fn persist_bdk(&self, changeset: &ChangeSet) -> Result<(), WalletError>;
+
+    /// Loads the contract UTXO tracker changeset.
+    ///
+    /// The default implementation returns an empty changeset: a backend
+    /// that does not persist the tracker rebuilds it from contract
+    /// storage and a chain sync on the next wallet sync.
+    async fn initialize_contract_tracker(
+        &self,
+    ) -> Result<wallet::contract_tracker::ChangeSet, WalletError> {
+        Ok(wallet::contract_tracker::ChangeSet::default())
+    }
+
+    /// Persists contract UTXO tracker changes.
+    ///
+    /// The default implementation drops the changeset; see
+    /// [`Storage::initialize_contract_tracker`].
+    async fn persist_contract_tracker(
+        &self,
+        _changeset: &wallet::contract_tracker::ChangeSet,
+    ) -> Result<(), WalletError> {
+        Ok(())
+    }
 }
 
 /// Interface for secure key material storage and retrieval.
