@@ -293,8 +293,14 @@ impl DlcDevKitWallet {
                     }
                     WalletCommand::NewExternalAddress(sender) => {
                         let address = wallet.next_unused_address(KeychainKind::External);
-                        let _ = wallet.persist_async(&mut storage).await;
-                        let _ = sender.send(Ok(address)).map_err(|e| {
+                        // A dropped persist error loses the revealed index and
+                        // leads to address reuse after a restart.
+                        let result = wallet
+                            .persist_async(&mut storage)
+                            .await
+                            .map(|_| address)
+                            .map_err(|e| WalletError::WalletPersistanceError(e.to_string()));
+                        let _ = sender.send(result).map_err(|e| {
                             log_error!(
                                 logger_clone,
                                 "Error sending new external address command. error={:?}",
@@ -304,8 +310,12 @@ impl DlcDevKitWallet {
                     }
                     WalletCommand::NewChangeAddress(sender) => {
                         let address = wallet.next_unused_address(KeychainKind::Internal);
-                        let _ = wallet.persist_async(&mut storage).await;
-                        let _ = sender.send(Ok(address)).map_err(|e| {
+                        let result = wallet
+                            .persist_async(&mut storage)
+                            .await
+                            .map(|_| address)
+                            .map_err(|e| WalletError::WalletPersistanceError(e.to_string()));
+                        let _ = sender.send(result).map_err(|e| {
                             log_error!(
                                 logger_clone,
                                 "Error sending new change address command. error={:?}",
