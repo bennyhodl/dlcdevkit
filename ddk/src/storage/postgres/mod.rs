@@ -900,13 +900,19 @@ async fn tx_graph_changeset_persist_to_postgres(
         .await?;
     }
 
+    // A last_seen entry can arrive before the row for its txid exists; a plain
+    // UPDATE silently dropped it. last_seen only ever increases.
     for (&txid, &last_seen) in &changeset.last_seen {
-        sqlx::query("UPDATE tx SET last_seen = $1 WHERE wallet_name = $2 AND txid = $3")
-            .bind(last_seen as i64)
-            .bind(wallet_name)
-            .bind(txid.to_string())
-            .execute(&mut **db_tx)
-            .await?;
+        sqlx::query(
+            "INSERT INTO tx (wallet_name, txid, last_seen) VALUES ($1, $2, $3)
+             ON CONFLICT (wallet_name, txid)
+             DO UPDATE SET last_seen = GREATEST(tx.last_seen, EXCLUDED.last_seen)",
+        )
+        .bind(wallet_name)
+        .bind(txid.to_string())
+        .bind(last_seen as i64)
+        .execute(&mut **db_tx)
+        .await?;
     }
 
     // first_seen only ever decreases and last_evicted only ever increases,
@@ -1273,6 +1279,29 @@ mod tests {
 
         let read = db.read().await.unwrap();
         assert!(read.local_chain.blocks.get(&100).is_none());
+    }
+
+    #[tokio::test]
+    async fn last_seen_survives_missing_tx_row() {
+        let (_server, db) = seed_db().await;
+
+        let txid = dummy_tx().compute_txid();
+
+        // No tx row exists yet for this txid; the value must not be dropped.
+        let mut changeset = ChangeSet::default();
+        changeset.network = Some(Network::Regtest);
+        changeset.tx_graph.last_seen.insert(txid, 100);
+        db.write(&changeset).await.unwrap();
+
+        let read = db.read().await.unwrap();
+        assert_eq!(read.tx_graph.last_seen.get(&txid), Some(&100));
+
+        // last_seen only ever increases.
+        let mut stale = ChangeSet::default();
+        stale.tx_graph.last_seen.insert(txid, 50);
+        db.write(&stale).await.unwrap();
+        let read = db.read().await.unwrap();
+        assert_eq!(read.tx_graph.last_seen.get(&txid), Some(&100));
     }
 
     #[tokio::test]
