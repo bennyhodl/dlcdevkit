@@ -5,7 +5,6 @@ use crate::{chain::EsploraClient, logger::Logger};
 use bdk_chain::spk_client::FullScanRequest;
 use bdk_esplora::EsploraAsyncExt;
 use bdk_wallet::{KeychainKind, PersistedWallet, Update};
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 type Result<T> = std::result::Result<T, WalletError>;
@@ -55,11 +54,7 @@ pub async fn sync(
             .full_scan(chain, STOP_GAP, PARALLEL_REQUESTS)
             .await
             .map_err(|e| WalletError::Esplora(e.to_string()))?;
-        Update {
-            last_active_indices: sync.last_active_indices,
-            tx_update: sync.tx_update,
-            chain: sync.chain_update,
-        }
+        Update::from(sync)
     } else {
         // Tell esplora which txids we expect under our SPKs. Expected txids
         // that no longer show up come back stamped as evicted, which drops
@@ -78,21 +73,14 @@ pub async fn sync(
             .expected_spk_txids(expected_spk_txids)
             .chain_tip(prev_tip)
             .build();
+        // A sync (not a full scan) must not set last-active indices: the
+        // update is built from the sync result alone.
         let sync = blockchain
             .async_client
-            .sync(spks, 1)
+            .sync(spks, PARALLEL_REQUESTS)
             .await
             .map_err(|e| WalletError::Esplora(e.to_string()))?;
-        let indices = wallet.derivation_index(KeychainKind::External).unwrap_or(0);
-        let internal_index = wallet.derivation_index(KeychainKind::Internal).unwrap_or(0);
-        let mut last_active_indices = BTreeMap::new();
-        last_active_indices.insert(KeychainKind::External, indices);
-        last_active_indices.insert(KeychainKind::Internal, internal_index);
-        Update {
-            last_active_indices,
-            tx_update: sync.tx_update,
-            chain: sync.chain_update,
-        }
+        Update::from(sync)
     };
     wallet.apply_update(sync_result)?;
     wallet
