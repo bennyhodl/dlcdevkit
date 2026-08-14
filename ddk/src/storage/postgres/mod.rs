@@ -957,7 +957,7 @@ async fn local_chain_changeset_persist_to_postgres(
             Some(hash) => {
                 sqlx::query(
                     "INSERT INTO block (wallet_name, hash, height) VALUES ($1, $2, $3)
-                     ON CONFLICT (wallet_name, hash) DO UPDATE SET height = $3",
+                     ON CONFLICT (wallet_name, height) DO UPDATE SET hash = EXCLUDED.hash",
                 )
                 .bind(wallet_name)
                 .bind(hash.to_string())
@@ -1086,6 +1086,56 @@ mod tests {
         assert_eq!(confirmed_rows[0].state, ContractPrefix::Closed as i16);
         let contracts = db.get_contracts().await.unwrap();
         assert!(contracts.len() > 0);
+    }
+
+    #[tokio::test]
+    async fn block_reorg_replaces_hash_at_height() {
+        let (_server, db) = seed_db().await;
+
+        let hash_a = BlockHash::from_byte_array([0xAA; 32]);
+        let hash_b = BlockHash::from_byte_array([0xBB; 32]);
+
+        let mut changeset = ChangeSet::default();
+        changeset.network = Some(Network::Regtest);
+        changeset.local_chain.blocks.insert(100, Some(hash_a));
+        db.write(&changeset).await.unwrap();
+
+        // A reorg replaces the hash at the same height; the old row must go.
+        let mut reorg = ChangeSet::default();
+        reorg.local_chain.blocks.insert(100, Some(hash_b));
+        db.write(&reorg).await.unwrap();
+
+        let read = db.read().await.unwrap();
+        assert_eq!(read.local_chain.blocks.get(&100), Some(&Some(hash_b)));
+        assert_eq!(read.local_chain.blocks.len(), 1);
+
+        // An anchored tx must not block removing the block row.
+        let tx = bitcoin::Transaction {
+            version: bitcoin::transaction::Version::TWO,
+            lock_time: bitcoin::absolute::LockTime::ZERO,
+            input: vec![],
+            output: vec![],
+        };
+        let mut anchor = ChangeSet::default();
+        anchor.tx_graph.txs.insert(Arc::new(tx.clone()));
+        anchor.tx_graph.anchors.insert((
+            ConfirmationBlockTime {
+                block_id: bdk_chain::BlockId {
+                    height: 100,
+                    hash: hash_b,
+                },
+                confirmation_time: 1234,
+            },
+            tx.compute_txid(),
+        ));
+        db.write(&anchor).await.unwrap();
+
+        let mut remove = ChangeSet::default();
+        remove.local_chain.blocks.insert(100, None);
+        db.write(&remove).await.unwrap();
+
+        let read = db.read().await.unwrap();
+        assert!(read.local_chain.blocks.get(&100).is_none());
     }
 
     #[tokio::test]
