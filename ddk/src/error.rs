@@ -207,6 +207,8 @@ pub enum WalletError {
     Sender(#[from] tokio::sync::mpsc::error::SendError<WalletCommand>),
     #[error("Coin selection: {0}")]
     CoinSelection(#[from] bdk_wallet::coin_selection::InsufficientFunds),
+    #[error("Coin control: {0}")]
+    AddUtxo(#[from] bdk_wallet::tx_builder::AddUtxoError),
     #[error("Invalid derivation index")]
     InvalidDerivationIndex,
     #[error("Invalid secret key")]

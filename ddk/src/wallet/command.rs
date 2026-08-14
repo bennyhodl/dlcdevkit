@@ -305,6 +305,17 @@ pub enum Spend {
     All,
 }
 
+/// Coin control for a send: restrict which UTXOs fund the transaction.
+#[derive(Debug, Default, Clone)]
+pub struct CoinControl {
+    /// Fund the transaction with exactly these UTXOs and no others
+    pub selected_utxos: Vec<bitcoin::OutPoint>,
+    /// Never spend these outpoints
+    pub unspendable: Vec<bitcoin::OutPoint>,
+    /// Only spend coins with at least this many confirmations
+    pub min_confirmations: Option<u32>,
+}
+
 /// Builds, signs, and broadcasts a spend to `address`, then persists the
 /// wallet so the revealed change index survives a restart.
 #[tracing::instrument(skip(wallet, blockchain, storage))]
@@ -315,6 +326,7 @@ pub async fn send(
     address: Address,
     spend: Spend,
     fee_rate: FeeRate,
+    coin_control: CoinControl,
 ) -> Result<bitcoin::Txid> {
     let mut builder = wallet.build_tx();
     builder.version(2).fee_rate(fee_rate);
@@ -323,9 +335,19 @@ pub async fn send(
             builder.add_recipient(address.script_pubkey(), amount);
         }
         Spend::All => {
-            builder.drain_wallet();
+            if coin_control.selected_utxos.is_empty() {
+                builder.drain_wallet();
+            }
             builder.drain_to(address.script_pubkey());
         }
+    }
+    if !coin_control.selected_utxos.is_empty() {
+        builder.add_utxos(&coin_control.selected_utxos)?;
+        builder.manually_selected_only();
+    }
+    builder.unspendable(coin_control.unspendable);
+    if let Some(min_confirmations) = coin_control.min_confirmations {
+        builder.exclude_below_confirmations(min_confirmations);
     }
     let mut psbt = builder.finish()?;
     wallet.sign(&mut psbt, bdk_wallet::SignOptions::default())?;
