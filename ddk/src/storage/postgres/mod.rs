@@ -951,11 +951,12 @@ async fn spk_cache_from_postgres(
 ) -> Result<BTreeMap<DescriptorId, BTreeMap<u32, ScriptBuf>>, SqlxError> {
     let mut cache: BTreeMap<DescriptorId, BTreeMap<u32, ScriptBuf>> = BTreeMap::new();
 
-    let rows =
-        sqlx::query("SELECT descriptor_id, spk_index, script FROM spk_cache WHERE wallet_name = $1")
-            .bind(wallet_name)
-            .fetch_all(&mut **db_tx)
-            .await?;
+    let rows = sqlx::query(
+        "SELECT descriptor_id, spk_index, script FROM spk_cache WHERE wallet_name = $1",
+    )
+    .bind(wallet_name)
+    .fetch_all(&mut **db_tx)
+    .await?;
 
     for row in rows {
         let descriptor_id: Vec<u8> = row.get("descriptor_id");
@@ -1299,7 +1300,10 @@ mod tests {
 
         let metadata = db.get_contract_metadata(None).await.unwrap();
         assert_eq!(metadata.len(), 1);
-        assert_eq!(metadata[0].is_offer_party, accepted_contract.is_offer_party());
+        assert_eq!(
+            metadata[0].is_offer_party,
+            accepted_contract.is_offer_party()
+        );
         assert_eq!(
             metadata[0].fee_rate_per_vb as u64,
             accepted_contract.get_fee_rate_per_vb()
