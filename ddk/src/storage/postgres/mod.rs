@@ -333,6 +333,68 @@ impl Storage for PostgresStore {
             .await
             .map_err(|_| WalletError::StorageError("Did not persist bdk storage".to_string()))
     }
+
+    async fn initialize_contract_tracker(
+        &self,
+    ) -> Result<crate::wallet::contract_tracker::ChangeSet, WalletError> {
+        let row = sqlx::query("SELECT changeset FROM contract_tracker WHERE wallet_name = $1")
+            .bind(&self.wallet_name)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| WalletError::StorageError(e.to_string()))?;
+
+        match row {
+            Some(row) => {
+                let changeset: serde_json::Value = row.get("changeset");
+                Ok(serde_json::from_value(changeset)?)
+            }
+            None => Ok(crate::wallet::contract_tracker::ChangeSet::default()),
+        }
+    }
+
+    async fn persist_contract_tracker(
+        &self,
+        changeset: &crate::wallet::contract_tracker::ChangeSet,
+    ) -> Result<(), WalletError> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| WalletError::StorageError(e.to_string()))?;
+
+        // Merge with the stored changeset app-side; the changeset is
+        // monotone under merge.
+        let stored =
+            sqlx::query("SELECT changeset FROM contract_tracker WHERE wallet_name = $1 FOR UPDATE")
+                .bind(&self.wallet_name)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(|e| WalletError::StorageError(e.to_string()))?;
+
+        let mut merged = match stored {
+            Some(row) => {
+                let value: serde_json::Value = row.get("changeset");
+                serde_json::from_value::<crate::wallet::contract_tracker::ChangeSet>(value)?
+            }
+            None => crate::wallet::contract_tracker::ChangeSet::default(),
+        };
+        merged.merge(changeset.clone());
+
+        sqlx::query(
+            "INSERT INTO contract_tracker (wallet_name, changeset) VALUES ($1, $2)
+             ON CONFLICT (wallet_name) DO UPDATE SET changeset = $2",
+        )
+        .bind(&self.wallet_name)
+        .bind(serde_json::to_value(&merged)?)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| WalletError::StorageError(e.to_string()))?;
+
+        tx.commit()
+            .await
+            .map_err(|e| WalletError::StorageError(e.to_string()))?;
+        Ok(())
+    }
 }
 
 #[async_trait::async_trait]
@@ -1276,6 +1338,37 @@ mod tests {
         db.write(&advance).await.unwrap();
         let read = db.read().await.unwrap();
         assert_eq!(read.indexer.last_revealed.get(&did), Some(&9));
+    }
+
+    #[tokio::test]
+    async fn contract_tracker_round_trips() {
+        use crate::wallet::contract_tracker;
+        use crate::Storage as DdkStorage;
+
+        let (_server, db) = seed_db().await;
+
+        let spk = ScriptBuf::new_p2wsh(&bitcoin::WScriptHash::from_byte_array([0xCD; 32]));
+        let mut changeset = contract_tracker::ChangeSet::default();
+        changeset.spks.insert([0x5A; 32], spk.clone());
+        changeset
+            .tx_graph
+            .last_seen
+            .insert(dummy_tx().compute_txid(), 100);
+        DdkStorage::persist_contract_tracker(&db, &changeset)
+            .await
+            .unwrap();
+        let read = DdkStorage::initialize_contract_tracker(&db).await.unwrap();
+        assert_eq!(read, changeset);
+
+        // A second persist merges instead of overwriting.
+        let mut more = contract_tracker::ChangeSet::default();
+        more.spks.insert([0x5B; 32], spk);
+        DdkStorage::persist_contract_tracker(&db, &more)
+            .await
+            .unwrap();
+        let read = DdkStorage::initialize_contract_tracker(&db).await.unwrap();
+        assert_eq!(read.spks.len(), 2);
+        assert_eq!(read.tx_graph.last_seen.len(), 1);
     }
 
     #[tokio::test]

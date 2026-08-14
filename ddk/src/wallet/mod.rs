@@ -299,7 +299,9 @@ impl DlcDevKitWallet {
 
         let (sender, mut receiver) = channel(100);
 
-        let mut tracker = contract_tracker::ContractUtxoTracker::new();
+        let mut tracker = contract_tracker::ContractUtxoTracker::from_changeset(
+            storage.0.initialize_contract_tracker().await?,
+        );
 
         let logger_clone = logger.clone();
         tokio::spawn(async move {
