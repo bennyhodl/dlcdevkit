@@ -417,15 +417,15 @@ impl ManagerStorage for PostgresStore {
     ) -> Result<(), ddk_manager::error::Error> {
         let mut tx = self.pool.begin().await.map_err(to_storage_error)?;
         let id = hex::encode(id);
-        sqlx::query_as::<Postgres, ContractMetadata>("DELETE FROM contract_metadata WHERE id = $1")
+        sqlx::query("DELETE FROM contract_data WHERE id = $1")
             .bind(id.clone())
-            .fetch_one(&mut *tx)
+            .execute(&mut *tx)
             .await
             .map_err(to_storage_error)?;
 
-        sqlx::query_as::<Postgres, ContractData>("DELETE FROM contract_data WHERE id = $1")
+        sqlx::query("DELETE FROM contract_metadata WHERE id = $1")
             .bind(id)
-            .fetch_one(&mut *tx)
+            .execute(&mut *tx)
             .await
             .map_err(to_storage_error)?;
 
@@ -1086,5 +1086,20 @@ mod tests {
         assert_eq!(confirmed_rows[0].state, ContractPrefix::Closed as i16);
         let contracts = db.get_contracts().await.unwrap();
         assert!(contracts.len() > 0);
+    }
+
+    #[tokio::test]
+    async fn delete_contract_removes_rows() {
+        let (_server, db) = seed_db().await;
+
+        let contracts = db.get_contracts().await.unwrap();
+        let id = contracts[0].get_id();
+
+        db.delete_contract(&id)
+            .await
+            .expect("delete_contract should succeed");
+
+        assert!(db.get_contract(&id).await.unwrap().is_none());
+        assert!(db.get_contract_metadata(None).await.unwrap().is_empty());
     }
 }
