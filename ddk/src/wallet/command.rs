@@ -403,6 +403,7 @@ pub async fn select_utxos(
     amount: Amount,
     fee_rate: u64,
     lock_utxos: bool,
+    min_change_size: u64,
 ) -> Result<Vec<ddk_manager::Utxo>> {
     let candidates = wallet
         .list_unspent()
@@ -416,7 +417,7 @@ pub async fn select_utxos(
     let fee_rate = FeeRate::from_sat_per_vb(fee_rate)
         .ok_or_else(|| WalletError::Esplora(format!("Invalid fee rate: {fee_rate}")))?;
 
-    let selected = BranchAndBoundCoinSelection::new(super::MIN_CHANGE_SIZE, SingleRandomDraw)
+    let selected = BranchAndBoundCoinSelection::new(min_change_size, SingleRandomDraw)
         .coin_select(
             vec![],
             candidates,
