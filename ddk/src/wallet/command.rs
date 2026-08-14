@@ -1,8 +1,9 @@
+use super::contract_tracker::ContractUtxoTracker;
 use super::WalletStorage;
 use crate::error::WalletError;
-use crate::logger::{log_debug, WriteLog};
+use crate::logger::{log_debug, log_error, WriteLog};
 use crate::{chain::EsploraClient, logger::Logger};
-use bdk_chain::spk_client::FullScanRequest;
+use bdk_chain::spk_client::{FullScanRequest, SyncRequest};
 use bdk_esplora::EsploraAsyncExt;
 use bdk_wallet::coin_selection::{
     BranchAndBoundCoinSelection, CoinSelectionAlgorithm, SingleRandomDraw,
@@ -10,6 +11,8 @@ use bdk_wallet::coin_selection::{
 use bdk_wallet::{KeychainKind, PersistedWallet, Update, Utxo, WeightedUtxo};
 use bitcoin::key::rand::thread_rng;
 use bitcoin::{Address, Amount, FeeRate, ScriptBuf};
+use ddk_manager::contract::Contract;
+use ddk_manager::ContractId;
 use std::sync::Arc;
 
 type Result<T> = std::result::Result<T, WalletError>;
@@ -23,6 +26,7 @@ const PARALLEL_REQUESTS: usize = 5;
 #[tracing::instrument(skip_all)]
 pub async fn sync(
     wallet: &mut PersistedWallet<WalletStorage>,
+    tracker: &mut ContractUtxoTracker,
     blockchain: &EsploraClient,
     storage: &mut WalletStorage,
     logger: Arc<Logger>,
@@ -113,11 +117,88 @@ pub async fn sync(
         wallet.unlock_outpoint(outpoint);
     }
 
+    sync_contract_utxos(wallet, tracker, blockchain, storage, logger).await?;
+
     wallet
         .persist_async(storage)
         .await
         .map_err(|e| WalletError::WalletPersistanceError(e.to_string()))?;
     Ok(())
+}
+
+/// Runs a second, targeted sync over the contract funding SPKs and
+/// outpoints. Esplora resolves outpoint spend status, so one round trip
+/// learns both confirmation of the funding transaction and any spend of the
+/// funding output (CET, refund, or counterparty close).
+async fn sync_contract_utxos(
+    wallet: &mut PersistedWallet<WalletStorage>,
+    tracker: &mut ContractUtxoTracker,
+    blockchain: &EsploraClient,
+    storage: &mut WalletStorage,
+    logger: Arc<Logger>,
+) -> Result<()> {
+    // Contracts learn their funding transaction at accept time; register
+    // every funding script the storage knows about.
+    match storage.0.get_contracts().await {
+        Ok(contracts) => {
+            for contract in &contracts {
+                if let Some((contract_id, spk)) = contract_funding_spk(contract) {
+                    tracker.register(contract_id, spk);
+                }
+            }
+        }
+        Err(e) => log_error!(
+            logger,
+            "Could not load contracts for the funding tracker. error={}",
+            e
+        ),
+    }
+
+    let spks = tracker.sync_spks();
+    if spks.is_empty() {
+        return Ok(());
+    }
+
+    let request = SyncRequest::builder()
+        .chain_tip(wallet.latest_checkpoint())
+        .spks(spks)
+        .outpoints(tracker.sync_outpoints())
+        .build();
+    let response = blockchain
+        .async_client
+        .sync(request, PARALLEL_REQUESTS)
+        .await
+        .map_err(|e| WalletError::Esplora(e.to_string()))?;
+
+    // The tracker shares the wallet's chain view: connect the chain update
+    // to the wallet so the tracker's anchors resolve.
+    if let Some(chain_update) = response.chain_update {
+        wallet.apply_update(Update {
+            chain: Some(chain_update),
+            ..Default::default()
+        })?;
+    }
+    tracker.apply_update(response.tx_update);
+
+    Ok(())
+}
+
+/// The funding script of a contract that has a funding transaction, with
+/// the contract's id. Offered contracts do not have one yet: the funding
+/// transaction needs the accept party's inputs.
+pub(super) fn contract_funding_spk(contract: &Contract) -> Option<(ContractId, ScriptBuf)> {
+    let accepted = match contract {
+        Contract::Accepted(accepted) => accepted,
+        Contract::Signed(signed) | Contract::Confirmed(signed) => &signed.accepted_contract,
+        Contract::PreClosed(preclosed) => &preclosed.signed_contract.accepted_contract,
+        _ => return None,
+    };
+    let transactions = &accepted.dlc_transactions;
+    let fund_output = transactions.get_fund_output();
+    Some((
+        accepted.get_contract_id(),
+        fund_output.script_pubkey.clone(),
+    ))
 }
 
 /// Selects UTXOs that cover `amount` at `fee_rate`, ignoring locked
@@ -182,4 +263,39 @@ pub async fn select_utxos(
     }
 
     Ok(utxos)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::util::ser::deserialize_contract;
+
+    #[test]
+    fn funding_spk_follows_the_contract_state() {
+        let offered = deserialize_contract(
+            &include_bytes!("../../../testconfig/contract_binaries/Offered").to_vec(),
+        )
+        .unwrap();
+        assert!(contract_funding_spk(&offered).is_none());
+
+        let accepted = deserialize_contract(
+            &include_bytes!("../../../testconfig/contract_binaries/Accepted").to_vec(),
+        )
+        .unwrap();
+        let (accepted_id, accepted_spk) = contract_funding_spk(&accepted).unwrap();
+        assert!(accepted_spk.is_p2wsh());
+
+        // The same contract keeps the same funding script through its
+        // lifecycle.
+        for binary in [
+            include_bytes!("../../../testconfig/contract_binaries/Signed").to_vec(),
+            include_bytes!("../../../testconfig/contract_binaries/Confirmed").to_vec(),
+            include_bytes!("../../../testconfig/contract_binaries/PreClosed").to_vec(),
+        ] {
+            let contract = deserialize_contract(&binary).unwrap();
+            let (contract_id, spk) = contract_funding_spk(&contract).unwrap();
+            assert_eq!(contract_id, accepted_id);
+            assert_eq!(spk, accepted_spk);
+        }
+    }
 }
