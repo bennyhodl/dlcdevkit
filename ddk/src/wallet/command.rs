@@ -33,6 +33,10 @@ pub async fn sync(
     events: &broadcast::Sender<WalletEvent>,
     logger: Arc<Logger>,
 ) -> Result<()> {
+    // Keep the fee rate cache fresh; a failed fetch keeps the cached
+    // rates and never fails the sync.
+    blockchain.refresh_fee_estimates().await;
+
     let block_height = blockchain
         .async_client
         .get_height()
