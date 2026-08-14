@@ -194,10 +194,10 @@ where
 
     log_info!(
         logger,
-        "Created DLC transactions. temp_id={} fund_txid={} funding_spk={} fund_output_value={} refund_txid={} num_cets={}",
+        "Created DLC transactions. temp_id={} fund_txid={} funding_witness_script={} fund_output_value={} refund_txid={} num_cets={}",
         offered_contract.id.to_lower_hex_string(),
         dlc_transactions.fund.compute_txid().to_string(),
-        dlc_transactions.funding_script_pubkey.to_string(),
+        dlc_transactions.funding_witness_script.to_string(),
         dlc_transactions.get_fund_output().value.to_sat(),
         dlc_transactions.refund.compute_txid().to_string(),
         dlc_transactions.cets.len()
@@ -242,7 +242,7 @@ pub(crate) fn accept_contract_internal(
     let total_collateral = offered_contract.total_collateral;
 
     let input_script_pubkey =
-        input_script_pubkey.unwrap_or_else(|| &dlc_transactions.funding_script_pubkey);
+        input_script_pubkey.unwrap_or_else(|| &dlc_transactions.funding_witness_script);
 
     let cet_input = dlc_transactions.cets[0].input[0].clone();
 
@@ -262,7 +262,7 @@ pub(crate) fn accept_contract_internal(
         fund,
         cets,
         refund,
-        funding_script_pubkey,
+        funding_witness_script,
         pending_close_txs: _,
     } = dlc_transactions;
 
@@ -310,7 +310,7 @@ pub(crate) fn accept_contract_internal(
         fund: fund.clone(),
         cets,
         refund: refund.clone(),
-        funding_script_pubkey: funding_script_pubkey.clone(),
+        funding_witness_script: funding_witness_script.clone(),
         pending_close_txs: vec![],
     };
 
@@ -425,10 +425,10 @@ where
 
     log_info!(
         logger,
-        "Created DLC transactions. temp_id={} fund_txid={} funding_spk={} fund_output_value={} refund_txid={} num_cets={}",
+        "Created DLC transactions. temp_id={} fund_txid={} funding_witness_script={} fund_output_value={} refund_txid={} num_cets={}",
         offered_contract.id.to_lower_hex_string(),
         dlc_transactions.fund.compute_txid().to_string(),
-        dlc_transactions.funding_script_pubkey.to_string(),
+        dlc_transactions.funding_witness_script.to_string(),
         dlc_transactions.get_fund_output().value.to_sat(),
         dlc_transactions.refund.compute_txid().to_string(),
         dlc_transactions.cets.len()
@@ -528,7 +528,7 @@ where
         fund,
         cets,
         refund,
-        funding_script_pubkey,
+        funding_witness_script,
         pending_close_txs: _,
     } = dlc_transactions;
 
@@ -536,7 +536,7 @@ where
         .map_err(|_| Error::InvalidState("Tried to create PSBT from signed tx".to_string()))?;
     let mut cets = cets.clone();
 
-    let input_script_pubkey = input_script_pubkey.unwrap_or_else(|| funding_script_pubkey);
+    let input_script_pubkey = input_script_pubkey.unwrap_or_else(|| funding_witness_script);
     let counter_adaptor_pk = counter_adaptor_pk.unwrap_or(accept_params.fund_pubkey);
 
     ddk_dlc::verify_tx_input_sig(
@@ -591,7 +591,7 @@ where
             secp,
             offered_contract.total_collateral,
             &accept_params.fund_pubkey,
-            funding_script_pubkey,
+            funding_witness_script,
             input_value,
             &tmp_cets,
             cet_adaptor_signatures,
@@ -728,7 +728,7 @@ where
         fund: fund.clone(),
         cets,
         refund: refund.clone(),
-        funding_script_pubkey: funding_script_pubkey.clone(),
+        funding_witness_script: funding_witness_script.clone(),
         pending_close_txs: vec![],
     };
 
@@ -820,7 +820,7 @@ where
 {
     let offered_contract = &accepted_contract.offered_contract;
     let input_script_pubkey = input_script_pubkey
-        .unwrap_or_else(|| &accepted_contract.dlc_transactions.funding_script_pubkey);
+        .unwrap_or_else(|| &accepted_contract.dlc_transactions.funding_witness_script);
     let counter_adaptor_pk =
         counter_adaptor_pk.unwrap_or(accepted_contract.offered_contract.offer_params.fund_pubkey);
 
@@ -1082,7 +1082,7 @@ where
         &contract
             .accepted_contract
             .dlc_transactions
-            .funding_script_pubkey,
+            .funding_witness_script,
         contract
             .accepted_contract
             .dlc_transactions
@@ -1111,7 +1111,7 @@ where
     );
     let accepted_contract = &contract.accepted_contract;
     let offered_contract = &accepted_contract.offered_contract;
-    let funding_script_pubkey = &accepted_contract.dlc_transactions.funding_script_pubkey;
+    let funding_witness_script = &accepted_contract.dlc_transactions.funding_witness_script;
     let fund_output_value = accepted_contract.dlc_transactions.get_fund_output().value;
     let (other_fund_pubkey, other_sig) = if offered_contract.is_offer_party {
         (
@@ -1133,7 +1133,7 @@ where
         other_sig,
         other_fund_pubkey,
         &fund_priv_key,
-        funding_script_pubkey,
+        funding_witness_script,
         fund_output_value,
         0,
     )?;
@@ -1194,7 +1194,7 @@ where
         secp,
         &close_tx,
         0,
-        &accepted_contract.dlc_transactions.funding_script_pubkey,
+        &accepted_contract.dlc_transactions.funding_witness_script,
         fund_output_value,
         &fund_private_key,
     )?;
@@ -1272,7 +1272,7 @@ where
         &close_message.close_signature,
         counter_pubkey,
         &fund_private_key,
-        &accepted_contract.dlc_transactions.funding_script_pubkey,
+        &accepted_contract.dlc_transactions.funding_witness_script,
         fund_output_value,
         0,
     )?;

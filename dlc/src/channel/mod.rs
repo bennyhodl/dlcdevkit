@@ -247,7 +247,7 @@ pub fn create_channel_transactions(
 ) -> Result<DlcChannelTransactions, Error> {
     let extra_fee =
         super::util::weight_to_fee(BUFFER_TX_WEIGHT + CET_EXTRA_WEIGHT, fee_rate_per_vb)?;
-    let (fund, funding_script_pubkey) = super::create_fund_transaction_with_fees(
+    let (fund, funding_witness_script) = super::create_fund_transaction_with_fees(
         offer_params,
         accept_params,
         fee_rate_per_vb,
@@ -262,7 +262,7 @@ pub fn create_channel_transactions(
         offer_revoke_params,
         accept_revoke_params,
         &fund,
-        &funding_script_pubkey,
+        &funding_witness_script,
         payouts,
         refund_lock_time,
         fee_rate_per_vb,
@@ -281,7 +281,7 @@ pub fn create_renewal_channel_transactions(
     offer_revoke_params: &RevokeParams,
     accept_revoke_params: &RevokeParams,
     fund_tx: &Transaction,
-    funding_script_pubkey: &Script,
+    funding_witness_script: &Script,
     payouts: &[Payout],
     refund_lock_time: u32,
     fee_rate_per_vb: u64,
@@ -293,7 +293,7 @@ pub fn create_renewal_channel_transactions(
         super::util::weight_to_fee(BUFFER_TX_WEIGHT + CET_EXTRA_WEIGHT, fee_rate_per_vb)?;
 
     let (fund_vout, fund_output) =
-        super::util::get_output_for_script_pubkey(fund_tx, &funding_script_pubkey.to_p2wsh())
+        super::util::get_output_for_script_pubkey(fund_tx, &funding_witness_script.to_p2wsh())
             .expect("to find the funding script pubkey");
 
     let outpoint = OutPoint {
@@ -338,7 +338,7 @@ pub fn create_renewal_channel_transactions(
             fund: fund_tx.clone(),
             cets,
             refund,
-            funding_script_pubkey: funding_script_pubkey.to_owned(),
+            funding_witness_script: funding_witness_script.to_owned(),
             pending_close_txs: vec![],
         },
         buffer_transaction,

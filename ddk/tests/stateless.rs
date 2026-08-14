@@ -1048,7 +1048,7 @@ fn assert_spends_funding_output(
     assert!(witness[0].is_empty(), "multisig witness must start empty");
     assert_eq!(
         witness[3],
-        transactions.funding_script_pubkey.to_bytes(),
+        transactions.funding_witness_script.to_bytes(),
         "witness script is not the funding script"
     );
 }

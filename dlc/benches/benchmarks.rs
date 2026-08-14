@@ -122,7 +122,7 @@ mod benches {
         tx_from_string("02000000019246862ea34db0833bd4bd9e657d61e2e5447d0438f6f6181d1cd329e8cf71c30000000000ffffffff02603bea0b000000001600145dedfbf9ea599dd4e3ca6a80b333c472fd0b3f69a0860100000000001600149652d86bedf43ad264362e6e6eba6eb76450812700000000")
     }
 
-    fn funding_script_pubkey() -> ScriptBuf {
+    fn funding_witness_script() -> ScriptBuf {
         let seckey = SecretKey::new(&mut thread_rng());
         make_funding_redeemscript(
             &PublicKey::from_secret_key(SECP256K1, &seckey),
@@ -145,7 +145,7 @@ mod benches {
                     &cet,
                     &oracle_infos,
                     &seckey,
-                    &funding_script_pubkey(),
+                    &funding_witness_script(),
                     cet.output[0].value,
                     &generate_single_outcome_messages(SINGLE_NB_ORACLES, SINGLE_NB_NONCES),
                 )
@@ -168,7 +168,7 @@ mod benches {
                     &cet,
                     adaptor_point,
                     &seckey,
-                    &funding_script_pubkey(),
+                    &funding_witness_script(),
                     cet.output[0].value,
                 )
                 .unwrap(),

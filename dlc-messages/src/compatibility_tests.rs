@@ -371,7 +371,7 @@ fn get_cets_and_refund_sigs(
     refund_tx: &Transaction,
     oracle_infos: &Vec<DlcOracleInfo>,
     fund_sk: &SecretKey,
-    funding_script_pubkey: &Script,
+    funding_witness_script: &Script,
     fund_output_value: u64,
     messages: &Vec<Vec<Vec<Message>>>,
 ) -> (Vec<(AdaptorSignature, AdaptorProof)>, Signature) {
@@ -381,7 +381,7 @@ fn get_cets_and_refund_sigs(
             cets,
             oracle_infos,
             fund_sk,
-            funding_script_pubkey,
+            funding_witness_script,
             fund_output_value,
             messages,
         )
@@ -390,7 +390,7 @@ fn get_cets_and_refund_sigs(
             &secp,
             refund_tx,
             0,
-            funding_script_pubkey,
+            funding_witness_script,
             fund_output_value,
             fund_sk,
         ),
@@ -441,7 +441,7 @@ fn test_single(case: TestCase, secp: &secp256k1::Secp256k1<secp256k1::All>) {
 
     let mut fund_tx = dlc_txs.fund.clone();
     let mut refund_tx = dlc_txs.refund.clone();
-    let funding_script_pubkey =
+    let funding_witness_script =
         dlc::make_funding_redeemscript(&offer_params.fund_pubkey, &accept_params.fund_pubkey);
     let offer_funding_witnesses = get_funding_signatures(
         secp,
@@ -482,7 +482,7 @@ fn test_single(case: TestCase, secp: &secp256k1::Secp256k1<secp256k1::All>) {
         &refund_tx,
         &oracle_infos,
         &offer_fund_sk,
-        &funding_script_pubkey,
+        &funding_witness_script,
         fund_output_value,
         &msgs,
     );
@@ -492,7 +492,7 @@ fn test_single(case: TestCase, secp: &secp256k1::Secp256k1<secp256k1::All>) {
         &refund_tx,
         &oracle_infos,
         &accept_fund_sk,
-        &funding_script_pubkey,
+        &funding_witness_script,
         fund_output_value,
         &msgs,
     );
@@ -527,7 +527,7 @@ fn test_single(case: TestCase, secp: &secp256k1::Secp256k1<secp256k1::All>) {
         &vec![vec![case.inputs.params.oracle_signature]],
         &offer_fund_sk,
         &accept_params.fund_pubkey,
-        &funding_script_pubkey,
+        &funding_witness_script,
         fund_tx.output[0].value,
     )
     .expect("Error signing CET");
@@ -541,7 +541,7 @@ fn test_single(case: TestCase, secp: &secp256k1::Secp256k1<secp256k1::All>) {
         &vec![vec![case.inputs.params.oracle_signature]],
         &accept_fund_sk,
         &offer_params.fund_pubkey,
-        &funding_script_pubkey,
+        &funding_witness_script,
         fund_tx.output[0].value,
     )
     .expect("Error signing CET");
@@ -552,7 +552,7 @@ fn test_single(case: TestCase, secp: &secp256k1::Secp256k1<secp256k1::All>) {
         &offer_refund_sig,
         &PublicKey::from_secret_key(&secp, &offer_fund_sk),
         &accept_fund_sk,
-        &funding_script_pubkey,
+        &funding_witness_script,
         fund_tx.output[0].value,
         0,
     );
@@ -561,7 +561,7 @@ fn test_single(case: TestCase, secp: &secp256k1::Secp256k1<secp256k1::All>) {
         fund: fund_tx,
         cets: vec![offer_final_cet, accept_final_cet],
         refund: refund_tx,
-        funding_script_pubkey,
+        funding_witness_script,
     };
 
     let offer = OfferDlc {

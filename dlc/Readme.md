@@ -35,12 +35,14 @@ let refund_tx = dlc_txs.refund;
 ```rust
 use ddk_dlc::{create_cet_adaptor_sig_from_oracle_info, sign_cet};
 
-// Create adaptor signature for CET
+// Create adaptor signature for CET. The functions take the raw
+// funding witness script (dlc_txs.funding_witness_script), not the
+// P2WSH script pubkey of the fund output.
 let adaptor_sig = create_cet_adaptor_sig_from_oracle_info(
     &secp,
     &cet,
     &adaptor_info,
-    &funding_script_pubkey,
+    &funding_witness_script,
     fund_output_value,
     &secret_key,
 )?;
@@ -51,7 +53,7 @@ let signed_cet = sign_cet(
     &cet,
     &adaptor_sig,
     &oracle_signatures,
-    &funding_script_pubkey,
+    &funding_witness_script,
     fund_output_value,
     &own_secret_key,
 )?;
