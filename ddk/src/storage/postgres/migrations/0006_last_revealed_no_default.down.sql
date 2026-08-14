@@ -1,0 +1,1 @@
+ALTER TABLE keychain ALTER COLUMN last_revealed SET DEFAULT 0;
