@@ -25,6 +25,8 @@ pub mod address;
 mod command;
 pub mod contract_tracker;
 
+pub use command::{CoinControl, Spend};
+
 use crate::contract::ContractKeyProvider;
 use crate::error::{wallet_err_to_manager_err, WalletError};
 use crate::logger::Logger;
@@ -151,11 +153,20 @@ pub enum WalletCommand {
     /// Generate a new internal (change) address
     NewChangeAddress(oneshot::Sender<Result<AddressInfo>>),
 
-    /// Send a specific amount to an address with the given fee rate
-    SendToAddress(Address, Amount, FeeRate, oneshot::Sender<Result<Txid>>),
-
-    /// Send all available funds to an address with the given fee rate
-    SendAll(Address, FeeRate, oneshot::Sender<Result<Txid>>),
+    /// Send to an address: an amount or the whole wallet, with optional
+    /// coin control
+    Send {
+        /// Destination address
+        address: Address,
+        /// What the send spends
+        spend: command::Spend,
+        /// Fee rate of the transaction
+        fee_rate: FeeRate,
+        /// Restrictions on which UTXOs fund the transaction
+        coin_control: command::CoinControl,
+        /// Channel for receiving the transaction id
+        responder: oneshot::Sender<Result<Txid>>,
+    },
 
     /// Get all wallet transactions
     GetTransactions(oneshot::Sender<Result<Vec<Arc<Transaction>>>>),
@@ -392,40 +403,25 @@ impl DlcDevKitWallet {
                             );
                         });
                     }
-                    WalletCommand::SendToAddress(address, amount, fee_rate, sender) => {
+                    WalletCommand::Send {
+                        address,
+                        spend,
+                        fee_rate,
+                        coin_control,
+                        responder,
+                    } => {
                         let result = command::send(
                             &mut wallet,
                             &blockchain,
                             &mut storage,
                             address,
-                            command::Spend::Amount(amount),
+                            spend,
                             fee_rate,
+                            coin_control,
                         )
                         .await;
-                        let _ = sender.send(result).map_err(|e| {
-                            log_error!(
-                                logger_clone,
-                                "Error sending send to address command. error={:?}",
-                                e
-                            );
-                        });
-                    }
-                    WalletCommand::SendAll(address, fee_rate, sender) => {
-                        let result = command::send(
-                            &mut wallet,
-                            &blockchain,
-                            &mut storage,
-                            address,
-                            command::Spend::All,
-                            fee_rate,
-                        )
-                        .await;
-                        let _ = sender.send(result).map_err(|e| {
-                            log_error!(
-                                logger_clone,
-                                "Error sending send all command. error={:?}",
-                                e
-                            );
+                        let _ = responder.send(result).map_err(|e| {
+                            log_error!(logger_clone, "Error sending send command. error={:?}", e);
                         });
                     }
                     WalletCommand::GetTransactions(sender) => {
@@ -667,9 +663,43 @@ impl DlcDevKitWallet {
         amount: Amount,
         fee_rate: FeeRate,
     ) -> Result<Txid> {
+        self.send_with_coin_control(
+            address,
+            Spend::Amount(amount),
+            fee_rate,
+            CoinControl::default(),
+        )
+        .await
+    }
+
+    /// Sends with coin control: caller-selected UTXOs, an unspendable
+    /// exclusion list, and a confirmation floor.
+    ///
+    /// # Arguments
+    /// * `address` - Destination Bitcoin address
+    /// * `spend` - An amount, or the whole wallet
+    /// * `fee_rate` - Fee rate for the transaction
+    /// * `coin_control` - Restrictions on which UTXOs fund the transaction
+    ///
+    /// # Returns
+    /// Transaction ID of the sent transaction
+    #[tracing::instrument(skip(self))]
+    pub async fn send_with_coin_control(
+        &self,
+        address: Address,
+        spend: Spend,
+        fee_rate: FeeRate,
+        coin_control: CoinControl,
+    ) -> Result<Txid> {
         let (tx, rx) = oneshot::channel();
         self.sender
-            .send(WalletCommand::SendToAddress(address, amount, fee_rate, tx))
+            .send(WalletCommand::Send {
+                address,
+                spend,
+                fee_rate,
+                coin_control,
+                responder: tx,
+            })
             .await?;
         rx.await.map_err(WalletError::Receiver)?
     }
@@ -684,11 +714,8 @@ impl DlcDevKitWallet {
     /// Transaction ID of the sent transaction
     #[tracing::instrument(skip(self))]
     pub async fn send_all(&self, address: Address, fee_rate: FeeRate) -> Result<Txid> {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(WalletCommand::SendAll(address, fee_rate, tx))
-            .await?;
-        rx.await.map_err(WalletError::Receiver)?
+        self.send_with_coin_control(address, Spend::All, fee_rate, CoinControl::default())
+            .await
     }
 
     /// Retrieves all transactions known to the wallet.
@@ -1228,6 +1255,63 @@ mod tests {
         // queued command.
         wallet.unreserve_utxos(&outpoints).unwrap();
         assert!(wallet.get_utxos_for_amount(amount, 1, true).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn coin_control_restricts_the_funding_utxos() {
+        use bitcoincore_rpc::RpcApi;
+
+        let wallet = create_wallet().await;
+        let addr_one = wallet.new_external_address().await.unwrap().address;
+        let addr_two = wallet.new_external_address().await.unwrap().address;
+        fund_address(&addr_one);
+        fund_address(&addr_two);
+        wallet.sync().await.unwrap();
+
+        let utxos = wallet.list_utxos().await.unwrap();
+        assert_eq!(utxos.len(), 2);
+        let selected = utxos[0].outpoint;
+        let excluded = utxos[1].outpoint;
+
+        // A manually selected UTXO is the only input of the send.
+        let dest = Address::from_str("bcrt1qt0yrvs7qx8guvpqsx8u9mypz6t4zr3pxthsjkm")
+            .unwrap()
+            .assume_checked();
+        let txid = wallet
+            .send_with_coin_control(
+                dest.clone(),
+                super::Spend::Amount(Amount::from_btc(0.5).unwrap()),
+                FeeRate::from_sat_per_vb(1).unwrap(),
+                super::CoinControl {
+                    selected_utxos: vec![selected],
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let env = ddk_testenv::env();
+        let tx = env.rpc().get_raw_transaction(&txid, None).unwrap();
+        assert_eq!(tx.input.len(), 1);
+        assert_eq!(tx.input[0].previous_output, selected);
+
+        // Let the wallet observe the spend so one coin remains.
+        env.wait_for_tx(&txid);
+        wallet.sync().await.unwrap();
+
+        // An unspendable outpoint never funds the send: only the other
+        // coin remains, so excluding it leaves nothing to spend.
+        let result = wallet
+            .send_with_coin_control(
+                dest,
+                super::Spend::Amount(Amount::from_btc(0.5).unwrap()),
+                FeeRate::from_sat_per_vb(1).unwrap(),
+                super::CoinControl {
+                    unspendable: vec![excluded],
+                    ..Default::default()
+                },
+            )
+            .await;
+        assert!(result.is_err());
     }
 
     #[tokio::test]
