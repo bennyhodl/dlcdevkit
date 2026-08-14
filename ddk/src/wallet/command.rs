@@ -30,10 +30,6 @@ pub async fn sync(
         .map_err(|e| WalletError::Esplora(e.to_string()))?;
     let prev_tip = wallet.latest_checkpoint();
 
-    if prev_tip.height() == block_height {
-        return Ok(());
-    }
-
     log_debug!(
         logger,
         "Syncing wallet with latest known height. height={} wallet_height={}",

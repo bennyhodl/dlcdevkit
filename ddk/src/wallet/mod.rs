@@ -1015,6 +1015,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn sees_mempool_transaction_without_new_block() {
+        // A private environment: a block mined by a concurrent test would
+        // change the chain height and confirm the transaction.
+        let env = ddk_testenv::TestEnv::new();
+        let mut seed = [0u8; 64];
+        seed.try_fill(&mut bitcoin::key::rand::thread_rng())
+            .unwrap();
+        let wallet = create_wallet_on(env.esplora_host(), &seed).await;
+        let address = wallet.new_external_address().await.unwrap().address;
+        // Bring the wallet tip up to the current chain height first.
+        wallet.sync().await.unwrap();
+
+        // Send to the address without mining a block: the transaction stays
+        // in the mempool and the chain height does not change.
+        let txid = env.send_to_address(&address, Amount::from_btc(0.5).unwrap());
+        env.wait_for_tx(&txid);
+
+        wallet.sync().await.unwrap();
+        let pending = wallet.get_balance().await.unwrap().untrusted_pending;
+        assert!(pending > Amount::ZERO);
+    }
+
+    #[tokio::test]
     async fn restore_from_seed_finds_change_outputs() {
         let mut seed = [0u8; 64];
         seed.try_fill(&mut bitcoin::key::rand::thread_rng())
