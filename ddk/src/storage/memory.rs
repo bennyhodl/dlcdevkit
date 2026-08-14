@@ -8,6 +8,7 @@ use std::sync::RwLock;
 pub struct MemoryStorage {
     bdk_data: RwLock<Option<bdk_wallet::ChangeSet>>,
     contract_tracker: RwLock<crate::wallet::contract_tracker::ChangeSet>,
+    labels: RwLock<std::collections::BTreeMap<String, bip329::Label>>,
     contracts: RwLock<HashMap<ContractId, Contract>>,
     channels: RwLock<HashMap<ChannelId, Channel>>,
 }
@@ -48,6 +49,31 @@ impl Storage for MemoryStorage {
             .write()
             .unwrap()
             .merge(changeset.clone());
+        Ok(())
+    }
+
+    async fn load_labels(&self) -> Result<bip329::Labels, crate::error::WalletError> {
+        Ok(bip329::Labels::new(
+            self.labels.read().unwrap().values().cloned().collect(),
+        ))
+    }
+
+    async fn persist_label(&self, label: &bip329::Label) -> Result<(), crate::error::WalletError> {
+        self.labels
+            .write()
+            .unwrap()
+            .insert(super::label_key(&label.ref_()), label.clone());
+        Ok(())
+    }
+
+    async fn delete_label(
+        &self,
+        label_ref: &bip329::LabelRef,
+    ) -> Result<(), crate::error::WalletError> {
+        self.labels
+            .write()
+            .unwrap()
+            .remove(&super::label_key(label_ref));
         Ok(())
     }
 }
@@ -233,5 +259,58 @@ impl ddk_manager::Storage for MemoryStorage {
                 _ => None,
             })
             .collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bitcoin::hashes::Hash;
+
+    #[tokio::test]
+    async fn labels_round_trip() {
+        let storage = MemoryStorage::new();
+        let txid = bitcoin::Txid::from_byte_array([0xAB; 32]);
+
+        let label = bip329::Label::Transaction(bip329::TransactionRecord {
+            ref_: txid,
+            label: Some("DLC funding".to_string()),
+            origin: None,
+        });
+        storage.persist_label(&label).await.unwrap();
+
+        // An input and an output record share the same outpoint
+        // reference and must not overwrite each other.
+        let outpoint = bitcoin::OutPoint { txid, vout: 0 };
+        let output_label = bip329::Label::Output(bip329::OutputRecord {
+            ref_: outpoint,
+            label: Some("collateral".to_string()),
+            spendable: Some(false),
+        });
+        let input_label = bip329::Label::Input(bip329::InputRecord {
+            ref_: outpoint,
+            label: Some("funding input".to_string()),
+        });
+        storage.persist_label(&output_label).await.unwrap();
+        storage.persist_label(&input_label).await.unwrap();
+
+        let labels = storage.load_labels().await.unwrap();
+        assert_eq!(labels.iter().count(), 3);
+
+        // Replacing by reference and deleting.
+        let renamed = bip329::Label::Transaction(bip329::TransactionRecord {
+            ref_: txid,
+            label: Some("DLC funding renamed".to_string()),
+            origin: None,
+        });
+        storage.persist_label(&renamed).await.unwrap();
+        storage.delete_label(&input_label.ref_()).await.unwrap();
+
+        let labels = storage.load_labels().await.unwrap();
+        assert_eq!(labels.iter().count(), 2);
+        assert!(labels.iter().any(|label| matches!(
+            label,
+            bip329::Label::Transaction(record) if record.label.as_deref() == Some("DLC funding renamed")
+        )));
     }
 }

@@ -24,6 +24,7 @@ pub const CHAIN_MONITOR_KEY: u8 = 4;
 const SIGNER_TREE: u8 = 6;
 const WALLET_TREE: u8 = 7;
 const MARKETPLACE_TREE: u8 = 8;
+const LABEL_TREE: u8 = 9;
 const CHANGESET_KEY: &str = "changeset";
 const CONTRACT_TRACKER_KEY: &str = "contract_tracker";
 
@@ -92,6 +93,10 @@ impl SledStorage {
 
     pub fn marketplace_tree(&self) -> Result<Tree, sled::Error> {
         self.db.open_tree([MARKETPLACE_TREE])
+    }
+
+    fn label_tree(&self) -> Result<Tree, sled::Error> {
+        self.db.open_tree([LABEL_TREE])
     }
 }
 
@@ -169,6 +174,39 @@ impl Storage for SledStorage {
             .map_err(sled_to_wallet_error)?;
         Ok(())
     }
+
+    async fn load_labels(&self) -> Result<bip329::Labels, WalletError> {
+        let labels = self
+            .label_tree()
+            .map_err(sled_to_wallet_error)?
+            .iter()
+            .values()
+            .map(|value| {
+                let value = value.map_err(sled_to_wallet_error)?;
+                Ok(serde_json::from_slice::<bip329::Label>(&value)?)
+            })
+            .collect::<Result<Vec<_>, WalletError>>()?;
+        Ok(bip329::Labels::new(labels))
+    }
+
+    async fn persist_label(&self, label: &bip329::Label) -> Result<(), WalletError> {
+        self.label_tree()
+            .map_err(sled_to_wallet_error)?
+            .insert(
+                crate::storage::label_key(&label.ref_()).as_bytes(),
+                serde_json::to_vec(label)?,
+            )
+            .map_err(sled_to_wallet_error)?;
+        Ok(())
+    }
+
+    async fn delete_label(&self, label_ref: &bip329::LabelRef) -> Result<(), WalletError> {
+        self.label_tree()
+            .map_err(sled_to_wallet_error)?
+            .remove(crate::storage::label_key(label_ref).as_bytes())
+            .map_err(sled_to_wallet_error)?;
+        Ok(())
+    }
 }
 
 fn sled_to_wallet_error(error: sled::Error) -> WalletError {
@@ -180,6 +218,38 @@ mod tests {
     use super::*;
     use bitcoin::hashes::Hash;
     use bitcoin::{OutPoint, Txid};
+
+    #[tokio::test]
+    async fn labels_round_trip() {
+        let path = "tests/data/dlc_storagedb/labels_round_trip";
+        let logger = Arc::new(Logger::disabled("sled_test".to_string()));
+        {
+            let storage = SledStorage::new(path, logger).expect("Error opening sled DB");
+            let txid = Txid::from_byte_array([0xAB; 32]);
+
+            let label = bip329::Label::Transaction(bip329::TransactionRecord {
+                ref_: txid,
+                label: Some("DLC funding".to_string()),
+                origin: None,
+            });
+            storage.persist_label(&label).await.unwrap();
+
+            let output_label = bip329::Label::Output(bip329::OutputRecord {
+                ref_: OutPoint { txid, vout: 0 },
+                label: Some("collateral".to_string()),
+                spendable: Some(false),
+            });
+            storage.persist_label(&output_label).await.unwrap();
+
+            let labels = storage.load_labels().await.unwrap();
+            assert_eq!(labels.iter().count(), 2);
+
+            storage.delete_label(&label.ref_()).await.unwrap();
+            let labels = storage.load_labels().await.unwrap();
+            assert_eq!(labels.iter().count(), 1);
+        }
+        std::fs::remove_dir_all(path).unwrap();
+    }
 
     #[tokio::test]
     async fn contract_tracker_round_trips() {
