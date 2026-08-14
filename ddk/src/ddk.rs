@@ -242,6 +242,41 @@ where
             }
         });
 
+        // Spawn the wallet event listener: a transaction event (confirmed,
+        // unconfirmed, replaced, dropped) triggers the manager's periodic
+        // check right away instead of waiting for the next timer tick.
+        let processor = self.sender.clone();
+        let logger = self.logger.clone();
+        let mut wallet_events = self.wallet.subscribe_events();
+        runtime.spawn(async move {
+            use crate::wallet::WalletEvent;
+            use tokio::sync::broadcast::error::RecvError;
+            loop {
+                match wallet_events.recv().await {
+                    Ok(WalletEvent::ChainTipChanged { .. }) => continue,
+                    Ok(event) => {
+                        log_debug!(
+                            logger,
+                            "Wallet event triggers a periodic check. event={:?}",
+                            event
+                        );
+                        let _ = processor
+                            .send(DlcManagerMessage::PeriodicCheck)
+                            .await
+                            .map_err(|e| {
+                                log_error!(
+                                    logger,
+                                    "Error sending periodic check: error={}",
+                                    e.to_string()
+                                );
+                            });
+                    }
+                    Err(RecvError::Lagged(_)) => continue,
+                    Err(RecvError::Closed) => break,
+                }
+            }
+        });
+
         // Spawn contract monitor thread (30-second interval)
         let processor = self.sender.clone();
         let logger = self.logger.clone();

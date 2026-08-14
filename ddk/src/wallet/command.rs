@@ -8,12 +8,13 @@ use bdk_esplora::EsploraAsyncExt;
 use bdk_wallet::coin_selection::{
     BranchAndBoundCoinSelection, CoinSelectionAlgorithm, SingleRandomDraw,
 };
-use bdk_wallet::{KeychainKind, PersistedWallet, Update, Utxo, WeightedUtxo};
+use bdk_wallet::{KeychainKind, PersistedWallet, Update, Utxo, WalletEvent, WeightedUtxo};
 use bitcoin::key::rand::thread_rng;
 use bitcoin::{Address, Amount, FeeRate, ScriptBuf};
 use ddk_manager::contract::Contract;
 use ddk_manager::ContractId;
 use std::sync::Arc;
+use tokio::sync::broadcast;
 
 type Result<T> = std::result::Result<T, WalletError>;
 
@@ -29,6 +30,7 @@ pub async fn sync(
     tracker: &mut ContractUtxoTracker,
     blockchain: &EsploraClient,
     storage: &mut WalletStorage,
+    events: &broadcast::Sender<WalletEvent>,
     logger: Arc<Logger>,
 ) -> Result<()> {
     let block_height = blockchain
@@ -91,7 +93,7 @@ pub async fn sync(
             .map_err(|e| WalletError::Esplora(e.to_string()))?;
         Update::from(sync)
     };
-    wallet.apply_update(sync_result)?;
+    forward_events(events, wallet.apply_update_events(sync_result)?);
 
     // A lock on an outpoint that a confirmed transaction spent is dead
     // weight: release it. Unconfirmed spends keep their locks, because an
@@ -117,7 +119,7 @@ pub async fn sync(
         wallet.unlock_outpoint(outpoint);
     }
 
-    sync_contract_utxos(wallet, tracker, blockchain, storage, logger).await?;
+    sync_contract_utxos(wallet, tracker, blockchain, storage, events, logger).await?;
 
     wallet
         .persist_async(storage)
@@ -138,6 +140,7 @@ async fn sync_contract_utxos(
     tracker: &mut ContractUtxoTracker,
     blockchain: &EsploraClient,
     storage: &mut WalletStorage,
+    events: &broadcast::Sender<WalletEvent>,
     logger: Arc<Logger>,
 ) -> Result<()> {
     // Contracts learn their funding transaction at accept time; register
@@ -176,14 +179,25 @@ async fn sync_contract_utxos(
     // The tracker shares the wallet's chain view: connect the chain update
     // to the wallet so the tracker's anchors resolve.
     if let Some(chain_update) = response.chain_update {
-        wallet.apply_update(Update {
-            chain: Some(chain_update),
-            ..Default::default()
-        })?;
+        forward_events(
+            events,
+            wallet.apply_update_events(Update {
+                chain: Some(chain_update),
+                ..Default::default()
+            })?,
+        );
     }
     tracker.apply_update(response.tx_update);
 
     Ok(())
+}
+
+/// Forwards wallet events to the subscribers. A send fails only when no
+/// subscriber exists, which is fine.
+fn forward_events(events: &broadcast::Sender<WalletEvent>, wallet_events: Vec<WalletEvent>) {
+    for event in wallet_events {
+        let _ = events.send(event);
+    }
 }
 
 /// The funding script of a contract that has a funding transaction, with
