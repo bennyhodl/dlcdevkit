@@ -88,6 +88,31 @@ pub async fn sync(
         Update::from(sync)
     };
     wallet.apply_update(sync_result)?;
+
+    // A lock on an outpoint that a confirmed transaction spent is dead
+    // weight: release it. Unconfirmed spends keep their locks, because an
+    // evicted transaction would return the coin to the spendable set.
+    let confirmed_spends = wallet
+        .transactions()
+        .filter(|canonical_tx| canonical_tx.chain_position.is_confirmed())
+        .flat_map(|canonical_tx| {
+            canonical_tx
+                .tx_node
+                .tx
+                .input
+                .iter()
+                .map(|input| input.previous_output)
+                .collect::<Vec<_>>()
+        })
+        .collect::<std::collections::HashSet<_>>();
+    let spent_locks = wallet
+        .list_locked_outpoints()
+        .filter(|outpoint| confirmed_spends.contains(outpoint))
+        .collect::<Vec<_>>();
+    for outpoint in spent_locks {
+        wallet.unlock_outpoint(outpoint);
+    }
+
     wallet
         .persist_async(storage)
         .await
