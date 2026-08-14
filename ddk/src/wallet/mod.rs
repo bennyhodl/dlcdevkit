@@ -295,6 +295,8 @@ impl DlcDevKitWallet {
 
         let (sender, mut receiver) = channel(100);
 
+        let mut tracker = contract_tracker::ContractUtxoTracker::new();
+
         let logger_clone = logger.clone();
         tokio::spawn(async move {
             while let Some(command) = receiver.recv().await {
@@ -302,6 +304,7 @@ impl DlcDevKitWallet {
                     WalletCommand::Sync(sender) => {
                         let sync = command::sync(
                             &mut wallet,
+                            &mut tracker,
                             &blockchain,
                             &mut storage,
                             logger_clone.clone(),
