@@ -209,6 +209,8 @@ pub enum WalletError {
     CoinSelection(#[from] bdk_wallet::coin_selection::InsufficientFunds),
     #[error("Coin control: {0}")]
     AddUtxo(#[from] bdk_wallet::tx_builder::AddUtxoError),
+    #[error("Fee bump: {0}")]
+    FeeBump(#[from] bdk_wallet::error::BuildFeeBumpError),
     #[error("Invalid derivation index")]
     InvalidDerivationIndex,
     #[error("Invalid secret key")]

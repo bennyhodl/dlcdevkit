@@ -349,7 +349,34 @@ pub async fn send(
     if let Some(min_confirmations) = coin_control.min_confirmations {
         builder.exclude_below_confirmations(min_confirmations);
     }
-    let mut psbt = builder.finish()?;
+    let psbt = builder.finish()?;
+    sign_and_broadcast(wallet, blockchain, storage, psbt).await
+}
+
+/// Builds, signs, and broadcasts an RBF replacement of `txid` at the
+/// higher `fee_rate`. RBF is on by default for wallet transactions.
+#[tracing::instrument(skip(wallet, blockchain, storage))]
+pub async fn bump_fee(
+    wallet: &mut PersistedWallet<WalletStorage>,
+    blockchain: &EsploraClient,
+    storage: &mut WalletStorage,
+    txid: bitcoin::Txid,
+    fee_rate: FeeRate,
+) -> Result<bitcoin::Txid> {
+    let mut builder = wallet.build_fee_bump(txid)?;
+    builder.fee_rate(fee_rate);
+    let psbt = builder.finish()?;
+    sign_and_broadcast(wallet, blockchain, storage, psbt).await
+}
+
+/// Signs a built PSBT, broadcasts the transaction, and persists the
+/// wallet so the revealed change index survives a restart.
+async fn sign_and_broadcast(
+    wallet: &mut PersistedWallet<WalletStorage>,
+    blockchain: &EsploraClient,
+    storage: &mut WalletStorage,
+    mut psbt: bitcoin::Psbt,
+) -> Result<bitcoin::Txid> {
     wallet.sign(&mut psbt, bdk_wallet::SignOptions::default())?;
     let tx = psbt.extract_tx().map_err(|_| WalletError::ExtractTx)?;
     let txid = tx.compute_txid();
