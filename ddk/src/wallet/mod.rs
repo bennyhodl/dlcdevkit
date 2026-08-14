@@ -168,6 +168,16 @@ pub enum WalletCommand {
         responder: oneshot::Sender<Result<Txid>>,
     },
 
+    /// Replace an unconfirmed wallet transaction with a higher-fee version
+    BumpFee {
+        /// The transaction to replace
+        txid: Txid,
+        /// The fee rate of the replacement; must beat the original's
+        fee_rate: FeeRate,
+        /// Channel for receiving the replacement transaction id
+        responder: oneshot::Sender<Result<Txid>>,
+    },
+
     /// Get all wallet transactions
     GetTransactions(oneshot::Sender<Result<Vec<Arc<Transaction>>>>),
 
@@ -422,6 +432,27 @@ impl DlcDevKitWallet {
                         .await;
                         let _ = responder.send(result).map_err(|e| {
                             log_error!(logger_clone, "Error sending send command. error={:?}", e);
+                        });
+                    }
+                    WalletCommand::BumpFee {
+                        txid,
+                        fee_rate,
+                        responder,
+                    } => {
+                        let result = command::bump_fee(
+                            &mut wallet,
+                            &blockchain,
+                            &mut storage,
+                            txid,
+                            fee_rate,
+                        )
+                        .await;
+                        let _ = responder.send(result).map_err(|e| {
+                            log_error!(
+                                logger_clone,
+                                "Error sending bump fee command. error={:?}",
+                                e
+                            );
                         });
                     }
                     WalletCommand::GetTransactions(sender) => {
@@ -716,6 +747,29 @@ impl DlcDevKitWallet {
     pub async fn send_all(&self, address: Address, fee_rate: FeeRate) -> Result<Txid> {
         self.send_with_coin_control(address, Spend::All, fee_rate, CoinControl::default())
             .await
+    }
+
+    /// Replaces a stuck unconfirmed wallet transaction with a
+    /// higher-fee version (RBF is on by default for wallet
+    /// transactions).
+    ///
+    /// # Arguments
+    /// * `txid` - The transaction to replace; it must be unconfirmed
+    /// * `fee_rate` - Fee rate of the replacement; must beat the original's
+    ///
+    /// # Returns
+    /// Transaction ID of the replacement transaction
+    #[tracing::instrument(skip(self))]
+    pub async fn bump_fee(&self, txid: Txid, fee_rate: FeeRate) -> Result<Txid> {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(WalletCommand::BumpFee {
+                txid,
+                fee_rate,
+                responder: tx,
+            })
+            .await?;
+        rx.await.map_err(WalletError::Receiver)?
     }
 
     /// Retrieves all transactions known to the wallet.
@@ -1255,6 +1309,49 @@ mod tests {
         // queued command.
         wallet.unreserve_utxos(&outpoints).unwrap();
         assert!(wallet.get_utxos_for_amount(amount, 1, true).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn bump_fee_replaces_a_stuck_transaction() {
+        use bitcoincore_rpc::RpcApi;
+
+        // A private environment: a block mined by a concurrent test would
+        // confirm the transaction before it can be replaced.
+        let env = ddk_testenv::TestEnv::new();
+        let mut seed = [0u8; 64];
+        seed.try_fill(&mut bitcoin::key::rand::thread_rng())
+            .unwrap();
+        let wallet = create_wallet_on(env.esplora_host(), &seed).await;
+        let address = wallet.new_external_address().await.unwrap().address;
+        env.fund_address(&address, Amount::from_btc(1.0).unwrap());
+        wallet.sync().await.unwrap();
+
+        let dest = Address::from_str("bcrt1qt0yrvs7qx8guvpqsx8u9mypz6t4zr3pxthsjkm")
+            .unwrap()
+            .assume_checked();
+        let txid = wallet
+            .send_to_address(
+                dest,
+                Amount::from_btc(0.5).unwrap(),
+                FeeRate::from_sat_per_vb(1).unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // The wallet has to see its unconfirmed transaction to replace it.
+        env.wait_for_tx(&txid);
+        wallet.sync().await.unwrap();
+
+        let replacement = wallet
+            .bump_fee(txid, FeeRate::from_sat_per_vb(10).unwrap())
+            .await
+            .unwrap();
+        assert_ne!(replacement, txid);
+
+        // The replacement is in the mempool and the original is gone.
+        let rpc = env.rpc();
+        assert!(rpc.get_mempool_entry(&replacement).is_ok());
+        assert!(rpc.get_mempool_entry(&txid).is_err());
     }
 
     #[tokio::test]
