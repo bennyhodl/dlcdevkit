@@ -31,9 +31,6 @@ use crate::logger::{log_error, log_info, WriteLog};
 use crate::wallet::address::AddressGenerator;
 use crate::{chain::EsploraClient, Storage};
 use bdk_chain::Balance;
-use bdk_wallet::coin_selection::{
-    BranchAndBoundCoinSelection, CoinSelectionAlgorithm, SingleRandomDraw,
-};
 use bdk_wallet::descriptor::IntoWalletDescriptor;
 use bdk_wallet::AsyncWalletPersister;
 pub use bdk_wallet::LocalOutput;
@@ -46,11 +43,9 @@ use bdk_wallet::{
     template::Bip84,
     AddressInfo, KeychainKind, SignOptions, Wallet,
 };
-use bdk_wallet::{Utxo, WeightedUtxo};
 use bitcoin::bip32::Fingerprint;
-use bitcoin::key::rand::thread_rng;
 use bitcoin::Psbt;
-use bitcoin::{secp256k1::SecretKey, Amount, FeeRate, ScriptBuf, Transaction};
+use bitcoin::{secp256k1::SecretKey, Amount, FeeRate, Transaction};
 use ddk_manager::{error::Error as ManagerError, SimpleSigner};
 use lightning::chain::chaininterface::{ConfirmationTarget, FeeEstimator};
 use std::collections::HashMap;
@@ -155,6 +150,18 @@ pub enum WalletCommand {
         bitcoin::psbt::Psbt,
         oneshot::Sender<std::result::Result<Psbt, ManagerError>>,
     ),
+
+    /// Select UTXOs that cover an amount, optionally locking them
+    SelectUtxos {
+        /// The amount the selection must cover
+        amount: Amount,
+        /// Fee rate in sat/vB the selection pays for its own weight
+        fee_rate: u64,
+        /// Lock the selected outpoints against concurrent selections
+        lock_utxos: bool,
+        /// Channel for receiving the selected UTXOs
+        responder: oneshot::Sender<Result<Vec<ddk_manager::Utxo>>>,
+    },
 }
 
 /// The main wallet implementation that provides Bitcoin functionality for DDK.
@@ -504,6 +511,28 @@ impl DlcDevKitWallet {
                             );
                         });
                     }
+                    WalletCommand::SelectUtxos {
+                        amount,
+                        fee_rate,
+                        lock_utxos,
+                        responder,
+                    } => {
+                        let result = command::select_utxos(
+                            &mut wallet,
+                            &mut storage,
+                            amount,
+                            fee_rate,
+                            lock_utxos,
+                        )
+                        .await;
+                        let _ = responder.send(result).map_err(|e| {
+                            log_error!(
+                                logger_clone,
+                                "Error sending select utxos command. error={:?}",
+                                e
+                            );
+                        });
+                    }
                 }
             }
         });
@@ -808,13 +837,15 @@ impl ddk_manager::Wallet for DlcDevKitWallet {
     /// Selects UTXOs for a specific amount and fee rate.
     ///
     /// This method is used by the DLC manager to select appropriate UTXOs
-    /// for funding DLC transactions. It performs coin selection based on the
-    /// requested amount and fee rate.
+    /// for funding DLC transactions. Locked outpoints are never selected.
+    /// When `lock_utxos` is set, the selected outpoints are locked and the
+    /// locks persist across restarts, so two concurrent offers cannot fund
+    /// themselves with the same coins.
     ///
     /// # Arguments
     /// * `amount` - The amount of Bitcoin needed
     /// * `fee_rate` - The fee rate for the transaction
-    /// * `_lock_utxos` - Whether to lock the selected UTXOs (currently unused)
+    /// * `lock_utxos` - Whether to lock the selected UTXOs
     ///
     /// # Returns
     /// A vector of UTXOs that can cover the required amount plus fees
@@ -823,50 +854,21 @@ impl ddk_manager::Wallet for DlcDevKitWallet {
         &self,
         amount: Amount,
         fee_rate: u64,
-        _lock_utxos: bool,
+        lock_utxos: bool,
     ) -> std::result::Result<Vec<ddk_manager::Utxo>, ManagerError> {
-        let local_utxos = self.list_utxos().await.map_err(wallet_err_to_manager_err)?;
-
-        let utxos = local_utxos
-            .iter()
-            .map(|utxo| WeightedUtxo {
-                satisfaction_weight: utxo.txout.weight(),
-                utxo: Utxo::Local(utxo.clone()),
-            })
-            .collect::<Vec<WeightedUtxo>>();
-
-        let selected_utxos = BranchAndBoundCoinSelection::new(MIN_CHANGE_SIZE, SingleRandomDraw)
-            .coin_select(
-                vec![],
-                utxos,
-                FeeRate::from_sat_per_vb(fee_rate).ok_or_else(|| {
-                    ManagerError::WalletError(Box::new(WalletError::Esplora(format!(
-                        "Invalid fee rate: {fee_rate}"
-                    ))))
-                })?,
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(WalletCommand::SelectUtxos {
                 amount,
-                ScriptBuf::new().as_script(),
-                &mut thread_rng(),
-            )
-            .map_err(|e| ManagerError::WalletError(Box::new(e)))?;
-
-        let dlc_utxos = selected_utxos
-            .selected
-            .iter()
-            .map(|utxo| {
-                let address =
-                    Address::from_script(&utxo.txout().script_pubkey, self.network).unwrap();
-                ddk_manager::Utxo {
-                    tx_out: utxo.txout().clone(),
-                    outpoint: utxo.outpoint(),
-                    address,
-                    redeem_script: ScriptBuf::new(),
-                    reserved: false,
-                }
+                fee_rate,
+                lock_utxos,
+                responder: tx,
             })
-            .collect();
-
-        Ok(dlc_utxos)
+            .await
+            .map_err(|e| wallet_err_to_manager_err(WalletError::Sender(e)))?;
+        rx.await
+            .map_err(|e| wallet_err_to_manager_err(WalletError::Receiver(e)))?
+            .map_err(wallet_err_to_manager_err)
     }
 }
 
@@ -937,7 +939,14 @@ mod tests {
     }
 
     async fn create_wallet_on(esplora: &str, seed: &[u8; 64]) -> DlcDevKitWallet {
-        let storage = Arc::new(MemoryStorage::new());
+        create_wallet_with_storage(esplora, seed, Arc::new(MemoryStorage::new())).await
+    }
+
+    async fn create_wallet_with_storage(
+        esplora: &str,
+        seed: &[u8; 64],
+        storage: Arc<MemoryStorage>,
+    ) -> DlcDevKitWallet {
         let logger = Arc::new(Logger::console(
             "console_logger".to_string(),
             LogLevel::Info,
@@ -948,7 +957,7 @@ mod tests {
             seed,
             esplora,
             Network::Regtest,
-            storage.clone(),
+            storage,
             None,
             logger.clone(),
         )
@@ -1112,6 +1121,61 @@ mod tests {
             wallet.get_balance().await.unwrap().untrusted_pending,
             Amount::ZERO
         );
+    }
+
+    #[tokio::test]
+    async fn concurrent_selections_never_overlap() {
+        use ddk_manager::Wallet;
+
+        let wallet = create_wallet().await;
+        let addr_one = wallet.new_external_address().await.unwrap().address;
+        let addr_two = wallet.new_external_address().await.unwrap().address;
+        fund_address(&addr_one);
+        fund_address(&addr_two);
+        wallet.sync().await.unwrap();
+
+        let amount = Amount::from_btc(0.5).unwrap();
+        let first = wallet.get_utxos_for_amount(amount, 1, true).await.unwrap();
+        let second = wallet.get_utxos_for_amount(amount, 1, true).await.unwrap();
+
+        assert!(!first.is_empty());
+        assert!(!second.is_empty());
+        assert!(first.iter().all(|utxo| utxo.reserved));
+        for utxo in &first {
+            assert!(second.iter().all(|other| other.outpoint != utxo.outpoint));
+        }
+
+        // Every coin is locked now: a third selection has nothing to spend.
+        assert!(wallet.get_utxos_for_amount(amount, 1, true).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn utxo_locks_survive_restart() {
+        use ddk_manager::Wallet;
+
+        let esplora = ddk_testenv::env().esplora_host().to_string();
+        let storage = Arc::new(MemoryStorage::new());
+        let mut seed = [0u8; 64];
+        seed.try_fill(&mut bitcoin::key::rand::thread_rng())
+            .unwrap();
+
+        let wallet = create_wallet_with_storage(&esplora, &seed, storage.clone()).await;
+        let address = wallet.new_external_address().await.unwrap().address;
+        fund_address(&address);
+        wallet.sync().await.unwrap();
+
+        let amount = Amount::from_btc(0.5).unwrap();
+        let selected = wallet.get_utxos_for_amount(amount, 1, true).await.unwrap();
+        assert!(!selected.is_empty());
+
+        // A wallet loaded from the same storage sees the persisted locks
+        // and cannot select the locked coin.
+        let restarted = create_wallet_with_storage(&esplora, &seed, storage.clone()).await;
+        restarted.sync().await.unwrap();
+        assert!(restarted
+            .get_utxos_for_amount(amount, 1, true)
+            .await
+            .is_err());
     }
 
     #[tokio::test]
