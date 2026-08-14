@@ -63,8 +63,25 @@ use tokio::sync::{
 type FutureResult<'a, T, E> = Pin<Box<dyn Future<Output = std::result::Result<T, E>> + Send + 'a>>;
 type Result<T> = std::result::Result<T, WalletError>;
 
-/// The minimum change size for the wallet to create in coin selection.
-const MIN_CHANGE_SIZE: u64 = 25_000;
+/// The default minimum change size for the wallet to create in coin
+/// selection.
+pub const DEFAULT_MIN_CHANGE_SIZE: u64 = 25_000;
+
+/// Configuration of the internal BDK wallet.
+#[derive(Debug, Clone, Copy)]
+pub struct WalletConfig {
+    /// The smallest change output coin selection creates; a smaller
+    /// change amount goes to fees instead
+    pub min_change_size: u64,
+}
+
+impl Default for WalletConfig {
+    fn default() -> Self {
+        Self {
+            min_change_size: DEFAULT_MIN_CHANGE_SIZE,
+        }
+    }
+}
 
 /// The wallet balance, split into the BDK balance categories plus the
 /// spendable/reserved view over the outpoint locks.
@@ -289,6 +306,31 @@ impl DlcDevKitWallet {
         network: Network,
         storage: Arc<dyn Storage>,
         address_generator: Option<Arc<dyn AddressGenerator + Send + Sync>>,
+        logger: Arc<Logger>,
+    ) -> Result<DlcDevKitWallet> {
+        Self::new_with_config(
+            seed_bytes,
+            blockchain,
+            network,
+            storage,
+            address_generator,
+            WalletConfig::default(),
+            logger,
+        )
+        .await
+    }
+
+    /// Creates a new DlcDevKitWallet with an explicit [`WalletConfig`].
+    /// See [`DlcDevKitWallet::new`] for the construction steps.
+    #[tracing::instrument(name = "wallet", skip_all)]
+    #[allow(clippy::too_many_arguments)]
+    pub async fn new_with_config(
+        seed_bytes: &[u8; 64],
+        blockchain: Arc<EsploraClient>,
+        network: Network,
+        storage: Arc<dyn Storage>,
+        address_generator: Option<Arc<dyn AddressGenerator + Send + Sync>>,
+        config: WalletConfig,
         logger: Arc<Logger>,
     ) -> Result<DlcDevKitWallet> {
         let secp = Secp256k1::new();
@@ -549,6 +591,7 @@ impl DlcDevKitWallet {
                             amount,
                             fee_rate,
                             lock_utxos,
+                            config.min_change_size,
                         )
                         .await;
                         let _ = responder.send(result).map_err(|e| {
@@ -1309,6 +1352,45 @@ mod tests {
         // queued command.
         wallet.unreserve_utxos(&outpoints).unwrap();
         assert!(wallet.get_utxos_for_amount(amount, 1, true).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn custom_min_change_size_reaches_coin_selection() {
+        use ddk_manager::Wallet;
+
+        let esplora = ddk_testenv::env().esplora_host().to_string();
+        let logger = Arc::new(Logger::console(
+            "console_logger".to_string(),
+            LogLevel::Info,
+        ));
+        let esplora =
+            Arc::new(EsploraClient::new(&esplora, Network::Regtest, logger.clone()).unwrap());
+        let mut seed = [0u8; 64];
+        seed.try_fill(&mut bitcoin::key::rand::thread_rng())
+            .unwrap();
+        let wallet = DlcDevKitWallet::new_with_config(
+            &seed,
+            esplora,
+            Network::Regtest,
+            Arc::new(MemoryStorage::new()),
+            None,
+            super::WalletConfig {
+                min_change_size: 1_000,
+            },
+            logger,
+        )
+        .await
+        .unwrap();
+
+        let address = wallet.new_external_address().await.unwrap().address;
+        fund_address(&address);
+        wallet.sync().await.unwrap();
+
+        let selected = wallet
+            .get_utxos_for_amount(Amount::from_btc(0.5).unwrap(), 1, false)
+            .await
+            .unwrap();
+        assert!(!selected.is_empty());
     }
 
     #[tokio::test]
