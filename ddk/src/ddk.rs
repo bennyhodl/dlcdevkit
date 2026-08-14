@@ -448,6 +448,23 @@ where
         Ok(self.storage.delete_label(label_ref).await?)
     }
 
+    /// Exports every BIP-329 label as JSONL, one label per line.
+    pub async fn export_labels(&self) -> Result<String> {
+        let labels = self.storage.load_labels().await?;
+        labels.export().map_err(|e| Error::Generic(e.to_string()))
+    }
+
+    /// Imports BIP-329 JSONL labels, replacing stored labels with the
+    /// same reference.
+    pub async fn import_labels(&self, jsonl: &str) -> Result<()> {
+        let labels =
+            bip329::Labels::try_from_str(jsonl).map_err(|e| Error::Generic(e.to_string()))?;
+        for label in labels.iter() {
+            self.storage.persist_label(label).await?;
+        }
+        Ok(())
+    }
+
     /// Refunds a DLC contract.
     ///
     /// This method checks if the refund locktime has passed and broadcasts the refund transaction if it has.
