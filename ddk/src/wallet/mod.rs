@@ -931,13 +931,17 @@ mod tests {
 
     async fn create_wallet_from_seed(seed: &[u8; 64]) -> DlcDevKitWallet {
         let esplora = ddk_testenv::env().esplora_host().to_string();
+        create_wallet_on(&esplora, seed).await
+    }
+
+    async fn create_wallet_on(esplora: &str, seed: &[u8; 64]) -> DlcDevKitWallet {
         let storage = Arc::new(MemoryStorage::new());
         let logger = Arc::new(Logger::console(
             "console_logger".to_string(),
             LogLevel::Info,
         ));
         let esplora =
-            Arc::new(EsploraClient::new(&esplora, Network::Regtest, logger.clone()).unwrap());
+            Arc::new(EsploraClient::new(esplora, Network::Regtest, logger.clone()).unwrap());
         DlcDevKitWallet::new(
             seed,
             esplora,
@@ -1035,6 +1039,77 @@ mod tests {
         wallet.sync().await.unwrap();
         let pending = wallet.get_balance().await.unwrap().untrusted_pending;
         assert!(pending > Amount::ZERO);
+    }
+
+    #[tokio::test]
+    async fn drops_replaced_mempool_transaction() {
+        use bitcoincore_rpc::RpcApi;
+        use std::collections::HashMap;
+
+        // A private environment: a block mined by a concurrent test would
+        // confirm the transaction before it can be replaced.
+        let env = ddk_testenv::TestEnv::new();
+        let rpc = env.rpc();
+
+        let mut seed = [0u8; 64];
+        seed.try_fill(&mut bitcoin::key::rand::thread_rng())
+            .unwrap();
+        let wallet = create_wallet_on(env.esplora_host(), &seed).await;
+        let address = wallet.new_external_address().await.unwrap().address;
+        wallet.sync().await.unwrap();
+
+        // Build an RBF transaction that pays the wallet.
+        let unspent = rpc
+            .list_unspent(Some(1), None, None, None, None)
+            .unwrap()
+            .into_iter()
+            .find(|utxo| utxo.amount >= Amount::from_btc(1.0).unwrap() && utxo.spendable)
+            .unwrap();
+        let input = bitcoincore_rpc::json::CreateRawTransactionInput {
+            txid: unspent.txid,
+            vout: unspent.vout,
+            sequence: None,
+        };
+        let change = rpc.get_new_address(None, None).unwrap().assume_checked();
+        let payment = Amount::from_btc(0.5).unwrap();
+        let fee = Amount::from_sat(2_000);
+        let mut outputs = HashMap::new();
+        outputs.insert(address.to_string(), payment);
+        outputs.insert(change.to_string(), unspent.amount - payment - fee);
+        let raw = rpc
+            .create_raw_transaction(&[input.clone()], &outputs, None, Some(true))
+            .unwrap();
+        let signed = rpc
+            .sign_raw_transaction_with_wallet(&raw, None, None)
+            .unwrap();
+        let txid = rpc.send_raw_transaction(&signed.hex).unwrap();
+        env.wait_for_tx(&txid);
+
+        wallet.sync().await.unwrap();
+        assert_eq!(
+            wallet.get_balance().await.unwrap().untrusted_pending,
+            payment
+        );
+
+        // Replace it with a conflicting transaction that does not pay the
+        // wallet. The wallet only learns of the eviction from esplora.
+        let replacement_fee = Amount::from_sat(50_000);
+        let mut replacement_outputs = HashMap::new();
+        replacement_outputs.insert(change.to_string(), unspent.amount - replacement_fee);
+        let raw = rpc
+            .create_raw_transaction(&[input], &replacement_outputs, None, Some(true))
+            .unwrap();
+        let signed = rpc
+            .sign_raw_transaction_with_wallet(&raw, None, None)
+            .unwrap();
+        let replacement_txid = rpc.send_raw_transaction(&signed.hex).unwrap();
+        env.wait_for_tx(&replacement_txid);
+
+        wallet.sync().await.unwrap();
+        assert_eq!(
+            wallet.get_balance().await.unwrap().untrusted_pending,
+            Amount::ZERO
+        );
     }
 
     #[tokio::test]
