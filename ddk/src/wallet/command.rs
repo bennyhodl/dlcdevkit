@@ -4,7 +4,12 @@ use crate::logger::{log_debug, WriteLog};
 use crate::{chain::EsploraClient, logger::Logger};
 use bdk_chain::spk_client::FullScanRequest;
 use bdk_esplora::EsploraAsyncExt;
-use bdk_wallet::{KeychainKind, PersistedWallet, Update};
+use bdk_wallet::coin_selection::{
+    BranchAndBoundCoinSelection, CoinSelectionAlgorithm, SingleRandomDraw,
+};
+use bdk_wallet::{KeychainKind, PersistedWallet, Update, Utxo, WeightedUtxo};
+use bitcoin::key::rand::thread_rng;
+use bitcoin::{Address, Amount, FeeRate, ScriptBuf};
 use std::sync::Arc;
 
 type Result<T> = std::result::Result<T, WalletError>;
@@ -88,4 +93,68 @@ pub async fn sync(
         .await
         .map_err(|e| WalletError::WalletPersistanceError(e.to_string()))?;
     Ok(())
+}
+
+/// Selects UTXOs that cover `amount` at `fee_rate`, ignoring locked
+/// outpoints. When `lock_utxos` is set, the selected outpoints are locked and
+/// the locks are persisted, so a concurrent selection cannot pick the same
+/// coins and the locks survive a restart.
+#[tracing::instrument(skip(wallet, storage))]
+pub async fn select_utxos(
+    wallet: &mut PersistedWallet<WalletStorage>,
+    storage: &mut WalletStorage,
+    amount: Amount,
+    fee_rate: u64,
+    lock_utxos: bool,
+) -> Result<Vec<ddk_manager::Utxo>> {
+    let candidates = wallet
+        .list_unspent()
+        .filter(|utxo| !wallet.is_outpoint_locked(utxo.outpoint))
+        .map(|utxo| WeightedUtxo {
+            satisfaction_weight: utxo.txout.weight(),
+            utxo: Utxo::Local(utxo),
+        })
+        .collect::<Vec<WeightedUtxo>>();
+
+    let fee_rate = FeeRate::from_sat_per_vb(fee_rate)
+        .ok_or_else(|| WalletError::Esplora(format!("Invalid fee rate: {fee_rate}")))?;
+
+    let selected = BranchAndBoundCoinSelection::new(super::MIN_CHANGE_SIZE, SingleRandomDraw)
+        .coin_select(
+            vec![],
+            candidates,
+            fee_rate,
+            amount,
+            ScriptBuf::new().as_script(),
+            &mut thread_rng(),
+        )?;
+
+    let network = wallet.network();
+    let utxos = selected
+        .selected
+        .iter()
+        .map(|utxo| {
+            let address = Address::from_script(&utxo.txout().script_pubkey, network)
+                .expect("wallet outputs have addressable script pubkeys");
+            ddk_manager::Utxo {
+                tx_out: utxo.txout().clone(),
+                outpoint: utxo.outpoint(),
+                address,
+                redeem_script: ScriptBuf::new(),
+                reserved: lock_utxos,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    if lock_utxos {
+        for utxo in &utxos {
+            wallet.lock_outpoint(utxo.outpoint);
+        }
+        wallet
+            .persist_async(storage)
+            .await
+            .map_err(|e| WalletError::WalletPersistanceError(e.to_string()))?;
+    }
+
+    Ok(utxos)
 }

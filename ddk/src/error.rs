@@ -205,6 +205,8 @@ pub enum WalletError {
     Receiver(#[from] tokio::sync::oneshot::error::RecvError),
     #[error("Wallet sender error: {0}")]
     Sender(#[from] tokio::sync::mpsc::error::SendError<WalletCommand>),
+    #[error("Coin selection: {0}")]
+    CoinSelection(#[from] bdk_wallet::coin_selection::InsufficientFunds),
     #[error("Invalid derivation index")]
     InvalidDerivationIndex,
     #[error("Invalid secret key")]
