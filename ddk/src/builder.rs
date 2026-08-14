@@ -42,6 +42,7 @@ pub struct Builder<T, S, O> {
     zmq_blockhash_endpoint: Option<String>,
     network: Network,
     seed_bytes: [u8; 64],
+    wallet_config: crate::wallet::WalletConfig,
     logger: Option<Arc<Logger>>,
 }
 
@@ -62,6 +63,7 @@ impl<T: Transport, S: Storage, O: Oracle> Default for Builder<T, S, O> {
             zmq_blockhash_endpoint: None,
             network: DEFAULT_NETWORK,
             seed_bytes: [0u8; 64],
+            wallet_config: crate::wallet::WalletConfig::default(),
             logger: None,
         }
     }
@@ -150,6 +152,13 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
         Ok(self)
     }
 
+    /// Set the smallest change output the wallet's coin selection
+    /// creates; smaller change goes to fees. Defaults to 25 000 sats.
+    pub fn set_min_change_size(&mut self, min_change_size: u64) -> &mut Self {
+        self.wallet_config.min_change_size = min_change_size;
+        self
+    }
+
     /// Set the logger for the DDK instance.
     pub fn set_logger(&mut self, logger: Arc<Logger>) -> &mut Self {
         self.logger = Some(logger);
@@ -201,31 +210,18 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
             logger.clone(),
         )?);
 
-        let wallet = match &self.contract_address_generator {
-            Some(w) => {
-                let wallet = DlcDevKitWallet::new(
-                    &self.seed_bytes,
-                    esplora_client.clone(),
-                    self.network,
-                    storage.clone(),
-                    Some(w.clone()),
-                    logger.clone(),
-                )
-                .await?;
-                Arc::new(wallet)
-            }
-            None => Arc::new(
-                DlcDevKitWallet::new(
-                    &self.seed_bytes,
-                    esplora_client.clone(),
-                    self.network,
-                    storage.clone(),
-                    None,
-                    logger.clone(),
-                )
-                .await?,
-            ),
-        };
+        let wallet = Arc::new(
+            DlcDevKitWallet::new_with_config(
+                &self.seed_bytes,
+                esplora_client.clone(),
+                self.network,
+                storage.clone(),
+                self.contract_address_generator.clone(),
+                self.wallet_config,
+                logger.clone(),
+            )
+            .await?,
+        );
 
         let mut oracles = HashMap::new();
         oracles.insert(oracle.get_public_key(), oracle.clone());
