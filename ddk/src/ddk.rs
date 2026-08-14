@@ -435,6 +435,8 @@ where
             confirmed: wallet_balance.confirmed,
             change_unconfirmed: wallet_balance.immature + wallet_balance.trusted_pending,
             foreign_unconfirmed: wallet_balance.untrusted_pending,
+            spendable: wallet_balance.spendable,
+            reserved: wallet_balance.reserved,
             contract: contract.to_owned(),
             contract_pnl: contract_pnl.to_owned().to_sat(),
         })

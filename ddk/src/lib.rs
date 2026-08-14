@@ -233,6 +233,14 @@ pub struct Balance {
     /// Unconfirmed balance from external sources
     pub foreign_unconfirmed: Amount,
 
+    /// Unspent coins minus reserved coins: what a new transaction or
+    /// offer can spend
+    pub spendable: Amount,
+
+    /// Unspent coins locked for in-flight offers and signed funding
+    /// transactions
+    pub reserved: Amount,
+
     /// Total amount currently locked in active DLC contracts
     pub contract: Amount,
 

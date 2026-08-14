@@ -30,7 +30,6 @@ use crate::logger::Logger;
 use crate::logger::{log_error, log_info, WriteLog};
 use crate::wallet::address::AddressGenerator;
 use crate::{chain::EsploraClient, Storage};
-use bdk_chain::Balance;
 use bdk_wallet::descriptor::IntoWalletDescriptor;
 use bdk_wallet::AsyncWalletPersister;
 pub use bdk_wallet::LocalOutput;
@@ -64,6 +63,24 @@ type Result<T> = std::result::Result<T, WalletError>;
 
 /// The minimum change size for the wallet to create in coin selection.
 const MIN_CHANGE_SIZE: u64 = 25_000;
+
+/// The wallet balance, split into the BDK balance categories plus the
+/// spendable/reserved view over the outpoint locks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct WalletBalance {
+    /// Confirmed and mature coins
+    pub confirmed: Amount,
+    /// Unconfirmed coins from the wallet's own transactions
+    pub trusted_pending: Amount,
+    /// Unconfirmed coins from foreign transactions
+    pub untrusted_pending: Amount,
+    /// Immature coinbase outputs
+    pub immature: Amount,
+    /// Unspent coins minus reserved coins: what a new selection can spend
+    pub spendable: Amount,
+    /// Unspent coins locked for in-flight offers and funding transactions
+    pub reserved: Amount,
+}
 
 /// Wrapper type that adapts DDK's Storage trait to BDK's AsyncWalletPersister interface.
 ///
@@ -122,7 +139,7 @@ pub enum WalletCommand {
     Sync(oneshot::Sender<Result<()>>),
 
     /// Get the current wallet balance
-    Balance(oneshot::Sender<Balance>),
+    Balance(oneshot::Sender<WalletBalance>),
 
     /// Generate a new external (receiving) address
     NewExternalAddress(oneshot::Sender<Result<AddressInfo>>),
@@ -298,6 +315,23 @@ impl DlcDevKitWallet {
                     }
                     WalletCommand::Balance(sender) => {
                         let balance = wallet.balance();
+                        let reserved = wallet
+                            .list_unspent()
+                            .filter(|utxo| wallet.is_outpoint_locked(utxo.outpoint))
+                            .map(|utxo| utxo.txout.value)
+                            .sum::<Amount>();
+                        let spendable = balance
+                            .total()
+                            .checked_sub(reserved)
+                            .unwrap_or(Amount::ZERO);
+                        let balance = WalletBalance {
+                            confirmed: balance.confirmed,
+                            trusted_pending: balance.trusted_pending,
+                            untrusted_pending: balance.untrusted_pending,
+                            immature: balance.immature,
+                            spendable,
+                            reserved,
+                        };
                         let _ = sender.send(balance).map_err(|e| {
                             log_error!(
                                 logger_clone,
@@ -629,9 +663,11 @@ impl DlcDevKitWallet {
         PublicKey::from_secret_key(&self.secp, &self.xprv.private_key)
     }
 
-    /// Retrieves the current wallet balance including confirmed and unconfirmed amounts.
+    /// Retrieves the current wallet balance including confirmed and
+    /// unconfirmed amounts, plus the spendable/reserved split over the
+    /// outpoint locks.
     #[tracing::instrument(skip(self))]
-    pub async fn get_balance(&self) -> Result<Balance> {
+    pub async fn get_balance(&self) -> Result<WalletBalance> {
         let (tx, rx) = oneshot::channel();
         self.sender.send(WalletCommand::Balance(tx)).await?;
         rx.await.map_err(WalletError::Receiver)
@@ -1272,6 +1308,31 @@ mod tests {
         // queued command.
         wallet.unreserve_utxos(&outpoints).unwrap();
         assert!(wallet.get_utxos_for_amount(amount, 1, true).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn balance_splits_spendable_and_reserved() {
+        use ddk_manager::Wallet;
+
+        let wallet = create_wallet().await;
+        let address = wallet.new_external_address().await.unwrap().address;
+        fund_address(&address);
+        wallet.sync().await.unwrap();
+
+        let before = wallet.get_balance().await.unwrap();
+        assert_eq!(before.reserved, Amount::ZERO);
+        assert_eq!(before.spendable, before.confirmed);
+
+        wallet
+            .get_utxos_for_amount(Amount::from_btc(0.5).unwrap(), 1, true)
+            .await
+            .unwrap();
+
+        // The single wallet coin is locked: it moves from spendable to
+        // reserved while the total stays the same.
+        let after = wallet.get_balance().await.unwrap();
+        assert_eq!(after.reserved, before.confirmed);
+        assert_eq!(after.spendable, Amount::ZERO);
     }
 
     #[tokio::test]
