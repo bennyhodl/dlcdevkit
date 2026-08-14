@@ -241,8 +241,13 @@ pub struct Balance {
     /// transactions
     pub reserved: Amount,
 
-    /// Total amount currently locked in active DLC contracts
-    pub contract: Amount,
+    /// Confirmed contract funding outputs, from chain truth over the
+    /// tracked 2-of-2 funding outpoints
+    pub contract_confirmed: Amount,
+
+    /// Unconfirmed contract funding outputs, from chain truth over the
+    /// tracked 2-of-2 funding outpoints
+    pub contract_pending: Amount,
 
     /// Cumulative profit/loss from all closed contracts (in satoshis)
     /// Positive values indicate overall profit, negative values indicate loss
