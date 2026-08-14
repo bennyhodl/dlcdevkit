@@ -240,6 +240,7 @@ impl PostgresStore {
         changeset.tx_graph = tx_graph_changeset_from_postgres(tx, wallet_name).await?;
         changeset.local_chain = local_chain_changeset_from_postgres(tx, wallet_name).await?;
         changeset.indexer.spk_cache = spk_cache_from_postgres(tx, wallet_name).await?;
+        changeset.locked_outpoints = locked_outpoints_from_postgres(tx, wallet_name).await?;
         Ok(())
     }
 
@@ -299,6 +300,10 @@ impl PostgresStore {
             .await
             .map_err(StorageError::Sqlx)?;
         tx_graph_changeset_persist_to_postgres(&mut tx, wallet_name, &changeset.tx_graph)
+            .await
+            .map_err(StorageError::Sqlx)?;
+
+        locked_outpoints_persist_to_postgres(&mut tx, wallet_name, &changeset.locked_outpoints)
             .await
             .map_err(StorageError::Sqlx)?;
 
@@ -955,6 +960,62 @@ async fn tx_graph_changeset_persist_to_postgres(
     Ok(())
 }
 
+/// Select the wallet's locked outpoints.
+#[tracing::instrument(skip(db_tx))]
+async fn locked_outpoints_from_postgres(
+    db_tx: &mut Transaction<'_, Postgres>,
+    wallet_name: &str,
+) -> Result<bdk_wallet::locked_outpoints::ChangeSet, SqlxError> {
+    let rows =
+        sqlx::query("SELECT txid, vout, is_locked FROM locked_outpoints WHERE wallet_name = $1")
+            .bind(wallet_name)
+            .fetch_all(&mut **db_tx)
+            .await?;
+
+    let mut outpoints = BTreeMap::new();
+    for row in rows {
+        let txid: String = row.get("txid");
+        let vout: i32 = row.get("vout");
+        let is_locked: bool = row.get("is_locked");
+        let txid =
+            Txid::from_str(&txid).map_err(|_| SqlxError::Custom("parse locked txid".into()))?;
+        outpoints.insert(
+            OutPoint {
+                txid,
+                vout: vout as u32,
+            },
+            is_locked,
+        );
+    }
+
+    Ok(bdk_wallet::locked_outpoints::ChangeSet { outpoints })
+}
+
+/// Upsert the wallet's locked outpoints. A `false` overwrites an earlier
+/// `true`, matching the merge semantics of the BDK changeset.
+#[tracing::instrument(skip_all)]
+async fn locked_outpoints_persist_to_postgres(
+    db_tx: &mut Transaction<'_, Postgres>,
+    wallet_name: &str,
+    changeset: &bdk_wallet::locked_outpoints::ChangeSet,
+) -> Result<(), SqlxError> {
+    for (outpoint, is_locked) in &changeset.outpoints {
+        sqlx::query(
+            "INSERT INTO locked_outpoints (wallet_name, txid, vout, is_locked)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT (wallet_name, txid, vout) DO UPDATE SET is_locked = $4",
+        )
+        .bind(wallet_name)
+        .bind(outpoint.txid.to_string())
+        .bind(outpoint.vout as i32)
+        .bind(is_locked)
+        .execute(&mut **db_tx)
+        .await?;
+    }
+
+    Ok(())
+}
+
 /// Select the cached script pubkeys of the keychain indexer.
 #[tracing::instrument(skip(db_tx))]
 async fn spk_cache_from_postgres(
@@ -1215,6 +1276,30 @@ mod tests {
         db.write(&advance).await.unwrap();
         let read = db.read().await.unwrap();
         assert_eq!(read.indexer.last_revealed.get(&did), Some(&9));
+    }
+
+    #[tokio::test]
+    async fn locked_outpoints_round_trip() {
+        let (_server, db) = seed_db().await;
+
+        let outpoint = OutPoint {
+            txid: dummy_tx().compute_txid(),
+            vout: 0,
+        };
+
+        let mut lock = ChangeSet::default();
+        lock.network = Some(Network::Regtest);
+        lock.locked_outpoints.outpoints.insert(outpoint, true);
+        db.write(&lock).await.unwrap();
+        let read = db.read().await.unwrap();
+        assert_eq!(read.locked_outpoints.outpoints.get(&outpoint), Some(&true));
+
+        // An unlock overwrites the lock.
+        let mut unlock = ChangeSet::default();
+        unlock.locked_outpoints.outpoints.insert(outpoint, false);
+        db.write(&unlock).await.unwrap();
+        let read = db.read().await.unwrap();
+        assert_eq!(read.locked_outpoints.outpoints.get(&outpoint), Some(&false));
     }
 
     #[tokio::test]
