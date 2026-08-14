@@ -34,6 +34,7 @@ use crate::{chain::EsploraClient, Storage};
 use bdk_wallet::descriptor::IntoWalletDescriptor;
 use bdk_wallet::AsyncWalletPersister;
 pub use bdk_wallet::LocalOutput;
+pub use bdk_wallet::WalletEvent;
 use bdk_wallet::{
     bitcoin::{
         bip32::Xpriv,
@@ -216,6 +217,9 @@ pub enum WalletCommand {
 pub struct DlcDevKitWallet {
     /// Channel sender for wallet commands
     sender: Sender<WalletCommand>,
+    /// Broadcast sender for wallet events; new subscribers come from
+    /// [`DlcDevKitWallet::subscribe_events`]
+    events: tokio::sync::broadcast::Sender<WalletEvent>,
     /// Bitcoin network (mainnet, testnet, regtest)
     network: Network,
     /// Extended private key for the wallet
@@ -301,11 +305,13 @@ impl DlcDevKitWallet {
         let contract_keys = ContractKeyProvider::from_xprv(xprv);
 
         let (sender, mut receiver) = channel(100);
+        let (events, _) = tokio::sync::broadcast::channel(256);
 
         let mut tracker = contract_tracker::ContractUtxoTracker::from_changeset(
             storage.0.initialize_contract_tracker().await?,
         );
 
+        let events_clone = events.clone();
         let logger_clone = logger.clone();
         tokio::spawn(async move {
             while let Some(command) = receiver.recv().await {
@@ -316,6 +322,7 @@ impl DlcDevKitWallet {
                             &mut tracker,
                             &blockchain,
                             &mut storage,
+                            &events_clone,
                             logger_clone.clone(),
                         )
                         .await;
@@ -661,6 +668,7 @@ impl DlcDevKitWallet {
 
         Ok(DlcDevKitWallet {
             sender,
+            events,
             network,
             xprv,
             secp,
@@ -678,6 +686,13 @@ impl DlcDevKitWallet {
         let (tx, rx) = oneshot::channel();
         self.sender.send(WalletCommand::Sync(tx)).await?;
         rx.await.map_err(WalletError::Receiver)?
+    }
+
+    /// Subscribes to wallet events. Each sync emits an event for every
+    /// transaction that confirmed, unconfirmed, was replaced, or was
+    /// dropped, with reorg awareness from BDK.
+    pub fn subscribe_events(&self) -> tokio::sync::broadcast::Receiver<WalletEvent> {
+        self.events.subscribe()
     }
 
     /// Returns the wallet's master public key.
@@ -1342,6 +1357,26 @@ mod tests {
         // queued command.
         wallet.unreserve_utxos(&outpoints).unwrap();
         assert!(wallet.get_utxos_for_amount(amount, 1, true).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn emits_wallet_events_on_sync() {
+        let wallet = create_wallet().await;
+        let mut events = wallet.subscribe_events();
+        let address = wallet.new_external_address().await.unwrap().address;
+        wallet.sync().await.unwrap();
+        while events.try_recv().is_ok() {}
+
+        fund_address(&address);
+        wallet.sync().await.unwrap();
+
+        let mut confirmed = false;
+        while let Ok(event) = events.try_recv() {
+            if matches!(event, super::WalletEvent::TxConfirmed { .. }) {
+                confirmed = true;
+            }
+        }
+        assert!(confirmed);
     }
 
     #[tokio::test]
