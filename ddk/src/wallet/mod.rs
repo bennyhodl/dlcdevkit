@@ -81,6 +81,10 @@ pub struct WalletBalance {
     pub spendable: Amount,
     /// Unspent coins locked for in-flight offers and funding transactions
     pub reserved: Amount,
+    /// Confirmed contract funding outputs, from chain truth
+    pub contract_confirmed: Amount,
+    /// Unconfirmed contract funding outputs, from chain truth
+    pub contract_pending: Amount,
 }
 
 /// Wrapper type that adapts DDK's Storage trait to BDK's AsyncWalletPersister interface.
@@ -325,6 +329,7 @@ impl DlcDevKitWallet {
                             .total()
                             .checked_sub(reserved)
                             .unwrap_or(Amount::ZERO);
+                        let contract_balance = tracker.balance(wallet.local_chain());
                         let balance = WalletBalance {
                             confirmed: balance.confirmed,
                             trusted_pending: balance.trusted_pending,
@@ -332,6 +337,9 @@ impl DlcDevKitWallet {
                             immature: balance.immature,
                             spendable,
                             reserved,
+                            contract_confirmed: contract_balance.confirmed,
+                            contract_pending: contract_balance.trusted_pending
+                                + contract_balance.untrusted_pending,
                         };
                         let _ = sender.send(balance).map_err(|e| {
                             log_error!(
