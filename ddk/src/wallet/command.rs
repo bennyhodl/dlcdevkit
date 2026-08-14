@@ -222,6 +222,53 @@ pub(super) fn contract_funding_spk(contract: &Contract) -> Option<(ContractId, S
     ))
 }
 
+/// What a send spends: a specific amount, or the whole wallet.
+#[derive(Debug)]
+pub enum Spend {
+    /// Send this amount to the destination
+    Amount(Amount),
+    /// Drain every spendable coin to the destination
+    All,
+}
+
+/// Builds, signs, and broadcasts a spend to `address`, then persists the
+/// wallet so the revealed change index survives a restart.
+#[tracing::instrument(skip(wallet, blockchain, storage))]
+pub async fn send(
+    wallet: &mut PersistedWallet<WalletStorage>,
+    blockchain: &EsploraClient,
+    storage: &mut WalletStorage,
+    address: Address,
+    spend: Spend,
+    fee_rate: FeeRate,
+) -> Result<bitcoin::Txid> {
+    let mut builder = wallet.build_tx();
+    builder.version(2).fee_rate(fee_rate);
+    match spend {
+        Spend::Amount(amount) => {
+            builder.add_recipient(address.script_pubkey(), amount);
+        }
+        Spend::All => {
+            builder.drain_wallet();
+            builder.drain_to(address.script_pubkey());
+        }
+    }
+    let mut psbt = builder.finish()?;
+    wallet.sign(&mut psbt, bdk_wallet::SignOptions::default())?;
+    let tx = psbt.extract_tx().map_err(|_| WalletError::ExtractTx)?;
+    let txid = tx.compute_txid();
+    blockchain
+        .async_client
+        .broadcast(&tx)
+        .await
+        .map_err(|e| WalletError::Esplora(e.to_string()))?;
+    wallet
+        .persist_async(storage)
+        .await
+        .map_err(|e| WalletError::WalletPersistanceError(e.to_string()))?;
+    Ok(txid)
+}
+
 /// Selects UTXOs that cover `amount` at `fee_rate`, ignoring locked
 /// outpoints. When `lock_utxos` is set, the selected outpoints are locked and
 /// the locks are persisted, so a concurrent selection cannot pick the same

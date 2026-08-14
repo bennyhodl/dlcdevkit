@@ -393,61 +393,16 @@ impl DlcDevKitWallet {
                         });
                     }
                     WalletCommand::SendToAddress(address, amount, fee_rate, sender) => {
-                        let mut txn_builder = wallet.build_tx();
-                        txn_builder
-                            .add_recipient(address.script_pubkey(), amount)
-                            .version(2)
-                            .fee_rate(fee_rate);
-                        let mut psbt = match txn_builder.finish() {
-                            Ok(psbt) => psbt,
-                            Err(e) => {
-                                let _ = sender.send(Err(WalletError::TxnBuilder(e))).map_err(|e| {
-                                    log_error!(
-                                        logger_clone,
-                                        "Error sending send to address command. error={:?}",
-                                        e
-                                    );
-                                });
-                                continue;
-                            }
-                        };
-                        if let Err(e) = wallet.sign(&mut psbt, SignOptions::default()) {
-                            let _ = sender.send(Err(WalletError::Signing(e))).map_err(|e| {
-                                log_error!(
-                                    logger_clone,
-                                    "Error sending send to address command. error={:?}",
-                                    e
-                                );
-                            });
-                            continue;
-                        }
-                        let tx = match psbt.extract_tx() {
-                            Ok(tx) => tx,
-                            Err(_) => {
-                                let _ = sender.send(Err(WalletError::ExtractTx)).map_err(|e| {
-                                    log_error!(
-                                        logger_clone,
-                                        "Error sending send to address command. error={:?}",
-                                        e
-                                    );
-                                });
-                                continue;
-                            }
-                        };
-                        let txid = tx.compute_txid();
-                        if let Err(e) = blockchain.async_client.broadcast(&tx).await {
-                            let _ = sender
-                                .send(Err(WalletError::Esplora(e.to_string())))
-                                .map_err(|e| {
-                                    log_error!(
-                                        logger_clone,
-                                        "Error sending send to address command. error={:?}",
-                                        e
-                                    );
-                                });
-                            continue;
-                        }
-                        let _ = sender.send(Ok(txid)).map_err(|e| {
+                        let result = command::send(
+                            &mut wallet,
+                            &blockchain,
+                            &mut storage,
+                            address,
+                            command::Spend::Amount(amount),
+                            fee_rate,
+                        )
+                        .await;
+                        let _ = sender.send(result).map_err(|e| {
                             log_error!(
                                 logger_clone,
                                 "Error sending send to address command. error={:?}",
@@ -456,60 +411,16 @@ impl DlcDevKitWallet {
                         });
                     }
                     WalletCommand::SendAll(address, fee_rate, sender) => {
-                        let mut tx_builder = wallet.build_tx();
-                        tx_builder.fee_rate(fee_rate);
-                        tx_builder.drain_wallet();
-                        tx_builder.drain_to(address.script_pubkey());
-                        let mut psbt = match tx_builder.finish() {
-                            Ok(psbt) => psbt,
-                            Err(e) => {
-                                let _ = sender.send(Err(WalletError::TxnBuilder(e))).map_err(|e| {
-                                    log_error!(
-                                        logger_clone,
-                                        "Error sending send all command. error={:?}",
-                                        e
-                                    );
-                                });
-                                continue;
-                            }
-                        };
-                        if let Err(e) = wallet.sign(&mut psbt, SignOptions::default()) {
-                            let _ = sender.send(Err(WalletError::Signing(e))).map_err(|e| {
-                                log_error!(
-                                    logger_clone,
-                                    "Error sending send all command. error={:?}",
-                                    e
-                                );
-                            });
-                            continue;
-                        }
-                        let tx = match psbt.extract_tx() {
-                            Ok(tx) => tx,
-                            Err(_) => {
-                                let _ = sender.send(Err(WalletError::ExtractTx)).map_err(|e| {
-                                    log_error!(
-                                        logger_clone,
-                                        "Error sending send all command. error={:?}",
-                                        e
-                                    );
-                                });
-                                continue;
-                            }
-                        };
-                        let txid = tx.compute_txid();
-                        if let Err(e) = blockchain.async_client.broadcast(&tx).await {
-                            let _ = sender
-                                .send(Err(WalletError::Esplora(e.to_string())))
-                                .map_err(|e| {
-                                    log_error!(
-                                        logger_clone,
-                                        "Error sending send all command. error={:?}",
-                                        e
-                                    );
-                                });
-                            continue;
-                        }
-                        let _ = sender.send(Ok(txid)).map_err(|e| {
+                        let result = command::send(
+                            &mut wallet,
+                            &blockchain,
+                            &mut storage,
+                            address,
+                            command::Spend::All,
+                            fee_rate,
+                        )
+                        .await;
+                        let _ = sender.send(result).map_err(|e| {
                             log_error!(
                                 logger_clone,
                                 "Error sending send all command. error={:?}",
