@@ -256,6 +256,26 @@ impl Contract {
         }
     }
 
+    /// Get the fee rate per virtual byte for a contract.
+    pub fn get_fee_rate_per_vb(&self) -> u64 {
+        match self {
+            Contract::Offered(o) | Contract::Rejected(o) => o.fee_rate_per_vb,
+            Contract::Accepted(a) => a.offered_contract.fee_rate_per_vb,
+            Contract::Signed(s) | Contract::Confirmed(s) | Contract::Refunded(s) => {
+                s.accepted_contract.offered_contract.fee_rate_per_vb
+            }
+            Contract::PreClosed(p) => {
+                p.signed_contract
+                    .accepted_contract
+                    .offered_contract
+                    .fee_rate_per_vb
+            }
+            Contract::FailedAccept(f) => f.offered_contract.fee_rate_per_vb,
+            Contract::FailedSign(f) => f.accepted_contract.offered_contract.fee_rate_per_vb,
+            Contract::Closed(_) => 0,
+        }
+    }
+
     /// Get the profit and loss for a contract.
     pub fn get_pnl(&self) -> SignedAmount {
         match self {

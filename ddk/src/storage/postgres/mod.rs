@@ -485,98 +485,60 @@ impl ManagerStorage for PostgresStore {
             .get_oracle_announcement()
             .map(|ann| ann.oracle_event.event_id.clone());
 
-        let existing_metadata = sqlx::query_as::<Postgres, ContractMetadata>(
-            "SELECT * FROM contract_metadata WHERE id = $1",
+        // A single atomic upsert: the read-modify-write it replaces raced under
+        // concurrent updates, and its insert arm hardcoded is_offer_party and
+        // fee_rate_per_vb. The update arm deliberately leaves the columns set
+        // at insert time untouched and only advances the mutable ones.
+        sqlx::query(
+            r#"
+            INSERT INTO contract_metadata (
+                id, state, is_offer_party, counter_party,
+                offer_collateral, accept_collateral, total_collateral, fee_rate_per_vb,
+                cet_locktime, refund_locktime, pnl, funding_txid, cet_txid, announcement_id, oracle_pubkey
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+            ON CONFLICT (id) DO UPDATE SET
+                state = EXCLUDED.state,
+                pnl = EXCLUDED.pnl,
+                funding_txid = COALESCE(EXCLUDED.funding_txid, contract_metadata.funding_txid),
+                cet_txid = COALESCE(EXCLUDED.cet_txid, contract_metadata.cet_txid)
+            "#,
         )
         .bind(&contract_id)
-        .fetch_optional(&mut *tx)
+        .bind(prefix as i16)
+        .bind(contract.is_offer_party())
+        .bind(hex::encode(contract.get_counter_party_id().serialize()))
+        .bind(offer_collateral.to_sat() as i64)
+        .bind(accept_collateral.to_sat() as i64)
+        .bind(total_collateral.to_sat() as i64)
+        .bind(contract.get_fee_rate_per_vb() as i64)
+        .bind(contract.get_cet_locktime() as i32)
+        .bind(contract.get_refund_locktime() as i32)
+        .bind(Some(contract.get_pnl().to_sat()))
+        .bind(&funding_txid)
+        .bind(&cet_txid)
+        .bind(announcement_id.unwrap_or_else(|| "legacy_data".to_string()))
+        .bind(oracle_pubkey.unwrap_or_else(|| "legacy_data".to_string()))
+        .execute(&mut *tx)
         .await
         .map_err(to_storage_error)?;
 
-        if existing_metadata.is_some() {
-            sqlx::query(
-                r#"
-            UPDATE contract_metadata SET
-                state = $2,
-                pnl = $3,
-                funding_txid = COALESCE($4, funding_txid),
-                cet_txid = COALESCE($5, cet_txid)
-            WHERE id = $1
-            "#,
-            )
-            .bind(&contract_id)
-            .bind(prefix as i16)
-            .bind(Some(contract.get_pnl().to_sat()))
-            .bind(&funding_txid)
-            .bind(&cet_txid)
-            .execute(&mut *tx)
-            .await
-            .map_err(to_storage_error)?;
-        } else {
-            sqlx::query(
-                r#"
-                INSERT INTO contract_metadata (
-                id, state, is_offer_party, counter_party,
-                offer_collateral, accept_collateral, total_collateral, fee_rate_per_vb, 
-                cet_locktime, refund_locktime, pnl, funding_txid, cet_txid, announcement_id, oracle_pubkey
-                )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-                "#,
-            )
-            .bind(&contract_id)
-            .bind(prefix as i16)
-            // need to track this
-            .bind(false)
-            .bind(hex::encode(contract.get_counter_party_id().serialize()))
-            .bind(offer_collateral.to_sat() as i64)
-            .bind(accept_collateral.to_sat() as i64)
-            .bind(total_collateral.to_sat() as i64)
-            // need to track this
-            .bind(1_i64)
-            .bind(contract.get_cet_locktime() as i32)
-            .bind(contract.get_refund_locktime() as i32)
-            .bind(Some(contract.get_pnl().to_sat()))
-            .bind(&funding_txid)
-            .bind(&cet_txid)
-            .bind(announcement_id)
-            .bind(&oracle_pubkey)
-            .execute(&mut *tx)
-            .await
-            .map_err(to_storage_error)?;
-        }
-
-        let existing_data =
-            sqlx::query_as::<Postgres, ContractData>("SELECT * FROM contract_data WHERE id = $1")
-                .bind(&contract_id)
-                .fetch_optional(&mut *tx)
-                .await
-                .map_err(to_storage_error)?;
-
-        // Serialize the contract data
         let serialized_contract = serialize_contract(contract)?;
 
-        if existing_data.is_some() {
-            // Update existing contract data
-            sqlx::query("UPDATE contract_data SET contract_data = $2, state = $3 WHERE id = $1")
-                .bind(&contract_id)
-                .bind(&serialized_contract)
-                .bind(prefix as i16)
-                .execute(&mut *tx)
-                .await
-                .map_err(to_storage_error)?;
-        } else {
-            // Insert new contract data
-            sqlx::query(
-                "INSERT INTO contract_data (id, contract_data, is_compressed, state) VALUES ($1, $2, $3, $4)",
-            )
-            .bind(&contract_id)
-            .bind(&serialized_contract)
-            .bind(false) // is_compressed
-            .bind(prefix as i16)
-            .execute(&mut *tx)
-            .await
-            .map_err(to_storage_error)?;
-        }
+        sqlx::query(
+            "INSERT INTO contract_data (id, state, contract_data, is_compressed)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT (id) DO UPDATE SET
+                 state = EXCLUDED.state,
+                 contract_data = EXCLUDED.contract_data",
+        )
+        .bind(&contract_id)
+        .bind(prefix as i16)
+        .bind(&serialized_contract)
+        .bind(false)
+        .execute(&mut *tx)
+        .await
+        .map_err(to_storage_error)?;
 
         tx.commit().await.map_err(to_storage_error)?;
 
@@ -1279,6 +1241,25 @@ mod tests {
 
         let read = db.read().await.unwrap();
         assert!(read.local_chain.blocks.get(&100).is_none());
+    }
+
+    #[tokio::test]
+    async fn update_contract_inserts_real_metadata() {
+        let (_server, db) = seed_db().await;
+
+        // The metadata row was recreated by update_contract after the temp-id
+        // delete (the Accepted transition); it must carry the contract's real
+        // values instead of hardcoded ones.
+        let accept = include_bytes!("../../../../testconfig/contract_binaries/Accepted");
+        let accepted_contract = deserialize_contract(&accept.to_vec()).unwrap();
+
+        let metadata = db.get_contract_metadata(None).await.unwrap();
+        assert_eq!(metadata.len(), 1);
+        assert_eq!(metadata[0].is_offer_party, accepted_contract.is_offer_party());
+        assert_eq!(
+            metadata[0].fee_rate_per_vb as u64,
+            accepted_contract.get_fee_rate_per_vb()
+        );
     }
 
     #[tokio::test]
