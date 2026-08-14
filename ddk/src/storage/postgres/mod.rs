@@ -56,6 +56,19 @@ fn max_connections_from_env() -> u32 {
         .unwrap_or(DEFAULT_MAX_CONNECTIONS)
 }
 
+/// The embedded schema migrations for the Postgres storage backend.
+///
+/// The migration files are compiled into the crate, so consumers can apply or
+/// revert the schema against any database without access to the source tree:
+///
+/// ```ignore
+/// ddk::storage::postgres::MIGRATOR.run(&pool).await?;          // apply up
+/// ddk::storage::postgres::MIGRATOR.undo(&pool, version).await?; // revert down to `version`
+/// ```
+///
+/// [`PostgresStore::new`] runs this same migrator when `migrations` is true.
+pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("src/storage/postgres/migrations");
+
 /// Manages a pool of database connections.
 #[derive(Debug)]
 pub struct PostgresStore {
@@ -82,10 +95,9 @@ impl PostgresStore {
             .connect(url)
             .await
             .map_err(|e| StorageError::Sqlx(e.into()))?;
-        // TODO: inline migrations
         if migrations {
             log_info!(logger, "Migrating postgres");
-            sqlx::migrate!("src/storage/postgres/migrations")
+            MIGRATOR
                 .run(&pool)
                 .await
                 .map_err(|e| StorageError::Sqlx(e.into()))?;
