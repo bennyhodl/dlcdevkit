@@ -187,6 +187,20 @@ async fn enumeration_contract() {
     bob.ddk.wallet.sync().await.unwrap();
     alice.ddk.wallet.sync().await.unwrap();
 
+    // The tracker sees the confirmed 2-of-2 funding output on both sides.
+    for party in [&alice, &bob] {
+        let contract_utxos = party.ddk.contract_utxos().await.unwrap();
+        assert_eq!(contract_utxos.len(), 1);
+        assert_eq!(contract_utxos[0].contract_id, contract_id);
+        assert!(contract_utxos[0].confirmed);
+        assert_eq!(contract_utxos[0].spent_by, None);
+        assert!(contract_utxos[0].txout.value >= Amount::from_sat(100_000));
+
+        let balance = party.ddk.balance().await.unwrap();
+        assert_eq!(balance.contract_confirmed, contract_utxos[0].txout.value);
+        assert_eq!(balance.contract_pending, Amount::ZERO);
+    }
+
     // Used to check that timelock is reached.
     let locktime = match alice.ddk.storage.get_contract(&contract_id).await.unwrap() {
         Some(contract) => match contract {
@@ -267,4 +281,14 @@ async fn enumeration_contract() {
 
     // Serialize Closed state
     assert_contract_state_and_serialize!(bob.ddk.storage, contract_id, Closed);
+
+    // The CET spent the funding output: the tracker observes the close
+    // and the chain-truth contract balance returns to zero.
+    bob.ddk.wallet.sync().await.unwrap();
+    let contract_utxos = bob.ddk.contract_utxos().await.unwrap();
+    assert_eq!(contract_utxos.len(), 1);
+    assert!(contract_utxos[0].spent_by.is_some());
+    let balance = bob.ddk.balance().await.unwrap();
+    assert_eq!(balance.contract_confirmed, Amount::ZERO);
+    assert_eq!(balance.contract_pending, Amount::ZERO);
 }

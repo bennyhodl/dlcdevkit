@@ -190,6 +190,9 @@ pub enum WalletCommand {
 
     /// List the currently locked outpoints
     ListLockedOutpoints(oneshot::Sender<Vec<bitcoin::OutPoint>>),
+
+    /// List the tracked contract funding outputs with their chain state
+    ContractUtxos(oneshot::Sender<Vec<contract_tracker::ContractUtxo>>),
 }
 
 /// The main wallet implementation that provides Bitcoin functionality for DDK.
@@ -642,6 +645,16 @@ impl DlcDevKitWallet {
                             );
                         });
                     }
+                    WalletCommand::ContractUtxos(responder) => {
+                        let utxos = tracker.utxos(wallet.local_chain());
+                        let _ = responder.send(utxos).map_err(|e| {
+                            log_error!(
+                                logger_clone,
+                                "Error sending contract utxos command. error={:?}",
+                                e
+                            );
+                        });
+                    }
                 }
             }
         });
@@ -786,6 +799,16 @@ impl DlcDevKitWallet {
         self.sender
             .send(WalletCommand::ListLockedOutpoints(tx))
             .await?;
+        rx.await.map_err(WalletError::Receiver)
+    }
+
+    /// Lists the tracked contract funding outputs with their chain state,
+    /// so a consumer can show locked collateral per contract and observe
+    /// a close.
+    #[tracing::instrument(skip(self))]
+    pub async fn contract_utxos(&self) -> Result<Vec<contract_tracker::ContractUtxo>> {
+        let (tx, rx) = oneshot::channel();
+        self.sender.send(WalletCommand::ContractUtxos(tx)).await?;
         rx.await.map_err(WalletError::Receiver)
     }
 
