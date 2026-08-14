@@ -148,12 +148,43 @@ async fn sync_contract_utxos(
     logger: Arc<Logger>,
 ) -> Result<()> {
     // Contracts learn their funding transaction at accept time; register
-    // every funding script the storage knows about.
+    // every funding script the storage knows about. Registration and a
+    // close also write BIP-329 labels: the funding transaction and its
+    // outpoint get the contract id, the CET gets the attested outcome.
+    // Label writes are upserts, so repeating them is harmless, and a
+    // failed write never fails the sync.
     match storage.0.get_contracts().await {
         Ok(contracts) => {
             for contract in &contracts {
-                if let Some((contract_id, spk)) = contract_funding_spk(contract) {
-                    tracker.register(contract_id, spk);
+                if let Some((contract_id, spk, outpoint)) = contract_funding_info(contract) {
+                    if tracker.register(contract_id, spk) {
+                        let funding_tx_label =
+                            bip329::Label::Transaction(bip329::TransactionRecord {
+                                ref_: outpoint.txid,
+                                label: Some(format!("DLC funding {}", hex::encode(contract_id))),
+                                origin: None,
+                            });
+                        let funding_output_label = bip329::Label::Output(bip329::OutputRecord {
+                            ref_: outpoint,
+                            label: Some(hex::encode(contract_id)),
+                            spendable: Some(false),
+                        });
+                        for label in [funding_tx_label, funding_output_label] {
+                            if let Err(e) = storage.0.persist_label(&label).await {
+                                log_error!(logger, "Could not write a contract label. error={}", e);
+                            }
+                        }
+                    }
+                }
+                if let Some((cet_txid, close_label)) = contract_close_label(contract) {
+                    let label = bip329::Label::Transaction(bip329::TransactionRecord {
+                        ref_: cet_txid,
+                        label: Some(close_label),
+                        origin: None,
+                    });
+                    if let Err(e) = storage.0.persist_label(&label).await {
+                        log_error!(logger, "Could not write a close label. error={}", e);
+                    }
                 }
             }
         }
@@ -204,10 +235,12 @@ fn forward_events(events: &broadcast::Sender<WalletEvent>, wallet_events: Vec<Wa
     }
 }
 
-/// The funding script of a contract that has a funding transaction, with
-/// the contract's id. Offered contracts do not have one yet: the funding
-/// transaction needs the accept party's inputs.
-pub(super) fn contract_funding_spk(contract: &Contract) -> Option<(ContractId, ScriptBuf)> {
+/// The funding script and outpoint of a contract that has a funding
+/// transaction, with the contract's id. Offered contracts do not have one
+/// yet: the funding transaction needs the accept party's inputs.
+pub(super) fn contract_funding_info(
+    contract: &Contract,
+) -> Option<(ContractId, ScriptBuf, bitcoin::OutPoint)> {
     let accepted = match contract {
         Contract::Accepted(accepted) => accepted,
         Contract::Signed(signed) | Contract::Confirmed(signed) => &signed.accepted_contract,
@@ -216,10 +249,51 @@ pub(super) fn contract_funding_spk(contract: &Contract) -> Option<(ContractId, S
     };
     let transactions = &accepted.dlc_transactions;
     let fund_output = transactions.get_fund_output();
+    let outpoint = bitcoin::OutPoint {
+        txid: transactions.fund.compute_txid(),
+        vout: transactions.get_fund_output_index() as u32,
+    };
     Some((
         accepted.get_contract_id(),
         fund_output.script_pubkey.clone(),
+        outpoint,
     ))
+}
+
+/// The broadcast CET of a closed or pre-closed contract with the label it
+/// gets: the contract id and the attested outcome.
+pub(super) fn contract_close_label(contract: &Contract) -> Option<(bitcoin::Txid, String)> {
+    let (cet, attestations, contract_id) = match contract {
+        Contract::PreClosed(preclosed) => (
+            Some(&preclosed.signed_cet),
+            preclosed.attestations.as_ref(),
+            preclosed
+                .signed_contract
+                .accepted_contract
+                .get_contract_id(),
+        ),
+        Contract::Closed(closed) => (
+            closed.signed_cet.as_ref(),
+            closed.attestations.as_ref(),
+            closed.contract_id,
+        ),
+        _ => return None,
+    };
+    let txid = cet?.compute_txid();
+    let outcomes = attestations
+        .map(|attestations| {
+            attestations
+                .iter()
+                .flat_map(|attestation| attestation.outcomes.clone())
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .filter(|outcomes| !outcomes.is_empty());
+    let label = match outcomes {
+        Some(outcomes) => format!("DLC close {}: {}", hex::encode(contract_id), outcomes),
+        None => format!("DLC close {}", hex::encode(contract_id)),
+    };
+    Some((txid, label))
 }
 
 /// What a send spends: a specific amount, or the whole wallet.
@@ -344,13 +418,14 @@ mod tests {
             &include_bytes!("../../../testconfig/contract_binaries/Offered").to_vec(),
         )
         .unwrap();
-        assert!(contract_funding_spk(&offered).is_none());
+        assert!(contract_funding_info(&offered).is_none());
 
         let accepted = deserialize_contract(
             &include_bytes!("../../../testconfig/contract_binaries/Accepted").to_vec(),
         )
         .unwrap();
-        let (accepted_id, accepted_spk) = contract_funding_spk(&accepted).unwrap();
+        let (accepted_id, accepted_spk, accepted_outpoint) =
+            contract_funding_info(&accepted).unwrap();
         assert!(accepted_spk.is_p2wsh());
 
         // The same contract keeps the same funding script through its
@@ -361,9 +436,28 @@ mod tests {
             include_bytes!("../../../testconfig/contract_binaries/PreClosed").to_vec(),
         ] {
             let contract = deserialize_contract(&binary).unwrap();
-            let (contract_id, spk) = contract_funding_spk(&contract).unwrap();
+            let (contract_id, spk, outpoint) = contract_funding_info(&contract).unwrap();
             assert_eq!(contract_id, accepted_id);
             assert_eq!(spk, accepted_spk);
+            assert_eq!(outpoint, accepted_outpoint);
+        }
+    }
+
+    #[test]
+    fn close_labels_carry_the_outcome() {
+        let confirmed = deserialize_contract(
+            &include_bytes!("../../../testconfig/contract_binaries/Confirmed").to_vec(),
+        )
+        .unwrap();
+        assert!(contract_close_label(&confirmed).is_none());
+
+        for binary in [
+            include_bytes!("../../../testconfig/contract_binaries/PreClosed").to_vec(),
+            include_bytes!("../../../testconfig/contract_binaries/Closed").to_vec(),
+        ] {
+            let contract = deserialize_contract(&binary).unwrap();
+            let (_txid, label) = contract_close_label(&contract).unwrap();
+            assert!(label.starts_with("DLC close "));
         }
     }
 }

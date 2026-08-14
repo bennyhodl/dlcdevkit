@@ -291,4 +291,34 @@ async fn enumeration_contract() {
     let balance = bob.ddk.balance().await.unwrap();
     assert_eq!(balance.contract_confirmed, Amount::ZERO);
     assert_eq!(balance.contract_pending, Amount::ZERO);
+
+    // The contract auto-labeled its transactions: the funding tx and
+    // outpoint carry the contract id, the CET carries the outcome, and
+    // the labels survive a JSONL export/import round trip.
+    let labels = bob.ddk.labels().await.unwrap();
+    let funding_txid = contract_utxos[0].outpoint.txid;
+    let cet_txid = contract_utxos[0].spent_by.unwrap();
+    assert!(labels.iter().any(|label| matches!(
+        label,
+        ddk::bip329::Label::Transaction(record)
+            if record.ref_ == funding_txid
+                && record.label.as_deref().unwrap_or_default().starts_with("DLC funding")
+    )));
+    assert!(labels.iter().any(|label| matches!(
+        label,
+        ddk::bip329::Label::Output(record) if record.ref_ == contract_utxos[0].outpoint
+    )));
+    assert!(labels.iter().any(|label| matches!(
+        label,
+        ddk::bip329::Label::Transaction(record)
+            if record.ref_ == cet_txid
+                && record.label.as_deref().unwrap_or_default().contains("rust")
+    )));
+
+    let exported = bob.ddk.export_labels().await.unwrap();
+    bob.ddk.import_labels(&exported).await.unwrap();
+    assert_eq!(
+        bob.ddk.labels().await.unwrap().iter().count(),
+        labels.iter().count()
+    );
 }
