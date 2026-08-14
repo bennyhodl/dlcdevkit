@@ -1082,7 +1082,7 @@ struct KeychainEntry {
     keychainkind: String,
     descriptor: String,
     descriptor_id: Vec<u8>,
-    last_revealed: i32,
+    last_revealed: Option<i32>,
 }
 
 #[cfg(test)]
@@ -1222,6 +1222,19 @@ mod tests {
         // Re-staging the descriptor and network (wallet re-create path) must
         // not violate unique constraints or reset last_revealed.
         db.write(&changeset).await.unwrap();
+
+        // A keychain row written without a revealed index must read back as
+        // "nothing revealed", not index 0.
+        let mut fresh = ChangeSet::default();
+        fresh.change_descriptor = Some(
+            "wpkh([73c5da0a/84'/1'/0']tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M/1/*)"
+                .parse()
+                .unwrap(),
+        );
+        db.write(&fresh).await.unwrap();
+        let read = db.read().await.unwrap();
+        let fresh_did = fresh.change_descriptor.as_ref().unwrap().descriptor_id();
+        assert!(read.indexer.last_revealed.get(&fresh_did).is_none());
 
         let read = db.read().await.unwrap();
         assert_eq!(read.network, Some(Network::Regtest));
