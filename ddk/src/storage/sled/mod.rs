@@ -134,3 +134,37 @@ impl Storage for SledStorage {
 fn sled_to_wallet_error(error: sled::Error) -> WalletError {
     WalletError::StorageError(error.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bitcoin::hashes::Hash;
+    use bitcoin::{OutPoint, Txid};
+
+    #[tokio::test]
+    async fn locked_outpoints_round_trip() {
+        let path = "tests/data/dlc_storagedb/locked_outpoints_round_trip";
+        let logger = Arc::new(Logger::disabled("sled_test".to_string()));
+        {
+            let storage = SledStorage::new(path, logger).expect("Error opening sled DB");
+            let outpoint = OutPoint {
+                txid: Txid::from_byte_array([0xAB; 32]),
+                vout: 1,
+            };
+
+            let mut lock = ChangeSet::default();
+            lock.locked_outpoints.outpoints.insert(outpoint, true);
+            storage.persist_bdk(&lock).await.unwrap();
+            let read = storage.initialize_bdk().await.unwrap();
+            assert_eq!(read.locked_outpoints.outpoints.get(&outpoint), Some(&true));
+
+            // An unlock overwrites the lock.
+            let mut unlock = ChangeSet::default();
+            unlock.locked_outpoints.outpoints.insert(outpoint, false);
+            storage.persist_bdk(&unlock).await.unwrap();
+            let read = storage.initialize_bdk().await.unwrap();
+            assert_eq!(read.locked_outpoints.outpoints.get(&outpoint), Some(&false));
+        }
+        std::fs::remove_dir_all(path).unwrap();
+    }
+}
