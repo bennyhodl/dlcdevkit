@@ -10,6 +10,12 @@ use std::sync::Arc;
 
 type Result<T> = std::result::Result<T, WalletError>;
 
+/// The number of consecutive unused script pubkeys to scan before a full scan
+/// stops. A restored wallet with gaps larger than this does not find all funds.
+const STOP_GAP: usize = 50;
+/// The number of esplora requests a scan makes in parallel.
+const PARALLEL_REQUESTS: usize = 5;
+
 #[tracing::instrument(skip_all)]
 pub async fn sync(
     wallet: &mut PersistedWallet<WalletStorage>,
@@ -36,18 +42,21 @@ pub async fn sync(
     );
     let sync_result = if prev_tip.height() == 0 {
         log_debug!(logger, "Performing a full chain scan.");
-        let spks = wallet
-            .all_unbounded_spk_iters()
-            .get(&KeychainKind::External)
-            .unwrap()
-            .to_owned();
+        let mut spk_iters = wallet.all_unbounded_spk_iters();
+        let external_spks = spk_iters
+            .remove(&KeychainKind::External)
+            .expect("wallet has an external keychain");
+        let internal_spks = spk_iters
+            .remove(&KeychainKind::Internal)
+            .expect("wallet has an internal keychain");
         let chain = FullScanRequest::builder()
-            .spks_for_keychain(KeychainKind::External, spks.clone())
+            .spks_for_keychain(KeychainKind::External, external_spks)
+            .spks_for_keychain(KeychainKind::Internal, internal_spks)
             .chain_tip(prev_tip)
             .build();
         let sync = blockchain
             .async_client
-            .full_scan(chain, 10, 1)
+            .full_scan(chain, STOP_GAP, PARALLEL_REQUESTS)
             .await
             .map_err(|e| WalletError::Esplora(e.to_string()))?;
         Update {
