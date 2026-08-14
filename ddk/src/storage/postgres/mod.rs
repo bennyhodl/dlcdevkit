@@ -707,8 +707,11 @@ async fn insert_descriptor(
         Internal => "Internal",
     };
 
+    // A wallet's descriptors never change once created; re-staging one must
+    // not poison the persist transaction with a unique violation.
     sqlx::query(
-        "INSERT INTO keychain (wallet_name, keychainkind, descriptor, descriptor_id) VALUES ($1, $2, $3, $4)",
+        "INSERT INTO keychain (wallet_name, keychainkind, descriptor, descriptor_id) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (wallet_name, keychainkind) DO NOTHING",
     )
         .bind(wallet_name)
         .bind(keychain)
@@ -727,11 +730,14 @@ async fn insert_network(
     wallet_name: &str,
     network: Network,
 ) -> Result<(), SqlxError> {
-    sqlx::query("INSERT INTO network (wallet_name, name) VALUES ($1, $2)")
-        .bind(wallet_name)
-        .bind(network.to_string())
-        .execute(&mut **tx)
-        .await?;
+    sqlx::query(
+        "INSERT INTO network (wallet_name, name) VALUES ($1, $2)
+         ON CONFLICT (wallet_name) DO NOTHING",
+    )
+    .bind(wallet_name)
+    .bind(network.to_string())
+    .execute(&mut **tx)
+    .await?;
 
     Ok(())
 }
@@ -1196,6 +1202,31 @@ mod tests {
         db.write(&advance).await.unwrap();
         let read = db.read().await.unwrap();
         assert_eq!(read.indexer.last_revealed.get(&did), Some(&9));
+    }
+
+    #[tokio::test]
+    async fn descriptor_and_network_writes_are_idempotent() {
+        let (_server, db) = seed_db().await;
+
+        let descriptor: ExtendedDescriptor = "wpkh([73c5da0a/84'/1'/0']tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M/0/*)"
+            .parse()
+            .unwrap();
+        let did = descriptor.descriptor_id();
+
+        let mut changeset = ChangeSet::default();
+        changeset.network = Some(Network::Regtest);
+        changeset.descriptor = Some(descriptor.clone());
+        changeset.indexer.last_revealed.insert(did, 4);
+        db.write(&changeset).await.unwrap();
+
+        // Re-staging the descriptor and network (wallet re-create path) must
+        // not violate unique constraints or reset last_revealed.
+        db.write(&changeset).await.unwrap();
+
+        let read = db.read().await.unwrap();
+        assert_eq!(read.network, Some(Network::Regtest));
+        assert_eq!(read.descriptor, Some(descriptor));
+        assert_eq!(read.indexer.last_revealed.get(&did), Some(&4));
     }
 
     #[tokio::test]
