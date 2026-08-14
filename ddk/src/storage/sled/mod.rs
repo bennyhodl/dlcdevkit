@@ -25,6 +25,7 @@ const SIGNER_TREE: u8 = 6;
 const WALLET_TREE: u8 = 7;
 const MARKETPLACE_TREE: u8 = 8;
 const CHANGESET_KEY: &str = "changeset";
+const CONTRACT_TRACKER_KEY: &str = "contract_tracker";
 
 /// Implementation of Storage interface using the sled DB backend.
 #[derive(Debug, Clone)]
@@ -129,6 +130,45 @@ impl Storage for SledStorage {
         };
         Ok(changeset)
     }
+
+    async fn initialize_contract_tracker(
+        &self,
+    ) -> Result<crate::wallet::contract_tracker::ChangeSet, WalletError> {
+        let changeset = match self
+            .wallet_tree()
+            .map_err(sled_to_wallet_error)?
+            .get(CONTRACT_TRACKER_KEY)
+            .map_err(sled_to_wallet_error)?
+        {
+            Some(changeset) => serde_json::from_slice(&changeset)?,
+            None => crate::wallet::contract_tracker::ChangeSet::default(),
+        };
+        Ok(changeset)
+    }
+
+    async fn persist_contract_tracker(
+        &self,
+        changeset: &crate::wallet::contract_tracker::ChangeSet,
+    ) -> Result<(), WalletError> {
+        let wallet_tree = self.wallet_tree().map_err(sled_to_wallet_error)?;
+        let new_changeset = match wallet_tree
+            .get(CONTRACT_TRACKER_KEY)
+            .map_err(sled_to_wallet_error)?
+        {
+            Some(stored) => {
+                let mut stored =
+                    serde_json::from_slice::<crate::wallet::contract_tracker::ChangeSet>(&stored)?;
+                stored.merge(changeset.clone());
+                stored
+            }
+            None => changeset.to_owned(),
+        };
+
+        wallet_tree
+            .insert(CONTRACT_TRACKER_KEY, serde_json::to_vec(&new_changeset)?)
+            .map_err(sled_to_wallet_error)?;
+        Ok(())
+    }
 }
 
 fn sled_to_wallet_error(error: sled::Error) -> WalletError {
@@ -140,6 +180,38 @@ mod tests {
     use super::*;
     use bitcoin::hashes::Hash;
     use bitcoin::{OutPoint, Txid};
+
+    #[tokio::test]
+    async fn contract_tracker_round_trips() {
+        use crate::wallet::contract_tracker;
+
+        let path = "tests/data/dlc_storagedb/contract_tracker_round_trips";
+        let logger = Arc::new(Logger::disabled("sled_test".to_string()));
+        {
+            let storage = SledStorage::new(path, logger).expect("Error opening sled DB");
+
+            let spk =
+                bitcoin::ScriptBuf::new_p2wsh(&bitcoin::WScriptHash::from_byte_array([0xCD; 32]));
+            let mut changeset = contract_tracker::ChangeSet::default();
+            changeset.spks.insert([0x5A; 32], spk.clone());
+            changeset
+                .tx_graph
+                .last_seen
+                .insert(Txid::from_byte_array([0xAB; 32]), 100);
+            storage.persist_contract_tracker(&changeset).await.unwrap();
+            let read = storage.initialize_contract_tracker().await.unwrap();
+            assert_eq!(read, changeset);
+
+            // A second persist merges instead of overwriting.
+            let mut more = contract_tracker::ChangeSet::default();
+            more.spks.insert([0x5B; 32], spk);
+            storage.persist_contract_tracker(&more).await.unwrap();
+            let read = storage.initialize_contract_tracker().await.unwrap();
+            assert_eq!(read.spks.len(), 2);
+            assert_eq!(read.tx_graph.last_seen.len(), 1);
+        }
+        std::fs::remove_dir_all(path).unwrap();
+    }
 
     #[tokio::test]
     async fn locked_outpoints_round_trip() {

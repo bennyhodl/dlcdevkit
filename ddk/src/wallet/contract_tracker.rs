@@ -39,10 +39,31 @@ pub struct ContractUtxo {
 /// trait next to the wallet changeset.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ChangeSet {
-    /// Funding script registrations by contract
+    /// Funding script registrations by contract. Serialized as a list of
+    /// pairs: a JSON map cannot key on a byte array.
+    #[serde(with = "spk_map_serde")]
     pub spks: BTreeMap<ContractId, ScriptBuf>,
     /// The transaction graph changes
     pub tx_graph: bdk_chain::tx_graph::ChangeSet<ConfirmationBlockTime>,
+}
+
+mod spk_map_serde {
+    use super::*;
+    use serde::{Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(
+        map: &BTreeMap<ContractId, ScriptBuf>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serde::Serialize::serialize(&map.iter().collect::<Vec<_>>(), serializer)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<BTreeMap<ContractId, ScriptBuf>, D::Error> {
+        let entries: Vec<(ContractId, ScriptBuf)> = serde::Deserialize::deserialize(deserializer)?;
+        Ok(entries.into_iter().collect())
+    }
 }
 
 impl Merge for ChangeSet {

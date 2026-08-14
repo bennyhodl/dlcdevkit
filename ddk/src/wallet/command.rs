@@ -123,6 +123,9 @@ pub async fn sync(
         .persist_async(storage)
         .await
         .map_err(|e| WalletError::WalletPersistanceError(e.to_string()))?;
+    if let Some(changeset) = tracker.take_staged() {
+        storage.0.persist_contract_tracker(&changeset).await?;
+    }
     Ok(())
 }
 
