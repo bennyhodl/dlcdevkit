@@ -162,6 +162,12 @@ pub enum WalletCommand {
         /// Channel for receiving the selected UTXOs
         responder: oneshot::Sender<Result<Vec<ddk_manager::Utxo>>>,
     },
+
+    /// Unlock previously locked outpoints and persist the change
+    UnlockOutpoints(
+        Vec<bitcoin::OutPoint>,
+        oneshot::Sender<Result<()>>,
+    ),
 }
 
 /// The main wallet implementation that provides Bitcoin functionality for DDK.
@@ -533,6 +539,26 @@ impl DlcDevKitWallet {
                             );
                         });
                     }
+                    WalletCommand::UnlockOutpoints(outpoints, responder) => {
+                        for outpoint in outpoints {
+                            wallet.unlock_outpoint(outpoint);
+                        }
+                        let result = wallet
+                            .persist_async(&mut storage)
+                            .await
+                            .map(|_| ())
+                            .map_err(|e| WalletError::WalletPersistanceError(e.to_string()));
+                        if let Err(e) = &result {
+                            log_error!(
+                                logger_clone,
+                                "Could not persist unlocked outpoints. error={:?}",
+                                e
+                            );
+                        }
+                        // The responder is already dropped when the manager
+                        // fires this command without waiting.
+                        let _ = responder.send(result);
+                    }
                 }
             }
         });
@@ -654,6 +680,17 @@ impl DlcDevKitWallet {
     pub async fn list_utxos(&self) -> Result<Vec<LocalOutput>> {
         let (tx, rx) = oneshot::channel();
         self.sender.send(WalletCommand::ListUtxos(tx)).await?;
+        rx.await.map_err(WalletError::Receiver)?
+    }
+
+    /// Unlocks previously locked outpoints and waits until the change is
+    /// persisted.
+    #[tracing::instrument(skip(self))]
+    pub async fn unlock_outpoints(&self, outpoints: Vec<bitcoin::OutPoint>) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(WalletCommand::UnlockOutpoints(outpoints, tx))
+            .await?;
         rx.await.map_err(WalletError::Receiver)?
     }
 
@@ -819,13 +856,18 @@ impl ddk_manager::Wallet for DlcDevKitWallet {
         self.sign_psbt_input(psbt, input_index).await
     }
 
-    /// Unreserves UTXOs that were previously reserved for a transaction.
-    /// Currently a no-op as UTXO reservation is not implemented.
+    /// Unreserves UTXOs that were previously locked by coin selection.
+    /// The manager calls this when an offer fails or a contract is
+    /// rejected. The unlock command is fired without waiting because this
+    /// trait method is synchronous; the actor persists the change.
     fn unreserve_utxos(
         &self,
-        _outpoints: &[bitcoin::OutPoint],
+        outpoints: &[bitcoin::OutPoint],
     ) -> std::result::Result<(), ManagerError> {
-        Ok(())
+        let (tx, _rx) = oneshot::channel();
+        self.sender
+            .try_send(WalletCommand::UnlockOutpoints(outpoints.to_vec(), tx))
+            .map_err(|e| wallet_err_to_manager_err(WalletError::SendMessage(e.to_string())))
     }
 
     /// Imports an address into the wallet for monitoring.
@@ -1147,6 +1189,41 @@ mod tests {
 
         // Every coin is locked now: a third selection has nothing to spend.
         assert!(wallet.get_utxos_for_amount(amount, 1, true).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn unlocked_outpoints_are_selectable_again() {
+        use ddk_manager::Wallet;
+
+        let wallet = create_wallet().await;
+        let address = wallet.new_external_address().await.unwrap().address;
+        fund_address(&address);
+        wallet.sync().await.unwrap();
+
+        let amount = Amount::from_btc(0.5).unwrap();
+        let selected = wallet.get_utxos_for_amount(amount, 1, true).await.unwrap();
+        assert!(wallet.get_utxos_for_amount(amount, 1, true).await.is_err());
+
+        let outpoints = selected
+            .iter()
+            .map(|utxo| utxo.outpoint)
+            .collect::<Vec<_>>();
+        wallet.unlock_outpoints(outpoints.clone()).await.unwrap();
+
+        let reselected = wallet.get_utxos_for_amount(amount, 1, true).await.unwrap();
+        assert_eq!(
+            reselected
+                .iter()
+                .map(|utxo| utxo.outpoint)
+                .collect::<Vec<_>>(),
+            outpoints
+        );
+
+        // The synchronous manager path unlocks as well. It fires the
+        // command without waiting, so the effect lands with the next
+        // queued command.
+        wallet.unreserve_utxos(&outpoints).unwrap();
+        assert!(wallet.get_utxos_for_amount(amount, 1, true).await.is_ok());
     }
 
     #[tokio::test]
