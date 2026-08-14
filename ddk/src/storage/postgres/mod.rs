@@ -13,7 +13,7 @@ use bdk_chain::{
 use bdk_wallet::bitcoin::{
     self,
     consensus::{self, Decodable},
-    hashes::Hash,
+    hashes::{sha256, Hash},
     Amount, BlockHash, Network, OutPoint, ScriptBuf, TxOut, Txid,
 };
 use bdk_wallet::chain as bdk_chain;
@@ -33,6 +33,7 @@ use serde_json::json;
 use sqlx::pool::PoolOptions;
 use sqlx::postgres::PgRow;
 use sqlx::{FromRow, Pool, Postgres, Row, Transaction};
+use std::collections::BTreeMap;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -226,6 +227,7 @@ impl PostgresStore {
 
         changeset.tx_graph = tx_graph_changeset_from_postgres(tx, wallet_name).await?;
         changeset.local_chain = local_chain_changeset_from_postgres(tx, wallet_name).await?;
+        changeset.indexer.spk_cache = spk_cache_from_postgres(tx, wallet_name).await?;
         Ok(())
     }
 
@@ -276,6 +278,10 @@ impl PostgresStore {
                     .map_err(StorageError::Sqlx)?;
             }
         }
+
+        spk_cache_persist_to_postgres(&mut tx, wallet_name, &changeset.indexer.spk_cache)
+            .await
+            .map_err(StorageError::Sqlx)?;
 
         local_chain_changeset_persist_to_postgres(&mut tx, wallet_name, &changeset.local_chain)
             .await
@@ -800,16 +806,20 @@ async fn tx_graph_changeset_from_postgres(
     let mut changeset = tx_graph::ChangeSet::default();
 
     // Fetch transactions
-    let rows = sqlx::query("SELECT txid, whole_tx, last_seen FROM tx WHERE wallet_name = $1")
-        .bind(wallet_name)
-        .fetch_all(&mut **db_tx)
-        .await?;
+    let rows = sqlx::query(
+        "SELECT txid, whole_tx, last_seen, first_seen, last_evicted FROM tx WHERE wallet_name = $1",
+    )
+    .bind(wallet_name)
+    .fetch_all(&mut **db_tx)
+    .await?;
 
     for row in rows {
         let txid: String = row.get("txid");
         let txid = Txid::from_str(&txid)?;
         let whole_tx: Option<Vec<u8>> = row.get("whole_tx");
         let last_seen: Option<i64> = row.get("last_seen");
+        let first_seen: Option<i64> = row.get("first_seen");
+        let last_evicted: Option<i64> = row.get("last_evicted");
 
         if let Some(tx_bytes) = whole_tx {
             if let Ok(tx) = bitcoin::Transaction::consensus_decode(&mut tx_bytes.as_slice()) {
@@ -818,6 +828,12 @@ async fn tx_graph_changeset_from_postgres(
         }
         if let Some(last_seen) = last_seen {
             changeset.last_seen.insert(txid, last_seen as u64);
+        }
+        if let Some(first_seen) = first_seen {
+            changeset.first_seen.insert(txid, first_seen as u64);
+        }
+        if let Some(last_evicted) = last_evicted {
+            changeset.last_evicted.insert(txid, last_evicted as u64);
         }
     }
 
@@ -893,6 +909,34 @@ async fn tx_graph_changeset_persist_to_postgres(
             .await?;
     }
 
+    // first_seen only ever decreases and last_evicted only ever increases,
+    // matching the tx_graph merge rules. LEAST/GREATEST ignore NULL.
+    for (&txid, &first_seen) in &changeset.first_seen {
+        sqlx::query(
+            "INSERT INTO tx (wallet_name, txid, first_seen) VALUES ($1, $2, $3)
+             ON CONFLICT (wallet_name, txid)
+             DO UPDATE SET first_seen = LEAST(tx.first_seen, EXCLUDED.first_seen)",
+        )
+        .bind(wallet_name)
+        .bind(txid.to_string())
+        .bind(first_seen as i64)
+        .execute(&mut **db_tx)
+        .await?;
+    }
+
+    for (&txid, &last_evicted) in &changeset.last_evicted {
+        sqlx::query(
+            "INSERT INTO tx (wallet_name, txid, last_evicted) VALUES ($1, $2, $3)
+             ON CONFLICT (wallet_name, txid)
+             DO UPDATE SET last_evicted = GREATEST(tx.last_evicted, EXCLUDED.last_evicted)",
+        )
+        .bind(wallet_name)
+        .bind(txid.to_string())
+        .bind(last_evicted as i64)
+        .execute(&mut **db_tx)
+        .await?;
+    }
+
     for (op, txo) in &changeset.txouts {
         sqlx::query(
             "INSERT INTO txout (wallet_name, txid, vout, value, script) VALUES ($1, $2, $3, $4, $5)
@@ -920,6 +964,62 @@ async fn tx_graph_changeset_persist_to_postgres(
         .bind(txid.to_string())
         .execute(&mut **db_tx)
         .await?;
+    }
+
+    Ok(())
+}
+
+/// Select the cached script pubkeys of the keychain indexer.
+#[tracing::instrument(skip(db_tx))]
+async fn spk_cache_from_postgres(
+    db_tx: &mut Transaction<'_, Postgres>,
+    wallet_name: &str,
+) -> Result<BTreeMap<DescriptorId, BTreeMap<u32, ScriptBuf>>, SqlxError> {
+    let mut cache: BTreeMap<DescriptorId, BTreeMap<u32, ScriptBuf>> = BTreeMap::new();
+
+    let rows =
+        sqlx::query("SELECT descriptor_id, spk_index, script FROM spk_cache WHERE wallet_name = $1")
+            .bind(wallet_name)
+            .fetch_all(&mut **db_tx)
+            .await?;
+
+    for row in rows {
+        let descriptor_id: Vec<u8> = row.get("descriptor_id");
+        let spk_index: i32 = row.get("spk_index");
+        let script: Vec<u8> = row.get("script");
+        let descriptor_id = <[u8; 32]>::try_from(descriptor_id.as_slice())
+            .map_err(|_| SqlxError::Custom("descriptor_id is not 32 bytes".into()))?;
+        cache
+            .entry(DescriptorId(sha256::Hash::from_byte_array(descriptor_id)))
+            .or_default()
+            .insert(spk_index as u32, ScriptBuf::from(script));
+    }
+
+    Ok(cache)
+}
+
+/// Insert cached script pubkeys of the keychain indexer.
+#[tracing::instrument(skip_all)]
+async fn spk_cache_persist_to_postgres(
+    db_tx: &mut Transaction<'_, Postgres>,
+    wallet_name: &str,
+    spk_cache: &BTreeMap<DescriptorId, BTreeMap<u32, ScriptBuf>>,
+) -> Result<(), SqlxError> {
+    for (descriptor_id, spks) in spk_cache {
+        let descriptor_id = descriptor_id.to_byte_array();
+        for (spk_index, script) in spks {
+            sqlx::query(
+                "INSERT INTO spk_cache (wallet_name, descriptor_id, spk_index, script)
+                 VALUES ($1, $2, $3, $4)
+                 ON CONFLICT (wallet_name, descriptor_id, spk_index) DO NOTHING",
+            )
+            .bind(wallet_name)
+            .bind(descriptor_id.as_slice())
+            .bind(*spk_index as i32)
+            .bind(script.as_bytes())
+            .execute(&mut **db_tx)
+            .await?;
+        }
     }
 
     Ok(())
@@ -1080,6 +1180,15 @@ mod tests {
         (server, store)
     }
 
+    fn dummy_tx() -> bitcoin::Transaction {
+        bitcoin::Transaction {
+            version: bitcoin::transaction::Version::TWO,
+            lock_time: bitcoin::absolute::LockTime::ZERO,
+            input: vec![],
+            output: vec![],
+        }
+    }
+
     #[tokio::test]
     async fn postgres() {
         let (_server, db) = seed_db().await;
@@ -1143,12 +1252,7 @@ mod tests {
         assert_eq!(read.local_chain.blocks.len(), 1);
 
         // An anchored tx must not block removing the block row.
-        let tx = bitcoin::Transaction {
-            version: bitcoin::transaction::Version::TWO,
-            lock_time: bitcoin::absolute::LockTime::ZERO,
-            input: vec![],
-            output: vec![],
-        };
+        let tx = dummy_tx();
         let mut anchor = ChangeSet::default();
         anchor.tx_graph.txs.insert(Arc::new(tx.clone()));
         anchor.tx_graph.anchors.insert((
@@ -1169,6 +1273,54 @@ mod tests {
 
         let read = db.read().await.unwrap();
         assert!(read.local_chain.blocks.get(&100).is_none());
+    }
+
+    #[tokio::test]
+    async fn tx_timestamps_and_spk_cache_roundtrip() {
+        let (_server, db) = seed_db().await;
+
+        let tx = dummy_tx();
+        let txid = tx.compute_txid();
+        let did = DescriptorId(sha256::Hash::from_byte_array([0x11; 32]));
+        let script = ScriptBuf::from(vec![0x00, 0x14]);
+
+        let mut changeset = ChangeSet::default();
+        changeset.network = Some(Network::Regtest);
+        changeset.tx_graph.txs.insert(Arc::new(tx));
+        changeset.tx_graph.first_seen.insert(txid, 100);
+        changeset.tx_graph.last_evicted.insert(txid, 200);
+        changeset
+            .indexer
+            .spk_cache
+            .entry(did)
+            .or_default()
+            .insert(5, script.clone());
+        db.write(&changeset).await.unwrap();
+
+        let read = db.read().await.unwrap();
+        assert_eq!(read.tx_graph.first_seen.get(&txid), Some(&100));
+        assert_eq!(read.tx_graph.last_evicted.get(&txid), Some(&200));
+        assert_eq!(
+            read.indexer.spk_cache.get(&did).and_then(|m| m.get(&5)),
+            Some(&script)
+        );
+
+        // Merge rules: first_seen only decreases, last_evicted only increases.
+        let mut ignored = ChangeSet::default();
+        ignored.tx_graph.first_seen.insert(txid, 150);
+        ignored.tx_graph.last_evicted.insert(txid, 150);
+        db.write(&ignored).await.unwrap();
+        let read = db.read().await.unwrap();
+        assert_eq!(read.tx_graph.first_seen.get(&txid), Some(&100));
+        assert_eq!(read.tx_graph.last_evicted.get(&txid), Some(&200));
+
+        let mut taken = ChangeSet::default();
+        taken.tx_graph.first_seen.insert(txid, 50);
+        taken.tx_graph.last_evicted.insert(txid, 250);
+        db.write(&taken).await.unwrap();
+        let read = db.read().await.unwrap();
+        assert_eq!(read.tx_graph.first_seen.get(&txid), Some(&50));
+        assert_eq!(read.tx_graph.last_evicted.get(&txid), Some(&250));
     }
 
     #[tokio::test]
