@@ -49,12 +49,10 @@ use bitcoin::Psbt;
 use bitcoin::{secp256k1::SecretKey, Amount, FeeRate, Transaction};
 use ddk_manager::{error::Error as ManagerError, SimpleSigner};
 use lightning::chain::chaininterface::{ConfirmationTarget, FeeEstimator};
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::AtomicU32;
-use std::sync::{atomic::Ordering, Arc};
+use std::sync::Arc;
 use tokio::sync::{
     mpsc::{channel, Sender},
     oneshot,
@@ -220,6 +218,8 @@ pub struct DlcDevKitWallet {
     /// Broadcast sender for wallet events; new subscribers come from
     /// [`DlcDevKitWallet::subscribe_events`]
     events: tokio::sync::broadcast::Sender<WalletEvent>,
+    /// Esplora client, the source of the cached live fee estimates
+    blockchain: Arc<EsploraClient>,
     /// Bitcoin network (mainnet, testnet, regtest)
     network: Network,
     /// Extended private key for the wallet
@@ -235,8 +235,6 @@ pub struct DlcDevKitWallet {
     /// Logger
     logger: Arc<Logger>,
 }
-
-const MIN_FEERATE: u32 = 253;
 
 impl DlcDevKitWallet {
     /// Creates a new DlcDevKitWallet instance.
@@ -306,6 +304,7 @@ impl DlcDevKitWallet {
 
         let (sender, mut receiver) = channel(100);
         let (events, _) = tokio::sync::broadcast::channel(256);
+        let blockchain_handle = blockchain.clone();
 
         let mut tracker = contract_tracker::ContractUtxoTracker::from_changeset(
             storage.0.initialize_contract_tracker().await?,
@@ -669,6 +668,7 @@ impl DlcDevKitWallet {
         Ok(DlcDevKitWallet {
             sender,
             events,
+            blockchain: blockchain_handle,
             network,
             xprv,
             secp,
@@ -867,14 +867,12 @@ impl DlcDevKitWallet {
 /// Implementation of Lightning's FeeEstimator trait for the wallet.
 /// Provides fee estimation for DLC operations based on confirmation targets.
 impl FeeEstimator for DlcDevKitWallet {
-    /// Returns the estimated fee rate in satoshis per 1000 weight units.
-    /// Used by the DLC manager to estimate fees for funding transactions.
+    /// Returns the estimated fee rate in satoshis per 1000 weight units,
+    /// from the fee cache the esplora client refreshes on each sync.
     #[tracing::instrument(skip(self))]
     fn get_est_sat_per_1000_weight(&self, confirmation_target: ConfirmationTarget) -> u32 {
-        let fees = fee_estimator();
-        fees.get(&confirmation_target)
-            .unwrap()
-            .load(Ordering::Acquire)
+        self.blockchain
+            .get_est_sat_per_1000_weight(confirmation_target)
     }
 }
 
@@ -1045,44 +1043,6 @@ impl ddk_manager::Wallet for DlcDevKitWallet {
             .map_err(|e| wallet_err_to_manager_err(WalletError::Receiver(e)))?
             .map_err(wallet_err_to_manager_err)
     }
-}
-
-/// Creates a fee estimator with predefined fee rates for different confirmation targets.
-///
-/// This function sets up fee estimation for different urgency levels:
-/// - High Priority: For immediate confirmation
-/// - Normal: For confirmation within a few blocks  
-/// - Background: For non-urgent transactions
-///
-/// Returns a HashMap mapping confirmation targets to atomic fee rates.
-fn fee_estimator() -> HashMap<ConfirmationTarget, AtomicU32> {
-    let mut fees: HashMap<ConfirmationTarget, AtomicU32> = HashMap::new();
-    fees.insert(ConfirmationTarget::UrgentOnChainSweep, AtomicU32::new(5000));
-    fees.insert(
-        ConfirmationTarget::MinAllowedAnchorChannelRemoteFee,
-        AtomicU32::new(25 * 250),
-    );
-    fees.insert(
-        ConfirmationTarget::MinAllowedAnchorChannelRemoteFee,
-        AtomicU32::new(MIN_FEERATE),
-    );
-    fees.insert(
-        ConfirmationTarget::MinAllowedNonAnchorChannelRemoteFee,
-        AtomicU32::new(MIN_FEERATE),
-    );
-    fees.insert(
-        ConfirmationTarget::AnchorChannelFee,
-        AtomicU32::new(MIN_FEERATE),
-    );
-    fees.insert(
-        ConfirmationTarget::NonAnchorChannelFee,
-        AtomicU32::new(2000),
-    );
-    fees.insert(
-        ConfirmationTarget::ChannelCloseMinimum,
-        AtomicU32::new(MIN_FEERATE),
-    );
-    fees
 }
 
 impl Debug for DlcDevKitWallet {

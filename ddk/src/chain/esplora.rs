@@ -38,6 +38,7 @@ fn esplora_timeout_secs() -> u64 {
 pub struct EsploraClient {
     pub async_client: AsyncClient,
     network: Network,
+    fees: super::FeeRateCache,
     logger: Arc<Logger>,
 }
 
@@ -52,8 +53,23 @@ impl EsploraClient {
         Ok(EsploraClient {
             async_client,
             network,
+            fees: super::FeeRateCache::new(),
             logger,
         })
+    }
+
+    /// Fetches the fee estimates from esplora into the fee rate cache.
+    /// A failed fetch keeps the cached rates and logs a warning: fee
+    /// estimation must not fail a sync.
+    pub async fn refresh_fee_estimates(&self) {
+        match self.async_client.get_fee_estimates().await {
+            Ok(estimates) => self.fees.update(&estimates),
+            Err(e) => log_warn!(
+                self.logger,
+                "Could not fetch fee estimates. error={}",
+                e.to_string()
+            ),
+        }
     }
 }
 
@@ -193,7 +209,7 @@ impl ddk_manager::Blockchain for EsploraClient {
 }
 
 impl FeeEstimator for EsploraClient {
-    fn get_est_sat_per_1000_weight(&self, _confirmation_target: ConfirmationTarget) -> u32 {
-        1
+    fn get_est_sat_per_1000_weight(&self, confirmation_target: ConfirmationTarget) -> u32 {
+        self.fees.get(confirmation_target)
     }
 }
