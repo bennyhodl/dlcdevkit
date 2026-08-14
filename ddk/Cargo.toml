@@ -53,7 +53,7 @@ kormir = { workspace = true, optional = true }
 
 bitcoin = { workspace = true, features = ["std", "rand", "serde"] }
 bdk_esplora = { version = "0.22.2", default-features = false, features = ["std", "async-https", "tokio"], optional = true }
-bdk_wallet = "3.0.0"
+bdk_wallet = "3.1.0"
 bdk_chain = "0.23.3"
 lightning = { workspace = true, features = ["std", "grind_signatures"] }
 serde = { workspace = true, features = ["std", "derive"] }
