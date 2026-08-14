@@ -23,6 +23,7 @@
 
 pub mod address;
 mod command;
+pub mod contract_tracker;
 
 use crate::contract::ContractKeyProvider;
 use crate::error::{wallet_err_to_manager_err, WalletError};
@@ -181,10 +182,7 @@ pub enum WalletCommand {
     },
 
     /// Unlock previously locked outpoints and persist the change
-    UnlockOutpoints(
-        Vec<bitcoin::OutPoint>,
-        oneshot::Sender<Result<()>>,
-    ),
+    UnlockOutpoints(Vec<bitcoin::OutPoint>, oneshot::Sender<Result<()>>),
 
     /// List the currently locked outpoints
     ListLockedOutpoints(oneshot::Sender<Vec<bitcoin::OutPoint>>),
