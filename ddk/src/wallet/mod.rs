@@ -929,7 +929,7 @@ mod tests {
 
     use super::DlcDevKitWallet;
 
-    async fn create_wallet() -> DlcDevKitWallet {
+    async fn create_wallet_from_seed(seed: &[u8; 64]) -> DlcDevKitWallet {
         let esplora = ddk_testenv::env().esplora_host().to_string();
         let storage = Arc::new(MemoryStorage::new());
         let logger = Arc::new(Logger::console(
@@ -938,12 +938,8 @@ mod tests {
         ));
         let esplora =
             Arc::new(EsploraClient::new(&esplora, Network::Regtest, logger.clone()).unwrap());
-        let mut entropy = [0u8; 64];
-        entropy
-            .try_fill(&mut bitcoin::key::rand::thread_rng())
-            .unwrap();
         DlcDevKitWallet::new(
-            &entropy,
+            seed,
             esplora,
             Network::Regtest,
             storage.clone(),
@@ -952,6 +948,14 @@ mod tests {
         )
         .await
         .unwrap()
+    }
+
+    async fn create_wallet() -> DlcDevKitWallet {
+        let mut entropy = [0u8; 64];
+        entropy
+            .try_fill(&mut bitcoin::key::rand::thread_rng())
+            .unwrap();
+        create_wallet_from_seed(&entropy).await
     }
 
     fn generate_blocks(num: u64) {
@@ -1008,6 +1012,43 @@ mod tests {
         wallet.sync().await.unwrap();
         let balance = wallet.get_balance().await.unwrap();
         assert!(balance.confirmed == Amount::ZERO)
+    }
+
+    #[tokio::test]
+    async fn restore_from_seed_finds_change_outputs() {
+        let mut seed = [0u8; 64];
+        seed.try_fill(&mut bitcoin::key::rand::thread_rng())
+            .unwrap();
+
+        let original = create_wallet_from_seed(&seed).await;
+        let addr = original.new_external_address().await.unwrap().address;
+        fund_address(&addr);
+        original.sync().await.unwrap();
+
+        // Spend to a foreign address so the only remaining funds sit on an
+        // internal (change) output.
+        let dest = Address::from_str("bcrt1qt0yrvs7qx8guvpqsx8u9mypz6t4zr3pxthsjkm")
+            .unwrap()
+            .assume_checked();
+        original
+            .send_to_address(
+                dest,
+                Amount::from_sat(10_000_000),
+                FeeRate::from_sat_per_vb(1).unwrap(),
+            )
+            .await
+            .unwrap();
+        generate_blocks(1);
+        original.sync().await.unwrap();
+        let original_balance = original.get_balance().await.unwrap();
+        assert!(original_balance.confirmed > Amount::ZERO);
+
+        // Restore from the same seed into empty storage. The full scan must
+        // discover the used change address on the internal keychain.
+        let restored = create_wallet_from_seed(&seed).await;
+        restored.sync().await.unwrap();
+        let restored_balance = restored.get_balance().await.unwrap();
+        assert_eq!(restored_balance.confirmed, original_balance.confirmed);
     }
 
     #[tokio::test]
