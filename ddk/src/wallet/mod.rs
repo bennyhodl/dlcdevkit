@@ -168,6 +168,9 @@ pub enum WalletCommand {
         Vec<bitcoin::OutPoint>,
         oneshot::Sender<Result<()>>,
     ),
+
+    /// List the currently locked outpoints
+    ListLockedOutpoints(oneshot::Sender<Vec<bitcoin::OutPoint>>),
 }
 
 /// The main wallet implementation that provides Bitcoin functionality for DDK.
@@ -503,7 +506,32 @@ impl DlcDevKitWallet {
                         // input-by-input finds later inputs already
                         // finalized, so the signing work is done one time.
                         let result = match wallet.sign(&mut psbt, sign_opts) {
-                            Ok(_) => Ok(psbt),
+                            Ok(_) => {
+                                // A signed funding transaction can stay
+                                // unbroadcast while the counterparty
+                                // finishes the protocol. Lock its wallet
+                                // inputs so a concurrent selection cannot
+                                // double-spend them; the locks release when
+                                // the spend confirms.
+                                let wallet_inputs = psbt
+                                    .unsigned_tx
+                                    .input
+                                    .iter()
+                                    .map(|input| input.previous_output)
+                                    .filter(|outpoint| wallet.get_utxo(*outpoint).is_some())
+                                    .collect::<Vec<_>>();
+                                for outpoint in wallet_inputs {
+                                    wallet.lock_outpoint(outpoint);
+                                }
+                                if let Err(e) = wallet.persist_async(&mut storage).await {
+                                    log_error!(
+                                        logger_clone,
+                                        "Could not persist locks for signed funding inputs. error={:?}",
+                                        e
+                                    );
+                                }
+                                Ok(psbt)
+                            }
                             Err(e) => {
                                 log_error!(logger_clone, "Could not sign PSBT. error={:?}", e);
                                 Err(ManagerError::WalletError(WalletError::Signing(e).into()))
@@ -558,6 +586,16 @@ impl DlcDevKitWallet {
                         // The responder is already dropped when the manager
                         // fires this command without waiting.
                         let _ = responder.send(result);
+                    }
+                    WalletCommand::ListLockedOutpoints(responder) => {
+                        let outpoints = wallet.list_locked_outpoints().collect();
+                        let _ = responder.send(outpoints).map_err(|e| {
+                            log_error!(
+                                logger_clone,
+                                "Error sending list locked outpoints command. error={:?}",
+                                e
+                            );
+                        });
                     }
                 }
             }
@@ -692,6 +730,16 @@ impl DlcDevKitWallet {
             .send(WalletCommand::UnlockOutpoints(outpoints, tx))
             .await?;
         rx.await.map_err(WalletError::Receiver)?
+    }
+
+    /// Lists the outpoints that are locked against coin selection.
+    #[tracing::instrument(skip(self))]
+    pub async fn locked_outpoints(&self) -> Result<Vec<bitcoin::OutPoint>> {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(WalletCommand::ListLockedOutpoints(tx))
+            .await?;
+        rx.await.map_err(WalletError::Receiver)
     }
 
     /// Signs a specific input in a PSBT for DLC operations.
@@ -1224,6 +1272,65 @@ mod tests {
         // queued command.
         wallet.unreserve_utxos(&outpoints).unwrap();
         assert!(wallet.get_utxos_for_amount(amount, 1, true).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn signed_funding_inputs_lock_until_confirmation() {
+        use bitcoincore_rpc::RpcApi;
+        use ddk_manager::Wallet;
+
+        let wallet = create_wallet().await;
+        let address = wallet.new_external_address().await.unwrap().address;
+        fund_address(&address);
+        wallet.sync().await.unwrap();
+
+        let utxos = wallet.list_utxos().await.unwrap();
+        assert_eq!(utxos.len(), 1);
+        let utxo = utxos[0].clone();
+
+        // A funding transaction that spends the wallet coin, signed
+        // through the manager path but not broadcast.
+        let dest = Address::from_str("bcrt1qt0yrvs7qx8guvpqsx8u9mypz6t4zr3pxthsjkm")
+            .unwrap()
+            .assume_checked();
+        let unsigned = bitcoin::Transaction {
+            version: bitcoin::transaction::Version::TWO,
+            lock_time: bitcoin::absolute::LockTime::ZERO,
+            input: vec![bitcoin::TxIn {
+                previous_output: utxo.outpoint,
+                script_sig: bitcoin::ScriptBuf::new(),
+                sequence: bitcoin::Sequence::MAX,
+                witness: bitcoin::Witness::new(),
+            }],
+            output: vec![bitcoin::TxOut {
+                value: utxo.txout.value - Amount::from_sat(1_000),
+                script_pubkey: dest.script_pubkey(),
+            }],
+        };
+        let mut psbt = bitcoin::Psbt::from_unsigned_tx(unsigned).unwrap();
+        psbt.inputs[0].witness_utxo = Some(utxo.txout.clone());
+
+        wallet.sign_psbt_input(&mut psbt, 0).await.unwrap();
+        assert!(psbt.inputs[0].final_script_witness.is_some());
+
+        // The signed-but-unbroadcast input is locked and not selectable.
+        assert_eq!(
+            wallet.locked_outpoints().await.unwrap(),
+            vec![utxo.outpoint]
+        );
+        assert!(wallet
+            .get_utxos_for_amount(Amount::from_btc(0.5).unwrap(), 1, true)
+            .await
+            .is_err());
+
+        // Broadcast and confirm the spend: the sync releases the lock.
+        let tx = psbt.extract_tx().unwrap();
+        let env = ddk_testenv::env();
+        let txid = env.rpc().send_raw_transaction(&tx).unwrap();
+        env.wait_for_tx(&txid);
+        generate_blocks(1);
+        wallet.sync().await.unwrap();
+        assert!(wallet.locked_outpoints().await.unwrap().is_empty());
     }
 
     #[tokio::test]
