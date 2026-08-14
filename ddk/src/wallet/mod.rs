@@ -150,10 +150,9 @@ pub enum WalletCommand {
     /// Get the next derivation index for address generation
     NextDerivationIndex(oneshot::Sender<Result<u32>>),
 
-    /// Sign a specific input in a PSBT (Partially Signed Bitcoin Transaction)
-    SignPsbtInput(
+    /// Sign every wallet-owned input of a PSBT (Partially Signed Bitcoin Transaction)
+    SignPsbt(
         bitcoin::psbt::Psbt,
-        usize,
         oneshot::Sender<std::result::Result<Psbt, ManagerError>>,
     ),
 }
@@ -481,35 +480,29 @@ impl DlcDevKitWallet {
                             );
                         });
                     }
-                    WalletCommand::SignPsbtInput(mut psbt, input_index, sender) => {
+                    WalletCommand::SignPsbt(mut psbt, sender) => {
                         let sign_opts = SignOptions {
                             trust_witness_utxo: true,
                             ..Default::default()
                         };
-                        let mut signed_psbt = psbt.clone();
-                        if let Err(e) = wallet.sign(&mut signed_psbt, sign_opts) {
-                            log_error!(logger_clone, "Could not sign PSBT. error={:?}", e);
-                            let _ = sender
-                                .send(Err(ManagerError::WalletError(
-                                    WalletError::Signing(e).into(),
-                                )))
-                                .map_err(|e| {
-                                    log_error!(
-                                        logger_clone,
-                                        "Error sending sign psbt input command. error={:?}",
-                                        e
-                                    );
-                                });
-                        } else {
-                            psbt.inputs[input_index] = signed_psbt.inputs[input_index].clone();
-                            let _ = sender.send(Ok(psbt)).map_err(|e| {
-                                log_error!(
-                                    logger_clone,
-                                    "Error sending sign psbt input command. error={:?}",
-                                    e
-                                );
-                            });
-                        }
+                        // Sign in place, once, for every input the wallet
+                        // owns. A caller that walks a funding transaction
+                        // input-by-input finds later inputs already
+                        // finalized, so the signing work is done one time.
+                        let result = match wallet.sign(&mut psbt, sign_opts) {
+                            Ok(_) => Ok(psbt),
+                            Err(e) => {
+                                log_error!(logger_clone, "Could not sign PSBT. error={:?}", e);
+                                Err(ManagerError::WalletError(WalletError::Signing(e).into()))
+                            }
+                        };
+                        let _ = sender.send(result).map_err(|e| {
+                            log_error!(
+                                logger_clone,
+                                "Error sending sign psbt command. error={:?}",
+                                e
+                            );
+                        });
                     }
                 }
             }
@@ -638,7 +631,9 @@ impl DlcDevKitWallet {
     /// Signs a specific input in a PSBT for DLC operations.
     ///
     /// This method is used internally by the DLC manager to sign
-    /// DLC-related transactions such as funding transactions.
+    /// DLC-related transactions such as funding transactions. The manager
+    /// calls it once per input; the wallet signs the full PSBT on the first
+    /// call and later calls find their input already finalized.
     ///
     /// # Arguments
     /// * `psbt` - The PSBT to sign
@@ -649,9 +644,16 @@ impl DlcDevKitWallet {
         psbt: &mut bitcoin::psbt::Psbt,
         input_index: usize,
     ) -> std::result::Result<(), ManagerError> {
+        if psbt
+            .inputs
+            .get(input_index)
+            .is_some_and(|input| input.final_script_witness.is_some())
+        {
+            return Ok(());
+        }
         let (tx, rx) = oneshot::channel();
         self.sender
-            .send(WalletCommand::SignPsbtInput(psbt.clone(), input_index, tx))
+            .send(WalletCommand::SignPsbt(psbt.clone(), tx))
             .await
             .map_err(|e| ManagerError::WalletError(Box::new(WalletError::Sender(e))))?;
         let signed_psbt_received = rx
