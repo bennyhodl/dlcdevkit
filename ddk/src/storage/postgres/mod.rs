@@ -776,8 +776,11 @@ async fn update_last_revealed(
     descriptor_id: DescriptorId,
     last_revealed: u32,
 ) -> Result<(), SqlxError> {
+    // BDK's merge rule for last_revealed keeps the greater index; a stale
+    // write must never regress it or the wallet re-reveals used addresses.
     sqlx::query(
-        "UPDATE keychain SET last_revealed = $1 WHERE wallet_name = $2 AND descriptor_id = $3",
+        "UPDATE keychain SET last_revealed = GREATEST(last_revealed, $1)
+         WHERE wallet_name = $2 AND descriptor_id = $3",
     )
     .bind(last_revealed as i32)
     .bind(wallet_name)
@@ -1086,6 +1089,36 @@ mod tests {
         assert_eq!(confirmed_rows[0].state, ContractPrefix::Closed as i16);
         let contracts = db.get_contracts().await.unwrap();
         assert!(contracts.len() > 0);
+    }
+
+    #[tokio::test]
+    async fn last_revealed_never_regresses() {
+        let (_server, db) = seed_db().await;
+
+        let descriptor: ExtendedDescriptor = "wpkh([73c5da0a/84'/1'/0']tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M/0/*)"
+            .parse()
+            .unwrap();
+        let did = descriptor.descriptor_id();
+
+        let mut changeset = ChangeSet::default();
+        changeset.network = Some(Network::Regtest);
+        changeset.descriptor = Some(descriptor);
+        changeset.indexer.last_revealed.insert(did, 7);
+        db.write(&changeset).await.unwrap();
+
+        // A stale write with a smaller index must not regress the value.
+        let mut stale = ChangeSet::default();
+        stale.indexer.last_revealed.insert(did, 3);
+        db.write(&stale).await.unwrap();
+        let read = db.read().await.unwrap();
+        assert_eq!(read.indexer.last_revealed.get(&did), Some(&7));
+
+        // A greater index still advances it.
+        let mut advance = ChangeSet::default();
+        advance.indexer.last_revealed.insert(did, 9);
+        db.write(&advance).await.unwrap();
+        let read = db.read().await.unwrap();
+        assert_eq!(read.indexer.last_revealed.get(&did), Some(&9));
     }
 
     #[tokio::test]
