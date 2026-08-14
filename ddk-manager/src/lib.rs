@@ -174,6 +174,35 @@ pub trait Wallet {
     fn unreserve_utxos(&self, outpoints: &[OutPoint]) -> Result<(), Error>;
 }
 
+/// The state of a transaction on the bitcoin network, as reported by
+/// [`Blockchain::get_transaction_confirmations`].
+///
+/// This tells apart a transaction that sits in the mempool with zero
+/// confirmations from a transaction the network does not know at all
+/// (never broadcast, or evicted from the mempool).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConfirmationStatus {
+    /// The transaction is not in the mempool and not in a block. It was
+    /// either never broadcast or it was evicted from the mempool.
+    NotFound,
+    /// The transaction is in the mempool and has zero confirmations.
+    InMempool,
+    /// The transaction is included in a block and has the given number of
+    /// confirmations.
+    Confirmed(u32),
+}
+
+impl ConfirmationStatus {
+    /// The number of confirmations. A transaction that is not found or that
+    /// only sits in the mempool has zero confirmations.
+    pub fn confirmations(&self) -> u32 {
+        match self {
+            ConfirmationStatus::Confirmed(confirmations) => *confirmations,
+            ConfirmationStatus::NotFound | ConfirmationStatus::InMempool => 0,
+        }
+    }
+}
+
 #[async_trait::async_trait]
 /// Blockchain trait provides access to the bitcoin blockchain.
 pub trait Blockchain {
@@ -187,8 +216,11 @@ pub trait Blockchain {
     async fn get_block_at_height(&self, height: u64) -> Result<Block, Error>;
     /// Get the transaction with given id.
     async fn get_transaction(&self, tx_id: &Txid) -> Result<Transaction, Error>;
-    /// Get the number of confirmation for the transaction with given id.
-    async fn get_transaction_confirmations(&self, tx_id: &Txid) -> Result<u32, Error>;
+    /// Get the confirmation status of the transaction with the given id.
+    async fn get_transaction_confirmations(
+        &self,
+        tx_id: &Txid,
+    ) -> Result<ConfirmationStatus, Error>;
 }
 
 #[async_trait::async_trait]

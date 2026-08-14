@@ -1,7 +1,8 @@
 //! #Manager a component to create and update DLCs.
 
 use super::{
-    Blockchain, CachedContractSignerProvider, ContractSigner, Oracle, Storage, Time, Wallet,
+    Blockchain, CachedContractSignerProvider, ConfirmationStatus, ContractSigner, Oracle, Storage,
+    Time, Wallet,
 };
 use crate::chain_monitor::{ChainMonitor, ChannelInfo, RevokedTxType, TxType};
 use crate::channel::offered_channel::OfferedChannel;
@@ -821,16 +822,24 @@ where
 
     #[tracing::instrument(skip_all, level = "debug")]
     async fn check_signed_contract(&self, contract: &SignedContract) -> Result<(), Error> {
-        let confirmations = self
+        let fund_txid = contract
+            .accepted_contract
+            .dlc_transactions
+            .fund
+            .compute_txid();
+        let status = self
             .blockchain
-            .get_transaction_confirmations(
-                &contract
-                    .accepted_contract
-                    .dlc_transactions
-                    .fund
-                    .compute_txid(),
-            )
+            .get_transaction_confirmations(&fund_txid)
             .await?;
+        if status == ConfirmationStatus::NotFound {
+            log_warn!(self.logger,
+                "Funding transaction not found in mempool or on-chain. Not confirming contract. fund_txid={} contract_id={}",
+                fund_txid.to_string(),
+                contract.accepted_contract.get_contract_id_string(),
+            );
+            return Ok(());
+        }
+        let confirmations = status.confirmations();
         if confirmations >= *NB_CONFIRMATIONS {
             log_info!(
                 self.logger,
@@ -904,12 +913,36 @@ where
                 }
                 Err(e) => {
                     log_debug!(self.logger,
-                        "The previouse contract referenced in a splice transaction failed to retrieve. contract_id={} error={}", 
+                        "The previouse contract referenced in a splice transaction failed to retrieve. contract_id={} error={}",
                         contract_id.to_lower_hex_string(), e.to_string(),
                     );
                     Err(e)
                 }
             }?;
+
+            // The funding transaction of the splice contract closes the
+            // previous contract. Only pre-close the previous contract when
+            // the network knows that transaction. A transaction that was
+            // evicted from the mempool, or that was not broadcast, must not
+            // close the previous contract.
+            let splice_fund_txid = contract
+                .accepted_contract
+                .dlc_transactions
+                .fund
+                .compute_txid();
+            if self
+                .blockchain
+                .get_transaction_confirmations(&splice_fund_txid)
+                .await?
+                == ConfirmationStatus::NotFound
+            {
+                log_debug!(self.logger,
+                    "Splice funding transaction not found in mempool or on-chain. Not pre-closing the previous contract. splice_fund_txid={} contract_id={}",
+                    splice_fund_txid.to_string(),
+                    contract_id.to_lower_hex_string(),
+                );
+                continue;
+            }
 
             let preclosed_contract = PreClosedContract {
                 signed_contract: confirmed_contract_in_splice.clone(),
@@ -1116,10 +1149,17 @@ where
             .dlc_transactions
             .pending_close_txs
         {
-            let confirmations = self
+            let status = self
                 .blockchain
                 .get_transaction_confirmations(&pending_close_tx.compute_txid())
                 .await?;
+            if status == ConfirmationStatus::NotFound {
+                // The pending close transaction is not in the mempool and not
+                // in a block. It was not broadcast, or it was evicted from
+                // the mempool. Do not close the contract with it.
+                continue;
+            }
+            let confirmations = status.confirmations();
 
             log_debug!(
                 self.logger,
@@ -1129,7 +1169,11 @@ where
                 confirmations
             );
 
-            if confirmations >= *NB_CONFIRMATIONS {
+            // `Closed` is a terminal state that no periodic check examines
+            // again. A transaction that only sits in the mempool can still be
+            // evicted, so require at least one confirmation on-chain, also
+            // when `NB_CONFIRMATIONS` is zero.
+            if confirmations >= (*NB_CONFIRMATIONS).max(1) {
                 // Found a fully confirmed pending close - move directly to Closed
                 log_info!(self.logger,
                     "Pending close transaction is fully confirmed. Moving to closed. close_txid={} contract_id={}", 
@@ -1298,10 +1342,44 @@ where
     #[tracing::instrument(skip_all, level = "debug")]
     async fn check_preclosed_contract(&self, contract: &PreClosedContract) -> Result<(), Error> {
         let broadcasted_txid = contract.signed_cet.compute_txid();
-        let confirmations = self
+        let status = self
             .blockchain
             .get_transaction_confirmations(&broadcasted_txid)
             .await?;
+        if status == ConfirmationStatus::NotFound {
+            // The closing transaction is not in the mempool and not in a
+            // block. It was evicted from the mempool, or the chain source has
+            // not seen it yet. Broadcast it again — the network accepts a
+            // transaction it already knows without an error.
+            match self.blockchain.send_transaction(&contract.signed_cet).await {
+                Ok(()) => {
+                    log_warn!(self.logger,
+                        "Closing transaction not found in mempool or on-chain. Broadcast it again. close_txid={} contract_id={}",
+                        broadcasted_txid.to_string(),
+                        contract.signed_contract.accepted_contract.get_contract_id_string(),
+                    );
+                }
+                Err(e) if contract.attestations.is_none() => {
+                    // A pre-close without attestations comes from a splice or
+                    // a cooperative close. Its closing transaction cannot
+                    // enter the mempool again, so the funding output stays
+                    // unspent and the contract is still live. Move it back to
+                    // confirmed.
+                    log_warn!(self.logger,
+                        "Closing transaction was dropped and cannot be broadcast again. Moving contract back to confirmed. close_txid={} contract_id={} error={}",
+                        broadcasted_txid.to_string(),
+                        contract.signed_contract.accepted_contract.get_contract_id_string(),
+                        e.to_string(),
+                    );
+                    self.store
+                        .update_contract(&Contract::Confirmed(contract.signed_contract.clone()))
+                        .await?;
+                }
+                Err(e) => return Err(e),
+            }
+            return Ok(());
+        }
+        let confirmations = status.confirmations();
         log_debug!(
             self.logger,
             "Checking pre-closed contract. broadcasted_txid={} contract_id={} confirmations={}",
@@ -1312,9 +1390,13 @@ where
                 .get_contract_id_string(),
             confirmations
         );
-        if confirmations >= *NB_CONFIRMATIONS {
+        // `Closed` is a terminal state that no periodic check examines again.
+        // A transaction that only sits in the mempool can still be evicted,
+        // so require at least one confirmation on-chain, also when
+        // `NB_CONFIRMATIONS` is zero.
+        if confirmations >= (*NB_CONFIRMATIONS).max(1) {
             log_debug!(self.logger,
-                "Pre-closed contract is fully confirmed. Moving to closed. broadcasted_txid={} contract_id={}", 
+                "Pre-closed contract is fully confirmed. Moving to closed. broadcasted_txid={} contract_id={}",
                 broadcasted_txid.to_string(),
                 contract.signed_contract.accepted_contract.get_contract_id_string()
             );
@@ -1361,10 +1443,13 @@ where
         signed_cet: Transaction,
         attestations: Vec<OracleAttestation>,
     ) -> Result<Contract, Error> {
+        // A CET that was not broadcast yet is not found on the network, so
+        // count it as zero confirmations.
         let confirmations = self
             .blockchain
             .get_transaction_confirmations(&signed_cet.compute_txid())
-            .await?;
+            .await?
+            .confirmations();
 
         if confirmations < 1 {
             log_info!(
@@ -1443,10 +1528,13 @@ where
             );
             let accepted_contract = &contract.accepted_contract;
             let refund = accepted_contract.dlc_transactions.refund.clone();
+            // A refund that was not broadcast yet is not found on the
+            // network, so count it as zero confirmations.
             let confirmations = self
                 .blockchain
                 .get_transaction_confirmations(&refund.compute_txid())
-                .await?;
+                .await?
+                .confirmations();
             if confirmations == 0 {
                 log_debug!(self.logger,
                     "Refund transaction has not been broadcast yet. Sending transaction txid={} contract_id={}", 
@@ -1492,7 +1580,8 @@ where
             let confirmations = self
                 .blockchain
                 .get_transaction_confirmations(&refund_txid)
-                .await?;
+                .await?
+                .confirmations();
 
             if confirmations > 0 {
                 // Counterparty (or we) already broadcast the refund tx. Update state.
@@ -2142,6 +2231,7 @@ where
             .blockchain
             .get_transaction_confirmations(&buffer_tx.compute_txid())
             .await?
+            .confirmations()
             >= CET_NSEQUENCE
         {
             log_info!(
@@ -3441,7 +3531,7 @@ where
             .blockchain
             .get_transaction_confirmations(&settle_tx.compute_txid())
             .await
-            .unwrap_or(0)
+            .map_or(0, |status| status.confirmations())
             == 0
         {
             self.blockchain.send_transaction(&settle_tx).await?;
