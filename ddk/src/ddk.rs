@@ -33,7 +33,7 @@ use crate::wallet::DlcDevKitWallet;
 use crate::{Oracle, Storage, Transport};
 use bitcoin::hex::DisplayHex;
 use bitcoin::secp256k1::PublicKey;
-use bitcoin::{Amount, Network, SignedAmount};
+use bitcoin::{Network, SignedAmount};
 use ddk_manager::contract::Contract;
 use ddk_manager::error::Error as ManagerError;
 use ddk_manager::{
@@ -410,22 +410,6 @@ where
         let wallet_balance = self.wallet.get_balance().await?;
         let contracts = self.storage.get_contracts().await?;
 
-        let contract = &contracts
-            .iter()
-            .map(|contract| match contract {
-                Contract::Confirmed(c) => {
-                    let accept_party_collateral = c.accepted_contract.accept_params.collateral;
-                    let total_collateral = c.accepted_contract.offered_contract.total_collateral;
-                    if c.accepted_contract.offered_contract.is_offer_party {
-                        total_collateral - accept_party_collateral
-                    } else {
-                        accept_party_collateral
-                    }
-                }
-                _ => Amount::ZERO,
-            })
-            .sum::<Amount>();
-
         let contract_pnl = &contracts
             .iter()
             .map(|contract| contract.get_pnl())
@@ -437,7 +421,8 @@ where
             foreign_unconfirmed: wallet_balance.untrusted_pending,
             spendable: wallet_balance.spendable,
             reserved: wallet_balance.reserved,
-            contract: contract.to_owned(),
+            contract_confirmed: wallet_balance.contract_confirmed,
+            contract_pending: wallet_balance.contract_pending,
             contract_pnl: contract_pnl.to_owned().to_sat(),
         })
     }
