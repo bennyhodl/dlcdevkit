@@ -61,8 +61,21 @@ pub async fn sync(
             chain: sync.chain_update,
         }
     } else {
+        // Tell esplora which txids we expect under our SPKs. Expected txids
+        // that no longer show up come back stamped as evicted, which drops
+        // replaced or evicted transactions from the canonical view.
+        let expected_spk_txids = wallet
+            .tx_graph()
+            .list_expected_spk_txids(
+                wallet.local_chain(),
+                prev_tip.block_id(),
+                wallet.spk_index(),
+                ..,
+            )
+            .collect::<Vec<_>>();
         let spks = wallet
             .start_sync_with_revealed_spks()
+            .expected_spk_txids(expected_spk_txids)
             .chain_tip(prev_tip)
             .build();
         let sync = blockchain
