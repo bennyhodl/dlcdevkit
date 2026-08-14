@@ -395,6 +395,47 @@ impl Storage for PostgresStore {
             .map_err(|e| WalletError::StorageError(e.to_string()))?;
         Ok(())
     }
+
+    async fn load_labels(&self) -> Result<bip329::Labels, WalletError> {
+        let rows = sqlx::query("SELECT label FROM wallet_labels WHERE wallet_name = $1")
+            .bind(&self.wallet_name)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| WalletError::StorageError(e.to_string()))?;
+
+        let labels = rows
+            .into_iter()
+            .map(|row| {
+                let label: serde_json::Value = row.get("label");
+                Ok(serde_json::from_value::<bip329::Label>(label)?)
+            })
+            .collect::<Result<Vec<_>, WalletError>>()?;
+        Ok(bip329::Labels::new(labels))
+    }
+
+    async fn persist_label(&self, label: &bip329::Label) -> Result<(), WalletError> {
+        sqlx::query(
+            "INSERT INTO wallet_labels (wallet_name, label_key, label) VALUES ($1, $2, $3)
+             ON CONFLICT (wallet_name, label_key) DO UPDATE SET label = $3",
+        )
+        .bind(&self.wallet_name)
+        .bind(crate::storage::label_key(&label.ref_()))
+        .bind(serde_json::to_value(label)?)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| WalletError::StorageError(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn delete_label(&self, label_ref: &bip329::LabelRef) -> Result<(), WalletError> {
+        sqlx::query("DELETE FROM wallet_labels WHERE wallet_name = $1 AND label_key = $2")
+            .bind(&self.wallet_name)
+            .bind(crate::storage::label_key(label_ref))
+            .execute(&self.pool)
+            .await
+            .map_err(|e| WalletError::StorageError(e.to_string()))?;
+        Ok(())
+    }
 }
 
 #[async_trait::async_trait]
@@ -1338,6 +1379,49 @@ mod tests {
         db.write(&advance).await.unwrap();
         let read = db.read().await.unwrap();
         assert_eq!(read.indexer.last_revealed.get(&did), Some(&9));
+    }
+
+    #[tokio::test]
+    async fn labels_round_trip() {
+        use crate::Storage as DdkStorage;
+
+        let (_server, db) = seed_db().await;
+        let txid = dummy_tx().compute_txid();
+
+        let label = bip329::Label::Transaction(bip329::TransactionRecord {
+            ref_: txid,
+            label: Some("DLC funding".to_string()),
+            origin: None,
+        });
+        DdkStorage::persist_label(&db, &label).await.unwrap();
+
+        let output_label = bip329::Label::Output(bip329::OutputRecord {
+            ref_: OutPoint { txid, vout: 0 },
+            label: Some("collateral".to_string()),
+            spendable: Some(false),
+        });
+        DdkStorage::persist_label(&db, &output_label).await.unwrap();
+
+        let labels = DdkStorage::load_labels(&db).await.unwrap();
+        assert_eq!(labels.iter().count(), 2);
+
+        // Replacing by reference and deleting.
+        let renamed = bip329::Label::Transaction(bip329::TransactionRecord {
+            ref_: txid,
+            label: Some("renamed".to_string()),
+            origin: None,
+        });
+        DdkStorage::persist_label(&db, &renamed).await.unwrap();
+        DdkStorage::delete_label(&db, &output_label.ref_())
+            .await
+            .unwrap();
+
+        let labels = DdkStorage::load_labels(&db).await.unwrap();
+        assert_eq!(labels.iter().count(), 1);
+        assert!(labels.iter().any(|label| matches!(
+            label,
+            bip329::Label::Transaction(record) if record.label.as_deref() == Some("renamed")
+        )));
     }
 
     #[tokio::test]

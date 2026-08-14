@@ -46,6 +46,11 @@ pub mod wallet;
 
 pub use ddk_manager;
 
+/// BIP-329 wallet label types, re-exported for [`Storage`] implementors
+/// and consumers of the label API.
+#[cfg(feature = "manager")]
+pub use bip329;
+
 /// DDK object with all services
 #[cfg(feature = "manager")]
 pub use ddk::DlcDevKit;
@@ -190,6 +195,29 @@ pub trait Storage: ddk_manager::Storage + Send + Sync + std::fmt::Debug + 'stati
         &self,
         _changeset: &wallet::contract_tracker::ChangeSet,
     ) -> Result<(), WalletError> {
+        Ok(())
+    }
+
+    /// Loads every BIP-329 label.
+    ///
+    /// The default implementation stores no labels and returns an empty
+    /// set.
+    async fn load_labels(&self) -> Result<bip329::Labels, WalletError> {
+        Ok(bip329::Labels::default())
+    }
+
+    /// Stores a BIP-329 label, replacing an existing label with the same
+    /// reference.
+    ///
+    /// The default implementation drops the label.
+    async fn persist_label(&self, _label: &bip329::Label) -> Result<(), WalletError> {
+        Ok(())
+    }
+
+    /// Deletes the BIP-329 label of a reference.
+    ///
+    /// The default implementation does nothing.
+    async fn delete_label(&self, _label_ref: &bip329::LabelRef) -> Result<(), WalletError> {
         Ok(())
     }
 }
