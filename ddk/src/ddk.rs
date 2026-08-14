@@ -432,6 +432,22 @@ where
         Ok(self.wallet.contract_utxos().await?)
     }
 
+    /// Stores a BIP-329 label for a transaction, address, or output,
+    /// replacing an existing label with the same reference.
+    pub async fn set_label(&self, label: bip329::Label) -> Result<()> {
+        Ok(self.storage.persist_label(&label).await?)
+    }
+
+    /// Every BIP-329 label in storage.
+    pub async fn labels(&self) -> Result<bip329::Labels> {
+        Ok(self.storage.load_labels().await?)
+    }
+
+    /// Deletes the BIP-329 label of a reference.
+    pub async fn delete_label(&self, label_ref: &bip329::LabelRef) -> Result<()> {
+        Ok(self.storage.delete_label(label_ref).await?)
+    }
+
     /// Refunds a DLC contract.
     ///
     /// This method checks if the refund locktime has passed and broadcasts the refund transaction if it has.

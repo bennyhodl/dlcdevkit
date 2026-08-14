@@ -409,6 +409,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "bip329"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dac70750b23e4176d426b149e9c217af603c13a12100c79db82b794a6b27d55c"
+dependencies = [
+ "bitcoin",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "bip39"
 version = "2.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1071,6 +1083,7 @@ dependencies = [
  "bdk_chain",
  "bdk_esplora",
  "bdk_wallet",
+ "bip329",
  "bip39",
  "bitcoin",
  "bitcoincore-rpc",

@@ -21,6 +21,7 @@ manager = [
     "ddk-manager/manager",
     "dep:kormir",
     "dep:bdk_esplora",
+    "dep:bip329",
     "dep:tokio",
     "dep:zeromq",
     "dep:uuid",
@@ -53,6 +54,7 @@ kormir = { workspace = true, optional = true }
 
 bitcoin = { workspace = true, features = ["std", "rand", "serde"] }
 bdk_esplora = { version = "0.22.2", default-features = false, features = ["std", "async-https", "tokio"], optional = true }
+bip329 = { version = "0.6.0", optional = true }
 bdk_wallet = "3.1.0"
 bdk_chain = "0.23.3"
 lightning = { workspace = true, features = ["std", "grind_signatures"] }
