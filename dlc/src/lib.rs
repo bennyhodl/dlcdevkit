@@ -139,26 +139,34 @@ pub struct DlcTransactions {
     /// case of an oracle misbehavior
     pub refund: Transaction,
 
-    /// The script pubkey of the fund output in the fund transaction
-    pub funding_script_pubkey: ScriptBuf,
+    /// The raw witness script of the fund output. This is not the script
+    /// pubkey of the fund output. To get the script pubkey, use
+    /// [`DlcTransactions::funding_script_pubkey`], which applies the P2WSH
+    /// wrapping.
+    #[cfg_attr(feature = "use-serde", serde(alias = "funding_script_pubkey"))]
+    pub funding_witness_script: ScriptBuf,
 
     /// Pending cooperative close offers.
     pub pending_close_txs: Vec<Transaction>,
 }
 
 impl DlcTransactions {
+    /// Get the script pubkey of the fund output in the fund transaction.
+    /// This is the P2WSH wrapping of [`DlcTransactions::funding_witness_script`].
+    pub fn funding_script_pubkey(&self) -> ScriptBuf {
+        self.funding_witness_script.to_p2wsh()
+    }
+
     /// Get the fund output in the fund transaction
     pub fn get_fund_output(&self) -> &TxOut {
-        let v0_witness_fund_script = self.funding_script_pubkey.to_p2wsh();
-        util::get_output_for_script_pubkey(&self.fund, &v0_witness_fund_script)
+        util::get_output_for_script_pubkey(&self.fund, &self.funding_script_pubkey())
             .unwrap()
             .1
     }
 
     /// Get the fund output in the fund transaction
     pub fn get_fund_output_index(&self) -> usize {
-        let v0_witness_fund_script = self.funding_script_pubkey.to_p2wsh();
-        util::get_output_for_script_pubkey(&self.fund, &v0_witness_fund_script)
+        util::get_output_for_script_pubkey(&self.fund, &self.funding_script_pubkey())
             .unwrap()
             .0
     }
@@ -501,7 +509,7 @@ pub fn create_dlc_transactions(
     fund_output_serial_id: u64,
     contract_flags: u8,
 ) -> Result<DlcTransactions, Error> {
-    let (fund_tx, funding_script_pubkey) = create_fund_transaction_with_fees(
+    let (fund_tx, funding_witness_script) = create_fund_transaction_with_fees(
         offer_params,
         accept_params,
         fee_rate_per_vb,
@@ -511,7 +519,7 @@ pub fn create_dlc_transactions(
     )?;
     let fund_outpoint = OutPoint {
         txid: fund_tx.compute_txid(),
-        vout: util::get_output_for_script_pubkey(&fund_tx, &funding_script_pubkey.to_p2wsh())
+        vout: util::get_output_for_script_pubkey(&fund_tx, &funding_witness_script.to_p2wsh())
             .expect("to find the funding script pubkey")
             .0 as u32,
     };
@@ -530,7 +538,7 @@ pub fn create_dlc_transactions(
         fund: fund_tx,
         cets,
         refund: refund_tx,
-        funding_script_pubkey,
+        funding_witness_script,
         pending_close_txs: vec![],
     })
 }
@@ -579,11 +587,11 @@ pub fn create_fund_transaction_with_fees(
     let (accept_tx_ins, accept_inputs_serial_ids) =
         accept_params.get_unsigned_tx_inputs_and_serial_ids(fund_sequence);
 
-    let funding_script_pubkey =
+    let funding_witness_script =
         make_funding_redeemscript(&offer_params.fund_pubkey, &accept_params.fund_pubkey);
 
     let fund_tx = create_funding_transaction(
-        &funding_script_pubkey,
+        &funding_witness_script,
         fund_output_value,
         &offer_tx_ins,
         &offer_inputs_serial_ids,
@@ -597,7 +605,7 @@ pub fn create_fund_transaction_with_fees(
         fund_lock_time,
     );
 
-    Ok((fund_tx, funding_script_pubkey))
+    Ok((fund_tx, funding_witness_script))
 }
 
 /// Create the contract execution transactions and refund transaction.
@@ -743,7 +751,7 @@ pub fn create_cets(
 /// Create a funding transaction
 #[allow(clippy::too_many_arguments)]
 pub fn create_funding_transaction(
-    funding_script_pubkey: &Script,
+    funding_witness_script: &Script,
     output_amount: Amount,
     offer_inputs: &[TxIn],
     offer_inputs_serial_ids: &[u64],
@@ -758,7 +766,7 @@ pub fn create_funding_transaction(
 ) -> Transaction {
     let fund_tx_out = TxOut {
         value: output_amount,
-        script_pubkey: funding_script_pubkey.to_p2wsh(),
+        script_pubkey: funding_witness_script.to_p2wsh(),
     };
 
     let output: Vec<TxOut> = {
@@ -873,10 +881,10 @@ pub fn create_cet_adaptor_sig_from_point<C: secp256k1_zkp::Signing>(
     cet: &Transaction,
     adaptor_point: &PublicKey,
     funding_sk: &SecretKey,
-    funding_script_pubkey: &Script,
+    funding_witness_script: &Script,
     fund_output_value: Amount,
 ) -> Result<EcdsaAdaptorSignature, Error> {
-    let sig_hash = util::get_sig_hash_msg(cet, 0, funding_script_pubkey, fund_output_value)?;
+    let sig_hash = util::get_sig_hash_msg(cet, 0, funding_witness_script, fund_output_value)?;
 
     #[cfg(feature = "std")]
     let res = EcdsaAdaptorSignature::encrypt(secp, &sig_hash, funding_sk, adaptor_point);
@@ -894,7 +902,7 @@ pub fn create_cet_adaptor_sig_from_oracle_info(
     cet: &Transaction,
     oracle_infos: &[OracleInfo],
     funding_sk: &SecretKey,
-    funding_script_pubkey: &Script,
+    funding_witness_script: &Script,
     fund_output_value: Amount,
     msgs: &[Vec<Message>],
 ) -> Result<EcdsaAdaptorSignature, Error> {
@@ -904,7 +912,7 @@ pub fn create_cet_adaptor_sig_from_oracle_info(
         cet,
         &adaptor_point,
         funding_sk,
-        funding_script_pubkey,
+        funding_witness_script,
         fund_output_value,
     )
 }
@@ -914,7 +922,7 @@ pub fn create_cet_adaptor_sigs_from_points<C: secp256k1_zkp::Signing>(
     secp: &secp256k1_zkp::Secp256k1<C>,
     inputs: &[(&Transaction, &PublicKey)],
     funding_sk: &SecretKey,
-    funding_script_pubkey: &Script,
+    funding_witness_script: &Script,
     fund_output_value: Amount,
 ) -> Result<Vec<EcdsaAdaptorSignature>, Error> {
     inputs
@@ -925,7 +933,7 @@ pub fn create_cet_adaptor_sigs_from_points<C: secp256k1_zkp::Signing>(
                 cet,
                 adaptor_point,
                 funding_sk,
-                funding_script_pubkey,
+                funding_witness_script,
                 fund_output_value,
             )
         })
@@ -938,7 +946,7 @@ pub fn create_cet_adaptor_sigs_from_oracle_info(
     cets: &[Transaction],
     oracle_infos: &[OracleInfo],
     funding_sk: &SecretKey,
-    funding_script_pubkey: &Script,
+    funding_witness_script: &Script,
     fund_output_value: Amount,
     msgs: &[Vec<Vec<Message>>],
 ) -> Result<Vec<EcdsaAdaptorSignature>, Error> {
@@ -958,7 +966,7 @@ pub fn create_cet_adaptor_sigs_from_oracle_info(
                 cet,
                 oracle_infos,
                 funding_sk,
-                funding_script_pubkey,
+                funding_witness_script,
                 fund_output_value,
                 msg,
             )
@@ -996,7 +1004,7 @@ pub fn sign_cet<C: secp256k1_zkp::Signing>(
     oracle_signatures: &[Vec<SchnorrSignature>],
     funding_sk: &SecretKey,
     other_pk: &PublicKey,
-    funding_script_pubkey: &Script,
+    funding_witness_script: &Script,
     fund_output_value: Amount,
 ) -> Result<(), Error> {
     let adaptor_secret = signatures_to_secret(oracle_signatures)?;
@@ -1008,7 +1016,7 @@ pub fn sign_cet<C: secp256k1_zkp::Signing>(
         &adapted_sig,
         other_pk,
         funding_sk,
-        funding_script_pubkey,
+        funding_witness_script,
         fund_output_value,
         0,
     )?;
@@ -1024,10 +1032,10 @@ pub fn verify_cet_adaptor_sig_from_point(
     cet: &Transaction,
     adaptor_point: &PublicKey,
     pubkey: &PublicKey,
-    funding_script_pubkey: &Script,
+    funding_witness_script: &Script,
     total_collateral: Amount,
 ) -> Result<(), Error> {
-    let sig_hash = util::get_sig_hash_msg(cet, 0, funding_script_pubkey, total_collateral)?;
+    let sig_hash = util::get_sig_hash_msg(cet, 0, funding_witness_script, total_collateral)?;
     adaptor_sig.verify(secp, &sig_hash, pubkey, adaptor_point)?;
     Ok(())
 }
@@ -1041,7 +1049,7 @@ pub fn verify_cet_adaptor_sig_from_oracle_info(
     cet: &Transaction,
     oracle_infos: &[OracleInfo],
     pubkey: &PublicKey,
-    funding_script_pubkey: &Script,
+    funding_witness_script: &Script,
     total_collateral: Amount,
     msgs: &[Vec<Message>],
 ) -> Result<(), Error> {
@@ -1052,7 +1060,7 @@ pub fn verify_cet_adaptor_sig_from_oracle_info(
         cet,
         &adaptor_point,
         pubkey,
-        funding_script_pubkey,
+        funding_witness_script,
         total_collateral,
     )
 }
@@ -1171,10 +1179,10 @@ mod tests {
             value: change,
             script_pubkey: ScriptBuf::new(),
         };
-        let funding_script_pubkey = make_funding_redeemscript(&pk, &pk1);
+        let funding_witness_script = make_funding_redeemscript(&pk, &pk1);
 
         let transaction = create_funding_transaction(
-            &funding_script_pubkey,
+            &funding_witness_script,
             total_collateral,
             &offer_inputs,
             &[1],
@@ -1216,10 +1224,10 @@ mod tests {
             script_pubkey: ScriptBuf::new(),
         };
 
-        let funding_script_pubkey = make_funding_redeemscript(&pk, &pk1);
+        let funding_witness_script = make_funding_redeemscript(&pk, &pk1);
 
         let transaction = create_funding_transaction(
-            &funding_script_pubkey,
+            &funding_witness_script,
             total_collateral,
             &offer_inputs,
             &[1],
@@ -1304,11 +1312,11 @@ mod tests {
 
         let expected_serialized = "020000000001024F601442E48EEC22FF3A907C5F5290C6A0D3D08FB869E46EBFBAA9226B6D26830000000000FFFFFFFF98BBD477219A151A1DAF5377B30E8C5F9FB574783943F33AC523EF072FA292BC0000000000FFFFFFFF0338C3EB0B000000002200209B984C7BAE3EFDDC3A3F0A20FF81BFE89ED1FE07FF13E562149EE654BED845DBE70F102401000000160014FA3629F3060B6C1A5A365C30BF66FA00F155CB9EE70F10240100000016001465D4D622585BAF5151DE860B1E7AF58710F20DA20247304402207108DE1563AE311F8D4217E1C0C7463386C1A135BE6AF88CBE8D89A3A08D65090220195A2B0140FB9BA83F20CF45AD6EA088BB0C6860C0D4995F1CF1353739CA65A90121022F8BDE4D1A07209355B4A7250A5C5128E88B84BDDC619AB7CBA8D569B240EFE4024730440220048716EAEE918AEBCB1BFCFAF7564E78293A7BB0164D9A7844E42FCEB5AE393C022022817D033C9DB19C5BDCADD49B7587A810B6FC2264158A59665ABA8AB298455B012103FFF97BD5755EEEA420453A14355235D382F6472F8568A18B2F057A146029755600000000";
 
-        let funding_script_pubkey =
+        let funding_witness_script =
             make_funding_redeemscript(&offer_fund_pubkey, &accept_fund_pubkey);
 
         let mut fund_tx = create_funding_transaction(
-            &funding_script_pubkey,
+            &funding_witness_script,
             total_collateral,
             &[offer_input],
             &[1],
@@ -1614,7 +1622,7 @@ mod tests {
             oracle_sks.push(oracle_kp);
         }
 
-        let funding_script_pubkey = make_funding_redeemscript(
+        let funding_witness_script = make_funding_redeemscript(
             &offer_party_params.fund_pubkey,
             &accept_party_params.fund_pubkey,
         );
@@ -1626,7 +1634,7 @@ mod tests {
             &cets,
             &oracle_infos,
             &offer_fund_sk,
-            &funding_script_pubkey,
+            &funding_witness_script,
             fund_output_value,
             &messages,
         )
@@ -1639,7 +1647,7 @@ mod tests {
             &oracle_sigs,
             &accept_fund_sk,
             &offer_party_params.fund_pubkey,
-            &funding_script_pubkey,
+            &funding_witness_script,
             fund_output_value,
         );
 
@@ -1656,7 +1664,7 @@ mod tests {
                 &cets[i],
                 &oracle_infos,
                 &offer_party_params.fund_pubkey,
-                &funding_script_pubkey,
+                &funding_witness_script,
                 fund_output_value,
                 &messages[i],
             )
@@ -1667,7 +1675,7 @@ mod tests {
             &adapted_sig,
             &cets[0],
             0,
-            &funding_script_pubkey,
+            &funding_witness_script,
             fund_output_value,
             &offer_party_params.fund_pubkey,
         )
@@ -1751,7 +1759,7 @@ mod tests {
             // Check that fund output are in correct order
             assert!(
                 dlc_txs.fund.output[case.expected_fund_output_order[0]].script_pubkey
-                    == dlc_txs.funding_script_pubkey.to_p2wsh()
+                    == dlc_txs.funding_witness_script.to_p2wsh()
             );
             assert!(
                 dlc_txs.fund.output[case.expected_fund_output_order[1]].script_pubkey
@@ -1774,7 +1782,7 @@ mod tests {
 
             crate::util::get_output_for_script_pubkey(
                 &dlc_txs.fund,
-                &dlc_txs.funding_script_pubkey.to_p2wsh(),
+                &dlc_txs.funding_witness_script.to_p2wsh(),
             )
             .expect("Could not find fund output");
         }

@@ -117,7 +117,7 @@ impl EnumDescriptor {
         oracle_infos: &[OracleInfo],
         threshold: usize,
         fund_pubkey: &PublicKey,
-        funding_script_pubkey: &Script,
+        funding_witness_script: &Script,
         fund_output_value: Amount,
         cets: &[Transaction],
         adaptor_sigs: &[EcdsaAdaptorSignature],
@@ -134,7 +134,7 @@ impl EnumDescriptor {
                     &cets[cet_index],
                     adaptor_point,
                     fund_pubkey,
-                    funding_script_pubkey,
+                    funding_witness_script,
                     fund_output_value,
                 )?;
                 Ok(())
@@ -153,7 +153,7 @@ impl EnumDescriptor {
         oracle_infos: &[OracleInfo],
         threshold: usize,
         fund_pubkey: &PublicKey,
-        funding_script_pubkey: &Script,
+        funding_witness_script: &Script,
         fund_output_value: Amount,
         cets: &[Transaction],
         adaptor_sigs: &[EcdsaAdaptorSignature],
@@ -164,7 +164,7 @@ impl EnumDescriptor {
             oracle_infos,
             threshold,
             fund_pubkey,
-            funding_script_pubkey,
+            funding_witness_script,
             fund_output_value,
             cets,
             adaptor_sigs,
@@ -182,7 +182,7 @@ impl EnumDescriptor {
         oracle_infos: &[OracleInfo],
         threshold: usize,
         fund_privkey: &SecretKey,
-        funding_script_pubkey: &Script,
+        funding_witness_script: &Script,
         fund_output_value: Amount,
         cets: &[Transaction],
     ) -> Result<(AdaptorInfo, Vec<EcdsaAdaptorSignature>), Error> {
@@ -192,7 +192,7 @@ impl EnumDescriptor {
             threshold,
             cets,
             fund_privkey,
-            funding_script_pubkey,
+            funding_witness_script,
             fund_output_value,
         )?;
 
@@ -208,7 +208,7 @@ impl EnumDescriptor {
         threshold: usize,
         cets: &[Transaction],
         fund_privkey: &SecretKey,
-        funding_script_pubkey: &Script,
+        funding_witness_script: &Script,
         fund_output_value: Amount,
     ) -> Result<Vec<EcdsaAdaptorSignature>, Error> {
         let mut adaptor_sigs = Vec::new();
@@ -219,7 +219,7 @@ impl EnumDescriptor {
                     &cets[cet_index],
                     adaptor_point,
                     fund_privkey,
-                    funding_script_pubkey,
+                    funding_witness_script,
                     fund_output_value,
                 )?;
                 adaptor_sigs.push(sig);

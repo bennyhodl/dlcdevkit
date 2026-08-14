@@ -59,7 +59,7 @@ pub fn sign_cet(
         counterparty_adaptor_signatures(offer, accept, sign, party);
 
     let total_collateral = offer.get_total_collateral();
-    let funding_script_pubkey = &context.transactions.funding_script_pubkey;
+    let funding_witness_script = &context.transactions.funding_witness_script;
     let fund_value = context.transactions.get_fund_output().value;
     let outcomes: Vec<(usize, &Vec<String>)> = attestations
         .iter()
@@ -75,7 +75,7 @@ pub fn sign_cet(
                 &secp,
                 total_collateral,
                 &counterparty_pubkey,
-                funding_script_pubkey,
+                funding_witness_script,
                 fund_value,
                 &context.transactions.cets[cet_range.clone()],
                 &adaptor_signatures,
@@ -119,7 +119,7 @@ pub fn sign_cet(
             &oracle_signatures,
             funding_secret_key,
             &counterparty_pubkey,
-            funding_script_pubkey,
+            funding_witness_script,
             fund_value,
         )?;
         return Ok(cet);
@@ -153,14 +153,14 @@ pub fn sign_refund(
         Party::Accept => (offer.funding_pubkey, sign.refund_signature),
     };
 
-    let funding_script_pubkey = &context.transactions.funding_script_pubkey;
+    let funding_witness_script = &context.transactions.funding_witness_script;
     let fund_value = context.transactions.get_fund_output().value;
     ddk_dlc::verify_tx_input_sig(
         &secp,
         &counterparty_signature,
         &context.transactions.refund,
         0,
-        funding_script_pubkey,
+        funding_witness_script,
         fund_value,
         &counterparty_pubkey,
     )
@@ -173,7 +173,7 @@ pub fn sign_refund(
         &counterparty_signature,
         &counterparty_pubkey,
         funding_secret_key,
-        funding_script_pubkey,
+        funding_witness_script,
         fund_value,
         0,
     )?;

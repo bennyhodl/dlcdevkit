@@ -84,7 +84,7 @@ impl NumericalDescriptor {
         secp: &Secp256k1<All>,
         total_collateral: Amount,
         fund_pubkey: &PublicKey,
-        funding_script_pubkey: &Script,
+        funding_witness_script: &Script,
         fund_output_value: Amount,
         threshold: usize,
         precomputed_points: &[Vec<Vec<PublicKey>>],
@@ -103,7 +103,7 @@ impl NumericalDescriptor {
                 let index = multi_trie.generate_verify(
                     secp,
                     fund_pubkey,
-                    funding_script_pubkey,
+                    funding_witness_script,
                     fund_output_value,
                     &self.get_range_payouts(total_collateral)?,
                     cets,
@@ -118,7 +118,7 @@ impl NumericalDescriptor {
                 let index = trie.generate_verify(
                     secp,
                     fund_pubkey,
-                    funding_script_pubkey,
+                    funding_witness_script,
                     fund_output_value,
                     &self.get_range_payouts(total_collateral)?,
                     cets,
@@ -138,7 +138,7 @@ impl NumericalDescriptor {
         secp: &Secp256k1<All>,
         total_collateral: Amount,
         fund_priv_key: &SecretKey,
-        funding_script_pubkey: &Script,
+        funding_witness_script: &Script,
         fund_output_value: Amount,
         threshold: usize,
         precomputed_points: &[Vec<Vec<PublicKey>>],
@@ -156,7 +156,7 @@ impl NumericalDescriptor {
                 let adaptor_pairs = multi_trie.generate_sign(
                     secp,
                     fund_priv_key,
-                    funding_script_pubkey,
+                    funding_witness_script,
                     fund_output_value,
                     &self.get_range_payouts(total_collateral)?,
                     cets,
@@ -174,7 +174,7 @@ impl NumericalDescriptor {
                 let sigs = trie.generate_sign(
                     secp,
                     fund_priv_key,
-                    funding_script_pubkey,
+                    funding_witness_script,
                     fund_output_value,
                     &self.get_range_payouts(total_collateral)?,
                     cets,

@@ -240,7 +240,7 @@ where
         secp,
         &buffer_transaction,
         dlc_transactions.get_fund_output().value,
-        &dlc_transactions.funding_script_pubkey,
+        &dlc_transactions.funding_witness_script,
         &signer.get_secret_key()?,
         &offer_revoke_params.publish_pk.inner,
     )?;
@@ -404,7 +404,7 @@ where
         secp,
         &buffer_transaction,
         dlc_transactions.get_fund_output().value,
-        &dlc_transactions.funding_script_pubkey,
+        &dlc_transactions.funding_witness_script,
         &signed_contract.accepted_contract.accept_params.fund_pubkey,
         &offer_revoke_params.publish_pk.inner,
         &accept_channel.buffer_adaptor_signature,
@@ -414,7 +414,7 @@ where
         secp,
         &buffer_transaction,
         dlc_transactions.get_fund_output().value,
-        &dlc_transactions.funding_script_pubkey,
+        &dlc_transactions.funding_witness_script,
         &offer_fund_sk.get_secret_key()?,
         &accept_revoke_params.publish_pk.inner,
     )?;
@@ -450,7 +450,7 @@ where
         temporary_channel_id: offered_channel.temporary_channel_id,
         roll_back_state: None,
         fund_tx: dlc_transactions.fund.clone(),
-        fund_script_pubkey: dlc_transactions.funding_script_pubkey.clone(),
+        fund_script_pubkey: dlc_transactions.funding_witness_script.clone(),
         fund_output_index: dlc_transactions.get_fund_output_index(),
         own_params: offered_contract.offer_params.clone(),
         own_per_update_point: offered_channel.per_update_point,
@@ -507,7 +507,7 @@ where
         secp,
         &accepted_channel.buffer_transaction,
         accepted_contract.dlc_transactions.get_fund_output().value,
-        &accepted_contract.dlc_transactions.funding_script_pubkey,
+        &accepted_contract.dlc_transactions.funding_witness_script,
         &accepted_contract.offered_contract.offer_params.fund_pubkey,
         &own_publish_pk,
         &sign_channel.buffer_adaptor_signature,
@@ -571,7 +571,7 @@ where
             .clone(),
         fund_script_pubkey: accepted_contract
             .dlc_transactions
-            .funding_script_pubkey
+            .funding_witness_script
             .clone(),
         roll_back_state: None,
         own_per_update_seed: accepted_channel.accept_per_update_seed,
@@ -731,7 +731,7 @@ where
 
     let fund_tx = &channel.fund_tx;
     let fund_vout = channel.fund_output_index;
-    let funding_script_pubkey = &channel.fund_script_pubkey;
+    let funding_witness_script = &channel.fund_script_pubkey;
 
     let contract_signer = signer_provider.derive_contract_signer(keys_id)?;
 
@@ -740,7 +740,7 @@ where
         &own_next_per_update_point,
         fund_tx,
         fund_vout,
-        funding_script_pubkey,
+        funding_witness_script,
         &contract_signer.get_secret_key()?,
         &channel.counter_points,
         &channel.own_points,
@@ -824,7 +824,7 @@ where
 
     let fund_tx = &channel.fund_tx;
     let fund_vout = channel.fund_output_index;
-    let funding_script_pubkey = &channel.fund_script_pubkey;
+    let funding_witness_script = &channel.fund_script_pubkey;
 
     let contract_signer = signer_provider.derive_contract_signer(keys_id)?;
 
@@ -833,7 +833,7 @@ where
         &next_per_update_point,
         fund_tx,
         fund_vout,
-        funding_script_pubkey,
+        funding_witness_script,
         &contract_signer.get_secret_key()?,
         &channel.own_points,
         &channel.counter_points,
@@ -1486,7 +1486,7 @@ where
         secp,
         &buffer_transaction,
         dlc_transactions.get_fund_output().value,
-        &dlc_transactions.funding_script_pubkey,
+        &dlc_transactions.funding_witness_script,
         &contract_signer.get_secret_key()?,
         &accept_revoke_params.publish_pk.inner,
     )?;
@@ -2021,7 +2021,7 @@ fn get_settle_tx_and_adaptor_sig(
     own_next_per_update_point: &PublicKey,
     fund_tx: &Transaction,
     fund_vout: usize,
-    funding_script_pubkey: &Script,
+    funding_witness_script: &Script,
     own_fund_sk: &SecretKey,
     offer_points: &PartyBasePoints,
     accept_points: &PartyBasePoints,
@@ -2079,7 +2079,7 @@ fn get_settle_tx_and_adaptor_sig(
             secp,
             &settle_tx,
             fund_tx.output[fund_vout].value,
-            funding_script_pubkey,
+            funding_witness_script,
             &fund_pk,
             &offer_revoke_params.publish_pk.inner,
             adaptor_sig,
@@ -2096,7 +2096,7 @@ fn get_settle_tx_and_adaptor_sig(
         secp,
         &settle_tx,
         fund_tx.output[fund_vout].value,
-        funding_script_pubkey,
+        funding_witness_script,
         own_fund_sk,
         &counter_pk,
     )?;

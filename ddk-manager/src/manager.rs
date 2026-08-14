@@ -475,7 +475,7 @@ where
         .await?;
 
         self.wallet.import_address(&Address::p2wsh(
-            &accepted_contract.dlc_transactions.funding_script_pubkey,
+            &accepted_contract.dlc_transactions.funding_witness_script,
             self.blockchain.get_network()?,
         ))?;
 
@@ -653,7 +653,7 @@ where
             &signed_contract
                 .accepted_contract
                 .dlc_transactions
-                .funding_script_pubkey,
+                .funding_witness_script,
             self.blockchain.get_network()?,
         ))?;
 
@@ -1821,7 +1821,7 @@ where
             .await?;
 
         self.wallet.import_address(&Address::p2wsh(
-            &accepted_contract.dlc_transactions.funding_script_pubkey,
+            &accepted_contract.dlc_transactions.funding_witness_script,
             self.blockchain.get_network()?,
         ))?;
 
@@ -2287,7 +2287,7 @@ where
             &signed_contract
                 .accepted_contract
                 .dlc_transactions
-                .funding_script_pubkey,
+                .funding_witness_script,
             self.blockchain.get_network()?,
         ))?;
 
