@@ -12,13 +12,13 @@ homepage = "https://github.com/bennyhodl/dlcdevkit"
 [workspace.dependencies]
 # Default-features are disabled here so no-std crates (dlc, dlc-messages, dlc-trie)
 # don't pull std. Std-using crates must opt in via `features = ["std"]`.
-ddk = { version = "2.0.0-rc.1", path = "ddk", default-features = false }
-ddk-dlc = { version = "2.0.0-rc.1", path = "dlc", default-features = false }
-ddk-messages = { version = "2.0.0-rc.1", path = "dlc-messages", default-features = false }
-ddk-trie = { version = "2.0.0-rc.1", path = "dlc-trie", default-features = false }
-ddk-manager = { version = "2.0.0-rc.1", path = "ddk-manager", default-features = false }
-ddk-payouts = { version = "2.0.0-rc.1", path = "payouts" }
-kormir = { version = "2.0.0-rc.1", path = "kormir" }
+ddk = { version = "2.0.0-rc.2", path = "ddk", default-features = false }
+ddk-dlc = { version = "2.0.0-rc.2", path = "dlc", default-features = false }
+ddk-messages = { version = "2.0.0-rc.2", path = "dlc-messages", default-features = false }
+ddk-trie = { version = "2.0.0-rc.2", path = "dlc-trie", default-features = false }
+ddk-manager = { version = "2.0.0-rc.2", path = "ddk-manager", default-features = false }
+ddk-payouts = { version = "2.0.0-rc.2", path = "payouts" }
+kormir = { version = "2.0.0-rc.2", path = "kormir" }
 # Path-only (no version): cargo strips it from the published manifests.
 ddk-testenv = { path = "testenv" }
 
