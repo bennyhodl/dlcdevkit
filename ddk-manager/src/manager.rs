@@ -2019,6 +2019,7 @@ where
             CET_NSEQUENCE,
             &self.signer_provider,
             &self.time,
+            crate::contract::chain_hash_from_network(self.blockchain.get_network()?),
         )?;
 
         let counter_party = offered_contract.counter_party;
@@ -2670,6 +2671,7 @@ where
             renew_offer,
             PEER_TIMEOUT,
             &self.time,
+            crate::contract::chain_hash_from_network(self.blockchain.get_network()?),
         )?;
 
         self.store.create_contract(&offered_contract).await?;

@@ -31,12 +31,17 @@ use ddk_messages::{
 use ddk_trie::OracleNumericInfo;
 use std::fmt;
 
-pub(crate) const BITCOIN_CHAINHASH: [u8; 32] = [
+pub(crate) const PROTOCOL_VERSION: u32 = 1;
+
+/// Genesis hash that pre-upgrade code wrote on every `OfferDlc`.
+///
+/// Despite the old `BITCOIN_CHAINHASH` name, this is the regtest genesis
+/// hash. Used only when a stored [`OfferedContract`] has no chain hash, so
+/// rebuilding the offer message matches the bytes that originally went out.
+pub(crate) const LEGACY_CHAINHASH: [u8; 32] = [
     0x06, 0x22, 0x6e, 0x46, 0x11, 0x1a, 0x0b, 0x59, 0xca, 0xaf, 0x12, 0x60, 0x43, 0xeb, 0x5b, 0xbf,
     0x28, 0xc3, 0x4f, 0x3a, 0x5e, 0x33, 0x2a, 0x1f, 0xc7, 0xb2, 0xb7, 0x3c, 0xf1, 0x88, 0x91, 0x0f,
 ];
-
-pub(crate) const PROTOCOL_VERSION: u32 = 1;
 
 #[derive(Debug)]
 pub enum Error {

@@ -119,6 +119,7 @@ where
         refund_delay,
         time.unix_time_now() as u32,
         keys_id,
+        crate::contract::chain_hash_from_network(blockchain.get_network()?),
     );
 
     let per_update_seed = signer_provider.get_new_secret_key()?;
@@ -1110,6 +1111,7 @@ pub fn renew_offer<C: Signing, SP: Deref, T: Deref, X: ContractSigner>(
     cet_nsequence: u32,
     signer_provider: &SP,
     time: &T,
+    chain_hash: [u8; 32],
 ) -> Result<(RenewOffer, OfferedContract), Error>
 where
     SP::Target: ContractSignerProvider<Signer = X>,
@@ -1168,6 +1170,7 @@ where
         refund_delay,
         time.unix_time_now() as u32,
         keys_id,
+        chain_hash,
     );
 
     offered_contract.fund_output_serial_id = 0;
@@ -1219,6 +1222,7 @@ pub fn on_renew_offer<T: Deref>(
     renew_offer: &RenewOffer,
     peer_timeout: u64,
     time: &T,
+    chain_hash: [u8; 32],
 ) -> Result<OfferedContract, Error>
 where
     T::Target: Time,
@@ -1249,6 +1253,7 @@ where
         cet_locktime: renew_offer.cet_locktime,
         refund_locktime: renew_offer.refund_locktime,
         contract_flags: 0,
+        chain_hash: Some(chain_hash),
         keys_id,
     };
 

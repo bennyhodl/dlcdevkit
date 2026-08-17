@@ -271,6 +271,36 @@ mod tests {
         deserialize_contract(&stored.to_vec()).expect("oldest offered contract to deserialize");
     }
 
+    /// The fixtures predate ddk tracking the chain hash, so they carry none.
+    ///
+    /// This is what makes `stored_contracts_round_trip_byte_for_byte` above
+    /// meaningful for the chain hash: a contract with no stored chain hash
+    /// writes exactly the bytes it was read from, so upgrading ddk leaves
+    /// contracts already in a database untouched.
+    #[test]
+    fn stored_contracts_predating_the_chain_hash_carry_none() {
+        for (state, stored) in FIXTURES {
+            let contract = deserialize_contract(&stored.to_vec())
+                .unwrap_or_else(|e| panic!("{state} contract failed to deserialize: {e:?}"));
+
+            let offered = match &contract {
+                Contract::Offered(o) | Contract::Rejected(o) => o,
+                Contract::Accepted(a) => &a.offered_contract,
+                Contract::Signed(s) | Contract::Confirmed(s) | Contract::Refunded(s) => {
+                    &s.accepted_contract.offered_contract
+                }
+                Contract::PreClosed(p) => &p.signed_contract.accepted_contract.offered_contract,
+                Contract::Closed(c) => &c.signed_contract.accepted_contract.offered_contract,
+                Contract::FailedAccept(f) => &f.offered_contract,
+                Contract::FailedSign(f) => &f.accepted_contract.offered_contract,
+            };
+            assert_eq!(
+                offered.chain_hash, None,
+                "{state} fixture unexpectedly carries a chain hash"
+            );
+        }
+    }
+
     /// The announcement inside a stored contract is the one the oracle signed.
     ///
     /// Reading it out and writing it back as a standalone TLV record must reproduce
