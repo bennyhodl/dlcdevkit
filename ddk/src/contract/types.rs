@@ -1,6 +1,5 @@
 //! Parameter and result types for the stateless contract API.
 
-use bitcoin::blockdata::constants::ChainHash;
 use bitcoin::key::rand::{thread_rng, Rng};
 use bitcoin::psbt::Psbt;
 use bitcoin::{Amount, Network, ScriptBuf, Transaction};
@@ -193,7 +192,7 @@ pub fn funding_input(
 /// Returns the DLC chain hash for a network, suitable for
 /// [`CreateOfferParams::chain_hash`].
 pub fn chain_hash_from_network(network: Network) -> [u8; 32] {
-    ChainHash::using_genesis_block_const(network).to_bytes()
+    ddk_manager::contract::chain_hash_from_network(network)
 }
 
 pub(crate) fn network_from_chain_hash(chain_hash: [u8; 32]) -> Option<Network> {

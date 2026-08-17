@@ -94,6 +94,8 @@ where
         party_params.collateral.to_sat(),
     );
 
+    let chain_hash = crate::contract::chain_hash_from_network(blockchain.get_network()?);
+
     let offered_contract = OfferedContract::new(
         id,
         contract_input,
@@ -104,9 +106,10 @@ where
         refund_delay,
         time.unix_time_now() as u32,
         keys_id,
+        chain_hash,
     );
 
-    let offer_msg: OfferDlc = (&offered_contract).into();
+    let offer_msg = OfferDlc::from(&offered_contract);
 
     Ok((offered_contract, offer_msg))
 }

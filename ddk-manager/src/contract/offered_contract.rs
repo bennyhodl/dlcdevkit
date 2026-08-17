@@ -1,7 +1,7 @@
 //! #OfferedContract
 
 use crate::conversion_utils::{
-    get_contract_info_and_announcements, get_tx_input_infos, BITCOIN_CHAINHASH, PROTOCOL_VERSION,
+    get_contract_info_and_announcements, get_tx_input_infos, LEGACY_CHAINHASH, PROTOCOL_VERSION,
 };
 use crate::dlc_input::get_dlc_inputs_from_funding_inputs;
 use crate::utils::get_new_serial_id;
@@ -50,6 +50,14 @@ pub struct OfferedContract {
     /// Feature flags for the contract (bit 0: refund to accepter).
     #[cfg_attr(feature = "use-serde", serde(default))]
     pub contract_flags: u8,
+    /// The genesis block hash of the chain the contract settles on, in DLC
+    /// message byte order, as it appeared on the offer message.
+    ///
+    /// [`None`] for contracts stored before ddk tracked this. Rebuilding an
+    /// offer message from those contracts uses the same genesis hash the old
+    /// conversion always wrote (regtest), so the message bytes stay the same.
+    #[cfg_attr(feature = "use-serde", serde(default))]
+    pub chain_hash: Option<[u8; 32]>,
     /// Keys Id for generating the signers
     pub(crate) keys_id: KeysId,
 }
@@ -93,6 +101,7 @@ impl OfferedContract {
         refund_delay: u32,
         cet_locktime: u32,
         keys_id: KeysId,
+        chain_hash: [u8; 32],
     ) -> Self {
         let total_collateral = contract.offer_collateral + contract.accept_collateral;
 
@@ -124,6 +133,7 @@ impl OfferedContract {
             cet_locktime,
             refund_locktime: latest_maturity + refund_delay,
             contract_flags: contract.contract_flags,
+            chain_hash: Some(chain_hash),
             counter_party: *counter_party,
             keys_id,
         }
@@ -162,9 +172,19 @@ impl OfferedContract {
             funding_inputs: offer_dlc.funding_inputs.clone(),
             total_collateral: offer_dlc.contract_info.get_total_collateral(),
             contract_flags: offer_dlc.contract_flags,
+            chain_hash: Some(offer_dlc.chain_hash),
             counter_party,
             keys_id,
         })
+    }
+
+    /// The chain hash to put on offer messages for this contract.
+    ///
+    /// Contracts stored before ddk tracked the chain hash have none to
+    /// report, so this returns the genesis hash the old conversion always
+    /// wrote.
+    pub(crate) fn offer_chain_hash(&self) -> [u8; 32] {
+        self.chain_hash.unwrap_or(LEGACY_CHAINHASH)
     }
 }
 
@@ -174,7 +194,7 @@ impl From<&OfferedContract> for OfferDlc {
             protocol_version: PROTOCOL_VERSION,
             temporary_contract_id: offered_contract.id,
             contract_flags: offered_contract.contract_flags,
-            chain_hash: BITCOIN_CHAINHASH,
+            chain_hash: offered_contract.offer_chain_hash(),
             contract_info: offered_contract.into(),
             funding_pubkey: offered_contract.offer_params.fund_pubkey,
             payout_spk: offered_contract.offer_params.payout_script_pubkey.clone(),
@@ -194,10 +214,50 @@ impl From<&OfferedContract> for OfferDlc {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::contract::chain_hash_from_network;
+    use bitcoin::Network;
 
     fn validate_offer_test_common(input: &str) {
         let offer: OfferedContract = serde_json::from_str(input).unwrap();
         assert!(offer.validate().is_err());
+    }
+
+    fn offered_contract(chain_hash: Option<[u8; 32]>) -> OfferedContract {
+        let offer_dlc: OfferDlc =
+            serde_json::from_str(include_str!("../../test_inputs/offer_contract.json")).unwrap();
+        let counter_party: PublicKey =
+            "02e6642fd69bd211f93f7f1f36ca51a26a5290eb2dd1b0d8279a87bb0d480c8443"
+                .parse()
+                .unwrap();
+        let mut offered =
+            OfferedContract::try_from_offer_dlc(&offer_dlc, counter_party, [7u8; 32]).unwrap();
+        offered.chain_hash = chain_hash;
+        offered
+    }
+
+    /// The chain hash of a received offer is the one we send back out.
+    #[test]
+    fn stored_chain_hash_survives_the_offer_round_trip() {
+        let mainnet = chain_hash_from_network(Network::Bitcoin);
+        let offered = offered_contract(Some(mainnet));
+        let offer: OfferDlc = (&offered).into();
+
+        assert_eq!(offer.chain_hash, mainnet);
+    }
+
+    /// A contract stored before ddk tracked the chain hash rebuilds the offer
+    /// with the same genesis hash the old conversion always wrote.
+    #[test]
+    fn contract_without_chain_hash_falls_back_to_the_legacy_constant() {
+        let offered = offered_contract(None);
+        let offer: OfferDlc = (&offered).into();
+
+        assert_eq!(offer.chain_hash, LEGACY_CHAINHASH);
+    }
+
+    #[test]
+    fn legacy_chain_hash_is_regtest_genesis() {
+        assert_eq!(LEGACY_CHAINHASH, chain_hash_from_network(Network::Regtest));
     }
 
     #[test]

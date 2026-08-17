@@ -102,6 +102,11 @@ impl Writeable for OfferedContract {
         self.cet_locktime.write(w)?;
         self.refund_locktime.write(w)?;
         self.contract_flags.write(w)?;
+        // Written only when present, so contracts stored before ddk tracked
+        // the chain hash keep re-serializing to their original bytes.
+        if let Some(chain_hash) = self.chain_hash {
+            chain_hash.write(w)?;
+        }
         self.counter_party.write(w)?;
         self.keys_id.write(w)?;
         Ok(())
@@ -121,24 +126,44 @@ impl Readable for OfferedContract {
         let cet_locktime: u32 = Readable::read(r)?;
         let refund_locktime: u32 = Readable::read(r)?;
 
-        // Backward compatibility: contract_flags (u8) was inserted between
-        // refund_locktime and counter_party. Peek one byte: 0x02/0x03 means
-        // old format (compressed pubkey prefix), 0x00/0x01 means new format
-        // (contract_flags value).
+        // Backward compatibility: contract_flags (u8) and later chain_hash
+        // ([u8; 32]) were inserted between refund_locktime and counter_party,
+        // and either may be absent in a stored contract. A compressed pubkey
+        // starts with 0x02/0x03, while contract_flags is 0x00/0x01 and no
+        // supported network's chain hash starts with those bytes (see the
+        // chain_hash_first_byte_is_not_a_pubkey_prefix test), so peeking one
+        // byte tells the formats apart at each step.
         let mut peek = [0u8; 1];
         r.read_exact(&mut peek)?;
-        let (contract_flags, counter_party) = if peek[0] == 0x02 || peek[0] == 0x03 {
-            // Old format: this byte is the start of counter_party pubkey
-            let mut pubkey_bytes = [0u8; 33];
-            pubkey_bytes[0] = peek[0];
-            r.read_exact(&mut pubkey_bytes[1..])?;
-            let pk = secp256k1_zkp::PublicKey::from_slice(&pubkey_bytes)
-                .map_err(|_| DecodeError::InvalidValue)?;
-            (0u8, pk)
+        let read_pubkey_from_first_byte =
+            |first: u8, r: &mut R| -> Result<secp256k1_zkp::PublicKey, DecodeError> {
+                let mut pubkey_bytes = [0u8; 33];
+                pubkey_bytes[0] = first;
+                r.read_exact(&mut pubkey_bytes[1..])?;
+                secp256k1_zkp::PublicKey::from_slice(&pubkey_bytes)
+                    .map_err(|_| DecodeError::InvalidValue)
+            };
+        let (contract_flags, chain_hash, counter_party) = if peek[0] == 0x02 || peek[0] == 0x03 {
+            // Stored without contract_flags or chain_hash: this byte starts
+            // the counter_party pubkey.
+            let pk = read_pubkey_from_first_byte(peek[0], r)?;
+            (0u8, None, pk)
         } else {
-            // New format: this byte is contract_flags
-            let counter_party: secp256k1_zkp::PublicKey = Readable::read(r)?;
-            (peek[0], counter_party)
+            // This byte is contract_flags; peek again to tell whether
+            // chain_hash follows or counter_party starts directly.
+            let contract_flags = peek[0];
+            r.read_exact(&mut peek)?;
+            if peek[0] == 0x02 || peek[0] == 0x03 {
+                // Stored with contract_flags but without chain_hash.
+                let pk = read_pubkey_from_first_byte(peek[0], r)?;
+                (contract_flags, None, pk)
+            } else {
+                let mut chain_hash = [0u8; 32];
+                chain_hash[0] = peek[0];
+                r.read_exact(&mut chain_hash[1..])?;
+                let counter_party: secp256k1_zkp::PublicKey = Readable::read(r)?;
+                (contract_flags, Some(chain_hash), counter_party)
+            }
         };
 
         let keys_id: KeysId = Readable::read(r)?;
@@ -155,6 +180,7 @@ impl Readable for OfferedContract {
             cet_locktime,
             refund_locktime,
             contract_flags,
+            chain_hash,
             counter_party,
             keys_id,
         })
@@ -335,4 +361,118 @@ fn read_multi_oracle_trie_with_diff<R: Read>(
 ) -> Result<MultiOracleTrieWithDiff, DecodeError> {
     let dump = multi_oracle_trie_with_diff_dump::read(reader)?;
     Ok(MultiOracleTrieWithDiff::from_dump(dump))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::contract::chain_hash_from_network;
+    use bitcoin::Network;
+    use lightning::io::Cursor;
+
+    fn offered_contract() -> OfferedContract {
+        let offer_dlc: ddk_messages::OfferDlc =
+            serde_json::from_str(include_str!("../../test_inputs/offer_contract.json")).unwrap();
+        let counter_party = "02e6642fd69bd211f93f7f1f36ca51a26a5290eb2dd1b0d8279a87bb0d480c8443"
+            .parse()
+            .unwrap();
+        OfferedContract::try_from_offer_dlc(&offer_dlc, counter_party, [7u8; 32]).unwrap()
+    }
+
+    /// Serializes `contract` in the formats used before chain_hash (and,
+    /// with `with_contract_flags` false, before contract_flags) existed.
+    fn serialize_pre_chain_hash(contract: &OfferedContract, with_contract_flags: bool) -> Vec<u8> {
+        let mut w = Vec::new();
+        contract.id.write(&mut w).unwrap();
+        contract.is_offer_party.write(&mut w).unwrap();
+        write_vec(&contract.contract_info, &mut w).unwrap();
+        ddk_messages::ser_impls::party_params::write(&contract.offer_params, &mut w).unwrap();
+        contract.total_collateral.write(&mut w).unwrap();
+        write_vec(&contract.funding_inputs, &mut w).unwrap();
+        contract.fund_output_serial_id.write(&mut w).unwrap();
+        contract.fee_rate_per_vb.write(&mut w).unwrap();
+        contract.cet_locktime.write(&mut w).unwrap();
+        contract.refund_locktime.write(&mut w).unwrap();
+        if with_contract_flags {
+            contract.contract_flags.write(&mut w).unwrap();
+        }
+        contract.counter_party.write(&mut w).unwrap();
+        contract.keys_id.write(&mut w).unwrap();
+        w
+    }
+
+    #[test]
+    fn chain_hash_survives_storage_round_trip() {
+        let mut contract = offered_contract();
+        contract.chain_hash = Some(chain_hash_from_network(Network::Bitcoin));
+        contract.contract_flags = 1;
+
+        let serialized = contract.serialize().unwrap();
+        let read = OfferedContract::deserialize(&mut Cursor::new(&serialized)).unwrap();
+
+        assert_eq!(read.chain_hash, contract.chain_hash);
+        assert_eq!(read.contract_flags, contract.contract_flags);
+        assert_eq!(read.counter_party, contract.counter_party);
+        assert_eq!(read.keys_id, contract.keys_id);
+    }
+
+    #[test]
+    fn contract_stored_without_chain_hash_reads_as_none() {
+        let mut contract = offered_contract();
+        contract.contract_flags = 1;
+        let serialized = serialize_pre_chain_hash(&contract, true);
+
+        let read = OfferedContract::deserialize(&mut Cursor::new(&serialized)).unwrap();
+
+        assert_eq!(read.chain_hash, None);
+        assert_eq!(read.contract_flags, contract.contract_flags);
+        assert_eq!(read.counter_party, contract.counter_party);
+        assert_eq!(read.keys_id, contract.keys_id);
+    }
+
+    #[test]
+    fn contract_stored_without_contract_flags_reads_as_none() {
+        let contract = offered_contract();
+        let serialized = serialize_pre_chain_hash(&contract, false);
+
+        let read = OfferedContract::deserialize(&mut Cursor::new(&serialized)).unwrap();
+
+        assert_eq!(read.chain_hash, None);
+        assert_eq!(read.contract_flags, 0);
+        assert_eq!(read.counter_party, contract.counter_party);
+        assert_eq!(read.keys_id, contract.keys_id);
+    }
+
+    /// A contract with no chain hash writes the bytes it was stored as, so
+    /// upgrading ddk does not rewrite contracts already in a database.
+    #[test]
+    fn contract_without_chain_hash_reserializes_unchanged() {
+        let mut contract = offered_contract();
+        contract.contract_flags = 1;
+        let stored = serialize_pre_chain_hash(&contract, true);
+
+        let read = OfferedContract::deserialize(&mut Cursor::new(&stored)).unwrap();
+
+        assert_eq!(read.serialize().unwrap(), stored);
+    }
+
+    /// The backward-compatible read of [`OfferedContract`] tells a chain hash
+    /// apart from a compressed pubkey by its first byte, so no supported
+    /// network's chain hash may start with a pubkey prefix (0x02/0x03).
+    #[test]
+    fn chain_hash_first_byte_is_not_a_pubkey_prefix() {
+        for network in [
+            Network::Bitcoin,
+            Network::Testnet,
+            Network::Testnet4,
+            Network::Signet,
+            Network::Regtest,
+        ] {
+            let first = chain_hash_from_network(network)[0];
+            assert!(
+                first != 0x02 && first != 0x03,
+                "{network} chain hash starts with a pubkey prefix byte"
+            );
+        }
+    }
 }

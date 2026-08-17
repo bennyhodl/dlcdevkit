@@ -27,6 +27,12 @@ pub mod ser;
 pub mod signed_contract;
 pub(crate) mod utils;
 
+/// The genesis block hash identifying `network`, in the byte order DLC
+/// messages use for their `chain_hash` field.
+pub fn chain_hash_from_network(network: bitcoin::Network) -> [u8; 32] {
+    bitcoin::blockdata::constants::ChainHash::using_genesis_block_const(network).to_bytes()
+}
+
 /// Converts wire-level contract information into the execution information
 /// required to construct CETs and adaptor signatures.
 pub fn execution_contract_infos(

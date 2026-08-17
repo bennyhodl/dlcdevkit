@@ -48,7 +48,7 @@ impl OfferedChannel {
         OfferChannel {
             protocol_version: crate::conversion_utils::PROTOCOL_VERSION,
             contract_flags: offered_contract.contract_flags,
-            chain_hash: crate::conversion_utils::BITCOIN_CHAINHASH,
+            chain_hash: offered_contract.offer_chain_hash(),
             temporary_contract_id: offered_contract.id,
             temporary_channel_id: self.temporary_channel_id,
             contract_info: offered_contract.into(),
@@ -123,6 +123,7 @@ impl OfferedChannel {
             funding_inputs: offer_channel.funding_inputs.clone(),
             total_collateral: offer_channel.contract_info.get_total_collateral(),
             contract_flags: offer_channel.contract_flags,
+            chain_hash: Some(offer_channel.chain_hash),
             keys_id,
         };
 
