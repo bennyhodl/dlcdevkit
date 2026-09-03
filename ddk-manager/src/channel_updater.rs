@@ -93,7 +93,7 @@ where
     T::Target: Time,
 {
     let id = get_new_temporary_id();
-    let keys_id = signer_provider.derive_signer_key_id(true, id);
+    let keys_id = signer_provider.derive_signer_key_id(id);
     let signer = signer_provider.derive_contract_signer(keys_id)?;
     let total_collateral = contract.offer_collateral + contract.accept_collateral;
     let (offer_params, funding_inputs_info) = crate::utils::get_party_params(

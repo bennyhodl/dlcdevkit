@@ -264,7 +264,8 @@ async fn main() {
 
     // Offer side: sign the new wallet UTXO, then produce this party's half of the
     // prior 2-of-2. The prior funding key is RE-DERIVED from `temp_id_a` — not
-    // stored — via the provider's `dlc_input_signing_key` helper.
+    // stored — via the provider's `dlc_input_signing_key` helper. The funding
+    // pubkey from the prior offer selects the key scheme the prior contract used.
     let mut offer_b_psbt = create_funding_psbt(&offer_b, &accept_b).unwrap();
     signing::sign_funding_psbt_with_wallet(
         &offer_b,
@@ -276,7 +277,7 @@ async fn main() {
     .await
     .expect("offer B wallet signing");
     let offer_prior_key = offerer_keys
-        .dlc_input_signing_key(temp_id_a, splice_serial)
+        .dlc_input_signing_key(temp_id_a, &offer_a.funding_pubkey, splice_serial)
         .expect("recover offer prior key");
     let sign_b = sign_accept_spliced(
         &offer_b,
@@ -291,7 +292,7 @@ async fn main() {
     // again from the RE-DERIVED prior funding key.
     let accept_b_psbt = create_funding_psbt(&offer_b, &accept_b).unwrap();
     let accept_prior_key = accepter_keys
-        .dlc_input_signing_key(temp_id_a, splice_serial)
+        .dlc_input_signing_key(temp_id_a, &accept_a.funding_pubkey, splice_serial)
         .expect("recover accept prior key");
     let funding_tx_b = finalize_sign_spliced(
         &offer_b,

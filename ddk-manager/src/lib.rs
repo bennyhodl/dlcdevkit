@@ -11,6 +11,9 @@
 #![deny(dead_code)]
 #![deny(unused_imports)]
 #![deny(missing_docs)]
+// Deprecated items in the key-provider API are unlock-only compatibility paths.
+// Naming one is a hard error in this crate.
+#![deny(deprecated)]
 // Without the `manager` feature the async application layer (`manager` /
 // `channel_updater`) is compiled out, leaving some protocol helpers with no
 // callers in this subset build. The default build compiles the superset and
@@ -135,8 +138,12 @@ pub trait ContractSignerProvider {
     /// A type which implements [`ContractSigner`]
     type Signer: ContractSigner;
 
-    /// Create a keys id for deriving a `Signer`.
-    fn derive_signer_key_id(&self, is_offer_party: bool, temp_id: [u8; 32]) -> [u8; 32];
+    /// Create a keys id for deriving a `Signer` from a contract's temporary id.
+    ///
+    /// Both sides of a contract call this with the same `temp_id`. The id is a
+    /// pure function of `temp_id` and the provider's own key material, so the
+    /// two parties still derive unrelated keys.
+    fn derive_signer_key_id(&self, temp_id: [u8; 32]) -> [u8; 32];
 
     /// Derives the private key material backing a `Signer`.
     fn derive_contract_signer(&self, key_id: [u8; 32]) -> Result<Self::Signer, Error>;
@@ -334,9 +341,8 @@ where
 {
     type Signer = X;
 
-    fn derive_signer_key_id(&self, is_offer_party: bool, temp_id: [u8; 32]) -> KeysId {
-        self.signer_provider
-            .derive_signer_key_id(is_offer_party, temp_id)
+    fn derive_signer_key_id(&self, temp_id: [u8; 32]) -> KeysId {
+        self.signer_provider.derive_signer_key_id(temp_id)
     }
 
     fn derive_contract_signer(&self, key_id: KeysId) -> Result<Self::Signer, Error> {

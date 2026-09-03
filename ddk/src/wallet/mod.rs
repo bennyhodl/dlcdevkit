@@ -682,22 +682,14 @@ impl FeeEstimator for DlcDevKitWallet {
 impl ddk_manager::ContractSignerProvider for DlcDevKitWallet {
     type Signer = SimpleSigner;
 
-    /// Generates a deterministic key ID for contract signing.
+    /// Generates a deterministic key ID for contract signing by delegating to
+    /// the [`ContractKeyProvider`].
     ///
-    /// This method creates a unique key identifier for each contract by hashing
-    /// the temporary contract ID with random bytes. The resulting key ID is used
-    /// to derive signing keys for the specific contract.
-    ///
-    /// # Arguments
-    /// * `_is_offer_party` - Whether this party is the offer party (currently unused)
-    /// * `temp_id` - Temporary contract ID from the DLC protocol
-    ///
-    /// # Returns
-    /// A 32-byte key ID for the contract
+    /// The key ID is `SHA256(fingerprint || temp_id || tag)`, so the same
+    /// temporary contract ID gives a different key ID in every wallet.
     #[tracing::instrument(skip(self))]
-    fn derive_signer_key_id(&self, is_offer_party: bool, temp_id: [u8; 32]) -> [u8; 32] {
-        self.contract_keys
-            .derive_signer_key_id(is_offer_party, temp_id)
+    fn derive_signer_key_id(&self, temp_id: [u8; 32]) -> [u8; 32] {
+        self.contract_keys.derive_signer_key_id(temp_id)
     }
 
     /// Creates a contract signer from a key ID by delegating to the
@@ -977,7 +969,7 @@ mod tests {
         temp_key_id
             .try_fill(&mut bitcoin::key::rand::thread_rng())
             .unwrap();
-        let gen_key_id = test.derive_signer_key_id(true, temp_key_id);
+        let gen_key_id = test.derive_signer_key_id(temp_key_id);
         let key_info = test.derive_contract_signer(gen_key_id);
         assert!(key_info.is_ok())
     }
@@ -1016,13 +1008,10 @@ mod tests {
 
         let temp_id = [0x55; 32];
 
-        // Test both offer party values produce same result (since _is_offer_party is unused)
-        let key_id1 = wallet.derive_signer_key_id(true, temp_id);
-        let key_id2 = wallet.derive_signer_key_id(false, temp_id);
-        let key_id3 = wallet.derive_signer_key_id(true, temp_id); // repeat with same params
+        let key_id1 = wallet.derive_signer_key_id(temp_id);
+        let key_id2 = wallet.derive_signer_key_id(temp_id);
 
-        assert_eq!(key_id1, key_id2); // is_offer_party doesn't affect result
-        assert_eq!(key_id1, key_id3); // deterministic
+        assert_eq!(key_id1, key_id2); // deterministic
     }
 
     #[tokio::test]
@@ -1032,8 +1021,8 @@ mod tests {
         let temp_id1 = [0x11; 32];
         let temp_id2 = [0x22; 32];
 
-        let key_id1 = wallet.derive_signer_key_id(true, temp_id1);
-        let key_id2 = wallet.derive_signer_key_id(true, temp_id2);
+        let key_id1 = wallet.derive_signer_key_id(temp_id1);
+        let key_id2 = wallet.derive_signer_key_id(temp_id2);
 
         // Different temp_ids should produce different key_ids
         assert_ne!(key_id1, key_id2);
@@ -1047,8 +1036,8 @@ mod tests {
         let temp_id = [0x99; 32];
 
         // Same temp_id should produce different key_ids for different wallets
-        let key_id1 = wallet1.derive_signer_key_id(true, temp_id);
-        let key_id2 = wallet2.derive_signer_key_id(true, temp_id);
+        let key_id1 = wallet1.derive_signer_key_id(temp_id);
+        let key_id2 = wallet2.derive_signer_key_id(temp_id);
 
         assert_ne!(
             key_id1, key_id2,
@@ -1061,7 +1050,7 @@ mod tests {
         let wallet = create_wallet().await;
 
         let temp_id = [0x77; 32];
-        let key_id = wallet.derive_signer_key_id(true, temp_id);
+        let key_id = wallet.derive_signer_key_id(temp_id);
         let signer = wallet
             .derive_contract_signer(key_id)
             .expect("Should create valid signer");
@@ -1089,11 +1078,11 @@ mod tests {
         let temp_id = [0xAB; 32];
 
         // Full workflow: temp_id -> key_id -> signer
-        let key_id = wallet.derive_signer_key_id(true, temp_id);
+        let key_id = wallet.derive_signer_key_id(temp_id);
         let signer1 = wallet.derive_contract_signer(key_id).unwrap();
 
         // Repeat the workflow
-        let key_id2 = wallet.derive_signer_key_id(true, temp_id);
+        let key_id2 = wallet.derive_signer_key_id(temp_id);
         let signer2 = wallet.derive_contract_signer(key_id2).unwrap();
 
         // Everything should be identical
@@ -1111,8 +1100,8 @@ mod tests {
         let temp_id1 = [0x01; 32];
         let temp_id2 = [0x02; 32];
 
-        let key_id1 = wallet.derive_signer_key_id(true, temp_id1);
-        let key_id2 = wallet.derive_signer_key_id(true, temp_id2);
+        let key_id1 = wallet.derive_signer_key_id(temp_id1);
+        let key_id2 = wallet.derive_signer_key_id(temp_id2);
         let signer1 = wallet.derive_contract_signer(key_id1).unwrap();
         let signer2 = wallet.derive_contract_signer(key_id2).unwrap();
 
@@ -1135,7 +1124,7 @@ mod tests {
             let mut temp_id = [0u8; 32];
             temp_id[0..4].copy_from_slice(&i.to_be_bytes());
 
-            let key_id = wallet.derive_signer_key_id(true, temp_id);
+            let key_id = wallet.derive_signer_key_id(temp_id);
             let signer = wallet.derive_contract_signer(key_id).unwrap();
             let public_key = signer.get_public_key(&wallet.secp).unwrap();
 
@@ -1162,7 +1151,7 @@ mod tests {
 
         // Simulate creating a contract
         let temp_id = [0xDE, 0xAD, 0xBE, 0xEF].repeat(8).try_into().unwrap();
-        let key_id = wallet.derive_signer_key_id(true, temp_id);
+        let key_id = wallet.derive_signer_key_id(temp_id);
         let original_signer = wallet.derive_contract_signer(key_id).unwrap();
         let target_public_key = original_signer.get_public_key(&wallet.secp).unwrap();
 
@@ -1176,7 +1165,7 @@ mod tests {
         );
 
         // Also test that we can recover from just the temp_id
-        let recovered_key_id = wallet.derive_signer_key_id(true, temp_id);
+        let recovered_key_id = wallet.derive_signer_key_id(temp_id);
         let temp_id_recovered_signer = wallet.derive_contract_signer(recovered_key_id).unwrap();
 
         assert_eq!(key_id, recovered_key_id);

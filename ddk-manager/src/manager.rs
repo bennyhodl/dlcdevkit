@@ -552,7 +552,7 @@ where
         offered_message.validate(&self.secp, REFUND_DELAY, REFUND_DELAY * 2)?;
         let keys_id = self
             .signer_provider
-            .derive_signer_key_id(false, offered_message.temporary_contract_id);
+            .derive_signer_key_id(offered_message.temporary_contract_id);
         let contract: OfferedContract =
             OfferedContract::try_from_offer_dlc(offered_message, counter_party, keys_id)?;
         contract.validate()?;
@@ -2299,7 +2299,7 @@ where
 
         let keys_id = self
             .signer_provider
-            .derive_signer_key_id(false, offer_channel.temporary_contract_id);
+            .derive_signer_key_id(offer_channel.temporary_contract_id);
         let (channel, contract) =
             OfferedChannel::from_offer_channel(offer_channel, counter_party, keys_id)?;
 

@@ -157,7 +157,7 @@ pub use accept::{accept_offer, create_dlc_transactions};
 pub use create::{create_offer, validate_offer};
 pub use error::ContractError;
 pub use finalize::{finalize_sign, finalize_sign_spliced};
-pub use keys::ContractKeyProvider;
+pub use keys::{ContractKeyProvider, KeyScheme};
 pub use psbt::create_funding_psbt;
 pub use settle::{sign_cet, sign_refund};
 pub use sign::{sign_accept, sign_accept_spliced};
