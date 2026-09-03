@@ -8,12 +8,18 @@ use bitcoin::Amount;
 use bitcoin::{Script, Transaction};
 use ddk_dlc::{OracleInfo, Payout};
 use ddk_messages::oracle_msgs;
-use ddk_messages::oracle_msgs::{EventDescriptor, OracleAnnouncement};
+use ddk_messages::oracle_msgs::{EventDescriptor, OracleAnnouncement, OracleAttestation};
 use ddk_trie::{DlcTrie, RangeInfo};
+use secp256k1_zkp::schnorr::Signature as SchnorrSignature;
 use secp256k1_zkp::{All, EcdsaAdaptorSignature, PublicKey, Secp256k1, SecretKey, Verification};
 use std::ops::Deref;
 
 pub(super) type OracleIndexAndPrefixLength = Vec<(usize, usize)>;
+
+/// The CET and adaptor signature indexes for an attested outcome, with the
+/// oracle signatures that decrypt the adaptor signature: one set per oracle of
+/// the matched combination.
+pub type RangeInfoAndOracleSignatures = (RangeInfo, Vec<Vec<SchnorrSignature>>);
 
 /// Contains information about the contract conditions and oracles used.
 #[derive(Clone, Debug)]
@@ -184,6 +190,39 @@ impl ContractInfo {
         }
     }
 
+    /// Finds the CET matching the attested outcomes and selects the oracle
+    /// signatures that decrypt its adaptor signature.
+    ///
+    /// The adaptor secret is the sum of one signature set per oracle of the
+    /// combination the adaptor point was built for, so the attestations must
+    /// bind to that index set: every oracle index must be distinct, and every
+    /// oracle of the matched combination must have an attestation with at least
+    /// as many signatures as the matched outcome prefix. Attestations from
+    /// oracles outside the matched combination are not used, so a
+    /// `threshold`-of-`n` contract accepts up to `n` attestations.
+    ///
+    /// Returns `Ok(None)` when no outcome of this contract info matches the
+    /// attestations.
+    pub fn get_range_info_and_oracle_signatures(
+        &self,
+        adaptor_info: &AdaptorInfo,
+        attestations: &[(usize, OracleAttestation)],
+        adaptor_sig_start: usize,
+    ) -> Result<Option<RangeInfoAndOracleSignatures>, Error> {
+        ensure_distinct_oracle_indices(attestations)?;
+        let outcomes: Vec<(usize, &Vec<String>)> = attestations
+            .iter()
+            .map(|(index, attestation)| (*index, &attestation.outcomes))
+            .collect();
+        let Some((signature_infos, range_info)) =
+            self.get_range_info_for_outcome(adaptor_info, &outcomes, adaptor_sig_start)
+        else {
+            return Ok(None);
+        };
+        let signatures = select_oracle_signatures(&signature_infos, attestations)?;
+        Ok(Some((range_info, signatures)))
+    }
+
     /// Verifies the given adaptor signatures are valid with respect to the given
     /// adaptor info.
     #[allow(clippy::too_many_arguments)]
@@ -328,9 +367,193 @@ fn get_digits_outcome(input: &[String]) -> Result<Vec<usize>, crate::error::Erro
         .collect::<Result<Vec<usize>, crate::error::Error>>()
 }
 
+/// Checks that no oracle index appears more than once in `attestations`.
+///
+/// A repeated oracle would count twice towards the threshold and its
+/// signatures would be summed twice into the adaptor secret.
+pub fn ensure_distinct_oracle_indices(
+    attestations: &[(usize, OracleAttestation)],
+) -> Result<(), Error> {
+    let mut indices: Vec<usize> = attestations.iter().map(|(index, _)| *index).collect();
+    indices.sort_unstable();
+    match indices.windows(2).find(|pair| pair[0] == pair[1]) {
+        Some(pair) => Err(Error::InvalidParameters(format!(
+            "Oracle {} has more than one attestation",
+            pair[0]
+        ))),
+        None => Ok(()),
+    }
+}
+
+/// Selects, for each `(oracle index, prefix length)` pair of a matched outcome,
+/// the first `prefix length` signatures of that oracle's attestation.
+///
+/// Each oracle in `signature_infos` must have exactly one attestation carrying
+/// at least `prefix length` signatures. A missing oracle or a short attestation
+/// is an error, not a silently shorter signature set.
+pub fn select_oracle_signatures(
+    signature_infos: &[(usize, usize)],
+    attestations: &[(usize, OracleAttestation)],
+) -> Result<Vec<Vec<SchnorrSignature>>, Error> {
+    ensure_distinct_oracle_indices(attestations)?;
+    signature_infos
+        .iter()
+        .map(|(oracle_index, prefix_length)| {
+            let (_, attestation) = attestations
+                .iter()
+                .find(|(index, _)| index == oracle_index)
+                .ok_or_else(|| {
+                    Error::InvalidParameters(format!(
+                        "No attestation for oracle {oracle_index}, which the matched outcome requires"
+                    ))
+                })?;
+            if attestation.signatures.len() < *prefix_length {
+                return Err(Error::InvalidParameters(format!(
+                    "Attestation from oracle {oracle_index} has {} signatures but the matched outcome needs {prefix_length}",
+                    attestation.signatures.len()
+                )));
+            }
+            Ok(attestation.signatures[..*prefix_length].to_vec())
+        })
+        .collect()
+}
+
 fn outcomes_to_digits(outcomes: &[(usize, &Vec<String>)]) -> Vec<(usize, Vec<usize>)> {
     outcomes
         .iter()
         .filter_map(|(x, path)| Some((*x, get_digits_outcome(path).ok()?)))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::contract::enum_descriptor::EnumDescriptor;
+    use ddk_dlc::{EnumerationPayout, Payout};
+    use ddk_messages::oracle_msgs::{EnumEventDescriptor, OracleEvent};
+    use secp256k1_zkp::XOnlyPublicKey;
+    use std::str::FromStr;
+
+    const NB_ORACLES: usize = 3;
+    const THRESHOLD: usize = 2;
+
+    fn oracle_public_key() -> XOnlyPublicKey {
+        XOnlyPublicKey::from_str("e6642fd69bd211f93f7f1f36ca51a26a5290eb2dd1b0d8279a87bb0d480c8443")
+            .unwrap()
+    }
+
+    fn signature() -> SchnorrSignature {
+        SchnorrSignature::from_str("6470FD1303DDA4FDA717B9837153C24A6EAB377183FC438F939E0ED2B620E9EE5077C4A8B8DCA28963D772A94F5F0DDF598E1C47C137F91933274C7C3EDADCE8").unwrap()
+    }
+
+    /// An enum contract on `NB_ORACLES` oracles with a `THRESHOLD`. The
+    /// signature selection never verifies signatures, so placeholder keys and
+    /// signatures are enough.
+    fn enum_contract_info() -> ContractInfo {
+        let oracle_announcements = (0..NB_ORACLES)
+            .map(|_| OracleAnnouncement {
+                announcement_signature: signature(),
+                oracle_public_key: oracle_public_key(),
+                oracle_event: OracleEvent {
+                    oracle_nonces: vec![oracle_public_key()],
+                    event_maturity_epoch: 0,
+                    event_descriptor: EventDescriptor::EnumEvent(EnumEventDescriptor {
+                        outcomes: vec!["a".to_string(), "b".to_string()],
+                    }),
+                    event_id: "test".to_string(),
+                },
+            })
+            .collect();
+        ContractInfo {
+            contract_descriptor: ContractDescriptor::Enum(EnumDescriptor {
+                outcome_payouts: vec![
+                    EnumerationPayout {
+                        outcome: "a".to_string(),
+                        payout: Payout {
+                            offer: Amount::from_sat(100),
+                            accept: Amount::ZERO,
+                        },
+                    },
+                    EnumerationPayout {
+                        outcome: "b".to_string(),
+                        payout: Payout {
+                            offer: Amount::ZERO,
+                            accept: Amount::from_sat(100),
+                        },
+                    },
+                ],
+            }),
+            oracle_announcements,
+            threshold: THRESHOLD,
+        }
+    }
+
+    fn attestation(outcome: &str) -> OracleAttestation {
+        OracleAttestation {
+            event_id: "test".to_string(),
+            oracle_public_key: oracle_public_key(),
+            signatures: vec![signature()],
+            outcomes: vec![outcome.to_string()],
+        }
+    }
+
+    fn lookup(
+        attestations: &[(usize, OracleAttestation)],
+    ) -> Result<Option<RangeInfoAndOracleSignatures>, Error> {
+        enum_contract_info().get_range_info_and_oracle_signatures(
+            &AdaptorInfo::Enum,
+            attestations,
+            0,
+        )
+    }
+
+    #[test]
+    fn exact_threshold_attestations_select_one_signature_set_per_oracle() {
+        let (range_info, signatures) = lookup(&[(1, attestation("a")), (2, attestation("a"))])
+            .unwrap()
+            .expect("outcome a has a CET");
+        assert_eq!(range_info.cet_index, 0);
+        assert_eq!(signatures.len(), THRESHOLD);
+        assert!(signatures.iter().all(|set| set.len() == 1));
+    }
+
+    #[test]
+    fn attestations_beyond_the_threshold_are_not_summed_into_the_secret() {
+        let (_, signatures) = lookup(&[
+            (0, attestation("a")),
+            (1, attestation("a")),
+            (2, attestation("a")),
+        ])
+        .unwrap()
+        .expect("outcome a has a CET");
+        assert_eq!(signatures.len(), THRESHOLD);
+    }
+
+    #[test]
+    fn a_duplicated_oracle_index_is_rejected() {
+        let error = lookup(&[(0, attestation("a")), (0, attestation("a"))]).unwrap_err();
+        assert!(matches!(error, Error::InvalidParameters(_)), "{error}");
+    }
+
+    #[test]
+    fn an_attestation_with_too_few_signatures_is_rejected() {
+        let mut unsigned = attestation("a");
+        unsigned.signatures.clear();
+        let error = lookup(&[(0, unsigned), (1, attestation("a"))]).unwrap_err();
+        assert!(matches!(error, Error::InvalidParameters(_)), "{error}");
+    }
+
+    #[test]
+    fn an_unknown_outcome_has_no_range_info() {
+        assert!(lookup(&[(0, attestation("c")), (1, attestation("c"))])
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn a_missing_oracle_in_the_matched_combination_is_rejected() {
+        let error =
+            select_oracle_signatures(&[(0, 1), (1, 1)], &[(0, attestation("a"))]).unwrap_err();
+        assert!(matches!(error, Error::InvalidParameters(_)), "{error}");
+    }
 }

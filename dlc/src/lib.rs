@@ -974,23 +974,28 @@ pub fn create_cet_adaptor_sigs_from_oracle_info(
         .collect()
 }
 
+/// Sums the `s` values of the given oracle signatures into the secret that
+/// decrypts a CET adaptor signature.
+///
+/// Every `s` value must be a valid non-zero scalar and so must the running
+/// sum. A malformed signature is reported as an error, never unwrapped, since
+/// attestations can come from outside the process.
 fn signatures_to_secret(signatures: &[Vec<SchnorrSignature>]) -> Result<SecretKey, Error> {
     let s_values = signatures
         .iter()
         .flatten()
-        .map(|x| match secp_utils::schnorrsig_decompose(x) {
-            Ok(v) => Ok(v.1),
-            Err(err) => Err(err),
-        })
+        .map(|x| secp_utils::schnorrsig_decompose(x).map(|(_, s)| s))
         .collect::<Result<Vec<&[u8]>, Error>>()?;
-    let secret = SecretKey::from_slice(s_values[0])?;
+    let (first, rest) = s_values.split_first().ok_or_else(|| {
+        Error::InvalidArgument("No oracle signatures to build the adaptor secret from".to_string())
+    })?;
+    let secret = SecretKey::from_slice(first)?;
 
-    let result = s_values.iter().skip(1).fold(secret, |accum, s| {
-        let sec = SecretKey::from_slice(s).unwrap();
-        accum.add_tweak(&Scalar::from(sec)).unwrap()
-    });
-
-    Ok(result)
+    rest.iter()
+        .try_fold(secret, |accum, s| -> Result<SecretKey, Error> {
+            let sec = SecretKey::from_slice(s)?;
+            Ok(accum.add_tweak(&Scalar::from(sec))?)
+        })
 }
 
 /// Sign the given cet using own private key, adapt the counter party signature
@@ -1097,6 +1102,36 @@ mod tests {
     use std::fmt::Write;
     use std::str::FromStr;
     use util;
+
+    #[test]
+    fn signatures_to_secret_rejects_an_empty_signature_set() {
+        assert!(matches!(
+            signatures_to_secret(&[]),
+            Err(Error::InvalidArgument(_))
+        ));
+        assert!(matches!(
+            signatures_to_secret(&[Vec::new()]),
+            Err(Error::InvalidArgument(_))
+        ));
+    }
+
+    #[test]
+    fn signatures_to_secret_rejects_a_zero_s_value() {
+        let secp = Secp256k1::new();
+        let keypair = Keypair::from_secret_key(&secp, &SecretKey::from_slice(&[7; 32]).unwrap());
+        let valid = secp.sign_schnorr_no_aux_rand(&Message::from_digest([1; 32]), &keypair);
+
+        // A well-formed 64-byte signature whose `s` is zero cannot be a secret
+        // key. It must be reported wherever it sits in the signature set.
+        let mut bytes = [0u8; 64];
+        bytes[..32].copy_from_slice(&keypair.x_only_public_key().0.serialize());
+        let zero_s = SchnorrSignature::from_slice(&bytes).unwrap();
+
+        assert!(signatures_to_secret(&[vec![zero_s]]).is_err());
+        assert!(signatures_to_secret(&[vec![valid], vec![zero_s]]).is_err());
+        assert!(signatures_to_secret(&[vec![valid, zero_s]]).is_err());
+        assert!(signatures_to_secret(&[vec![valid], vec![valid]]).is_ok());
+    }
 
     fn create_txin_vec(sequence: Sequence) -> Vec<TxIn> {
         let mut inputs = Vec::new();

@@ -1592,6 +1592,7 @@ async fn close_path(
         periodic_check!(ctx.manager(first), contract_id, Confirmed);
 
         let attestations = get_attestations(test_params).await;
+        assert_manual_close_rejects_bad_attestations(ctx, first, contract_id, &attestations).await;
 
         let contract = ctx
             .manager(first)
@@ -1640,6 +1641,40 @@ async fn close_path(
         periodic_check!(ctx.manager(first), contract_id, PreClosed);
         periodic_check!(ctx.manager(second), contract_id, PreClosed);
     }
+}
+
+/// A manual close must refuse attestation sets that do not bind one to one to
+/// the contract's oracles, and must leave the contract confirmed when it does.
+async fn assert_manual_close_rejects_bad_attestations(
+    ctx: &TestContext,
+    party: Party,
+    contract_id: ContractId,
+    attestations: &[(usize, OracleAttestation)],
+) {
+    let (index, attestation) = attestations[0].clone();
+
+    // The same oracle twice: its signatures would be summed twice into the
+    // adaptor secret.
+    let mut duplicated = attestations.to_vec();
+    duplicated.push((index, attestation.clone()));
+    ctx.manager(party)
+        .lock()
+        .await
+        .close_confirmed_contract(&contract_id, duplicated)
+        .await
+        .expect_err("a duplicated oracle attestation must not close the contract");
+
+    // An index no contract in these tests has an oracle at.
+    let mut out_of_range = attestations.to_vec();
+    out_of_range.push((99, attestation));
+    ctx.manager(party)
+        .lock()
+        .await
+        .close_confirmed_contract(&contract_id, out_of_range)
+        .await
+        .expect_err("an attestation for an unknown oracle must not close the contract");
+
+    assert_contract_state!(ctx.manager(party), contract_id, Confirmed);
 }
 
 /// Runs a confirmed contract past its refund locktime, either letting the

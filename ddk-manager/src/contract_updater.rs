@@ -1054,7 +1054,9 @@ where
             .iter()
             .map(|(_, a)| &a.outcomes)
             .collect::<Vec<_>>(),
-        attestations.first().unwrap().1.event_id,
+        attestations
+            .first()
+            .map_or("", |(_, attestation)| attestation.event_id.as_str()),
     );
     let (range_info, sigs) =
         crate::utils::get_range_info_and_oracle_sigs(contract_info, adaptor_info, attestations)?;

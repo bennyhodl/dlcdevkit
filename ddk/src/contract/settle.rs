@@ -40,6 +40,9 @@ use super::types::Party;
 /// announcements of the contract info it settles. For a contract with several
 /// disjoint contract infos, the first one whose outcome the attestations
 /// resolve is used, so it is enough to pass the attestations for one event.
+/// Each oracle may appear at most once: the adaptor secret is the sum of one
+/// signature set per oracle, so a repeated index is rejected with
+/// [`ContractError::InvalidAttestation`] instead of being summed twice.
 ///
 /// Returns [`ContractError::NoMatchingOutcome`] when no contract outcome
 /// corresponds to the attested outcomes, which is also what an attestation for
@@ -61,10 +64,6 @@ pub fn sign_cet(
     let total_collateral = offer.get_total_collateral();
     let funding_witness_script = &context.transactions.funding_witness_script;
     let fund_value = context.transactions.get_fund_output().value;
-    let outcomes: Vec<(usize, &Vec<String>)> = attestations
-        .iter()
-        .map(|(index, attestation)| (*index, &attestation.outcomes))
-        .collect();
 
     let mut signature_index = 0;
     for (info, cet_range) in context.execution_infos.iter().zip(&context.cet_ranges) {
@@ -85,8 +84,12 @@ pub fn sign_cet(
                 counterparty_error(party)(format!("invalid CET adaptor signatures: {e}"))
             })?;
 
-        let Some((signature_infos, range_info)) =
-            info.get_range_info_for_outcome(&adaptor_info, &outcomes, signature_index)
+        // The lookup also binds the attestations to the oracle combination the
+        // adaptor point was built for: one attestation per oracle, and a
+        // signature set for every oracle of the matched combination.
+        let Some((range_info, oracle_signatures)) = info
+            .get_range_info_and_oracle_signatures(&adaptor_info, attestations, signature_index)
+            .map_err(attestation_error)?
         else {
             signature_index = next_index;
             continue;
@@ -97,20 +100,6 @@ pub fn sign_cet(
         // `cet_index` is relative to the CETs of this contract info; the
         // adaptor index already carries the running offset.
         let mut cet = context.transactions.cets[cet_range.start + range_info.cet_index].clone();
-        let oracle_signatures: Vec<Vec<_>> = attestations
-            .iter()
-            .filter_map(|(index, attestation)| {
-                let signature_info = signature_infos.iter().find(|info| info.0 == *index)?;
-                Some(
-                    attestation
-                        .signatures
-                        .iter()
-                        .take(signature_info.1)
-                        .cloned()
-                        .collect(),
-                )
-            })
-            .collect();
 
         ddk_dlc::sign_cet(
             &secp,
@@ -222,6 +211,16 @@ fn counterparty_error(party: Party) -> fn(String) -> ContractError {
     match party {
         Party::Offer => ContractError::InvalidAccept,
         Party::Accept => ContractError::InvalidSign,
+    }
+}
+
+/// Reports an attestation set that does not bind to the contract's oracles.
+fn attestation_error(error: ddk_manager::error::Error) -> ContractError {
+    match error {
+        ddk_manager::error::Error::InvalidParameters(message) => {
+            ContractError::InvalidAttestation(message)
+        }
+        other => ContractError::InvalidAttestation(other.to_string()),
     }
 }
 

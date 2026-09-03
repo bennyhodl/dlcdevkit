@@ -1245,17 +1245,18 @@ where
         let contract_infos = &contract.accepted_contract.offered_contract.contract_info;
         let adaptor_infos = &contract.accepted_contract.adaptor_infos;
 
-        // find the contract info that matches the attestations
+        // Find the contract info whose oracles produced every attestation.
+        // Each attestation must be a valid signature from the oracle at the
+        // index it claims, so a forged, misindexed, or out-of-range attestation
+        // disqualifies the whole set instead of being skipped.
         if let Some((contract_info, adaptor_info)) =
             contract_infos.iter().zip(adaptor_infos).find(|(c, _)| {
-                let matches = attestations
-                    .iter()
-                    .filter(|(i, a)| {
-                        c.oracle_announcements[*i].oracle_event.oracle_nonces == a.nonces()
+                attestations.len() >= c.threshold
+                    && attestations.iter().all(|(i, a)| {
+                        c.oracle_announcements.get(*i).is_some_and(|announcement| {
+                            a.validate(&self.secp, announcement).is_ok()
+                        })
                     })
-                    .count();
-
-                matches >= c.threshold
             })
         {
             let offer = &contract.accepted_contract.offered_contract;
