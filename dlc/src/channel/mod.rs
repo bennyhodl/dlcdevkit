@@ -561,20 +561,28 @@ pub fn create_and_sign_punish_settle_transaction<C: Signing>(
     Ok(tx)
 }
 
-/// Create a transaction for collaboratively closing a channel.
+/// Create a transaction for collaboratively closing a channel or a contract.
+///
+/// The transaction pays a fee at `fee_rate_per_vb` out of the fund output: the
+/// surplus of the fund output over the two payouts (the CET fee reserve for
+/// contracts, zero for channels) is returned to the parties evenly once the
+/// close fee is taken, each party covering half. Truncated satoshis and any
+/// share a party cannot cover are left to the fee.
 ///
 /// This function is primarily intended for on-chain DLC contracts where the offeror
 /// can provide additional inputs to prevent the free option problem. For off-chain
 /// channels, the additional_inputs parameter should typically be empty.
+#[allow(clippy::too_many_arguments)]
 pub fn create_collaborative_close_transaction(
     offer_params: &PartyParams,
     offer_payout: Amount,
     accept_params: &PartyParams,
     accept_payout: Amount,
     fund_outpoint: OutPoint,
-    _fund_output_amount: Amount,
+    fund_output_amount: Amount,
+    fee_rate_per_vb: u64,
     additional_inputs: &[OutPoint],
-) -> Transaction {
+) -> Result<Transaction, Error> {
     let mut inputs = vec![TxIn {
         previous_output: fund_outpoint,
         witness: Witness::default(),
@@ -588,14 +596,46 @@ pub fn create_collaborative_close_transaction(
         sequence: crate::util::DISABLE_LOCKTIME,
     }));
 
-    //TODO(tibo): add fee re-payment
+    // The close transaction has the structure of a CET (fund input plus the
+    // two payout outputs); additional fee-paying inputs are counted with a
+    // P2WPKH witness.
+    let output_spk_weight = (offer_params.payout_script_pubkey.len()
+        + accept_params.payout_script_pubkey.len())
+    .checked_mul(4)
+    .ok_or_else(|| Error::InvalidArgument("Output spk weight overflow".to_string()))?;
+    let additional_input_weight = additional_inputs
+        .len()
+        .checked_mul(crate::TX_INPUT_BASE_WEIGHT + crate::P2WPKH_WITNESS_SIZE)
+        .ok_or_else(|| Error::InvalidArgument("Additional input weight overflow".to_string()))?;
+    let total_weight = crate::CET_BASE_WEIGHT + output_spk_weight + additional_input_weight;
+    let fee = crate::util::weight_to_fee(total_weight, fee_rate_per_vb)?;
+
+    let total_payout = offer_payout
+        .checked_add(accept_payout)
+        .ok_or_else(|| Error::InvalidArgument("Payout overflow".to_string()))?;
+    if fund_output_amount < total_payout {
+        return Err(Error::InvalidArgument(
+            "Payouts are greater than the fund output value".to_string(),
+        ));
+    }
+    if fund_output_amount <= fee {
+        return Err(Error::InvalidArgument(
+            "Fund output value cannot cover the close transaction fee".to_string(),
+        ));
+    }
+    let surplus = fund_output_amount - total_payout;
+
+    let half_net = (surplus.to_sat() as i64 - fee.to_sat() as i64) / 2;
+    let offer_value = (offer_payout.to_sat() as i64 + half_net).max(0) as u64;
+    let accept_value = (accept_payout.to_sat() as i64 + half_net).max(0) as u64;
+
     let offer_output = TxOut {
-        value: offer_payout,
+        value: Amount::from_sat(offer_value),
         script_pubkey: offer_params.payout_script_pubkey.clone(),
     };
 
     let accept_output = TxOut {
-        value: accept_payout,
+        value: Amount::from_sat(accept_value),
         script_pubkey: accept_params.payout_script_pubkey.clone(),
     };
 
@@ -607,12 +647,12 @@ pub fn create_collaborative_close_transaction(
 
     output = crate::util::discard_dust(output, crate::DUST_LIMIT);
 
-    Transaction {
+    Ok(Transaction {
         version: crate::TX_VERSION,
         lock_time: LockTime::ZERO,
         input: inputs,
         output,
-    }
+    })
 }
 
 /// Returns a descriptor for a buffer transaction.

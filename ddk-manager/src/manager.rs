@@ -71,6 +71,10 @@ static AUTOMATIC_REFUND: Lazy<bool> = Lazy::new(|| match std::env::var("AUTOMATI
 
 /// The delay to set the refund value to.
 pub const REFUND_DELAY: u32 = 86400 * 7;
+/// Tolerance for local clock skew: an oracle event is only considered matured
+/// once it is this many seconds past its maturity epoch, so a fast local clock
+/// cannot trigger a premature CET broadcast.
+pub const MATURITY_SKEW_SECS: u64 = 3600;
 /// Timeout in seconds when waiting for a peer's reply, after which a DLC channel
 /// is forced closed.
 pub const PEER_TIMEOUT: u64 = 3600;
@@ -80,6 +84,31 @@ type ClosableContractInfo<'a> = Option<(
     &'a AdaptorInfo,
     Vec<(usize, OracleAttestation)>,
 )>;
+
+/// Application hook consulted before a counterparty's cooperative close
+/// proposal is broadcast.
+///
+/// A valid signature on a [`CloseDlc`] is not consent: the counterparty
+/// chooses `accept_payout` freely, up to the full collateral. The application
+/// must check the proposed payout against its own expectation (oracle state,
+/// market price, user confirmation, ...) and return `Ok(true)` only when the
+/// terms are acceptable. When no approver is set on the [`Manager`], every
+/// counterparty close proposal is rejected.
+pub trait CooperativeCloseApprover: Send + Sync {
+    /// Returns whether the close proposal paying `accept_payout` to the
+    /// counterparty of the contract with the given id should be broadcast.
+    fn approve_counterparty_close(
+        &self,
+        contract_id: ContractId,
+        accept_payout: Amount,
+    ) -> Result<bool, Error>;
+}
+
+impl std::fmt::Debug for dyn CooperativeCloseApprover {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("CooperativeCloseApprover")
+    }
+}
 
 /// Used to create and update DLCs.
 #[derive(Debug)]
@@ -113,6 +142,7 @@ pub struct Manager<
     time: T,
     fee_estimator: F,
     logger: L,
+    close_approver: Option<Arc<dyn CooperativeCloseApprover>>,
 }
 
 macro_rules! get_contract_in_state {
@@ -195,6 +225,10 @@ where
     L::Target: Logger,
 {
     /// Create a new Manager struct.
+    ///
+    /// `close_approver` is consulted before a counterparty's cooperative close
+    /// proposal is broadcast; with `None`, [`Manager::accept_cooperative_close`]
+    /// rejects every proposal.
     #[allow(clippy::too_many_arguments)]
     #[tracing::instrument(skip_all)]
     pub async fn new(
@@ -206,6 +240,7 @@ where
         time: T,
         fee_estimator: F,
         logger: L,
+        close_approver: Option<Arc<dyn CooperativeCloseApprover>>,
     ) -> Result<Self, Error> {
         let init_height = blockchain.get_blockchain_height().await?;
         let chain_monitor = Mutex::new(
@@ -230,6 +265,7 @@ where
             fee_estimator,
             chain_monitor,
             logger,
+            close_approver,
         })
     }
 
@@ -390,7 +426,6 @@ where
             &counter_party,
             &self.wallet,
             &self.blockchain,
-            &self.time,
             &self.signer_provider,
             &self.logger,
         )
@@ -441,7 +476,6 @@ where
             &counter_party,
             &self.wallet,
             &self.blockchain,
-            &self.time,
             &self.signer_provider,
             &self.logger,
         )
@@ -999,7 +1033,8 @@ where
                 .oracle_announcements
                 .iter()
                 .filter(|x| {
-                    (x.oracle_event.event_maturity_epoch as u64) <= self.time.unix_time_now()
+                    (x.oracle_event.event_maturity_epoch as u64) + MATURITY_SKEW_SECS
+                        <= self.time.unix_time_now()
                 })
                 .enumerate()
                 .collect();
@@ -1686,6 +1721,15 @@ where
     /// Initiates a cooperative close of a contract by creating and signing a closing transaction.
     /// Returns a CloseDlc message to be sent to the counter party.
     /// The contract remains in Confirmed state until the close transaction is broadcast.
+    ///
+    /// # Warning
+    ///
+    /// The returned [`CloseDlc`] carries a signature over a transaction that
+    /// pays `counter_payout` to the counterparty out of the contract's funds.
+    /// Nothing binds `counter_payout` to any oracle outcome: the caller is
+    /// fully responsible for choosing a payout it is willing to give away. The
+    /// counterparty can broadcast the close transaction at any time once it
+    /// holds this message.
     #[tracing::instrument(skip_all, level = "debug")]
     pub async fn cooperative_close_contract(
         &self,
@@ -1741,6 +1785,15 @@ where
 
     /// Accepts a cooperative close request by completing the close transaction
     /// and broadcasting it to the network.
+    ///
+    /// # Warning
+    ///
+    /// A valid signature on the [`CloseDlc`] is not consent: the counterparty
+    /// chooses `accept_payout` freely, up to the full collateral. The
+    /// [`CooperativeCloseApprover`] set at [`Manager::new`] is consulted with
+    /// the proposed payout before anything is broadcast; without one, or when
+    /// it declines, this returns [`Error::CooperativeCloseRejected`] and the
+    /// contract stays in its current state.
     #[tracing::instrument(skip_all, level = "debug")]
     pub async fn accept_cooperative_close(
         &self,
@@ -1749,6 +1802,24 @@ where
     ) -> Result<(), Error> {
         let signed_contract =
             get_contract_in_state!(self, contract_id, Confirmed, None as Option<PublicKey>)?;
+
+        let approver = self.close_approver.as_ref().ok_or_else(|| {
+            Error::CooperativeCloseRejected(
+                "no cooperative close approver is configured".to_string(),
+            )
+        })?;
+        if !approver.approve_counterparty_close(*contract_id, close_message.accept_payout)? {
+            log_warn!(
+                self.logger,
+                "Cooperative close proposal declined by the application. contract_id={} accept_payout={}",
+                contract_id.to_lower_hex_string(),
+                close_message.accept_payout,
+            );
+            return Err(Error::CooperativeCloseRejected(format!(
+                "close proposal declined by the application. accept_payout={}",
+                close_message.accept_payout
+            )));
+        }
 
         let close_tx = crate::contract_updater::complete_cooperative_close(
             &self.secp,

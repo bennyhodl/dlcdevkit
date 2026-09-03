@@ -118,7 +118,7 @@ fn messages_with_serial_ids(offer_ids: &[u64], accept_ids: &[u64]) -> (OfferDlc,
         change_serial_id: 2,
         fund_output_serial_id: 3,
         fee_rate_per_vb: 2,
-        cet_locktime: 500,
+        cet_locktime: 750,
         refund_locktime: 1_000,
     };
     let accept = AcceptDlc {

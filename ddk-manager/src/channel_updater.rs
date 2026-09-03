@@ -83,7 +83,7 @@ pub async fn offer_channel<C: Signing, W: Deref, SP: Deref, B: Deref, T: Deref, 
     wallet: &W,
     signer_provider: &SP,
     blockchain: &B,
-    time: &T,
+    _time: &T,
     temporary_channel_id: ChannelId,
 ) -> Result<(OfferedChannel, OfferedContract), Error>
 where
@@ -117,7 +117,6 @@ where
         &funding_inputs_info,
         counter_party,
         refund_delay,
-        time.unix_time_now() as u32,
         keys_id,
         crate::contract::chain_hash_from_network(blockchain.get_network()?),
     );
@@ -1168,7 +1167,6 @@ where
         &[],
         &signed_channel.counter_party,
         refund_delay,
-        time.unix_time_now() as u32,
         keys_id,
         chain_hash,
     );
@@ -1882,8 +1880,9 @@ where
             vout: signed_channel.fund_output_index as u32,
         },
         fund_output_value,
+        signed_channel.fee_rate_per_vb,
         &additional_inputs,
-    );
+    )?;
 
     let keys_id = signed_channel
         .keys_id()
@@ -1958,8 +1957,9 @@ where
             vout: signed_channel.fund_output_index as u32,
         },
         fund_output_value,
+        signed_channel.fee_rate_per_vb,
         &[], // TODO: Add additional inputs parameter to prevent free option problem
-    );
+    )?;
 
     let mut state = SignedChannelState::CollaborativeCloseOffered {
         counter_payout: close_offer.counter_payout,

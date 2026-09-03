@@ -387,13 +387,16 @@ impl OfferDlc {
             }
         }
 
+        // The CET locktime is pinned to the closest maturity date: a lower value
+        // produces CETs spendable before the event matures, a higher value delays
+        // execution past it.
         let closest_maturity_date = self.contract_info.get_closest_maturity_date();
-        let valid_dates = self.cet_locktime <= closest_maturity_date
+        let valid_dates = self.cet_locktime == closest_maturity_date
             && closest_maturity_date + min_timeout_interval <= self.refund_locktime
             && self.refund_locktime <= closest_maturity_date + max_timeout_interval;
         if !valid_dates {
             return Err(Error::InvalidArgument(
-                "Locktime is less than closest maturity date".to_string(),
+                "CET locktime must equal the closest maturity date and the refund locktime must be within the timeout interval".to_string(),
             ));
         }
 
@@ -781,13 +784,25 @@ mod tests {
         let mut invalid_maturity = offer.clone();
         invalid_maturity.cet_locktime += 3;
 
+        let mut premature_cet_locktime = offer.clone();
+        premature_cet_locktime.cet_locktime -= 3;
+
+        let mut zero_cet_locktime = offer.clone();
+        zero_cet_locktime.cet_locktime = 0;
+
         let mut too_short_timeout = offer.clone();
         too_short_timeout.refund_locktime -= 100;
 
         let mut too_long_timeout = offer;
         too_long_timeout.refund_locktime -= 100;
 
-        for invalid in &[invalid_maturity, too_short_timeout, too_long_timeout] {
+        for invalid in &[
+            invalid_maturity,
+            premature_cet_locktime,
+            zero_cet_locktime,
+            too_short_timeout,
+            too_long_timeout,
+        ] {
             invalid
                 .validate(SECP256K1, 86400 * 7, 86400 * 14)
                 .expect_err("Should not pass validation of invalid offer message.");
