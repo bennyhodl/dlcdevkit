@@ -27,6 +27,10 @@ pub enum Error {
     DlcError(ddk_dlc::Error),
     /// An error occurred in the Secp library.
     SecpError(secp256k1_zkp::Error),
+    /// A counterparty's cooperative close proposal was not approved by the
+    /// application. The proposal is not broadcast and the contract stays in
+    /// its current state.
+    CooperativeCloseRejected(String),
 }
 
 impl fmt::Display for Error {
@@ -43,6 +47,9 @@ impl fmt::Display for Error {
             Error::DlcError(ref e) => write!(f, "Dlc error {e}"),
             Error::OracleError(ref s) => write!(f, "Oracle error {s}"),
             Error::SecpError(_) => write!(f, "Secp error"),
+            Error::CooperativeCloseRejected(ref s) => {
+                write!(f, "Cooperative close rejected: {s}")
+            }
         }
     }
 }
@@ -98,6 +105,7 @@ impl std::error::Error for Error {
             Error::OracleError(_) => None,
             Error::DlcError(e) => Some(e),
             Error::SecpError(e) => Some(e),
+            Error::CooperativeCloseRejected(_) => None,
         }
     }
 }

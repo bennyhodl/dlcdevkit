@@ -29,7 +29,7 @@ use crate::{
     },
     conversion_utils::get_tx_input_infos,
     error::Error,
-    Blockchain, ChannelId, ContractSigner, ContractSignerProvider, Time, Wallet,
+    Blockchain, ChannelId, ContractSigner, ContractSignerProvider, Wallet,
 };
 
 /// Creates an [`OfferedContract`] and [`OfferDlc`] message from the provided
@@ -38,7 +38,6 @@ use crate::{
 pub async fn offer_contract<
     W: Deref,
     B: Deref,
-    T: Deref,
     X: ContractSigner,
     SP: Deref,
     C: Signing,
@@ -52,14 +51,12 @@ pub async fn offer_contract<
     counter_party: &PublicKey,
     wallet: &W,
     blockchain: &B,
-    time: &T,
     signer_provider: &SP,
     logger: &L,
 ) -> Result<(OfferedContract, OfferDlc), Error>
 where
     W::Target: Wallet,
     B::Target: Blockchain,
-    T::Target: Time,
     SP::Target: ContractSignerProvider<Signer = X>,
     L::Target: Logger,
 {
@@ -104,7 +101,6 @@ where
         &funding_inputs_info,
         counter_party,
         refund_delay,
-        time.unix_time_now() as u32,
         keys_id,
         chain_hash,
     );
@@ -1171,7 +1167,8 @@ where
     let fund_output_value = accepted_contract.dlc_transactions.get_fund_output().value;
     let fund_outpoint = accepted_contract.dlc_transactions.get_fund_outpoint();
 
-    // Create the cooperative close transaction
+    // Create the cooperative close transaction, paying the close fee at the
+    // contract's fee rate out of the fund output.
     let close_tx = ddk_dlc::channel::create_collaborative_close_transaction(
         &offered_contract.offer_params,
         offer_payout,
@@ -1179,8 +1176,9 @@ where
         counter_payout,
         fund_outpoint,
         fund_output_value,
+        offered_contract.fee_rate_per_vb,
         &[], // TODO: Add additional inputs parameter to prevent free option problem
-    );
+    )?;
 
     log_debug!(
         logger,
@@ -1236,10 +1234,23 @@ where
     let fund_output_value = accepted_contract.dlc_transactions.get_fund_output().value;
     let fund_outpoint = accepted_contract.dlc_transactions.get_fund_outpoint();
 
+    if close_message.fee_rate_per_vb != offered_contract.fee_rate_per_vb {
+        return Err(Error::InvalidParameters(format!(
+            "Close message fee rate does not match the contract fee rate. message={} contract={}",
+            close_message.fee_rate_per_vb, offered_contract.fee_rate_per_vb
+        )));
+    }
+
     let total_collateral = offered_contract.total_collateral;
+    if close_message.accept_payout > total_collateral {
+        return Err(Error::InvalidParameters(
+            "Accept payout is greater than total collateral".to_string(),
+        ));
+    }
     let offer_payout = total_collateral - close_message.accept_payout;
 
-    // Recreate the close transaction to verify
+    // Recreate the close transaction to verify, using the contract's fee rate
+    // like the creating side does.
     let mut close_tx = ddk_dlc::channel::create_collaborative_close_transaction(
         &offered_contract.offer_params,
         offer_payout,
@@ -1247,8 +1258,9 @@ where
         close_message.accept_payout,
         fund_outpoint,
         fund_output_value,
+        offered_contract.fee_rate_per_vb,
         &[], // No additional inputs for contract cooperative close verification
-    );
+    )?;
 
     log_debug!(
         logger,

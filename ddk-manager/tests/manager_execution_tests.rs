@@ -295,9 +295,26 @@ type TestManager = Manager<
 /// path in its own `async fn` also keeps the harness off the stack: a single
 /// function holding all of them needs a frame big enough for the largest
 /// branch of every one at once.
+/// Close approver shared by both managers: approves everything unless a test
+/// flips it to decline.
+struct TestCloseApprover {
+    approve: AtomicBool,
+}
+
+impl ddk_manager::manager::CooperativeCloseApprover for TestCloseApprover {
+    fn approve_counterparty_close(
+        &self,
+        _contract_id: ContractId,
+        _accept_payout: Amount,
+    ) -> Result<bool, ddk_manager::error::Error> {
+        Ok(self.approve.load(Ordering::SeqCst))
+    }
+}
+
 struct TestContext {
     bob: Arc<Mutex<TestManager>>,
     alice: Arc<Mutex<TestManager>>,
+    close_approver: Arc<TestCloseApprover>,
     bob_wallet: Arc<DlcDevKitWallet>,
     alice_wallet: Arc<DlcDevKitWallet>,
     electrs: Arc<EsploraClient>,
@@ -1325,6 +1342,10 @@ async fn manager_execution_test_inner(test_params: TestParams, path: TestPath, m
     refresh_wallet(&alice_wallet, TOTAL_COLLATERAL.to_sat()).await;
     refresh_wallet(&bob_wallet, TOTAL_COLLATERAL.to_sat()).await;
 
+    let close_approver = Arc::new(TestCloseApprover {
+        approve: AtomicBool::new(true),
+    });
+
     let alice_manager = Arc::new(Mutex::new(
         Manager::new(
             Arc::clone(&alice_wallet),
@@ -1335,6 +1356,7 @@ async fn manager_execution_test_inner(test_params: TestParams, path: TestPath, m
             Arc::clone(&mock_time),
             Arc::clone(&electrs),
             logger.clone(),
+            Some(close_approver.clone()),
         )
         .await
         .unwrap(),
@@ -1352,6 +1374,7 @@ async fn manager_execution_test_inner(test_params: TestParams, path: TestPath, m
             Arc::clone(&mock_time),
             Arc::clone(&electrs),
             logger.clone(),
+            Some(close_approver.clone()),
         )
         .await
         .unwrap(),
@@ -1415,6 +1438,7 @@ async fn manager_execution_test_inner(test_params: TestParams, path: TestPath, m
     let mut ctx = TestContext {
         bob: bob_manager,
         alice: alice_manager,
+        close_approver,
         bob_wallet: Arc::clone(&bob_wallet),
         alice_wallet: Arc::clone(&alice_wallet),
         electrs: Arc::clone(&electrs),
@@ -1572,6 +1596,12 @@ async fn close_path(
     manual_close: bool,
 ) {
     if !manual_close {
+        test_utils::set_time(
+            (EVENT_MATURITY as u64) + ddk_manager::manager::MATURITY_SKEW_SECS + 1,
+        );
+    } else {
+        // Past maturity so the CET locktime is satisfied, but within the skew
+        // window so the automatic path does not close the contract first.
         test_utils::set_time((EVENT_MATURITY as u64) + 1);
     }
 
@@ -1686,7 +1716,9 @@ async fn refund_path(
     manual_close: bool,
 ) {
     if !manual_close {
-        test_utils::set_time((EVENT_MATURITY as u64) + 1);
+        test_utils::set_time(
+            (EVENT_MATURITY as u64) + ddk_manager::manager::MATURITY_SKEW_SECS + 1,
+        );
     }
 
     let first = random_party();
@@ -1765,7 +1797,26 @@ async fn cooperative_close_path(ctx: &mut TestContext, contract_id: ContractId) 
         .await
         .expect("Error initiating cooperative close");
 
-    // Bob receives and accepts the cooperative close.
+    // With the application hook declining, a valid close message must not be
+    // broadcast and the contract must stay Confirmed.
+    ctx.close_approver.approve.store(false, Ordering::SeqCst);
+    let declined = ctx
+        .bob
+        .lock()
+        .await
+        .accept_cooperative_close(&contract_id, &close_msg)
+        .await;
+    assert!(
+        matches!(
+            declined,
+            Err(ddk_manager::error::Error::CooperativeCloseRejected(_))
+        ),
+        "Declined cooperative close should return CooperativeCloseRejected"
+    );
+    periodic_check!(ctx.bob, contract_id, Confirmed);
+
+    // With the hook approving, Bob accepts the cooperative close.
+    ctx.close_approver.approve.store(true, Ordering::SeqCst);
     ctx.bob
         .lock()
         .await
@@ -1779,8 +1830,9 @@ async fn cooperative_close_path(ctx: &mut TestContext, contract_id: ContractId) 
     // Alice does not know about the close yet.
     periodic_check!(ctx.alice, contract_id, Confirmed);
 
-    // Mine a few blocks to partially confirm the close transaction.
-    ctx.mine(3).await;
+    // Mine one block: the close transaction is confirmed, but stays below the
+    // NB_CONFIRMATIONS (3) threshold that moves a contract to Closed.
+    ctx.mine(1).await;
 
     // Alice now detects the pending close transaction.
     periodic_check!(ctx.alice, contract_id, PreClosed);
@@ -1801,6 +1853,44 @@ async fn cooperative_close_path(ctx: &mut TestContext, contract_id: ContractId) 
     assert!(
         closed_contract.attestations.is_none(),
         "Cooperative close should not have attestations"
+    );
+
+    // The mined close transaction pays a fee close to the contract fee rate:
+    // at least the target rate over its virtual size, and the whole CET fee
+    // reserve above the payouts at most.
+    let alice_contract = ctx.contract(Party::Alice, &contract_id).await;
+    let Contract::Closed(ref alice_closed) = alice_contract else {
+        panic!("Alice's contract should be in Closed state");
+    };
+    let signed_contract = &alice_closed.signed_contract;
+    let close_tx = alice_closed
+        .signed_cet
+        .as_ref()
+        .expect("Closed cooperative contract should hold the close transaction");
+    let fund_output_value = signed_contract
+        .accepted_contract
+        .dlc_transactions
+        .get_fund_output()
+        .value;
+    let outputs_value: Amount = close_tx.output.iter().map(|o| o.value).sum();
+    let fee = fund_output_value - outputs_value;
+    let fee_rate = signed_contract
+        .accepted_contract
+        .offered_contract
+        .fee_rate_per_vb;
+    let min_fee = Amount::from_sat(close_tx.vsize() as u64 * fee_rate);
+    assert!(
+        fee >= min_fee,
+        "Close transaction fee {fee} is below the contract fee rate ({min_fee} for {fee_rate} sat/vB)"
+    );
+    let reserve = fund_output_value
+        - signed_contract
+            .accepted_contract
+            .offered_contract
+            .total_collateral;
+    assert!(
+        fee <= reserve + Amount::from_sat(1),
+        "Close transaction fee {fee} exceeds the CET fee reserve {reserve}"
     );
 }
 
@@ -2014,7 +2104,7 @@ async fn splice_path(
     // Only the last contract in the chain is still open, so advancing past its
     // maturity settles it and nothing else.
     let last_maturity = EVENT_MATURITY + (rounds.len() as u32) * SPLICE_MATURITY_STEP;
-    test_utils::set_time(last_maturity as u64 + 1);
+    test_utils::set_time(last_maturity as u64 + ddk_manager::manager::MATURITY_SKEW_SECS + 1);
 
     // Every contract the chain replaced is closed, and a closed contract cannot
     // be spliced a second time.

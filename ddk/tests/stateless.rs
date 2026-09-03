@@ -257,7 +257,7 @@ fn offer_params(
         party: offerer.party_params(secp, funding_inputs),
         fund_output_serial_id: None,
         fee_rate_per_vb: 2,
-        cet_locktime: 500,
+        cet_locktime: 750,
         refund_locktime: 1_000,
         contract_flags: 0,
     }

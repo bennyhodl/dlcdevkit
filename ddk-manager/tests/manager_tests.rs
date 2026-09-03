@@ -71,6 +71,7 @@ async fn get_manager(logger: Arc<Logger>) -> TestManager {
         time,
         blockchain,
         logger,
+        None,
     )
     .await
     .unwrap()

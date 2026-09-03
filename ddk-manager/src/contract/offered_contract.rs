@@ -90,6 +90,9 @@ impl OfferedContract {
     }
 
     /// Creates a new [`OfferedContract`] from the given parameters.
+    ///
+    /// The CET locktime is pinned to the closest oracle event maturity so that
+    /// CETs are spendable exactly when the first event matures, never before.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: ContractId,
@@ -99,7 +102,6 @@ impl OfferedContract {
         funding_inputs: &[FundingInput],
         counter_party: &PublicKey,
         refund_delay: u32,
-        cet_locktime: u32,
         keys_id: KeysId,
         chain_hash: [u8; 32],
     ) -> Self {
@@ -109,6 +111,8 @@ impl OfferedContract {
 
         let latest_maturity = crate::utils::get_latest_maturity_date(&oracle_announcements)
             .expect("to be able to retrieve latest maturity date");
+        let cet_locktime = crate::utils::get_closest_maturity_date(&oracle_announcements)
+            .expect("to be able to retrieve closest maturity date");
 
         let fund_output_serial_id = get_new_serial_id();
         let contract_info = contract

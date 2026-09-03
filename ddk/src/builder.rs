@@ -2,7 +2,7 @@ use crate::logger::{log_error, log_info, WriteLog};
 use bip39::{Language, Mnemonic};
 use bitcoin::key::rand::Fill;
 use bitcoin::Network;
-use ddk_manager::manager::Manager;
+use ddk_manager::manager::{CooperativeCloseApprover, Manager};
 use ddk_manager::SystemTimeProvider;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -43,6 +43,7 @@ pub struct Builder<T, S, O> {
     network: Network,
     seed_bytes: [u8; 64],
     logger: Option<Arc<Logger>>,
+    close_approver: Option<Arc<dyn CooperativeCloseApprover>>,
 }
 
 /// Defaults when creating a DDK application
@@ -63,6 +64,7 @@ impl<T: Transport, S: Storage, O: Oracle> Default for Builder<T, S, O> {
             network: DEFAULT_NETWORK,
             seed_bytes: [0u8; 64],
             logger: None,
+            close_approver: None,
         }
     }
 }
@@ -156,6 +158,17 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
         self
     }
 
+    /// Set the hook consulted before a counterparty's cooperative close
+    /// proposal is broadcast. Without one, every counterparty close proposal
+    /// is rejected.
+    pub fn set_cooperative_close_approver(
+        &mut self,
+        close_approver: Arc<dyn CooperativeCloseApprover>,
+    ) -> &mut Self {
+        self.close_approver = Some(close_approver);
+        self
+    }
+
     /// Setup the logger based on the provided logger or use default console logging
     fn setup_logger(&self, name: &str) -> Result<Arc<Logger>, Error> {
         match &self.logger {
@@ -243,6 +256,7 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
                 Arc::new(SystemTimeProvider {}),
                 wallet.clone(),
                 logger.clone(),
+                self.close_approver.clone(),
             )
             .await?,
         );
