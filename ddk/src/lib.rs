@@ -1,6 +1,9 @@
 //! application tooling for DLCs 🌊
 // #![doc = include_str!("../README.md")]
 #![allow(clippy::result_large_err)]
+// Deprecated items are unlock-only compatibility paths (see
+// `contract::KeyScheme::V0`). Naming one is a hard error in this crate.
+#![deny(deprecated)]
 
 /// Stateless DLC contract operations.
 ///

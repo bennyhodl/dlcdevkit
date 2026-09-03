@@ -817,16 +817,22 @@ impl TestParty {
     /// Recovers this party's funding key for a *previous* contract, so it can
     /// sign that contract's 2-of-2 output when splicing.
     ///
-    /// Providers recompute the key from the previous temporary contract id;
-    /// a raw key is simply the one the party already holds.
+    /// Providers recompute the key from the previous temporary contract id and
+    /// the funding pubkey published in the previous contract's messages; a raw
+    /// key is simply the one the party already holds.
     pub fn dlc_input_signing_key(
         &self,
         prior_temporary_contract_id: [u8; 32],
+        prior_funding_pubkey: &PublicKey,
         input_serial_id: u64,
     ) -> DlcInputSigningKey {
         match &self.contract_keys {
             Some(keys) => keys
-                .dlc_input_signing_key(prior_temporary_contract_id, input_serial_id)
+                .dlc_input_signing_key(
+                    prior_temporary_contract_id,
+                    prior_funding_pubkey,
+                    input_serial_id,
+                )
                 .unwrap(),
             None => DlcInputSigningKey {
                 input_serial_id,
@@ -1124,6 +1130,19 @@ pub fn splice_from(
     accepter: &TestParty,
     input_serial_id: u64,
 ) -> SpliceSetup {
+    // The keys travel with the roles (see `splice_setup_by`): when the accept
+    // party splices, `offerer` is the previous accepter, so its previous
+    // funding pubkey is the one from the previous accept message.
+    let (offerer_prior_pubkey, accepter_prior_pubkey) = match splicer {
+        Party::Offer => (
+            previous.offer.funding_pubkey,
+            previous.accept.funding_pubkey,
+        ),
+        Party::Accept => (
+            previous.accept.funding_pubkey,
+            previous.offer.funding_pubkey,
+        ),
+    };
     SpliceSetup {
         funding_input: create_dlc_splice_input(
             &previous.offer,
@@ -1133,8 +1152,16 @@ pub fn splice_from(
             DLC_INPUT_MAX_WITNESS_LEN,
         )
         .unwrap(),
-        offer_key: offerer.dlc_input_signing_key(previous.temporary_contract_id, input_serial_id),
-        accept_key: accepter.dlc_input_signing_key(previous.temporary_contract_id, input_serial_id),
+        offer_key: offerer.dlc_input_signing_key(
+            previous.temporary_contract_id,
+            &offerer_prior_pubkey,
+            input_serial_id,
+        ),
+        accept_key: accepter.dlc_input_signing_key(
+            previous.temporary_contract_id,
+            &accepter_prior_pubkey,
+            input_serial_id,
+        ),
     }
 }
 
