@@ -1276,6 +1276,30 @@ fn an_out_of_range_oracle_index_is_rejected() {
 }
 
 #[test]
+fn a_duplicated_oracle_attestation_is_rejected() {
+    let secp = Secp256k1::new();
+    let (offerer, accepter, offer, accept) = enum_contract(&secp, NETWORK);
+    let (sign, _) = fund_with_xpriv(&secp, &offerer, &accepter, &offer, &accept);
+
+    // The same genuine attestation twice. Without the index check its
+    // signature would be summed twice into the adaptor secret and the CET would
+    // carry an invalid counterparty signature.
+    let attestation = oracle_attestation(vec!["up".to_string()]);
+    let error = sign_cet(
+        &offer,
+        &accept,
+        &sign,
+        &offerer.funding_secret_key,
+        &[(0, attestation.clone()), (0, attestation)],
+    )
+    .unwrap_err();
+    assert!(
+        matches!(error, ContractError::InvalidAttestation(_)),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
 fn settling_with_a_mismatched_sign_message_is_rejected() {
     let secp = Secp256k1::new();
     let (offerer, accepter, offer, accept) = enum_contract(&secp, NETWORK);

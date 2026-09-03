@@ -242,30 +242,22 @@ pub(crate) fn get_half_common_fee(fee_rate: u64) -> Result<Amount, Error> {
     Ok(common_fee / 2)
 }
 
+/// Finds the CET for the attested outcomes and the oracle signatures that
+/// decrypt its adaptor signature.
+///
+/// Attestations must bind one to one to the oracles of the matched
+/// combination; see
+/// [`ContractInfo::get_range_info_and_oracle_signatures`].
 pub(crate) fn get_range_info_and_oracle_sigs(
     contract_info: &ContractInfo,
     adaptor_info: &AdaptorInfo,
     attestations: &[(usize, OracleAttestation)],
 ) -> Result<(RangeInfo, Vec<Vec<secp256k1_zkp::schnorr::Signature>>), Error> {
-    let outcomes = attestations
-        .iter()
-        .map(|(i, x)| (*i, &x.outcomes))
-        .collect::<Vec<(usize, &Vec<String>)>>();
-    let info_opt = contract_info.get_range_info_for_outcome(adaptor_info, &outcomes, 0);
-    if let Some((sig_infos, range_info)) = info_opt {
-        let sigs: Vec<Vec<_>> = attestations
-            .iter()
-            .filter_map(|(i, a)| {
-                let sig_info = sig_infos.iter().find(|x| x.0 == *i)?;
-                Some(a.signatures.iter().take(sig_info.1).cloned().collect())
-            })
-            .collect();
-        return Ok((range_info, sigs));
-    }
-
-    Err(Error::InvalidState(
-        "Could not find closing info for given outcomes".to_string(),
-    ))
+    contract_info
+        .get_range_info_and_oracle_signatures(adaptor_info, attestations, 0)?
+        .ok_or_else(|| {
+            Error::InvalidState("Could not find closing info for given outcomes".to_string())
+        })
 }
 
 pub(crate) fn get_latest_maturity_date(
