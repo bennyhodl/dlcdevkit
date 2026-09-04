@@ -2,6 +2,7 @@
 
 const { execSync } = require("child_process");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const readline = require("node:readline/promises");
 
@@ -41,6 +42,20 @@ if (explicitVersion && !/^\d+\.\d+\.\d+(-.*)?$/.test(explicitVersion)) {
 // Cached GitHub owner/repo parsed from the origin remote.
 let repoInfo = null;
 
+// cargo keeps one package-cache lock for the whole user, not one per workspace.
+const packageCacheLock = path.join(
+  process.env.CARGO_HOME || path.join(os.homedir(), ".cargo"),
+  ".package-cache"
+);
+
+// cargo-workspaces reads the registry through the `crates-index` crate, which
+// fails fast on a held lock instead of blocking the way cargo itself does. A
+// `cargo check` in *any other* workspace is therefore enough to abort a publish
+// with `crates index error: failed to obtain lock file '.../.package-cache'`.
+const PACKAGE_CACHE_LOCK_ERROR = /failed to obtain lock file/i;
+const CARGO_LOCK_ATTEMPTS = 3;
+const CARGO_LOCK_WAIT_MS = 15 * 60 * 1000;
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -64,14 +79,104 @@ function run(command, options = {}) {
   }
 }
 
-// Stream a command's output straight to the terminal (for long-running,
-// chatty commands like `cargo ws publish` where live progress matters).
-function runLive(command, options = {}) {
-  if (options.dryRun && dryRun) {
-    console.log(`   [DRY RUN] Would execute: ${command}`);
+// PIDs currently holding the cargo package-cache lock open, excluding our own.
+// `lsof` exits non-zero when nothing has the file open; if it is missing
+// entirely we also get null, and treating that as "free" is the right
+// degradation — runCargoLive still retries on the actual lock error.
+function packageCacheHolders() {
+  if (!fs.existsSync(packageCacheLock)) return [];
+  const pids = run(`lsof -t ${packageCacheLock}`, { allowFailure: true });
+  if (!pids) return [];
+  return pids.split("\n").filter(Boolean);
+}
+
+// Block until no other cargo process holds the package-cache lock. Bounded:
+// waiting forever on someone's hung build is worse than a clear error, and the
+// caller retries anyway.
+function waitForPackageCache(maxWaitMs = CARGO_LOCK_WAIT_MS) {
+  let holders = packageCacheHolders();
+  if (!holders.length) return;
+
+  console.log(`\n⏳ Waiting for the cargo package-cache lock (${packageCacheLock})`);
+  console.log(`   Held by pid(s): ${holders.join(", ")}`);
+  console.log("   A cargo build in any other workspace will block this release.");
+
+  const deadline = Date.now() + maxWaitMs;
+  while (holders.length && Date.now() < deadline) {
+    run("sleep 5");
+    holders = packageCacheHolders();
+  }
+
+  if (holders.length) {
+    console.warn(
+      `⚠️  Lock still held after ${Math.round(maxWaitMs / 60000)} min — trying anyway.`
+    );
     return;
   }
-  execSync(command, { stdio: "inherit", ...options });
+  console.log("✅ Package-cache lock is free");
+}
+
+// Stream a cargo command's output straight to the terminal (for long-running,
+// chatty commands like `cargo ws publish` where live progress matters), and
+// retry it when it dies on the package-cache lock.
+//
+// Retrying is safe because every cargo step here is idempotent: `cargo ws
+// publish` skips crates already on crates.io, and the version bump is guarded
+// by the `alreadyBumped` check in release().
+function runCargoLive(command, options = {}) {
+  if (options.dryRun && dryRun) {
+    console.log(`   [DRY RUN] Would execute: ${command}`);
+    return "";
+  }
+
+  const logFile = `/tmp/release-cargo-${process.pid}.log`;
+  const cleanup = () => fs.existsSync(logFile) && fs.unlinkSync(logFile);
+
+  for (let attempt = 1; attempt <= CARGO_LOCK_ATTEMPTS; attempt++) {
+    waitForPackageCache();
+    try {
+      // `tee` keeps the live output while still capturing it, so a lock failure
+      // can be told apart from a real publish failure. `pipefail` makes the
+      // pipeline report cargo's exit status rather than tee's. The command is
+      // wrapped in a group so the redirect covers all of it — `a; b 2>&1 | tee`
+      // would capture only `b`. Newlines, not `;`, so a command that already
+      // ends in a semicolon stays valid.
+      execSync(`set -o pipefail\n{ ${command}\n} 2>&1 | tee ${logFile}`, {
+        stdio: "inherit",
+        shell: "/bin/bash",
+        ...options,
+      });
+      const output = fs.existsSync(logFile)
+        ? fs.readFileSync(logFile, "utf8")
+        : "";
+      cleanup();
+      return output;
+    } catch (error) {
+      const output = fs.existsSync(logFile)
+        ? fs.readFileSync(logFile, "utf8")
+        : "";
+      cleanup();
+      if (!PACKAGE_CACHE_LOCK_ERROR.test(output) || attempt === CARGO_LOCK_ATTEMPTS) {
+        throw error;
+      }
+      console.warn(
+        `\n⚠️  Lost the cargo package-cache lock ` +
+          `(attempt ${attempt}/${CARGO_LOCK_ATTEMPTS}). Retrying...`
+      );
+    }
+  }
+}
+
+// Ask a yes/no question on stdin. Only an explicit "y" is a yes, so a
+// non-interactive stdin (EOF) declines rather than proceeding.
+async function ask(question) {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  const answer = await rl.question(question);
+  rl.close();
+  return answer.trim().toLowerCase() === "y";
 }
 
 function getRepoInfo() {
@@ -291,9 +396,79 @@ async function checkGitHubActions() {
   }
 }
 
+// Find the commit the previous release ended on, to bound the notes range.
+//
+// `git describe --tags --abbrev=0` is wrong here. Release PRs are squash-merged,
+// so the tag this script writes on the release branch points at a commit that
+// never lands on master: v2.0.0-rc.2 is not an ancestor of master even though
+// its squashed equivalent is. describe then walks silently back to the release
+// before it, which is how the v2.0.0-rc.3 notes ended up spanning two releases.
+//
+// The release commits themselves do survive the squash, so anchor on the newest
+// `chore: release v<x>` / `chore: pin workspace deps to v<x>` commit reachable
+// from HEAD that is not part of the release being cut. Fall back to describe.
+//
+// Subjects are matched here rather than with `git log --grep`, which searches
+// the whole message and so also matches merge commits that merely quote a
+// release subject in their body.
+function previousReleaseRef(version) {
+  const releaseCommit = /^chore: (release|pin workspace deps to) v?\d/;
+  // Match the version as a whole token, so cutting 2.0.0 does not mistake
+  // "chore: release v2.0.0-rc.3" for its own commit.
+  const isThisRelease = new RegExp(
+    `v?${version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-])`
+  );
+
+  const log = run("git log -n 200 --format='%H %s'", { allowFailure: true });
+
+  for (const line of (log || "").split("\n").filter(Boolean)) {
+    const sep = line.indexOf(" ");
+    const subject = line.slice(sep + 1);
+    if (!releaseCommit.test(subject) || isThisRelease.test(subject)) continue;
+    return { ref: line.slice(0, sep), label: subject };
+  }
+
+  const tag = run("git describe --tags --abbrev=0", { allowFailure: true });
+  return tag ? { ref: tag, label: tag } : null;
+}
+
+// Ask Claude for the notes. Returns the text, or throws with the reason.
+//
+// The prompt goes in on stdin rather than as `"$(cat file)"` so a long range
+// cannot hit ARG_MAX, and stderr is folded into stdout so a failure reports
+// what actually went wrong instead of "Claude returned no output".
+function claudeNotes(prompt, version) {
+  const promptFile = `/tmp/release-prompt-${version}.txt`;
+  fs.writeFileSync(promptFile, prompt);
+  try {
+    // Measured at ~130s for a 12-commit range, so the ceiling is generous.
+    let out;
+    try {
+      out = execSync(`claude -p < ${promptFile} 2>&1`, {
+        encoding: "utf8",
+        timeout: 600000,
+        maxBuffer: 32 * 1024 * 1024,
+      }).trim();
+    } catch (error) {
+      // stderr is folded into stdout above, so the real reason (an auth or
+      // credit error, say) is in error.stdout rather than error.message.
+      const detail = String(error.stdout || "").trim();
+      throw new Error(detail ? detail.slice(0, 600) : error.message);
+    }
+    if (!out) throw new Error("claude -p produced no output");
+    // A failing `claude -p` can still exit 0 with only a diagnostic on stdout.
+    if (!out.startsWith("#")) {
+      throw new Error(`claude -p did not return markdown notes: ${out.slice(0, 400)}`);
+    }
+    return out;
+  } finally {
+    fs.unlinkSync(promptFile);
+  }
+}
+
 // Generate release notes for `version` into releases/<version>-RELEASE.md.
 // Returns the notes content (used for the GitHub release body).
-function generateReleaseNotes(version) {
+async function generateReleaseNotes(version) {
   console.log("\n📝 Generating release notes...");
 
   const releaseDir = "./releases";
@@ -308,19 +483,33 @@ function generateReleaseNotes(version) {
     fs.mkdirSync(releaseDir, { recursive: true });
   }
 
-  const latestTag =
-    run("git describe --tags --abbrev=0", { allowFailure: true }) || "";
-  console.log(`   Latest tag: ${latestTag || "none"}`);
+  const previous = previousReleaseRef(version);
+  console.log(`   Previous release: ${previous ? previous.label : "none"}`);
 
-  const commits = latestTag
-    ? run(`git log ${latestTag}..HEAD --oneline`)
+  const range = previous ? `${previous.ref}..HEAD` : "";
+  // Subjects alone produce vague notes. The commit bodies in this repo carry the
+  // rationale and the compatibility notes, so send those too, indented under
+  // each subject and bounded so a long range cannot blow up the prompt.
+  const commits = range
+    ? run(`git log ${range} --format='- %h %s%n%w(0,4,4)%b'`).slice(0, 60000)
     : run("git log --oneline -20");
-  const gitDiff = latestTag ? run(`git diff ${latestTag}..HEAD --stat`) : "";
+  const oneline = range
+    ? run(`git log ${range} --oneline`)
+    : run("git log --oneline -20");
+  const gitDiff = range ? run(`git diff ${range} --stat`) : "";
+
+  // An empty range is not an error: finalizing a release candidate to its base
+  // version (2.0.0-rc.3 -> 2.0.0) is a promotion with no new commits.
+  if (range && !oneline) {
+    console.log(`   No new commits since ${previous.label} — promotion release`);
+  } else {
+    console.log(`   ${oneline.split("\n").length} commits in range`);
+  }
 
   const prompt = `Generate professional release notes for version ${version} of the DLC DevKit (DDK) Rust workspace.
 
-Here are the commits since the last release (${latestTag || "initial release"}):
-${commits}
+Here are the commits since the last release (${previous ? previous.label : "initial release"}), each with its full commit message body:
+${commits || `(none — this release promotes the previous release candidate to ${version} with no code changes)`}
 
 File changes summary:
 ${gitDiff}
@@ -338,12 +527,18 @@ The workspace contains these crates that are all being released with version ${v
 Please create release notes with:
 1. A brief summary of the release
 2. Breaking changes (if any, look for BREAKING in commits or major API changes)
-3. New features (commits starting with feat:)
-4. Bug fixes (commits starting with fix:)
-5. Other notable changes
-6. Installation instructions showing how to add ddk = "${version}" to Cargo.toml
+3. Security fixes, when a commit body describes one
+4. New features (commits starting with feat:)
+5. Bug fixes (commits starting with fix:)
+6. Other notable changes
+7. An upgrading section whenever a commit body describes on-disk or wire
+   compatibility, saying explicitly what keeps working
+8. Installation instructions showing how to add ddk = "${version}" to Cargo.toml
 
-Format as clean markdown suitable for a GitHub release. Be concise but informative.
+Write the specifics the commit bodies give you — the affected type and function
+names, what changed about them, and why. Do not just restate the commit
+subjects. Cite the short SHA for each entry. Format as clean markdown suitable
+for a GitHub release.
 
 Output the release notes and nothing else: the very first line must be the
 top-level heading, and the last line must be the last line of the notes. No
@@ -355,39 +550,109 @@ the output is written verbatim into the GitHub release body.`;
     return `# Release v${version}\n\n[DRY RUN - notes generated here]\n`;
   }
 
-  try {
-    // Measured at ~130s for a 12-commit range, so the ceiling is generous: the
-    // cost of waiting is a slow release, the cost of timing out is silently
-    // shipping the bare commit-list fallback below.
-    console.log("   Using Claude to generate release notes (up to 5 min)...");
-    const tempPromptFile = `/tmp/release-prompt-${version}.txt`;
-    fs.writeFileSync(tempPromptFile, prompt);
-    let claudeOutput;
+  console.log("   Using Claude to generate release notes (up to 10 min)...");
+  let lastError;
+  for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      claudeOutput = run(`claude -p "$(cat ${tempPromptFile})"`, {
-        allowFailure: true,
-        timeout: 300000,
-      });
-    } finally {
-      fs.unlinkSync(tempPromptFile);
+      const notes = claudeNotes(prompt, version);
+      fs.writeFileSync(releaseFile, notes);
+      console.log(`✅ Release notes written to ${releaseFile}`);
+      return notes;
+    } catch (error) {
+      lastError = error;
+      if (attempt === 1) console.warn(`⚠️  Attempt 1 failed; retrying...`);
     }
+  }
 
-    if (!claudeOutput) throw new Error("Claude returned no output");
+  // Never ship the bare commit list without being told to. The v2.0.0-rc.3
+  // notes went out as a raw `git log` dump because this fell through silently,
+  // and by then the crates were already published.
+  console.error(`\n❌ Could not generate release notes: ${lastError.message}`);
+  console.error(
+    "   If this mentions credit or authentication, ANTHROPIC_API_KEY is set in\n" +
+      "   this shell and takes precedence over the claude.ai login. Re-run with\n" +
+      "   `env -u ANTHROPIC_API_KEY node release.js ...`, or write\n" +
+      `   ${releaseFile} by hand and re-run — existing notes are reused as-is.`
+  );
 
-    fs.writeFileSync(releaseFile, claudeOutput);
-    console.log(`✅ Release notes written to ${releaseFile}`);
-    return claudeOutput;
-  } catch (error) {
-    console.warn(
-      `⚠️  Claude release notes failed (${error.message}); using basic template.`
+  const proceed =
+    skipConfirm ||
+    (await ask(
+      "\n❓ Continue anyway with a basic commit-list template? [y/N] "
+    ));
+  if (!proceed) {
+    console.log("Aborted before publishing. Nothing was released.");
+    process.exit(1);
+  }
+
+  let content = `# Release v${version}\n\n`;
+  content += `Released: ${new Date().toISOString().split("T")[0]}\n\n`;
+  content += `## 📥 Installation\n\n\`\`\`toml\nddk = "${version}"\n\`\`\`\n\n`;
+  content += `## Commits\n\n\`\`\`\n${oneline}\n\`\`\`\n`;
+  fs.writeFileSync(releaseFile, content);
+  console.log(`✅ Basic release notes written to ${releaseFile}`);
+  return content;
+}
+
+// Report what the dry run actually did.
+//
+// cargo-workspaces reports a crate it could not publish as `warn publish failed
+// <crate>` and still exits 0 with `info success ok`, so the dry run's exit code
+// on its own is a false green.
+//
+// One class of failure here is expected and unavoidable. `pinWorkspaceDeps`
+// points every intra-workspace dependency at the version being released, and
+// cargo re-resolves a packaged crate against the registry, where the sibling
+// crates do not exist yet — so a pre-release dry run cannot verify any crate
+// that depends on another workspace crate. The real run does not hit this
+// because it publishes in dependency order. Anything else is a genuine failure.
+function reportDryRunResult(output, version) {
+  const failed = [...output.matchAll(/^warn publish failed (\S+)/gm)].map(
+    (m) => m[1]
+  );
+  if (!failed.length) {
+    console.log("\n✅ Dry run packaged and verified every crate");
+    return;
+  }
+
+  const escaped = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const unresolvedSibling = new RegExp(
+    `failed to select a version for the requirement \`[\\w-]+ = "\\^?${escaped}"`
+  );
+
+  // cargo-workspaces prints an `info checking <crate>` banner before each
+  // crate, so each chunk holds one crate's output and its own failure reason.
+  const sections = output.split(/^info checking /m).slice(1);
+  const expected = [];
+  const real = [];
+  for (const section of sections) {
+    const crate = section.slice(0, section.indexOf("\n")).trim();
+    if (!/^warn publish failed /m.test(section)) continue;
+    (unresolvedSibling.test(section) ? expected : real).push(crate);
+  }
+  // If the banners ever change shape, fall back to judging the whole output.
+  if (!expected.length && !real.length) {
+    (unresolvedSibling.test(output) ? expected : real).push(...failed);
+  }
+
+  if (expected.length) {
+    console.log(
+      `\n⚠️  Not verifiable in a dry run: ${expected.join(", ")}`
     );
-    let content = `# Release v${version}\n\n`;
-    content += `Released: ${new Date().toISOString().split("T")[0]}\n\n`;
-    content += `## 📥 Installation\n\n\`\`\`toml\nddk = "${version}"\n\`\`\`\n\n`;
-    content += `## Commits\n\n\`\`\`\n${commits}\n\`\`\`\n`;
-    fs.writeFileSync(releaseFile, content);
-    console.log(`✅ Basic release notes written to ${releaseFile}`);
-    return content;
+    console.log(
+      `   These depend on workspace crates pinned to ${version}, which is not on\n` +
+        "   crates.io yet. The real run publishes in dependency order, so each\n" +
+        "   sibling is on the index by the time the next crate is packaged."
+    );
+  }
+
+  if (real.length) {
+    console.error(
+      `\n❌ Dry run failed to publish: ${real.join(", ")}\n` +
+        "   Scroll up for the cargo error. cargo-workspaces exits 0 on these, so\n" +
+        "   without this check the dry run would have looked like a success."
+    );
+    process.exit(1);
   }
 }
 
@@ -398,6 +663,7 @@ the output is written verbatim into the GitHub release body.`;
 // partial publish would sail straight into tagging, pushing, and cutting a
 // GitHub release for a version that isn't fully on the registry.
 function verifyPublished(version) {
+  waitForPackageCache();
   const meta = JSON.parse(run("cargo metadata --no-deps --format-version 1"));
   // `publish` is null when unrestricted and [] for `publish = false`.
   const crates = meta.packages
@@ -487,15 +753,10 @@ async function release() {
 
   // Step 2: confirm before doing anything irreversible.
   if (!dryRun && !skipConfirm) {
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-    });
-    const answer = await rl.question(
+    const confirmed = await ask(
       `\n❓ Publish all crates as v${version} to crates.io? [y/N] `
     );
-    rl.close();
-    if (answer.trim().toLowerCase() !== "y") {
+    if (!confirmed) {
       console.log("Aborted.");
       process.exit(0);
     }
@@ -504,17 +765,18 @@ async function release() {
   // Step 3: dry run validates the whole pipeline without mutating anything.
   if (dryRun) {
     console.log("\n📝 Generating release notes (preview)...");
-    generateReleaseNotes(version);
+    await generateReleaseNotes(version);
 
     console.log("\n📦 Validating publish via cargo-workspaces (--dry-run)...");
     // Stage the exact manifest state the real run publishes — bumped version
     // *and* re-pinned intra-workspace deps — so the dry run validates what will
     // actually go to crates.io, then put Cargo.toml back byte-for-byte.
     const original = fs.readFileSync("Cargo.toml", "utf8");
+    let output = "";
     try {
       setWorkspaceVersion(version);
       pinWorkspaceDeps(version);
-      runLive(
+      output = runCargoLive(
         `cargo ws publish --publish-as-is --allow-branch '*' ` +
           `--no-git-tag --no-git-push --dry-run --allow-dirty -y`
       );
@@ -522,6 +784,7 @@ async function release() {
       fs.writeFileSync("Cargo.toml", original);
       console.log("   Restored Cargo.toml (Cargo.lock may have been refreshed)");
     }
+    reportDryRunResult(output, version);
 
     console.log("\n🎉 Dry run complete. To perform the real release:");
     console.log(
@@ -546,7 +809,7 @@ async function release() {
   // notes live on the GitHub release page (see Step 10), not in the repo — so
   // there's nothing to commit, and the ignored file doesn't dirty the working
   // tree before cargo-workspaces runs.
-  const releaseNotes = generateReleaseNotes(version);
+  const releaseNotes = await generateReleaseNotes(version);
 
   // Step 6: bump + publish in dependency order via cargo-workspaces.
   // It derives the publish order from the dependency graph and skips crates
@@ -559,7 +822,7 @@ async function release() {
     console.log(`\n📦 Versions already at ${version} — skipping the bump`);
   } else {
     console.log("\n📦 Bumping crate versions via cargo-workspaces...");
-    runLive(
+    runCargoLive(
       `cargo ws version custom ${version} --force '*' ` +
         `--allow-branch 'release-*' --no-git-tag --no-git-push -y ` +
         `-m "chore: release v%v"`
@@ -576,7 +839,7 @@ async function release() {
   }
 
   console.log("\n📦 Publishing crates to crates.io via cargo-workspaces...");
-  runLive(
+  runCargoLive(
     `cargo ws publish --publish-as-is --allow-branch 'release-*' ` +
       `--no-git-tag --no-git-push -y`
   );
@@ -600,9 +863,14 @@ async function release() {
   const slug = info ? `${info.owner}/${info.repo}` : "<owner>/<repo>";
   console.log("📝 Creating pull request...");
   const prBodyFile = `/tmp/release-pr-body-${version}.md`;
+  // Inline the notes rather than pointing at releases/<version>-RELEASE.md:
+  // that directory is gitignored, so the file a reviewer is sent to look for is
+  // not in the repo. The GitHub release carries the same text.
   fs.writeFileSync(
     prBodyFile,
-    `Release version ${version}\n\n## Changes\n- Bumped all crate versions to ${version}\n- Published crates to crates.io\n\n## Release Notes\nSee releases/${version}-RELEASE.md\n`
+    `Bumps all crate versions to ${version} and publishes them to crates.io.\n\n` +
+      `Tag: [v${version}](https://github.com/${slug}/releases/tag/v${version})\n\n` +
+      `---\n\n${releaseNotes}\n`
   );
   try {
     const prUrl = run(
