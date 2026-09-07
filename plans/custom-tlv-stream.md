@@ -3,7 +3,7 @@ title: "Custom TLV Streams in DLC Messages"
 type: plan
 updated: "2026-08-13"
 tags: [dlcdevkit, ddk-messages, tlv, serialization, interop, node-dlc, bal, stateless-contracts]
-status: proposed
+status: partially implemented
 related: [[docs/oracle-message-serialization.md]]
 ---
 
@@ -168,41 +168,21 @@ passing. No migration.
 
 ### 4.1 `TlvStream`
 
-```rust
-/// The TLV records at the end of a message.
-///
-/// Records whose type this build knows are still parsed into their own fields;
-/// this holds the rest, verbatim, so they survive a round trip.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct TlvStream {
-    records: Vec<(u64, Vec<u8>)>,   // (type, full record bytes), ascending by type
-}
-
-impl TlvStream {
-    pub fn is_empty(&self) -> bool;
-
-    /// Reads records until the reader is exhausted.
-    pub fn read_to_end<R: Read>(reader: &mut R) -> Result<Self, DecodeError>;
-
-    /// Parses the record whose type is `T::TYPE_ID`, if present.
-    pub fn get<T: TlvRecord>(&self) -> Result<Option<T>, DecodeError>;
-
-    /// Writes `value`, replacing any existing record of the same type.
-    pub fn set<T: TlvRecord>(&mut self, value: &T);
-
-    pub fn remove(&mut self, type_id: u16) -> bool;
-
-    /// Raw access for records with no Rust type in this build.
-    pub fn raw(&self) -> impl Iterator<Item = (u64, &[u8])>;
-}
-```
+Landed as `dlc-messages/src/tlv_stream.rs`, with `TlvStreamRecord { tlv_type: u64,
+body: Vec<u8> }` holding the body alone; the header is rewritten from the type and
+`body.len()`. `is_empty`, `read_to_end`, `get`, `set`, `remove` and `raw` are as
+sketched here.
 
 `get`/`set` key off `TlvRecord::TYPE_ID`, so there is no runtime registry to
 populate and no way to read a record at the wrong type.
 
-Records are held sorted by type, which is what the TLV stream rules require and
-what makes `write` deterministic — important because a message's bytes are
-compared for equality in several places.
+**Records are held in wire order, not sorted, and duplicates are kept.** Both
+departures from the sketch above are forced by the peer we are interoperating with.
+node-dlc writes records in the order it holds them and appends one
+`BatchFundingGroup` record per group, so sorting on write would break byte equality
+against a real peer's message and rejecting duplicates would reject messages that are
+valid today. Wire order is also what makes `write` deterministic, which is what the
+byte-equality comparisons actually need.
 
 ### 4.2 Message field
 
@@ -266,17 +246,22 @@ be fixed for the feature to be usable at all:
 The Lightning convention is that an unknown even type must be rejected and an odd
 one may be ignored. node-dlc keeps everything regardless of parity.
 
-Recommendation: keep everything, and log a warning on an unknown even type.
-Interop with BAL is the point of the feature, DDK does not validate these
-records, and rejecting a message mid-protocol over a record we were never going
-to read is worse than carrying it. The warning means a genuinely required record
-we do not understand still surfaces.
-
-Decide before implementing — it changes `read_to_end` and the tests.
+**Decided: keep everything, regardless of parity.** Interop with BAL is the point of
+the feature, DDK does not validate these records, and rejecting a message mid-protocol
+over a record we were never going to read is worse than carrying it. The warning on an
+unknown even type was dropped with it — `ddk-messages` has no logger, and adding one to
+this crate for a line nobody reads is not worth the dependency.
 
 ---
 
 ## 6. Tasks
+
+Items 2 and 4 landed for `OfferDlc` only, along with the compatibility tests in item 5.
+`OfferDlc` has hand-written `Writeable`/`Readable` impls — it is the one message the
+`impl_dlc_writeable!` macro cannot express, because of the peek-based old-format branch
+— so it was wired up directly and item 3 was not needed yet. `AcceptDlc` and `SignDlc`
+still drop records; they go through the macro, so they need item 3 first.
+
 
 1. **Macro hygiene.** Qualify paths in `impl_dlc_writeable!`, `field_write!`,
    `field_read!`. Re-export `lightning` and `ddk_messages` from `ddk`. Add a test

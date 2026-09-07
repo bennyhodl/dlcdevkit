@@ -19,6 +19,7 @@ pub mod ser_macros;
 pub mod ser_impls;
 
 pub use ser_impls::{TlvRecord, TlvType};
+pub use tlv_stream::{TlvStream, TlvStreamRecord};
 
 #[cfg(any(test, feature = "use-serde"))]
 extern crate serde;
@@ -28,9 +29,11 @@ extern crate serde_json;
 
 pub mod channel;
 pub mod contract_msgs;
+pub mod liquidation;
 pub mod message_handler;
 pub mod oracle_msgs;
 pub mod segmentation;
+pub mod tlv_stream;
 pub mod types;
 
 #[cfg(any(test, feature = "use-serde"))]
@@ -354,6 +357,17 @@ pub struct OfferDlc {
     pub cet_locktime: u32,
     /// The lock time for the refund transactions.
     pub refund_locktime: u32,
+    #[cfg_attr(
+        feature = "use-serde",
+        serde(default, skip_serializing_if = "TlvStream::is_empty")
+    )]
+    /// The TLV records appended after the fixed fields.
+    ///
+    /// Empty for a peer that appends none, in which case it encodes to no bytes and the
+    /// message is byte-identical to one written before this field existed. Records this
+    /// build has no type for are held verbatim rather than dropped; see
+    /// [`tlv_stream`](crate::tlv_stream).
+    pub tlvs: TlvStream,
 }
 
 impl OfferDlc {
@@ -423,6 +437,8 @@ impl Writeable for OfferDlc {
         self.fee_rate_per_vb.write(w)?;
         self.cet_locktime.write(w)?;
         self.refund_locktime.write(w)?;
+        // Must stay last: the reader takes everything after this point as the stream.
+        self.tlvs.write(w)?;
         Ok(())
     }
 }
@@ -476,6 +492,9 @@ impl Readable for OfferDlc {
             fee_rate_per_vb: Readable::read(r)?,
             cet_locktime: Readable::read(r)?,
             refund_locktime: Readable::read(r)?,
+            // Reads to the end of the message. Before this, trailing records were left
+            // unread and silently dropped on the way back out.
+            tlvs: TlvStream::read_to_end(r)?,
         })
     }
 }
@@ -734,6 +753,113 @@ mod tests {
     fn offer_msg_roundtrip() {
         let input = include_str!("./test_inputs/offer_msg.json");
         roundtrip_test!(OfferDlc, input);
+    }
+
+    /// The offer fixture encoded by the last release that had no TLV stream, captured
+    /// from that code rather than regenerated here.
+    const OFFER_MSG_PRE_TLV: &str = include_str!("./test_inputs/offer_msg_pre_tlv.hex");
+
+    fn offer_fixture() -> OfferDlc {
+        serde_json::from_str(include_str!("./test_inputs/offer_msg.json")).unwrap()
+    }
+
+    fn from_hex(hex: &str) -> Vec<u8> {
+        (0..hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+            .collect()
+    }
+
+    fn read_offer(bytes: &[u8]) -> Result<OfferDlc, DecodeError> {
+        Readable::read(&mut lightning::io::Cursor::new(bytes.to_vec()))
+    }
+
+    /// A record at type 65003 with a 3-byte body: the shape node-dlc appends and this
+    /// crate used to drop.
+    const UNKNOWN_RECORD: &[u8] = &[0xfd, 0xfd, 0xeb, 0x03, 0x01, 0x02, 0x03];
+
+    #[test]
+    fn offer_with_no_records_is_byte_identical_to_the_previous_release() {
+        // An empty stream must contribute zero bytes, or every offer on the wire changes
+        // and the temporary contract id derived from those bytes changes with it.
+        let offer = offer_fixture();
+        assert!(offer.tlvs.is_empty());
+        assert_eq!(offer.encode(), from_hex(OFFER_MSG_PRE_TLV.trim()));
+    }
+
+    #[test]
+    fn offer_from_the_previous_release_still_decodes() {
+        let offer = read_offer(&from_hex(OFFER_MSG_PRE_TLV.trim())).unwrap();
+        assert!(offer.tlvs.is_empty());
+        assert_eq!(offer, offer_fixture());
+    }
+
+    #[test]
+    fn unknown_record_survives_a_decode_encode_cycle() {
+        // The regression this whole field exists for: before it, these 7 bytes were read
+        // past, never stored, and never written back — with no error at any layer.
+        let mut bytes = offer_fixture().encode();
+        bytes.extend_from_slice(UNKNOWN_RECORD);
+
+        let offer = read_offer(&bytes).unwrap();
+        assert_eq!(offer.tlvs.raw().count(), 1);
+        assert_eq!(offer.encode(), bytes);
+    }
+
+    #[test]
+    fn liquidation_record_round_trips_on_an_offer() {
+        use crate::liquidation::{LiquidationInfo, LiquidationMethod};
+
+        let info = LiquidationInfo {
+            announcements: Vec::new(),
+            liquidator: [0x11; 20],
+            method: LiquidationMethod::Price,
+        };
+        let mut offer = offer_fixture();
+        offer.tlvs.set(&info);
+
+        let decoded = read_offer(&offer.encode()).unwrap();
+        assert_eq!(decoded, offer);
+        assert_eq!(decoded.tlvs.get::<LiquidationInfo>().unwrap(), Some(info));
+    }
+
+    #[test]
+    fn known_and_unknown_records_coexist_in_wire_order() {
+        use crate::liquidation::{LiquidationInfo, LiquidationMethod};
+
+        let mut offer = offer_fixture();
+        offer.tlvs.set(&LiquidationInfo {
+            announcements: Vec::new(),
+            liquidator: [0x22; 20],
+            method: LiquidationMethod::Identifier,
+        });
+        let mut bytes = offer.encode();
+        bytes.extend_from_slice(UNKNOWN_RECORD);
+
+        let decoded = read_offer(&bytes).unwrap();
+        assert!(decoded.tlvs.get::<LiquidationInfo>().unwrap().is_some());
+        assert_eq!(decoded.encode(), bytes);
+    }
+
+    #[test]
+    fn old_format_offer_without_protocol_version_decodes_with_an_empty_stream() {
+        // What a pre-`protocol_version` peer sends: the 4 version bytes are simply absent.
+        // Reading to end must not turn that into an error, or peers valid today break.
+        let bytes = offer_fixture().encode();
+        let mut old_format = bytes[..2].to_vec();
+        old_format.extend_from_slice(&bytes[6..]);
+
+        let offer = read_offer(&old_format).unwrap();
+        assert_eq!(offer.protocol_version, 1);
+        assert!(offer.tlvs.is_empty());
+        assert_eq!(offer, offer_fixture());
+    }
+
+    #[test]
+    fn offer_with_a_truncated_record_is_rejected() {
+        let mut bytes = offer_fixture().encode();
+        bytes.extend_from_slice(&UNKNOWN_RECORD[..UNKNOWN_RECORD.len() - 1]);
+        assert!(read_offer(&bytes).is_err());
     }
 
     #[test]

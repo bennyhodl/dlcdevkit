@@ -211,6 +211,10 @@ impl From<&OfferedContract> for OfferDlc {
             refund_locktime: offered_contract.refund_locktime,
             fee_rate_per_vb: offered_contract.fee_rate_per_vb,
             fund_output_serial_id: offered_contract.fund_output_serial_id,
+            // `OfferedContract` decomposes the offer into its own fields and has no room
+            // for TLV records, so a re-derived offer carries none. Applications that need
+            // records use the stateless `ddk::contract` module, which keeps the message.
+            tlvs: Default::default(),
         }
     }
 }

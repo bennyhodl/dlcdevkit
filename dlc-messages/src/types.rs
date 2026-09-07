@@ -122,6 +122,7 @@ mod tests {
             fee_rate_per_vb: 1,
             cet_locktime: 100,
             refund_locktime: 200,
+            tlvs: Default::default(),
         };
 
         // Serialize the offer

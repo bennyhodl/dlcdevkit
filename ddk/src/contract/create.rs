@@ -65,6 +65,9 @@ pub fn create_offer(params: CreateOfferParams) -> Result<OfferDlc, ContractError
         fee_rate_per_vb,
         cet_locktime,
         refund_locktime,
+        // The caller attaches its own records after this returns; `create_offer` has
+        // nothing of its own to put here.
+        tlvs: Default::default(),
     };
 
     if offer.offer_collateral > offer.get_total_collateral() {

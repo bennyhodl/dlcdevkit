@@ -120,6 +120,7 @@ fn messages_with_serial_ids(offer_ids: &[u64], accept_ids: &[u64]) -> (OfferDlc,
         fee_rate_per_vb: 2,
         cet_locktime: 750,
         refund_locktime: 1_000,
+        tlvs: Default::default(),
     };
     let accept = AcceptDlc {
         protocol_version: PROTOCOL_VERSION,

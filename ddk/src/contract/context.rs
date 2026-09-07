@@ -13,7 +13,7 @@ use ddk_messages::{AcceptDlc, CetAdaptorSignatures, FundingInput, FundingSignatu
 
 use super::error::ContractError;
 use super::types::Party;
-use super::PROTOCOL_VERSION;
+use super::{MIN_PROTOCOL_VERSION, PROTOCOL_VERSION};
 
 /// Contract data rebuilt from the offer and accept messages.
 pub(crate) struct ContractContext {
@@ -391,7 +391,7 @@ pub(crate) fn ensure_protocol_version(
     version: u32,
     error: fn(String) -> ContractError,
 ) -> Result<(), ContractError> {
-    if version != PROTOCOL_VERSION {
+    if !(MIN_PROTOCOL_VERSION..=PROTOCOL_VERSION).contains(&version) {
         return Err(error(format!("unsupported DLC protocol version {version}")));
     }
     Ok(())
