@@ -1,8 +1,7 @@
 //! Module used when working with message segmentation.
 
-use lightning::ln::msgs::DecodeError;
 use lightning::ln::wire::Type;
-use lightning::util::ser::{Readable, Writeable, Writer};
+use lightning::util::ser::Writeable;
 
 /// The type of the [`SegmentStart`] message.
 pub const SEGMENT_START_TYPE: u16 = 42900;

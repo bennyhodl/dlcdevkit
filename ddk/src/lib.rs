@@ -54,6 +54,35 @@ pub use ddk_manager;
 #[cfg(feature = "manager")]
 pub use bip329;
 
+/// The DLC message types, and the macros for defining a TLV record to attach to one.
+///
+/// Re-exported so an application can define its own record without depending on
+/// `ddk-messages` or `lightning` directly:
+///
+/// ```
+/// use ddk::ddk_messages::{impl_dlc_tlv_record, impl_dlc_writeable};
+///
+/// #[derive(Debug)]
+/// pub struct LoanReference {
+///     pub loan_id: u64,
+///     pub lender: String,
+/// }
+///
+/// impl_dlc_writeable!(LoanReference, {
+///     (loan_id, writeable),
+///     (lender, string)
+/// });
+/// impl_dlc_tlv_record!(LoanReference, 65007);
+///
+/// # fn attach(offer: &mut ddk::ddk_messages::OfferDlc) {
+/// offer.tlvs.set(&LoanReference { loan_id: 7, lender: "acme".to_string() });
+/// # }
+/// ```
+///
+/// What goes in the stream is the application's business. This crate carries records it
+/// has no type for without looking at them; see [`ddk_messages::tlv_stream`].
+pub use ddk_messages;
+
 /// DDK object with all services
 #[cfg(feature = "manager")]
 pub use ddk::DlcDevKit;

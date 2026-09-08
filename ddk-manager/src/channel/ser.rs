@@ -8,8 +8,6 @@ use super::{ClosedChannel, ClosedPunishedChannel, ClosingChannel, FailedAccept, 
 use ddk_messages::ser_impls::{
     read_ecdsa_adaptor_signature, read_string, write_ecdsa_adaptor_signature, write_string,
 };
-use lightning::ln::msgs::DecodeError;
-use lightning::util::ser::{Readable, Writeable, Writer};
 
 impl_dlc_writeable!(PartyBasePoints, { (own_basepoint, writeable), (publish_basepoint, writeable), (revocation_basepoint, writeable) });
 impl_dlc_writeable!(OfferedChannel, { (offered_contract_id, writeable), (temporary_channel_id, writeable), (party_points, writeable), (per_update_point, writeable), (offer_per_update_seed, writeable), (is_offer_party, writeable), (counter_party, writeable), (cet_nsequence, writeable) });

@@ -2,8 +2,6 @@
 
 use bitcoin::{Amount, ScriptBuf};
 use ddk_dlc::Error;
-use lightning::ln::msgs::DecodeError;
-use lightning::util::ser::{Readable, Writeable, Writer};
 use secp256k1_zkp::{
     ecdsa::Signature, EcdsaAdaptorSignature, PublicKey, Secp256k1, SecretKey, Verification,
 };

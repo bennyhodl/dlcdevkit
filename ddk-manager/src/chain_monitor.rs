@@ -6,8 +6,6 @@ use bitcoin::{Block, OutPoint, Transaction, Txid};
 use ddk_messages::ser_impls::{
     read_ecdsa_adaptor_signature, read_hash_map, write_ecdsa_adaptor_signature, write_hash_map,
 };
-use lightning::ln::msgs::DecodeError;
-use lightning::util::ser::{Readable, Writeable, Writer};
 use secp256k1_zkp::EcdsaAdaptorSignature;
 
 use crate::ChannelId;

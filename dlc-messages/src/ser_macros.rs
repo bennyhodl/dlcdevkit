@@ -1,10 +1,36 @@
 //! Set of macro to help implementing the [`lightning::util::ser::Writeable`] trait.
+//!
+//! # Using these from another crate
+//!
+//! Every path these macros expand to is absolute and rooted at `$crate`, so a caller needs
+//! nothing in scope beyond the macro itself and does not need `lightning` as a direct
+//! dependency. `ddk-messages` re-exports `lightning`, and `ddk` re-exports `ddk_messages`,
+//! so an application that depends only on `ddk` can define its own record type:
+//!
+//! ```
+//! use ddk_messages::{impl_dlc_tlv_record, impl_dlc_writeable};
+//!
+//! #[derive(Debug)]
+//! pub struct LoanReference {
+//!     pub loan_id: u64,
+//!     pub lender: String,
+//! }
+//!
+//! impl_dlc_writeable!(LoanReference, {
+//!     (loan_id, writeable),
+//!     (lender, string)
+//! });
+//! impl_dlc_tlv_record!(LoanReference, 65007);
+//! ```
+//!
+//! `Debug` is required because [`lightning::ln::wire::Type`], which
+//! [`impl_dlc_tlv_record!`] derives, requires it.
 
 /// Writes a field to a writer.
 #[macro_export]
 macro_rules! field_write {
     ($stream: expr, $field: expr, writeable) => {
-        $field.write($stream)?;
+        $crate::lightning::util::ser::Writeable::write(&$field, $stream)?;
     };
     ($stream: expr, $field: expr, {cb_writeable, $w_cb: expr, $r_cb: expr}) => {
         $w_cb(&$field, $stream)?;
@@ -42,7 +68,7 @@ macro_rules! field_write {
 #[macro_export]
 macro_rules! field_read {
     ($stream: expr, writeable) => {
-        Readable::read($stream)?
+        $crate::lightning::util::ser::Readable::read($stream)?
     };
     ($stream: expr, {cb_writeable, $w_cb: expr, $r_cb: expr}) => {
         $r_cb($stream)?
@@ -78,23 +104,34 @@ macro_rules! field_read {
 
 /// Implements the [`lightning::util::ser::Writeable`] trait for a struct available
 /// in this crate.
+///
+/// A trailing `, $tlv_field` writes a [`TlvStream`](crate::tlv_stream::TlvStream) after the
+/// last fixed field and reads it back to the end of the message. It sits outside the field
+/// list because the stream has to be last — a reader takes everything after the fixed
+/// fields as the stream — and putting it there means a caller cannot place it anywhere
+/// else. See [`tlv_stream`](crate::tlv_stream) for what that costs and buys.
 #[macro_export]
 macro_rules! impl_dlc_writeable {
     ($st:ident, {$(($field: ident, $fieldty: tt)), *} ) => {
-        impl Writeable for $st {
-			fn write<W: Writer>(&self, w: &mut W) -> Result<(), ::lightning::io::Error> {
-				$(
-                    field_write!(w, self.$field, $fieldty);
+        impl $crate::lightning::util::ser::Writeable for $st {
+            fn write<W: $crate::lightning::util::ser::Writer>(
+                &self,
+                w: &mut W,
+            ) -> Result<(), $crate::lightning::io::Error> {
+                $(
+                    $crate::field_write!(w, self.$field, $fieldty);
                 )*
-				Ok(())
+                Ok(())
             }
         }
 
-        impl Readable for $st {
-			fn read<R: lightning::io::Read>(r: &mut R) -> Result<Self, DecodeError> {
+        impl $crate::lightning::util::ser::Readable for $st {
+            fn read<R: $crate::lightning::io::Read>(
+                r: &mut R,
+            ) -> Result<Self, $crate::lightning::ln::msgs::DecodeError> {
                 Ok(Self {
                     $(
-                        $field: field_read!(r, $fieldty),
+                        $field: $crate::field_read!(r, $fieldty),
                     )*
                 })
             }
@@ -102,28 +139,69 @@ macro_rules! impl_dlc_writeable {
     };
     // Version with type_id - writes/reads type_id as first field
     ($st:ident, $type_const:ident, {$(($field: ident, $fieldty: tt)), *} ) => {
-        impl Writeable for $st {
-			fn write<W: Writer>(&self, w: &mut W) -> Result<(), ::lightning::io::Error> {
+        impl $crate::lightning::util::ser::Writeable for $st {
+            fn write<W: $crate::lightning::util::ser::Writer>(
+                &self,
+                w: &mut W,
+            ) -> Result<(), $crate::lightning::io::Error> {
                 // Write type_id first
-                $type_const.write(w)?;
-				$(
-                    field_write!(w, self.$field, $fieldty);
+                $crate::lightning::util::ser::Writeable::write(&$type_const, w)?;
+                $(
+                    $crate::field_write!(w, self.$field, $fieldty);
                 )*
-				Ok(())
+                Ok(())
             }
         }
 
-        impl Readable for $st {
-			fn read<R: lightning::io::Read>(r: &mut R) -> Result<Self, DecodeError> {
+        impl $crate::lightning::util::ser::Readable for $st {
+            fn read<R: $crate::lightning::io::Read>(
+                r: &mut R,
+            ) -> Result<Self, $crate::lightning::ln::msgs::DecodeError> {
                 // Read and verify type_id first
-                let type_id: u16 = Readable::read(r)?;
+                let type_id: u16 = $crate::lightning::util::ser::Readable::read(r)?;
                 if type_id != $type_const {
-                    return Err(DecodeError::UnknownRequiredFeature);
+                    return Err($crate::lightning::ln::msgs::DecodeError::UnknownRequiredFeature);
                 }
                 Ok(Self {
                     $(
-                        $field: field_read!(r, $fieldty),
+                        $field: $crate::field_read!(r, $fieldty),
                     )*
+                })
+            }
+        }
+    };
+    // Version with type_id and a trailing TLV stream.
+    ($st:ident, $type_const:ident, {$(($field: ident, $fieldty: tt)), *}, $tlv_field: ident ) => {
+        impl $crate::lightning::util::ser::Writeable for $st {
+            fn write<W: $crate::lightning::util::ser::Writer>(
+                &self,
+                w: &mut W,
+            ) -> Result<(), $crate::lightning::io::Error> {
+                // Write type_id first
+                $crate::lightning::util::ser::Writeable::write(&$type_const, w)?;
+                $(
+                    $crate::field_write!(w, self.$field, $fieldty);
+                )*
+                // Last, always: the reader takes everything after this point as the stream.
+                $crate::lightning::util::ser::Writeable::write(&self.$tlv_field, w)?;
+                Ok(())
+            }
+        }
+
+        impl $crate::lightning::util::ser::Readable for $st {
+            fn read<R: $crate::lightning::io::Read>(
+                r: &mut R,
+            ) -> Result<Self, $crate::lightning::ln::msgs::DecodeError> {
+                // Read and verify type_id first
+                let type_id: u16 = $crate::lightning::util::ser::Readable::read(r)?;
+                if type_id != $type_const {
+                    return Err($crate::lightning::ln::msgs::DecodeError::UnknownRequiredFeature);
+                }
+                Ok(Self {
+                    $(
+                        $field: $crate::field_read!(r, $fieldty),
+                    )*
+                    $tlv_field: $crate::tlv_stream::TlvStream::read_to_end(r)?,
                 })
             }
         }
@@ -138,21 +216,24 @@ macro_rules! impl_dlc_writeable_external {
         /// Module containing write and read functions for $name
         pub mod $name {
             use super::*;
-            use lightning::ln::msgs::DecodeError;
-            use lightning::util::ser::Writer;
             /// Function to write $name
-            pub fn write<W: Writer>($name: &$st<$($gen$(<$gen2>)?)?>, w: &mut W) -> Result<(), ::lightning::io::Error> {
+            pub fn write<W: $crate::lightning::util::ser::Writer>(
+                $name: &$st<$($gen$(<$gen2>)?)?>,
+                w: &mut W,
+            ) -> Result<(), $crate::lightning::io::Error> {
                 $(
-                    field_write!(w, $name.$field, $fieldty);
+                    $crate::field_write!(w, $name.$field, $fieldty);
                 )*
                 Ok(())
             }
 
             /// Function to read $name
-            pub fn read<R: lightning::io::Read>(r: &mut R) -> Result<$st<$($gen$(<$gen2>)?)?>, DecodeError> {
+            pub fn read<R: $crate::lightning::io::Read>(
+                r: &mut R,
+            ) -> Result<$st<$($gen$(<$gen2>)?)?>, $crate::lightning::ln::msgs::DecodeError> {
                 Ok($st {
                     $(
-                        $field: field_read!(r, $fieldty),
+                        $field: $crate::field_read!(r, $fieldty),
                     )*
                 })
             }
@@ -168,26 +249,31 @@ macro_rules! impl_dlc_writeable_external_enum {
         mod $name {
             use super::*;
 
-			pub fn write<W: Writer>($name: &$st$(<$gen>)?, w: &mut W) -> Result<(), ::lightning::io::Error> {
+            pub fn write<W: $crate::lightning::util::ser::Writer>(
+                $name: &$st$(<$gen>)?,
+                w: &mut W,
+            ) -> Result<(), $crate::lightning::io::Error> {
                 match $name {
                     $($st::$variant_name(ref field) => {
                         let id : u8 = $variant_id;
-                        id.write(w)?;
+                        $crate::lightning::util::ser::Writeable::write(&id, w)?;
                         $variant_mod::write(field, w)?;
                     }),*
                 };
-				Ok(())
+                Ok(())
             }
 
-			pub fn read<R: lightning::io::Read>(r: &mut R) -> Result<$st$(<$gen>)?, DecodeError> {
-                let id: u8 = Readable::read(r)?;
+            pub fn read<R: $crate::lightning::io::Read>(
+                r: &mut R,
+            ) -> Result<$st$(<$gen>)?, $crate::lightning::ln::msgs::DecodeError> {
+                let id: u8 = $crate::lightning::util::ser::Readable::read(r)?;
                 match id {
                     $($variant_id => {
-						Ok($st::$variant_name($variant_mod::read(r)?))
-					}),*
-					_ => {
-						Err(DecodeError::UnknownRequiredFeature)
-					},
+                        Ok($st::$variant_name($variant_mod::read(r)?))
+                    }),*
+                    _ => {
+                        Err($crate::lightning::ln::msgs::DecodeError::UnknownRequiredFeature)
+                    },
                 }
             }
         }
@@ -196,9 +282,11 @@ macro_rules! impl_dlc_writeable_external_enum {
 
 /// Declares a type as a TLV record, giving it its record type in one place.
 ///
-/// Use this for any type the DLC specification assigns a TLV record type to. It
-/// implements [`TlvType`](crate::ser_impls::TlvType) with the given constant and derives
-/// [`Type`](lightning::ln::wire::Type) from it, so the two can never disagree.
+/// Use this for any type the DLC specification assigns a TLV record type to, and for any
+/// record an application defines for itself. It implements
+/// [`TlvType`](crate::ser_impls::TlvType) with the given constant and derives
+/// [`Type`](lightning::ln::wire::Type) from it, so the two can never disagree. The type
+/// must be `Debug`, which is what `Type` requires.
 ///
 /// Declaring it also brings in [`TlvRecord`](crate::ser_impls::TlvRecord) through that
 /// trait's blanket impl, which is what lets the type be read and written on its own
@@ -207,6 +295,10 @@ macro_rules! impl_dlc_writeable_external_enum {
 /// ```ignore
 /// impl_dlc_tlv_record!(OracleAnnouncement, ANNOUNCEMENT_TYPE);
 /// ```
+///
+/// An application picking its own record type should take an odd one in the custom range,
+/// where the DLC specification assigns nothing, so a peer that does not know the record
+/// carries it through instead of rejecting the message.
 ///
 /// Do not reach for this to mark a peer-to-peer protocol message. Those are wire
 /// messages — a `u16` type and no length — and want a bare
@@ -218,7 +310,7 @@ macro_rules! impl_dlc_tlv_record {
             const TYPE_ID: u16 = $type_id;
         }
 
-        impl ::lightning::ln::wire::Type for $st {
+        impl $crate::lightning::ln::wire::Type for $st {
             fn type_id(&self) -> u16 {
                 <$st as $crate::ser_impls::TlvType>::TYPE_ID
             }
@@ -230,30 +322,44 @@ macro_rules! impl_dlc_tlv_record {
 #[macro_export]
 macro_rules! impl_dlc_writeable_enum_as_tlv {
     ($st:ident, $(($variant_id: expr, $variant_name: ident)), *;) => {
-        impl Writeable for $st {
-			fn write<W: Writer>(&self, w: &mut W) -> Result<(), ::lightning::io::Error> {
+        impl $crate::lightning::util::ser::Writeable for $st {
+            fn write<W: $crate::lightning::util::ser::Writer>(
+                &self,
+                w: &mut W,
+            ) -> Result<(), $crate::lightning::io::Error> {
                 match self {
                     $($st::$variant_name(ref field) => {
-                        $crate::ser_impls::BigSize($variant_id as u64).write(w)?;
-                        $crate::ser_impls::BigSize(field.serialized_length() as u64).write(w)?;
-                        field.write(w)?;
+                        $crate::lightning::util::ser::Writeable::write(
+                            &$crate::ser_impls::BigSize($variant_id as u64), w)?;
+                        $crate::lightning::util::ser::Writeable::write(
+                            &$crate::ser_impls::BigSize(
+                                $crate::lightning::util::ser::Writeable::serialized_length(field)
+                                    as u64,
+                            ),
+                            w,
+                        )?;
+                        $crate::lightning::util::ser::Writeable::write(field, w)?;
                     }),*
                 };
-				Ok(())
+                Ok(())
             }
         }
 
-        impl Readable for $st {
-			fn read<R: lightning::io::Read>(r: &mut R) -> Result<Self, DecodeError> {
-                let id: $crate::ser_impls::BigSize = Readable::read(r)?;
+        impl $crate::lightning::util::ser::Readable for $st {
+            fn read<R: $crate::lightning::io::Read>(
+                r: &mut R,
+            ) -> Result<Self, $crate::lightning::ln::msgs::DecodeError> {
+                let id: $crate::ser_impls::BigSize =
+                    $crate::lightning::util::ser::Readable::read(r)?;
                 match id.0 {
                     $($variant_id => {
-                        let len : $crate::ser_impls::BigSize = Readable::read(r)?;
-						Ok($st::$variant_name($crate::ser_impls::read_tlv_body(r, len.0)?))
-					}),*
-					_ => {
-						Err(DecodeError::UnknownRequiredFeature)
-					},
+                        let len : $crate::ser_impls::BigSize =
+                            $crate::lightning::util::ser::Readable::read(r)?;
+                        Ok($st::$variant_name($crate::ser_impls::read_tlv_body(r, len.0)?))
+                    }),*
+                    _ => {
+                        Err($crate::lightning::ln::msgs::DecodeError::UnknownRequiredFeature)
+                    },
                 }
             }
         }
@@ -267,58 +373,64 @@ macro_rules! impl_dlc_writeable_enum {
     $(($variant_id: expr, $variant_name: ident, {$(($field: ident, $fieldty: tt)),*})), *;
     $(($external_variant_id: expr, $external_variant_name: ident, $write_cb: expr, $read_cb: expr)), *;
     $(($simple_variant_id: expr, $simple_variant_name: ident)), *) => {
-        impl Writeable for $st {
-			fn write<W: Writer>(&self, w: &mut W) -> Result<(), ::lightning::io::Error> {
+        impl $crate::lightning::util::ser::Writeable for $st {
+            fn write<W: $crate::lightning::util::ser::Writer>(
+                &self,
+                w: &mut W,
+            ) -> Result<(), $crate::lightning::io::Error> {
                 match self {
                     $($st::$tuple_variant_name(ref field) => {
                         let id : u8 = $tuple_variant_id;
-                        id.write(w)?;
-                        field.write(w)?;
+                        $crate::lightning::util::ser::Writeable::write(&id, w)?;
+                        $crate::lightning::util::ser::Writeable::write(field, w)?;
                     }),*
                     $($st::$variant_name { $(ref $field),* } => {
                         let id : u8 = $variant_id;
-                        id.write(w)?;
+                        $crate::lightning::util::ser::Writeable::write(&id, w)?;
                         $(
-                            field_write!(w, $field, $fieldty);
+                            $crate::field_write!(w, $field, $fieldty);
                         )*
                     }),*
                     $($st::$external_variant_name(ref field) => {
                         let id : u8 = $external_variant_id;
-                        id.write(w)?;
+                        $crate::lightning::util::ser::Writeable::write(&id, w)?;
                         $write_cb(field, w)?;
                     }),*
                     $($st::$simple_variant_name => {
                         let id : u8 = $simple_variant_id;
-                        id.write(w)?;
+                        $crate::lightning::util::ser::Writeable::write(&id, w)?;
                     }),*
                 };
-				Ok(())
+                Ok(())
             }
         }
 
-        impl Readable for $st {
-			fn read<R: lightning::io::Read>(r: &mut R) -> Result<Self, DecodeError> {
-                let id: u8 = Readable::read(r)?;
+        impl $crate::lightning::util::ser::Readable for $st {
+            fn read<R: $crate::lightning::io::Read>(
+                r: &mut R,
+            ) -> Result<Self, $crate::lightning::ln::msgs::DecodeError> {
+                let id: u8 = $crate::lightning::util::ser::Readable::read(r)?;
                 match id {
                     $($tuple_variant_id => {
-						Ok($st::$tuple_variant_name(Readable::read(r)?))
-					}),*
+                        Ok($st::$tuple_variant_name(
+                            $crate::lightning::util::ser::Readable::read(r)?))
+                    }),*
                     $($variant_id => {
                         Ok($st::$variant_name {
                             $(
-                                $field: field_read!(r, $fieldty)
+                                $field: $crate::field_read!(r, $fieldty)
                             ),*
                         })
                     }),*
                     $($external_variant_id => {
-						Ok($st::$external_variant_name($read_cb(r)?))
-					}),*
+                        Ok($st::$external_variant_name($read_cb(r)?))
+                    }),*
                     $($simple_variant_id => {
-						Ok($st::$simple_variant_name)
-					}),*
-					_ => {
-						Err(DecodeError::UnknownRequiredFeature)
-					},
+                        Ok($st::$simple_variant_name)
+                    }),*
+                    _ => {
+                        Err($crate::lightning::ln::msgs::DecodeError::UnknownRequiredFeature)
+                    },
                 }
             }
         }

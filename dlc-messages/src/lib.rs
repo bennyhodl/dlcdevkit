@@ -12,8 +12,16 @@
 
 extern crate bitcoin;
 extern crate ddk_dlc;
-extern crate lightning;
 extern crate secp256k1_zkp;
+
+/// The `lightning` crate this one serializes against.
+///
+/// Re-exported because the macros here expand to `$crate::lightning::…`. An absolute
+/// `::lightning::…` in a macro body can only ever be satisfied by a `lightning` entry in
+/// the *caller's* `Cargo.toml`, at exactly the version this crate resolves — no
+/// re-export can substitute for it. Going through `$crate` instead means a caller needs
+/// nothing but the macro, and cannot end up with two `lightning` versions.
+pub extern crate lightning;
 #[macro_use]
 pub mod ser_macros;
 pub mod ser_impls;

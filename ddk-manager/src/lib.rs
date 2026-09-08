@@ -52,8 +52,6 @@ use ddk_messages::impl_dlc_writeable;
 use ddk_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
 use ddk_messages::ser_impls::{read_address, write_address};
 use error::Error;
-use lightning::ln::msgs::DecodeError;
-use lightning::util::ser::{Readable, Writeable, Writer};
 use secp256k1_zkp::{PublicKey, SecretKey, Signing};
 use secp256k1_zkp::{Secp256k1, XOnlyPublicKey};
 use std::collections::HashMap;

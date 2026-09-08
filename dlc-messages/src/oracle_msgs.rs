@@ -6,8 +6,7 @@ use crate::ser_impls::{
 };
 use bitcoin::hashes::{Hash, HashEngine};
 use ddk_dlc::{Error, OracleInfo as DlcOracleInfo};
-use lightning::ln::msgs::DecodeError;
-use lightning::util::ser::{Readable, Writeable, Writer};
+use lightning::util::ser::Writeable;
 use secp256k1_zkp::Verification;
 use secp256k1_zkp::{schnorr::Signature, Message, Secp256k1, XOnlyPublicKey};
 #[cfg(feature = "use-serde")]
@@ -435,6 +434,7 @@ mod tests {
     use bitcoin::bip32::{ChildNumber, Xpriv};
     use bitcoin::hex::FromHex;
     use bitcoin::Network;
+    use lightning::util::ser::Readable;
     use secp256k1_zkp::rand::Fill;
     use secp256k1_zkp::SecretKey;
     use secp256k1_zkp::{rand::thread_rng, SECP256K1};
