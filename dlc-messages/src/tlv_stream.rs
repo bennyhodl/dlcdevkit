@@ -23,6 +23,17 @@
 //! byte-identical to one encoded before this type existed, in both directions. That is
 //! what makes the field safe to add to an existing message without a version gate.
 //!
+//! ## What node-dlc does differently
+//!
+//! Records survive a hop through node-dlc, but the bytes do not. Its `DlcOffer` decodes
+//! the types it knows into named fields and re-encodes the stream in a fixed order —
+//! metadata, IRC info, position info, batch funding groups, then everything it did not
+//! recognise — rather than the order it read. It also keeps only the last of a repeated
+//! singleton type, where [`TlvStream::get`] here returns the first. Neither difference
+//! loses a record, and nothing on either side derives an identifier or a signature from
+//! the encoded offer, so the divergence is confined to the byte order. Do not build
+//! anything that hashes these bytes without revisiting that.
+//!
 //! [dlcspecs PR #163]: https://github.com/discreetlogcontracts/dlcspecs/pull/163
 
 use crate::ser_impls::{read_tlv_body, BigSize, TlvRecord};
@@ -92,9 +103,15 @@ impl TlvStream {
     /// messages from peers that append nothing readable.
     pub fn read_to_end<R: Read>(reader: &mut R) -> Result<Self, DecodeError> {
         let mut bytes = Vec::new();
+        // One past the cap, because `read_to_limit` stops at its limit and reports
+        // success: reading exactly `MAX_TLV_STREAM_SIZE` cannot tell a stream that ends
+        // there from one that continues, and would silently drop the rest.
         reader
-            .read_to_limit(&mut bytes, MAX_TLV_STREAM_SIZE)
+            .read_to_limit(&mut bytes, MAX_TLV_STREAM_SIZE + 1)
             .map_err(|_| DecodeError::ShortRead)?;
+        if bytes.len() as u64 > MAX_TLV_STREAM_SIZE {
+            return Err(DecodeError::InvalidValue);
+        }
 
         let len = bytes.len() as u64;
         let mut cursor = Cursor::new(bytes);
@@ -133,14 +150,23 @@ impl TlvStream {
         read_tlv_body(&mut cursor, record.body.len() as u64).map(Some)
     }
 
-    /// Writes `value`, replacing any record already held at `T::TYPE_ID`.
+    /// Writes `value`, replacing every record already held at `T::TYPE_ID`.
+    ///
+    /// The replacement keeps the position of the first one, so setting a record that came
+    /// off the wire does not move it relative to the records around it.
     pub fn set<T: TlvRecord>(&mut self, value: &T) {
         let record = TlvStreamRecord {
             tlv_type: T::TYPE_ID as u64,
             body: value.encode(),
         };
         match self.position(T::TYPE_ID) {
-            Some(index) => self.records[index] = record,
+            // Every one, not just the first: a read keeps duplicates, so leaving the
+            // others would put a stale copy back on the wire for the peer to read
+            // instead of the one just set.
+            Some(index) => {
+                self.records.retain(|r| r.tlv_type != T::TYPE_ID as u64);
+                self.records.insert(index, record);
+            }
             None => self.records.push(record),
         }
     }
@@ -206,8 +232,10 @@ mod tests {
 
     #[test]
     fn records_keep_wire_order_even_when_types_descend() {
-        // node-dlc writes records in the order it holds them, not sorted by type, so
-        // re-ordering on write would break byte equality against a real peer's message.
+        // Sorting on write would mean a message we read and wrote back was not the
+        // message we received, which is the property the rest of this module exists to
+        // hold. It is not a parity claim: node-dlc re-emits in its own fixed order (see
+        // the module docs), so bytes are only stable across a DDK-to-DDK hop.
         let mut bytes = vec![0xfd, 0xfd, 0xec, 0x01, 0xaa];
         bytes.extend_from_slice(&[0x01, 0x01, 0xbb]);
         assert_eq!(read(&bytes).unwrap().encode(), bytes);
@@ -234,6 +262,60 @@ mod tests {
     #[test]
     fn truncated_header_is_rejected() {
         assert!(read(&[0xfd, 0xfd]).is_err());
+    }
+
+    #[test]
+    fn stream_past_the_size_cap_is_rejected_not_truncated() {
+        // `read_to_limit` stops at its limit and reports success, so reading exactly the
+        // cap would decode the first megabyte and drop the rest with no error — the same
+        // silent loss this module exists to stop.
+        let record: &[u8] = &[0x01, 0x63, 0x00];
+        let mut bytes = Vec::new();
+        while (bytes.len() as u64) <= MAX_TLV_STREAM_SIZE {
+            bytes.extend_from_slice(record);
+            bytes.resize(bytes.len() + 99, 0);
+        }
+        assert!(bytes.len() as u64 > MAX_TLV_STREAM_SIZE);
+        assert!(read(&bytes).is_err());
+    }
+
+    #[test]
+    fn set_replaces_every_duplicate_and_keeps_the_first_position() {
+        // A stream off the wire may hold duplicates, so replacing only the first would
+        // leave a stale record behind for the peer to read instead.
+        let mut bytes = vec![0x01, 0x01, 0xaa];
+        bytes.extend_from_slice(UNKNOWN_RECORD);
+        bytes.extend_from_slice(&[0x01, 0x01, 0xbb]);
+        let mut stream = read(&bytes).unwrap();
+        assert_eq!(stream.raw().count(), 3);
+
+        stream.set(&OneByte(0xcc));
+
+        assert_eq!(stream.raw().count(), 2);
+        assert_eq!(stream.encode(), {
+            let mut expected = vec![0x01, 0x01, 0xcc];
+            expected.extend_from_slice(UNKNOWN_RECORD);
+            expected
+        });
+    }
+
+    /// A one-byte record at type 1, so `set` has a `TlvRecord` to write.
+    struct OneByte(u8);
+
+    impl Writeable for OneByte {
+        fn write<W: Writer>(&self, w: &mut W) -> Result<(), lightning::io::Error> {
+            self.0.write(w)
+        }
+    }
+
+    impl Readable for OneByte {
+        fn read<R: Read>(r: &mut R) -> Result<Self, DecodeError> {
+            Ok(OneByte(Readable::read(r)?))
+        }
+    }
+
+    impl crate::ser_impls::TlvType for OneByte {
+        const TYPE_ID: u16 = 1;
     }
 
     #[test]

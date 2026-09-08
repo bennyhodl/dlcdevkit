@@ -176,13 +176,22 @@ sketched here.
 `get`/`set` key off `TlvRecord::TYPE_ID`, so there is no runtime registry to
 populate and no way to read a record at the wrong type.
 
-**Records are held in wire order, not sorted, and duplicates are kept.** Both
-departures from the sketch above are forced by the peer we are interoperating with.
-node-dlc writes records in the order it holds them and appends one
-`BatchFundingGroup` record per group, so sorting on write would break byte equality
-against a real peer's message and rejecting duplicates would reject messages that are
-valid today. Wire order is also what makes `write` deterministic, which is what the
-byte-equality comparisons actually need.
+**Records are held in wire order, not sorted, and duplicates are kept.** Duplicates
+are forced by the peer: node-dlc appends one `BatchFundingGroup` record per group, so
+rejecting duplicates would reject messages that are valid today. Wire order is our own
+choice — a message we read and wrote back should be the message we received, and that
+is also what makes `write` deterministic for the byte-equality comparisons.
+
+Wire order is **not** a parity claim. node-dlc's `DlcOffer` decodes the types it knows
+into named fields and re-emits the stream in a fixed order (metadata, IRC info,
+position info, batch funding groups, then unknown records) rather than the order it
+read, and keeps only the last of a repeated singleton type where `get` here returns the
+first. Neither difference loses a record, and nothing on either side derives an
+identifier or a signature from the encoded offer — `temporaryContractId` is a wire
+field on both stacks, not a hash of the message — so the divergence is confined to byte
+order. Anything that later hashes these bytes has to revisit it. Separately, node-dlc's
+`DlcOffer.toJSON()` builds a `tlvs` array and then omits it from the returned object,
+so offers must cross the boundary as serialized bytes, not as JSON.
 
 ### 4.2 Message field
 
@@ -270,7 +279,8 @@ still drop records; they go through the macro, so they need item 3 first.
 2. **`TlvStream`.** The type, `read_to_end`, `get`/`set`/`remove`/`raw`, ordering,
    and the even/odd rule from §5. Unit tests: empty stream writes nothing;
    unknown records round-trip verbatim; `get` at the wrong type returns `None`;
-   duplicate types rejected; truncated record rejected.
+   duplicate types kept in wire order; truncated record rejected; a stream past
+   the size cap rejected rather than truncated.
 3. **`tlv_stream` field kind.** Add to the field macros, rejecting use anywhere
    but last.
 4. **Wire up the three messages.** `OfferDlc`, `AcceptDlc`, `SignDlc`, with the
@@ -294,7 +304,9 @@ still drop records; they go through the macro, so they need item 3 first.
 - Type range: applications should use odd types in the custom range to avoid
   colliding with anything the specification assigns. The example uses 65003.
 - This does not make DDK a validating relay. A record it carries has been checked
-  for framing only — length and uniqueness — never for meaning.
+  for framing only — that its length fits inside the message — never for meaning,
+  and never for uniqueness: duplicates are kept, so a caller reading a record it
+  understands is reading the first of however many arrived.
 - If an application later needs records to survive into the manager's stored
   contracts, that is the larger piece of work described in §3, and it does need a
   `contract_data` migration. Nothing here forecloses it.
