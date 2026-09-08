@@ -167,13 +167,5 @@ pub use types::{
     DescriptorInput, DlcInputSigningKey, InputDerivation, Party, PartyParams, SignResult,
 };
 
-/// The DLC protocol version DDK writes on the messages it creates.
+/// The current DLC protocol version used by DDK.
 pub const PROTOCOL_VERSION: u32 = 1;
-
-/// The oldest protocol version DDK will accept on a message it receives.
-///
-/// Kept separate from [`PROTOCOL_VERSION`] so that bumping the version we write does not,
-/// by itself, start rejecting peers that are still writing the previous one. A version
-/// bump is a statement about what we emit; it is not a reason to refuse a message we can
-/// still read.
-pub const MIN_PROTOCOL_VERSION: u32 = 1;
