@@ -190,6 +190,10 @@ fn sign_with_context(
         cet_adaptor_signatures: CetAdaptorSignatures::from(adaptor_signatures.as_slice()),
         refund_signature,
         funding_signatures,
+        // Not copied from the offer or the accept, for the same reason as on the accept:
+        // the signer says its own piece here. The caller attaches records after this
+        // returns.
+        tlvs: Default::default(),
     };
     Ok(SignResult {
         sign,

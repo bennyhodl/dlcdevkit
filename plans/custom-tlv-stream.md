@@ -195,20 +195,36 @@ so offers must cross the boundary as serialized bytes, not as JSON.
 
 ### 4.2 Message field
 
-A new field kind in `impl_dlc_writeable!`, valid only as the final field:
+The stream goes in a trailing argument to `impl_dlc_writeable!`, outside the
+field list:
 
 ```rust
-impl_dlc_writeable!(SignDlc, SIGN_TYPE, {
-    (protocol_version, writeable),
-    (contract_id, writeable),
-    (cet_adaptor_signatures, writeable),
-    (refund_signature, writeable),
-    (funding_signatures, writeable),
-    (tlvs, tlv_stream)              // must be last
-});
+impl_dlc_writeable!(
+    SignDlc,
+    SIGN_TYPE,
+    {
+        (protocol_version, writeable),
+        (contract_id, writeable),
+        (cet_adaptor_signatures, writeable),
+        (refund_signature, writeable),
+        (funding_signatures, writeable)
+    },
+    tlvs
+);
 ```
 
-`field_write!` writes every record; `field_read!` calls `TlvStream::read_to_end`.
+**This departs from the sketch, which made it a field kind valid only as the
+final field.** A declarative macro cannot reject a field kind that appears in the
+wrong position — it can only match on it — so `(tlvs, tlv_stream)` in the middle
+of the list would have expanded happily and silently swallowed every field after
+it. Putting the stream in its own argument makes the wrong position
+unrepresentable rather than merely forbidden, which is the property the sketch was
+reaching for. The cost is one more macro arm.
+
+`ser_macros.rs` writes the stream after the last fixed field and reads it with
+`TlvStream::read_to_end`. A test asserts the record bytes really are the suffix of
+each encoded message, so a field added after the stream fails rather than
+corrupting the wire.
 
 Applied to `OfferDlc`, `AcceptDlc` and `SignDlc` to start — the three messages
 node-dlc extends and the three the stateless module exchanges. The channel
@@ -265,11 +281,16 @@ this crate for a line nobody reads is not worth the dependency.
 
 ## 6. Tasks
 
-Items 2 and 4 landed for `OfferDlc` only, along with the compatibility tests in item 5.
-`OfferDlc` has hand-written `Writeable`/`Readable` impls — it is the one message the
-`impl_dlc_writeable!` macro cannot express, because of the peek-based old-format branch
-— so it was wired up directly and item 3 was not needed yet. `AcceptDlc` and `SignDlc`
-still drop records; they go through the macro, so they need item 3 first.
+Items 1 through 5 have landed. `OfferDlc` keeps hand-written `Writeable`/`Readable`
+impls — it is the one message the `impl_dlc_writeable!` macro cannot express, because of
+the peek-based old-format branch — so it was wired up directly; `AcceptDlc` and `SignDlc`
+go through the macro's trailing-stream arm from §4.2.
+
+Item 6 (a round trip against a real node-dlc payload) is still open and needs a captured
+message from BAL. The channel messages still drop records, as does the `ddk-manager`
+storage path: `OfferedContract`, `AcceptedContract` and `SignedContract` decompose their
+message and have no field for records, so a message rebuilt from stored state carries
+none. Applications that need records use the stateless `ddk::contract` module.
 
 
 1. **Macro hygiene.** Qualify paths in `impl_dlc_writeable!`, `field_write!`,

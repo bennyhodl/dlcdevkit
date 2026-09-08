@@ -138,6 +138,7 @@ fn messages_with_serial_ids(offer_ids: &[u64], accept_ids: &[u64]) -> (OfferDlc,
         cet_adaptor_signatures: CetAdaptorSignatures::from(&[][..]),
         refund_signature: signature,
         negotiation_fields: None,
+        tlvs: Default::default(),
     };
     (offer, accept)
 }

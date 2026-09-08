@@ -83,6 +83,10 @@ pub fn accept_offer(
         cet_adaptor_signatures: CetAdaptorSignatures::from(adaptor_signatures.as_slice()),
         refund_signature,
         negotiation_fields: None,
+        // Not copied from the offer: the accepter answers with its own records or with
+        // none, and echoing the offerer's back would claim terms it did not set. The
+        // caller attaches whatever it means to say after this returns.
+        tlvs: Default::default(),
     };
     ensure_unique_input_serial_ids(offer, &accept)?;
 

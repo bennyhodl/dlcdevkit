@@ -37,7 +37,6 @@ extern crate serde_json;
 
 pub mod channel;
 pub mod contract_msgs;
-pub mod liquidation;
 pub mod message_handler;
 pub mod oracle_msgs;
 pub mod segmentation;
@@ -549,22 +548,38 @@ pub struct AcceptDlc {
     pub refund_signature: Signature,
     /// The negotiation fields from the accept party.
     pub negotiation_fields: Option<NegotiationFields>,
+    #[cfg_attr(
+        feature = "use-serde",
+        serde(default, skip_serializing_if = "TlvStream::is_empty")
+    )]
+    /// The TLV records appended after the fixed fields.
+    ///
+    /// Empty for a peer that appends none, in which case it encodes to no bytes and the
+    /// message is byte-identical to one written before this field existed. Records this
+    /// build has no type for are held verbatim rather than dropped; see
+    /// [`tlv_stream`](crate::tlv_stream).
+    pub tlvs: TlvStream,
 }
 
-impl_dlc_writeable!(AcceptDlc, ACCEPT_TYPE, {
-    (protocol_version, writeable),
-    (temporary_contract_id, writeable),
-    (accept_collateral, writeable),
-    (funding_pubkey, writeable),
-    (payout_spk, writeable),
-    (payout_serial_id, writeable),
-    (funding_inputs, vec),
-    (change_spk, writeable),
-    (change_serial_id, writeable),
-    (cet_adaptor_signatures, writeable),
-    (refund_signature, writeable),
-    (negotiation_fields, option)
-});
+impl_dlc_writeable!(
+    AcceptDlc,
+    ACCEPT_TYPE,
+    {
+        (protocol_version, writeable),
+        (temporary_contract_id, writeable),
+        (accept_collateral, writeable),
+        (funding_pubkey, writeable),
+        (payout_spk, writeable),
+        (payout_serial_id, writeable),
+        (funding_inputs, vec),
+        (change_spk, writeable),
+        (change_serial_id, writeable),
+        (cet_adaptor_signatures, writeable),
+        (refund_signature, writeable),
+        (negotiation_fields, option)
+    },
+    tlvs
+);
 
 /// Contains all the required signatures for the DLC transactions from the offering
 /// party.
@@ -592,15 +607,31 @@ pub struct SignDlc {
     pub refund_signature: Signature,
     /// The set of funding signatures from the offer party.
     pub funding_signatures: FundingSignatures,
+    #[cfg_attr(
+        feature = "use-serde",
+        serde(default, skip_serializing_if = "TlvStream::is_empty")
+    )]
+    /// The TLV records appended after the fixed fields.
+    ///
+    /// Empty for a peer that appends none, in which case it encodes to no bytes and the
+    /// message is byte-identical to one written before this field existed. Records this
+    /// build has no type for are held verbatim rather than dropped; see
+    /// [`tlv_stream`](crate::tlv_stream).
+    pub tlvs: TlvStream,
 }
 
-impl_dlc_writeable!(SignDlc, SIGN_TYPE, {
-    (protocol_version, writeable),
-    (contract_id, writeable),
-    (cet_adaptor_signatures, writeable),
-    (refund_signature, writeable),
-    (funding_signatures, writeable)
-});
+impl_dlc_writeable!(
+    SignDlc,
+    SIGN_TYPE,
+    {
+        (protocol_version, writeable),
+        (contract_id, writeable),
+        (cet_adaptor_signatures, writeable),
+        (refund_signature, writeable),
+        (funding_signatures, writeable)
+    },
+    tlvs
+);
 
 /// Contains information about a party wishing to close a DLC contract.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -814,38 +845,71 @@ mod tests {
         assert_eq!(offer.encode(), bytes);
     }
 
-    #[test]
-    fn liquidation_record_round_trips_on_an_offer() {
-        use crate::liquidation::{LiquidationInfo, LiquidationMethod};
+    /// A record defined the way an application defines one: the two macros, an odd type in
+    /// the custom range, and nothing this crate knows about the contents.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct ApplicationRecord {
+        reference: u64,
+        label: String,
+    }
 
-        let info = LiquidationInfo {
-            announcements: Vec::new(),
-            liquidator: [0x11; 20],
-            method: LiquidationMethod::Price,
-        };
+    impl_dlc_writeable!(ApplicationRecord, {
+        (reference, writeable),
+        (label, string)
+    });
+    impl_dlc_tlv_record!(ApplicationRecord, 65007);
+
+    fn application_record() -> ApplicationRecord {
+        ApplicationRecord {
+            reference: 42,
+            label: "loan".to_string(),
+        }
+    }
+
+    #[test]
+    fn an_application_record_round_trips_on_an_offer() {
+        let record = application_record();
         let mut offer = offer_fixture();
-        offer.tlvs.set(&info);
+        offer.tlvs.set(&record);
 
         let decoded = read_offer(&offer.encode()).unwrap();
         assert_eq!(decoded, offer);
-        assert_eq!(decoded.tlvs.get::<LiquidationInfo>().unwrap(), Some(info));
+        assert_eq!(
+            decoded.tlvs.get::<ApplicationRecord>().unwrap(),
+            Some(record)
+        );
+    }
+
+    #[test]
+    fn an_application_record_round_trips_on_an_accept_and_a_sign() {
+        let record = application_record();
+
+        let mut accept = accept_fixture();
+        accept.tlvs.set(&record);
+        let decoded: AcceptDlc = read_msg(&accept.encode()).unwrap();
+        assert_eq!(
+            decoded.tlvs.get::<ApplicationRecord>().unwrap(),
+            Some(record.clone())
+        );
+
+        let mut sign = sign_fixture();
+        sign.tlvs.set(&record);
+        let decoded: SignDlc = read_msg(&sign.encode()).unwrap();
+        assert_eq!(
+            decoded.tlvs.get::<ApplicationRecord>().unwrap(),
+            Some(record)
+        );
     }
 
     #[test]
     fn known_and_unknown_records_coexist_in_wire_order() {
-        use crate::liquidation::{LiquidationInfo, LiquidationMethod};
-
         let mut offer = offer_fixture();
-        offer.tlvs.set(&LiquidationInfo {
-            announcements: Vec::new(),
-            liquidator: [0x22; 20],
-            method: LiquidationMethod::Identifier,
-        });
+        offer.tlvs.set(&application_record());
         let mut bytes = offer.encode();
         bytes.extend_from_slice(UNKNOWN_RECORD);
 
         let decoded = read_offer(&bytes).unwrap();
-        assert!(decoded.tlvs.get::<LiquidationInfo>().unwrap().is_some());
+        assert!(decoded.tlvs.get::<ApplicationRecord>().unwrap().is_some());
         assert_eq!(decoded.encode(), bytes);
     }
 
@@ -868,6 +932,111 @@ mod tests {
         let mut bytes = offer_fixture().encode();
         bytes.extend_from_slice(&UNKNOWN_RECORD[..UNKNOWN_RECORD.len() - 1]);
         assert!(read_offer(&bytes).is_err());
+    }
+
+    /// The accept and sign fixtures encoded by the last release that had no TLV stream,
+    /// captured from that code rather than regenerated here.
+    const ACCEPT_MSG_PRE_TLV: &str = include_str!("./test_inputs/accept_msg_pre_tlv.hex");
+    const SIGN_MSG_PRE_TLV: &str = include_str!("./test_inputs/sign_msg_pre_tlv.hex");
+
+    fn accept_fixture() -> AcceptDlc {
+        serde_json::from_str(include_str!("./test_inputs/accept_msg.json")).unwrap()
+    }
+
+    fn sign_fixture() -> SignDlc {
+        serde_json::from_str(include_str!("./test_inputs/sign_msg.json")).unwrap()
+    }
+
+    fn read_msg<T: Readable>(bytes: &[u8]) -> Result<T, DecodeError> {
+        Readable::read(&mut lightning::io::Cursor::new(bytes.to_vec()))
+    }
+
+    #[test]
+    fn accept_with_no_records_is_byte_identical_to_the_previous_release() {
+        let accept = accept_fixture();
+        assert!(accept.tlvs.is_empty());
+        assert_eq!(accept.encode(), from_hex(ACCEPT_MSG_PRE_TLV.trim()));
+    }
+
+    #[test]
+    fn sign_with_no_records_is_byte_identical_to_the_previous_release() {
+        let sign = sign_fixture();
+        assert!(sign.tlvs.is_empty());
+        assert_eq!(sign.encode(), from_hex(SIGN_MSG_PRE_TLV.trim()));
+    }
+
+    #[test]
+    fn accept_from_the_previous_release_still_decodes() {
+        let accept: AcceptDlc = read_msg(&from_hex(ACCEPT_MSG_PRE_TLV.trim())).unwrap();
+        assert!(accept.tlvs.is_empty());
+        assert_eq!(accept, accept_fixture());
+    }
+
+    #[test]
+    fn sign_from_the_previous_release_still_decodes() {
+        let sign: SignDlc = read_msg(&from_hex(SIGN_MSG_PRE_TLV.trim())).unwrap();
+        assert!(sign.tlvs.is_empty());
+        assert_eq!(sign, sign_fixture());
+    }
+
+    #[test]
+    fn unknown_record_survives_a_decode_encode_cycle_on_an_accept() {
+        // node-dlc keeps `unknownTlvs` on its accept too, so these bytes are what a real
+        // peer expects back.
+        let mut bytes = accept_fixture().encode();
+        bytes.extend_from_slice(UNKNOWN_RECORD);
+
+        let accept: AcceptDlc = read_msg(&bytes).unwrap();
+        assert_eq!(accept.tlvs.raw().count(), 1);
+        assert_eq!(accept.encode(), bytes);
+    }
+
+    #[test]
+    fn unknown_record_survives_a_decode_encode_cycle_on_a_sign() {
+        let mut bytes = sign_fixture().encode();
+        bytes.extend_from_slice(UNKNOWN_RECORD);
+
+        let sign: SignDlc = read_msg(&bytes).unwrap();
+        assert_eq!(sign.tlvs.raw().count(), 1);
+        assert_eq!(sign.encode(), bytes);
+    }
+
+    #[test]
+    fn accept_with_a_truncated_record_is_rejected() {
+        let mut bytes = accept_fixture().encode();
+        bytes.extend_from_slice(&UNKNOWN_RECORD[..UNKNOWN_RECORD.len() - 1]);
+        assert!(read_msg::<AcceptDlc>(&bytes).is_err());
+    }
+
+    #[test]
+    fn sign_with_a_truncated_record_is_rejected() {
+        let mut bytes = sign_fixture().encode();
+        bytes.extend_from_slice(&UNKNOWN_RECORD[..UNKNOWN_RECORD.len() - 1]);
+        assert!(read_msg::<SignDlc>(&bytes).is_err());
+    }
+
+    #[test]
+    fn the_stream_is_the_last_thing_each_message_writes() {
+        // The one invariant the macro's trailing-field position exists to hold. A field
+        // added after the stream would be swallowed by it on the way back in, so assert
+        // the record bytes really are the message suffix rather than trusting placement.
+        let mut offer = offer_fixture();
+        offer.tlvs = read_msg::<AcceptDlc>(&{
+            let mut b = accept_fixture().encode();
+            b.extend_from_slice(UNKNOWN_RECORD);
+            b
+        })
+        .unwrap()
+        .tlvs;
+        assert!(offer.encode().ends_with(UNKNOWN_RECORD));
+
+        let mut accept = accept_fixture();
+        accept.tlvs = offer.tlvs.clone();
+        assert!(accept.encode().ends_with(UNKNOWN_RECORD));
+
+        let mut sign = sign_fixture();
+        sign.tlvs = offer.tlvs.clone();
+        assert!(sign.encode().ends_with(UNKNOWN_RECORD));
     }
 
     #[test]

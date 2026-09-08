@@ -72,6 +72,11 @@ impl AcceptedContract {
             cet_adaptor_signatures: ecdsa_adaptor_signatures.into(),
             refund_signature: self.accept_refund_signature,
             negotiation_fields: None,
+            // `AcceptedContract` decomposes the message into its own fields and has no
+            // room for TLV records, so one rebuilt here carries none. Applications that
+            // need records use the stateless `ddk::contract` module, which keeps the
+            // message it was given.
+            tlvs: Default::default(),
         }
     }
 

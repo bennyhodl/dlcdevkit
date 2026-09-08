@@ -44,6 +44,11 @@ impl SignedContract {
             },
             refund_signature: self.offer_refund_signature,
             funding_signatures: self.funding_signatures.clone(),
+            // `SignedContract` decomposes the message into its own fields and has no room
+            // for TLV records, so one rebuilt here carries none. Applications that need
+            // records use the stateless `ddk::contract` module, which keeps the message
+            // it was given.
+            tlvs: Default::default(),
         }
     }
 

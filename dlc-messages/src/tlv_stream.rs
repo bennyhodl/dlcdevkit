@@ -17,6 +17,18 @@
 //! writes them back byte for byte. Records this build has a type for are still readable
 //! as that type through [`TlvStream::get`]; the rest simply survive.
 //!
+//! ## Where records survive, and where they do not
+//!
+//! [`OfferDlc`](crate::OfferDlc), [`AcceptDlc`](crate::AcceptDlc) and
+//! [`SignDlc`](crate::SignDlc) carry a stream. The channel messages do not.
+//!
+//! Neither does anything that round-trips through `ddk-manager`'s stored contracts:
+//! `OfferedContract`, `AcceptedContract` and `SignedContract` decompose their message
+//! into their own fields and have no room for records, so a message rebuilt from stored
+//! state carries none. That is a property of the storage schema, not of this type. An
+//! application that needs records to survive should hold the message it received, or use
+//! the stateless `ddk::contract` module, which does.
+//!
 //! ## Compatibility
 //!
 //! An empty stream writes zero bytes, so a message from a peer that uses no records is

@@ -24,7 +24,7 @@
 //! ```
 //!
 //! `Debug` is required because [`lightning::ln::wire::Type`], which
-//! [`impl_dlc_tlv_record!`] derives, requires it.
+//! [`impl_dlc_tlv_record!`](crate::impl_dlc_tlv_record) derives, requires it.
 
 /// Writes a field to a writer.
 #[macro_export]
