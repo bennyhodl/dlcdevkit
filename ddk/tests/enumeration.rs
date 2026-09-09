@@ -167,13 +167,13 @@ async fn enumeration_contract() {
     alice
         .ddk
         .manager
-        .periodic_check(false)
+        .periodic_check()
         .await
         .expect("alice check failed");
 
     bob.ddk
         .manager
-        .periodic_check(false)
+        .periodic_check()
         .await
         .expect("bob check failed");
 
@@ -252,7 +252,7 @@ async fn enumeration_contract() {
 
     sleep(Duration::from_secs(10)).await;
 
-    bob.ddk.manager.periodic_check(false).await.unwrap();
+    bob.ddk.manager.periodic_check().await.unwrap();
 
     let contract = bob
         .ddk
@@ -268,7 +268,7 @@ async fn enumeration_contract() {
 
     generate_blocks(10);
 
-    bob.ddk.manager.periodic_check(false).await.unwrap();
+    bob.ddk.manager.periodic_check().await.unwrap();
 
     let contract = bob
         .ddk

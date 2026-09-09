@@ -14,10 +14,10 @@
 // Deprecated items in the key-provider API are unlock-only compatibility paths.
 // Naming one is a hard error in this crate.
 #![deny(deprecated)]
-// Without the `manager` feature the async application layer (`manager` /
-// `channel_updater`) is compiled out, leaving some protocol helpers with no
-// callers in this subset build. The default build compiles the superset and
-// keeps `deny`, so genuinely-dead code is still caught there.
+// Without the `manager` feature the async application layer is compiled out,
+// leaving some protocol helpers with no callers in this subset build. The
+// default build compiles the superset and keeps `deny`, so genuinely-dead code
+// is still caught there.
 #![cfg_attr(
     not(feature = "manager"),
     allow(dead_code, unused_imports, unused_macros)
@@ -26,10 +26,6 @@
 #[macro_use]
 extern crate ddk_messages;
 
-pub mod chain_monitor;
-pub mod channel;
-#[cfg(feature = "manager")]
-pub mod channel_updater;
 pub mod contract;
 pub mod contract_updater;
 mod conversion_utils;
@@ -42,10 +38,6 @@ mod utils;
 
 use bitcoin::psbt::Psbt;
 use bitcoin::{Address, Amount, Block, OutPoint, ScriptBuf, Transaction, TxOut, Txid};
-use chain_monitor::ChainMonitor;
-use channel::offered_channel::OfferedChannel;
-use channel::signed_channel::{SignedChannel, SignedChannelStateType};
-use channel::Channel;
 use contract::PreClosedContract;
 use contract::{offered_contract::OfferedContract, signed_contract::SignedContract, Contract};
 use ddk_messages::impl_dlc_writeable;
@@ -66,9 +58,6 @@ pub type KeysId = [u8; 32];
 
 /// Type alias for a channel id.
 pub type ChannelId = [u8; 32];
-
-/// The nSequence value used for CETs in DLC channels.
-pub const CET_NSEQUENCE: u32 = 288;
 
 /// Time trait to provide current unix time. Mainly defined to facilitate testing.
 pub trait Time {
@@ -145,15 +134,6 @@ pub trait ContractSignerProvider {
 
     /// Derives the private key material backing a `Signer`.
     fn derive_contract_signer(&self, key_id: [u8; 32]) -> Result<Self::Signer, Error>;
-
-    /// Get the secret key associated with the provided public key.
-    ///
-    /// Only used for Channels.
-    fn get_secret_key_for_pubkey(&self, pubkey: &PublicKey) -> Result<SecretKey, Error>;
-    /// Generate a new secret key and store it in the wallet so that it can later be retrieved.
-    ///
-    /// Only used for Channels.
-    fn get_new_secret_key(&self) -> Result<SecretKey, Error>;
 }
 
 #[async_trait::async_trait]
@@ -250,29 +230,6 @@ pub trait Storage {
     /// Returns the set of contracts whos broadcasted cet has not been verified to be confirmed on
     /// blockchain
     async fn get_preclosed_contracts(&self) -> Result<Vec<PreClosedContract>, Error>;
-    /// Update the state of the channel and optionally its associated contract
-    /// atomically.
-    async fn upsert_channel(
-        &self,
-        channel: Channel,
-        contract: Option<Contract>,
-    ) -> Result<(), Error>;
-    /// Delete the channel with given [`ChannelId`] if any.
-    async fn delete_channel(&self, channel_id: &ChannelId) -> Result<(), Error>;
-    /// Returns the channel with given [`ChannelId`] if any.
-    async fn get_channel(&self, channel_id: &ChannelId) -> Result<Option<Channel>, Error>;
-    /// Returns the set of [`SignedChannel`] in the store. Returns only the one
-    /// with matching `channel_state` if set.
-    async fn get_signed_channels(
-        &self,
-        channel_state: Option<SignedChannelStateType>,
-    ) -> Result<Vec<SignedChannel>, Error>;
-    /// Returns the set of channels in offer state.
-    async fn get_offered_channels(&self) -> Result<Vec<OfferedChannel>, Error>;
-    /// Writes the [`ChainMonitor`] data to the store.
-    async fn persist_chain_monitor(&self, monitor: &ChainMonitor) -> Result<(), Error>;
-    /// Returns the latest [`ChainMonitor`] in the store if any.
-    async fn get_chain_monitor(&self) -> Result<Option<ChainMonitor>, Error>;
 }
 
 #[async_trait::async_trait]
@@ -348,13 +305,5 @@ where
             Some(signer) => Ok(signer.clone()),
             None => self.signer_provider.derive_contract_signer(key_id),
         }
-    }
-
-    fn get_secret_key_for_pubkey(&self, pubkey: &PublicKey) -> Result<SecretKey, Error> {
-        self.signer_provider.get_secret_key_for_pubkey(pubkey)
-    }
-
-    fn get_new_secret_key(&self) -> Result<SecretKey, Error> {
-        self.signer_provider.get_new_secret_key()
     }
 }

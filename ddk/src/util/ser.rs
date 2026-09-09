@@ -1,87 +1,8 @@
-use ddk_manager::channel::signed_channel::SignedChannelStateType;
-use ddk_manager::channel::Channel;
 use ddk_manager::contract::Contract;
 use ddk_manager::error::Error;
 use ddk_messages::Message;
 
-/// Helper from rust-dlc to implement types for contracts.
-macro_rules! convertible_enum {
-    (enum $name:ident {
-        $($vname:ident $(= $val:expr)?,)*;
-        $($tname:ident $(= $tval:expr)?,)*
-    }, $input:ident) => {
-        #[derive(Debug)]
-        pub enum $name {
-            $($vname $(= $val)?,)*
-            $($tname $(= $tval)?,)*
-        }
-
-        impl From<$name> for u8 {
-            fn from(prefix: $name) -> u8 {
-                prefix as u8
-            }
-        }
-
-        impl std::convert::TryFrom<u8> for $name {
-            type Error = Error;
-
-            fn try_from(v: u8) -> Result<Self, Self::Error> {
-                match v {
-                    $(x if x == u8::from($name::$vname) => Ok($name::$vname),)*
-                    $(x if x == u8::from($name::$tname) => Ok($name::$tname),)*
-                    _ => Err(Error::StorageError("Unknown prefix".to_string())),
-                }
-            }
-        }
-
-        impl $name {
-            pub fn get_prefix(input: &$input) -> u8 {
-                let prefix = match input {
-                    $($input::$vname(_) => $name::$vname,)*
-                    $($input::$tname{..} => $name::$tname,)*
-                };
-                prefix.into()
-            }
-        }
-    }
-}
-
 pub use ddk_manager::contract::ser::ContractPrefix;
-
-convertible_enum!(
-    enum ChannelPrefix {
-        Offered = 100,
-        Accepted,
-        Signed,
-        FailedAccept,
-        FailedSign,
-        Closing,
-        Closed,
-        CounterClosed,
-        ClosedPunished,
-        CollaborativelyClosed,
-        Cancelled,;
-    },
-    Channel
-);
-
-convertible_enum!(
-    enum SignedChannelPrefix {;
-        Established = 1,
-        SettledOffered,
-        SettledReceived,
-        SettledAccepted,
-        SettledConfirmed,
-        Settled,
-        Closing,
-        CollaborativeCloseOffered,
-        RenewAccepted,
-        RenewOffered,
-        RenewFinalized,
-        RenewConfirmed,
-    },
-    SignedChannelStateType
-);
 
 pub fn serialize_contract(contract: &Contract) -> Result<Vec<u8>, Error> {
     contract.serialize()

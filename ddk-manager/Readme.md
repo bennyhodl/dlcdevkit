@@ -5,7 +5,7 @@
 
 Core DLC contract creation and state machine management for Discreet Log Contracts.
 
-This crate provides the `Manager` component for creating, processing, and managing DLCs and DLC channels. It handles the full lifecycle from offer through settlement/closure, including both on-chain contracts and off-chain channels with support for renewals, settlements, and collaborative/unilateral closes.
+This crate provides the `Manager` component for creating, processing, and managing DLCs. It handles the full on-chain contract lifecycle from offer through settlement or closure.
 
 ## Contract States
 
@@ -25,7 +25,7 @@ Users must implement these traits for their specific backends:
 
 | Trait | Purpose |
 |-------|---------|
-| `Storage` | Persist and retrieve contracts, channels, and chain state |
+| `Storage` | Persist and retrieve contracts |
 | `Wallet` | Address generation, UTXO management, PSBT signing |
 | `Blockchain` | Transaction broadcasting, block fetching, confirmations |
 | `Oracle` | Fetch oracle announcements and attestations |
@@ -39,13 +39,8 @@ manager.send_offer(&contract_input, counterparty).await?;
 manager.accept_contract_offer(&contract_id).await?;
 manager.on_dlc_message(&message, counterparty).await?;
 
-// Channel operations  
-manager.offer_channel(&contract_input, counterparty).await?;
-manager.settle_offer(&channel_id, payout).await?;
-manager.renew_offer(&channel_id, &contract_input).await?;
-
 // Periodic maintenance
-manager.periodic_check(false).await?;
+manager.periodic_check().await?;
 ```
 
 ## Features

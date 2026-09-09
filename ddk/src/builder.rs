@@ -260,7 +260,6 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
                 storage.clone(),
                 oracles,
                 Arc::new(SystemTimeProvider {}),
-                wallet.clone(),
                 logger.clone(),
                 self.close_approver.clone(),
             )
@@ -326,7 +325,7 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
                     DlcManagerMessage::PeriodicCheck => {
                         let manager = manager_clone.clone();
                         if let Err(e) =
-                            tokio::spawn(async move { manager.periodic_check(false).await }).await
+                            tokio::spawn(async move { manager.periodic_check().await }).await
                         {
                             log_error!(logger_clone.clone(), "Periodic check panicked: {}", e);
                         }

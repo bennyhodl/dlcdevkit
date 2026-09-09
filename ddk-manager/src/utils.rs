@@ -10,13 +10,12 @@ use ddk_messages::{
 use ddk_trie::RangeInfo;
 #[cfg(not(feature = "fuzztarget"))]
 use secp256k1_zkp::rand::{thread_rng, Rng, RngCore};
-use secp256k1_zkp::{PublicKey, Secp256k1, Signing};
+use secp256k1_zkp::{Secp256k1, Signing};
 
 use crate::{
-    channel::party_points::PartyBasePoints,
     contract::{contract_info::ContractInfo, ser::Serializable, AdaptorInfo},
     error::Error,
-    Blockchain, ContractSigner, ContractSignerProvider, Wallet,
+    Blockchain, ContractSigner, Wallet,
 };
 
 macro_rules! get_object_in_state {
@@ -222,23 +221,6 @@ fn get_approximate_required_amount(
             + ddk_dlc::util::weight_to_fee(dlc_weight, fee_rate)?
     };
     Ok(appr_required_amount)
-}
-
-pub(crate) fn get_party_base_points<C: Signing, SP: Deref>(
-    secp: &Secp256k1<C>,
-    signer_provider: &SP,
-) -> Result<PartyBasePoints, Error>
-where
-    SP::Target: ContractSignerProvider,
-{
-    Ok(PartyBasePoints {
-        own_basepoint: PublicKey::from_secret_key(secp, &signer_provider.get_new_secret_key()?),
-        publish_basepoint: PublicKey::from_secret_key(secp, &signer_provider.get_new_secret_key()?),
-        revocation_basepoint: PublicKey::from_secret_key(
-            secp,
-            &signer_provider.get_new_secret_key()?,
-        ),
-    })
 }
 
 pub(crate) fn get_half_common_fee(fee_rate: u64) -> Result<Amount, Error> {

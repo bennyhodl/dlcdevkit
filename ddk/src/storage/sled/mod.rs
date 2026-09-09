@@ -18,9 +18,6 @@ use lightning::io::{Cursor, Read};
 use sled::{Db, Tree};
 
 const CONTRACT_TREE: u8 = 1;
-const CHANNEL_TREE: u8 = 2;
-pub const CHAIN_MONITOR_TREE: u8 = 3;
-pub const CHAIN_MONITOR_KEY: u8 = 4;
 const SIGNER_TREE: u8 = 6;
 const WALLET_TREE: u8 = 7;
 const MARKETPLACE_TREE: u8 = 8;
@@ -77,10 +74,6 @@ impl SledStorage {
 
     fn contract_tree(&self) -> Result<Tree, Error> {
         self.open_tree(&[CONTRACT_TREE])
-    }
-
-    fn channel_tree(&self) -> Result<Tree, Error> {
-        self.open_tree(&[CHANNEL_TREE])
     }
 
     fn signer_tree(&self) -> Result<Tree, sled::Error> {

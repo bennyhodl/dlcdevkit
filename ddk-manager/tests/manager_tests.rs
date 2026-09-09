@@ -21,7 +21,6 @@ type TestManager = Manager<
     Arc<MemoryStorage>,
     Arc<MemoryOracle>,
     Arc<MockTime>,
-    Arc<EsploraClient>,
     SimpleSigner,
     Arc<Logger>,
 >;
@@ -70,7 +69,6 @@ async fn get_manager(logger: Arc<Logger>) -> TestManager {
         store.clone(),
         oracles,
         time,
-        blockchain,
         logger,
         None,
     )
@@ -177,26 +175,6 @@ async fn reject_offer_creation_with_mismatched_announcements() {
         matches!(result, Err(ddk_manager::error::Error::InvalidParameters(_))),
         "unexpected result: {result:?}"
     );
-}
-
-#[tokio::test]
-async fn reject_channel_offer_with_existing_channel_id() {
-    let logger = Arc::new(Logger::disabled("test_manager".to_string()));
-    let offer_message = Message::OfferChannel(
-        serde_json::from_str(include_str!("../test_inputs/offer_channel.json")).unwrap(),
-    );
-
-    let manager = get_manager(logger).await;
-
-    manager
-        .on_dlc_message(&offer_message, pubkey())
-        .await
-        .expect("To accept the first offer message");
-
-    manager
-        .on_dlc_message(&offer_message, pubkey())
-        .await
-        .expect_err("To reject the second offer message");
 }
 
 #[tokio::test]

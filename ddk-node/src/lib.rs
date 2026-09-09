@@ -435,7 +435,7 @@ impl DdkRpc for DdkNode {
     }
 
     async fn sync(&self, _request: Request<SyncRequest>) -> Result<Response<SyncResponse>, Status> {
-        if let Err(e) = self.node.manager.periodic_check(false).await {
+        if let Err(e) = self.node.manager.periodic_check().await {
             tracing::error!("Error syncing: {:?}", e);
             return Err(Status::new(Code::Internal, "Error syncing."));
         };
