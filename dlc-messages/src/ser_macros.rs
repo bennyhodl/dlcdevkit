@@ -1,30 +1,5 @@
 //! Set of macro to help implementing the [`lightning::util::ser::Writeable`] trait.
-//!
-//! # Using these from another crate
-//!
-//! Every path these macros expand to is absolute and rooted at `$crate`, so a caller needs
-//! nothing in scope beyond the macro itself and does not need `lightning` as a direct
-//! dependency. `ddk-messages` re-exports `lightning`, and `ddk` re-exports `ddk_messages`,
-//! so an application that depends only on `ddk` can define its own record type:
-//!
-//! ```
-//! use ddk_messages::{impl_dlc_tlv_record, impl_dlc_writeable};
-//!
-//! #[derive(Debug)]
-//! pub struct LoanReference {
-//!     pub loan_id: u64,
-//!     pub lender: String,
-//! }
-//!
-//! impl_dlc_writeable!(LoanReference, {
-//!     (loan_id, writeable),
-//!     (lender, string)
-//! });
-//! impl_dlc_tlv_record!(LoanReference, 65007);
-//! ```
-//!
-//! `Debug` is required because [`lightning::ln::wire::Type`], which
-//! [`impl_dlc_tlv_record!`](crate::impl_dlc_tlv_record) derives, requires it.
+//! All expanded paths are rooted at `$crate`, so callers do not need `lightning` in scope.
 
 /// Writes a field to a writer.
 #[macro_export]
@@ -106,10 +81,8 @@ macro_rules! field_read {
 /// in this crate.
 ///
 /// A trailing `, $tlv_field` writes a [`TlvStream`](crate::tlv_stream::TlvStream) after the
-/// last fixed field and reads it back to the end of the message. It sits outside the field
-/// list because the stream has to be last — a reader takes everything after the fixed
-/// fields as the stream — and putting it there means a caller cannot place it anywhere
-/// else. See [`tlv_stream`](crate::tlv_stream) for what that costs and buys.
+/// last fixed field and reads it back to the end of the message. It is a separate argument
+/// rather than a field kind because the stream must be written last.
 #[macro_export]
 macro_rules! impl_dlc_writeable {
     ($st:ident, {$(($field: ident, $fieldty: tt)), *} ) => {

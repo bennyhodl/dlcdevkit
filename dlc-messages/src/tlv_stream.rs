@@ -1,50 +1,11 @@
-//! The TLV stream that a DLC message may carry after its fixed fields.
-//!
-//! A DLC message is a fixed sequence of positionally encoded fields. Anything an
-//! application wants to attach to one — a loan reference, liquidation terms, a batch
-//! funding group — has nowhere to live in that layout, so [dlcspecs PR #163] appends a
-//! stream of TLV records to the end of the message instead.
-//!
-//! ## Why records are kept verbatim
-//!
-//! A reader that stops after the last fixed field leaves the trailing records unread and
-//! writes the message back out without them. Nothing errors, so nothing downstream can
-//! tell the data is gone. Our own counterparties append these records: node-dlc keeps
-//! what it does not recognise in `unknownTlvs` and re-emits it, so a message that passes
-//! through DDK today loses records the peer expects to get back.
-//!
-//! [`TlvStream`] therefore holds every record it reads, in the order it read them, and
-//! writes them back byte for byte. Records this build has a type for are still readable
-//! as that type through [`TlvStream::get`]; the rest simply survive.
-//!
-//! ## Where records survive, and where they do not
-//!
-//! [`OfferDlc`](crate::OfferDlc), [`AcceptDlc`](crate::AcceptDlc) and
-//! [`SignDlc`](crate::SignDlc) carry a stream. The channel messages do not.
-//!
-//! Neither does anything that round-trips through `ddk-manager`'s stored contracts:
-//! `OfferedContract`, `AcceptedContract` and `SignedContract` decompose their message
-//! into their own fields and have no room for records, so a message rebuilt from stored
-//! state carries none. That is a property of the storage schema, not of this type. An
-//! application that needs records to survive should hold the message it received, or use
-//! the stateless `ddk::contract` module, which does.
-//!
-//! ## Compatibility
-//!
-//! An empty stream writes zero bytes, so a message from a peer that uses no records is
-//! byte-identical to one encoded before this type existed, in both directions. That is
-//! what makes the field safe to add to an existing message without a version gate.
-//!
-//! ## What node-dlc does differently
-//!
-//! Records survive a hop through node-dlc, but the bytes do not. Its `DlcOffer` decodes
-//! the types it knows into named fields and re-encodes the stream in a fixed order —
-//! metadata, IRC info, position info, batch funding groups, then everything it did not
-//! recognise — rather than the order it read. It also keeps only the last of a repeated
-//! singleton type, where [`TlvStream::get`] here returns the first. Neither difference
-//! loses a record, and nothing on either side derives an identifier or a signature from
-//! the encoded offer, so the divergence is confined to the byte order. Do not build
-//! anything that hashes these bytes without revisiting that.
+//! The TLV stream a DLC message may carry after its fixed fields, per
+//! [dlcspecs PR #163]. Records are held in the order they were read, duplicates
+//! and unknown types included, and written back byte for byte, so a record a
+//! peer appended survives a round trip through this crate. An empty stream
+//! writes zero bytes, keeping messages without records byte-identical to ones
+//! encoded before this type existed. node-dlc preserves records too but re-emits
+//! them in its own fixed order, so byte equality across a node-dlc hop is not
+//! guaranteed; do not hash these bytes.
 //!
 //! [dlcspecs PR #163]: https://github.com/discreetlogcontracts/dlcspecs/pull/163
 

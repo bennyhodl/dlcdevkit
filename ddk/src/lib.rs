@@ -78,9 +78,6 @@ pub use bip329;
 /// offer.tlvs.set(&LoanReference { loan_id: 7, lender: "acme".to_string() });
 /// # }
 /// ```
-///
-/// What goes in the stream is the application's business. This crate carries records it
-/// has no type for without looking at them; see [`ddk_messages::tlv_stream`].
 pub use ddk_messages;
 
 /// DDK object with all services
