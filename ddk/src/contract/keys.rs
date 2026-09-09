@@ -453,17 +453,6 @@ impl ddk_manager::ContractSignerProvider for ContractKeyProvider {
             .map_err(|e| ddk_manager::error::Error::InvalidParameters(e.to_string()))?;
         Ok(SimpleSigner::new(secret_key))
     }
-
-    fn get_secret_key_for_pubkey(
-        &self,
-        _pubkey: &PublicKey,
-    ) -> Result<SecretKey, ddk_manager::error::Error> {
-        unreachable!("get_secret_key_for_pubkey is only used for channels")
-    }
-
-    fn get_new_secret_key(&self) -> Result<SecretKey, ddk_manager::error::Error> {
-        unreachable!("get_new_secret_key is only used for channels")
-    }
 }
 
 #[cfg(test)]

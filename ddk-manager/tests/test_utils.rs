@@ -97,7 +97,7 @@ macro_rules! periodic_check {
     ($d:expr, $id:expr, $p:ident) => {
         $d.lock()
             .await
-            .periodic_check(true)
+            .periodic_check()
             .await
             .expect("Periodic check error");
         assert_contract_state!($d, $id, $p);
@@ -142,58 +142,6 @@ macro_rules! assert_contract_state {
             panic!("Contract {:02x?} does not exist in store", $id);
         }
     };
-}
-
-#[macro_export]
-macro_rules! write_channel {
-    ($channel: ident, $state: ident) => {
-        let suffix = if let Channel::Signed(s) = &$channel {
-            format!("{}", s.state)
-        } else {
-            "".to_string()
-        };
-        match $channel {
-            Channel::$state(s) => {
-                let mut buf = Vec::new();
-                s.write(&mut buf)
-                    .expect("to be able to serialize the channel.");
-                std::fs::write(format!("{}Channel{}", stringify!($state), suffix), buf)
-                    .expect("to be able to save the channel to file.");
-            }
-            _ => {}
-        }
-    };
-}
-
-#[macro_export]
-macro_rules! assert_channel_state {
-    ($d:expr, $id:expr, $p:ident $(, $s: ident)?) => {{
-        assert_channel_state_unlocked!($d.lock().await, $id, $p $(, $s)?)
-    }};
-}
-
-#[allow(unused_macros)]
-macro_rules! assert_channel_state_unlocked {
-    ($d:expr, $id:expr, $p:ident $(, $s: ident)?) => {{
-        let res = $d
-            .get_store()
-            .get_channel(&$id)
-            .expect("Could not retrieve channel");
-        if let Some(Channel::$p(c)) = res {
-            $(if let ddk_manager::channel::signed_channel::SignedChannelState::$s { .. } = c.state {
-            } else {
-                panic!("Unexpected signed channel state {:?}", c.state);
-            })?
-            if std::env::var("GENERATE_SERIALIZED_CHANNEL").is_ok() {
-                let channel = Channel::$p(c);
-                write_channel!(channel, $p);
-            }
-        } else if let Some(c) = res {
-            panic!("Unexpected channel state {:?}", c);
-        } else {
-            panic!("Could not find requested channel");
-        }
-    }};
 }
 
 pub fn max_value() -> u32 {

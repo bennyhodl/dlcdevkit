@@ -11,8 +11,8 @@ edition.workspace = true
 [features]
 default = ["std", "manager"]
 std = ["ddk-dlc/std", "ddk-messages/std", "ddk-trie/std", "bitcoin/std", "lightning/std"]
-# The async DLC application layer: the `Manager` and channel updater. This pulls
-# tokio (`sync`). Turn it OFF (`default-features = false`) for FFI/mobile
+# The async DLC application layer. This pulls tokio (`sync`). Turn it OFF
+# (`default-features = false`) for FFI/mobile
 # consumers that only need the pure protocol core — the `contract` types, the
 # `ContractSigner`/`ContractSignerProvider`/`Wallet` traits, and `error::Error`.
 manager = ["std", "dep:tokio"]

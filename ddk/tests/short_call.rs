@@ -103,13 +103,13 @@ async fn short_call() {
     alice
         .ddk
         .manager
-        .periodic_check(false)
+        .periodic_check()
         .await
         .expect("alice check failed");
 
     bob.ddk
         .manager
-        .periodic_check(false)
+        .periodic_check()
         .await
         .expect("bob check failed");
 
@@ -178,8 +178,8 @@ async fn short_call() {
 
     generate_blocks(10);
 
-    bob.ddk.manager.periodic_check(false).await.unwrap();
-    alice.ddk.manager.periodic_check(false).await.unwrap();
+    bob.ddk.manager.periodic_check().await.unwrap();
+    alice.ddk.manager.periodic_check().await.unwrap();
 
     let contract = bob
         .ddk

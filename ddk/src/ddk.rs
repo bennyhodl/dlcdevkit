@@ -65,7 +65,6 @@ pub type DlcDevKitDlcManager<S, O> = ddk_manager::manager::Manager<
     Arc<S>,
     Arc<O>,
     Arc<SystemTimeProvider>,
-    Arc<DlcDevKitWallet>,
     SimpleSigner,
     Arc<Logger>,
 >;

@@ -752,63 +752,6 @@ impl ManagerStorage for PostgresStore {
 
         Ok(preclosed)
     }
-
-    #[tracing::instrument(skip(self))]
-    async fn upsert_channel(
-        &self,
-        _channel: ddk_manager::channel::Channel,
-        _contract: Option<Contract>,
-    ) -> Result<(), ddk_manager::error::Error> {
-        unimplemented!("Channels not supported.")
-    }
-
-    #[tracing::instrument(skip(self))]
-    async fn delete_channel(
-        &self,
-        _channel_id: &ddk_manager::ChannelId,
-    ) -> Result<(), ddk_manager::error::Error> {
-        unimplemented!("Channels not supported.")
-    }
-
-    #[tracing::instrument(skip(self, _channel_state))]
-    async fn get_signed_channels(
-        &self,
-        _channel_state: Option<ddk_manager::channel::signed_channel::SignedChannelStateType>,
-    ) -> Result<Vec<ddk_manager::channel::signed_channel::SignedChannel>, ddk_manager::error::Error>
-    {
-        unimplemented!("Channels not supported.")
-    }
-
-    #[tracing::instrument(skip(self))]
-    async fn get_channel(
-        &self,
-        _channel_id: &ddk_manager::ChannelId,
-    ) -> Result<Option<ddk_manager::channel::Channel>, ddk_manager::error::Error> {
-        unimplemented!("Channels not supported.")
-    }
-
-    #[tracing::instrument(skip(self))]
-    async fn get_offered_channels(
-        &self,
-    ) -> Result<Vec<ddk_manager::channel::offered_channel::OfferedChannel>, ddk_manager::error::Error>
-    {
-        unimplemented!("Channels not supported.")
-    }
-
-    #[tracing::instrument(skip(self))]
-    async fn persist_chain_monitor(
-        &self,
-        _monitor: &ddk_manager::chain_monitor::ChainMonitor,
-    ) -> Result<(), ddk_manager::error::Error> {
-        unimplemented!("Chain monitor not supported.")
-    }
-
-    #[tracing::instrument(skip(self))]
-    async fn get_chain_monitor(
-        &self,
-    ) -> Result<Option<ddk_manager::chain_monitor::ChainMonitor>, ddk_manager::error::Error> {
-        Ok(None)
-    }
 }
 
 /// Insert keychain descriptors.

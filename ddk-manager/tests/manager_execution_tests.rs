@@ -284,7 +284,6 @@ type TestManager = Manager<
     Arc<MemoryStorage>,
     Arc<MemoryOracle>,
     Arc<test_utils::MockTime>,
-    Arc<EsploraClient>,
     SimpleSigner,
     Arc<Logger>,
 >;
@@ -1354,7 +1353,6 @@ async fn manager_execution_test_inner(test_params: TestParams, path: TestPath, m
             Arc::clone(&alice_storage),
             alice_oracles,
             Arc::clone(&mock_time),
-            Arc::clone(&electrs),
             logger.clone(),
             Some(close_approver.clone()),
         )
@@ -1372,7 +1370,6 @@ async fn manager_execution_test_inner(test_params: TestParams, path: TestPath, m
             Arc::clone(&bob_storage),
             bob_oracles,
             Arc::clone(&mock_time),
-            Arc::clone(&electrs),
             logger.clone(),
             Some(close_approver.clone()),
         )

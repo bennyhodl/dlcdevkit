@@ -48,7 +48,7 @@ use bdk_wallet::{
 };
 use bitcoin::bip32::Fingerprint;
 use bitcoin::Psbt;
-use bitcoin::{secp256k1::SecretKey, Amount, FeeRate, Transaction};
+use bitcoin::{Amount, FeeRate, Transaction};
 use ddk_manager::{error::Error as ManagerError, SimpleSigner};
 use lightning::chain::chaininterface::{ConfirmationTarget, FeeEstimator};
 use std::fmt::Debug;
@@ -939,21 +939,6 @@ impl ddk_manager::ContractSignerProvider for DlcDevKitWallet {
         key_id: [u8; 32],
     ) -> std::result::Result<Self::Signer, ManagerError> {
         self.contract_keys.derive_contract_signer(key_id)
-    }
-
-    /// Gets a secret key for a given public key.
-    /// Currently unimplemented as it's only used for channel operations.
-    fn get_secret_key_for_pubkey(
-        &self,
-        _pubkey: &PublicKey,
-    ) -> std::result::Result<SecretKey, ManagerError> {
-        unreachable!("get_secret_key_for_pubkey is only used in channels.")
-    }
-
-    /// Generates a new secret key.
-    /// Currently unimplemented as it's only used for channel operations.
-    fn get_new_secret_key(&self) -> std::result::Result<SecretKey, ManagerError> {
-        unreachable!("get_new_secret_key is only used for channels")
     }
 }
 
