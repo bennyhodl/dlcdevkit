@@ -140,12 +140,11 @@ const TLV_SUFFIX_VERSION: u8 = 1;
 
 /// The TLV streams a contract carries, in the order the suffix stores them.
 ///
-/// The streams live in a suffix after the struct bytes rather than inside the
-/// structs because the structs nest (a signed contract contains the accepted
-/// one, which contains the offered one), so a stream inside a struct could not
-/// be told apart from the fields of the struct that follows it in old data.
-/// At the end of the whole buffer, old data simply ends and new data carries
-/// the suffix, so contracts stored before the suffix existed still load.
+/// The streams go in a suffix after the struct bytes because the structs nest:
+/// a signed contract contains the accepted one, which contains the offered one.
+/// Old data has no stream bytes inside the structs, and a suffix keeps it that
+/// way. Old data ends where the struct ends, so contracts stored before the
+/// suffix existed still load.
 fn tlv_streams(contract: &Contract) -> Vec<&TlvStream> {
     match contract {
         Contract::Offered(o) | Contract::Rejected(o) => vec![&o.tlvs],
@@ -206,8 +205,8 @@ pub fn serialize_contract(contract: &Contract) -> Result<Vec<u8>, Error> {
     let mut res = Vec::with_capacity(serialized.len() + 1);
     res.push(ContractPrefix::get_prefix(contract));
     res.append(&mut serialized);
-    // Written only when a stream has records, so a contract without any keeps
-    // the exact bytes older versions wrote.
+    // Only written when a stream has records, so a contract without records
+    // keeps the same bytes as before.
     let streams = tlv_streams(contract);
     if streams.iter().any(|s| !s.is_empty()) {
         res.push(TLV_SUFFIX_VERSION);
@@ -302,8 +301,8 @@ mod tests {
 
     /// Records set on a stored contract come back on the struct they were set
     /// on. The fixtures predate the suffix, so `stored_contracts_round_trip_byte_for_byte`
-    /// below is also the proof that contracts stored without it still load, and
-    /// that a contract without records writes the exact bytes it did before.
+    /// also proves that contracts stored without a suffix still load and write
+    /// the same bytes back.
     #[test]
     fn records_survive_contract_storage() {
         let stored = include_bytes!("../../../testconfig/contract_binaries/Signed");
@@ -333,7 +332,7 @@ mod tests {
         assert_eq!(read.tlvs, stream_with_record(3));
     }
 
-    /// An unknown suffix version is a hard error rather than a misparse.
+    /// An unknown suffix version returns an error instead of misreading the data.
     #[test]
     fn unknown_tlv_suffix_version_is_rejected() {
         let mut stored = include_bytes!("../../../testconfig/contract_binaries/Offered").to_vec();

@@ -155,7 +155,7 @@ macro_rules! impl_dlc_writeable {
                 $(
                     $crate::field_write!(w, self.$field, $fieldty);
                 )*
-                // Last, always: the reader takes everything after this point as the stream.
+                // The stream must be written last. The reader takes everything after the fixed fields.
                 $crate::lightning::util::ser::Writeable::write(&self.$tlv_field, w)?;
                 Ok(())
             }

@@ -1,11 +1,10 @@
 //! The TLV stream a DLC message may carry after its fixed fields, per
-//! [dlcspecs PR #163]. Records are held in the order they were read, duplicates
-//! and unknown types included, and written back byte for byte, so a record a
-//! peer appended survives a round trip through this crate. An empty stream
-//! writes zero bytes, keeping messages without records byte-identical to ones
-//! encoded before this type existed. node-dlc preserves records too but re-emits
-//! them in its own fixed order, so byte equality across a node-dlc hop is not
-//! guaranteed; do not hash these bytes.
+//! [dlcspecs PR #163]. Records keep the order they were read in, including
+//! duplicates and unknown types, and are written back byte for byte, so a
+//! record a peer appended survives a round trip. An empty stream writes no
+//! bytes, so a message without records encodes the same as it did before this
+//! type existed. node-dlc keeps records too but re-emits them in its own fixed
+//! order, so do not hash these bytes.
 //!
 //! [dlcspecs PR #163]: https://github.com/discreetlogcontracts/dlcspecs/pull/163
 
@@ -14,8 +13,8 @@ use lightning::io::{Cursor, Read};
 use lightning::ln::msgs::DecodeError;
 use lightning::util::ser::{Readable, Writeable, Writer};
 
-/// Upper bound on the bytes a TLV stream may occupy, mirroring the cap the rest of this
-/// crate puts on variable-length reads so a hostile peer cannot make us allocate freely.
+/// Upper bound on the bytes a TLV stream may occupy. The rest of the crate caps
+/// variable-length reads the same way so a peer cannot make us allocate freely.
 const MAX_TLV_STREAM_SIZE: u64 = 1_000_000;
 
 /// A single TLV record, with its body held as raw bytes.
@@ -29,9 +28,9 @@ const MAX_TLV_STREAM_SIZE: u64 = 1_000_000;
     serde(rename_all = "camelCase")
 )]
 pub struct TlvStreamRecord {
-    /// The record type, as read from the wire. Wider than the `u16` a
-    /// [`TlvType`](crate::TlvType) declares, because a record we do not recognise may
-    /// legitimately use a type this build has no constant for.
+    /// The record type, as read from the wire. It is wider than the `u16` a
+    /// [`TlvType`](crate::TlvType) declares because a record we do not
+    /// recognise may use a type this build has no constant for.
     pub tlv_type: u64,
     #[cfg_attr(
         feature = "use-serde",
@@ -66,19 +65,16 @@ impl TlvStream {
 
     /// Reads records until the reader is exhausted.
     ///
-    /// Only valid at the end of a message, where the remaining bytes are the stream and
-    /// nothing else. Every caller in this crate reads a message from a reader bounded to
-    /// that message's bytes — a [`FixedLengthReader`](lightning::util::ser::FixedLengthReader)
-    /// in the peer-message path, a cursor over the exact payload elsewhere — so "until
-    /// exhausted" means "to the end of this message", not "to the end of the connection".
-    ///
-    /// An empty remainder yields an empty stream rather than an error, which is what keeps
-    /// messages from peers that append nothing readable.
+    /// Only valid at the end of a message, where the remaining bytes are the
+    /// stream and nothing else. Every caller in this crate reads a message from
+    /// a reader bounded to that message's bytes, so the read stops at the end
+    /// of the message. An empty remainder is an empty stream, not an error, so
+    /// messages from peers that append nothing still read.
     pub fn read_to_end<R: Read>(reader: &mut R) -> Result<Self, DecodeError> {
         let mut bytes = Vec::new();
-        // One past the cap, because `read_to_limit` stops at its limit and reports
-        // success: reading exactly `MAX_TLV_STREAM_SIZE` cannot tell a stream that ends
-        // there from one that continues, and would silently drop the rest.
+        // Read one byte past the cap. `read_to_limit` stops at its limit and
+        // returns Ok, so reading exactly the cap could not tell a full stream
+        // from a truncated one.
         reader
             .read_to_limit(&mut bytes, MAX_TLV_STREAM_SIZE + 1)
             .map_err(|_| DecodeError::ShortRead)?;
@@ -93,8 +89,8 @@ impl TlvStream {
         while cursor.position() < len {
             let tlv_type: BigSize = Readable::read(&mut cursor)?;
             let body_len: BigSize = Readable::read(&mut cursor)?;
-            // Checked before allocating: a record may declare any length, including one
-            // far past the end of the message.
+            // Check before allocating. A record may declare any length,
+            // including one far past the end of the message.
             if body_len.0 > len - cursor.position() {
                 return Err(DecodeError::ShortRead);
             }
@@ -133,9 +129,9 @@ impl TlvStream {
             body: value.encode(),
         };
         match self.position(T::TYPE_ID) {
-            // Every one, not just the first: a read keeps duplicates, so leaving the
-            // others would put a stale copy back on the wire for the peer to read
-            // instead of the one just set.
+            // Remove every duplicate, not just the first. A read keeps
+            // duplicates, so a stale copy would stay on the wire and the peer
+            // could read it instead of the new record.
             Some(index) => {
                 self.records.retain(|r| r.tlv_type != T::TYPE_ID as u64);
                 self.records.insert(index, record);
@@ -239,9 +235,9 @@ mod tests {
 
     #[test]
     fn stream_past_the_size_cap_is_rejected_not_truncated() {
-        // `read_to_limit` stops at its limit and reports success, so reading exactly the
-        // cap would decode the first megabyte and drop the rest with no error — the same
-        // silent loss this module exists to stop.
+        // `read_to_limit` stops at its limit and returns Ok, so reading exactly
+        // the cap would decode the first megabyte and drop the rest with no
+        // error. That is the same silent loss this module exists to stop.
         let record: &[u8] = &[0x01, 0x63, 0x00];
         let mut bytes = Vec::new();
         while (bytes.len() as u64) <= MAX_TLV_STREAM_SIZE {

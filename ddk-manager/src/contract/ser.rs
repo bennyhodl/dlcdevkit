@@ -200,9 +200,9 @@ impl_dlc_writeable_external!(
     (pending_close_txs, vec)}
 );
 
-/// The TLV streams on the contract structs are persisted by the storage layer as a
-/// versioned suffix (see `ddk::util::ser`), not inside the struct bytes, so stored
-/// contracts keep the exact byte layout of previous versions.
+/// The storage layer persists the TLV streams as a versioned suffix (see
+/// `ddk::util::ser`). Writing nothing here keeps the struct bytes identical to
+/// what previous versions stored.
 fn write_external_tlvs<W: Writer>(
     _: &ddk_messages::tlv_stream::TlvStream,
     _: &mut W,
@@ -250,14 +250,13 @@ impl_dlc_writeable!(ClosedContract, {
     (signed_contract, writeable)
 });
 
-/// Zero marks a length-framed message. Data stored before the messages carried
-/// a TLV stream wrote the message raw, so it starts with the message's u16 wire
-/// type instead, which is never zero.
+/// Marker for a length-framed message. Old data wrote the message raw, so it
+/// starts with the message's u16 wire type, which is never zero.
 const FRAMED_MESSAGE_MARKER: u16 = 0;
 
-/// Writes a message preceded by a marker and its byte length. The frame is
-/// needed because these messages read their TLV stream to the end of the
-/// buffer, which would otherwise swallow the fields stored after them.
+/// Writes a message with a marker and its byte length. These messages read
+/// their TLV stream to the end of the buffer, so without the frame the read
+/// would swallow the fields stored after the message.
 fn write_framed_message<T: Writeable + Readable, W: Writer>(
     msg: &T,
     w: &mut W,
@@ -283,8 +282,8 @@ fn read_framed_message<R: Read, T: Readable>(
         }
         Ok(msg)
     } else if marker == v1_type {
-        // Unframed data from before the frame existed: the two bytes just read
-        // are the message type, so only the body follows, with no TLV stream.
+        // Old unframed data. The two bytes just read are the message type,
+        // and the body follows with no TLV stream.
         read_v1_body(r)
     } else {
         Err(DecodeError::InvalidValue)
@@ -511,8 +510,8 @@ mod tests {
         ddk_messages::tlv_stream::TlvStream::read_to_end(&mut Cursor::new(bytes)).unwrap()
     }
 
-    /// A failed accept stored before the message was length-framed: the message
-    /// was written raw, followed directly by the error string.
+    /// A failed accept stored before the message was length-framed. The
+    /// message was written raw, followed directly by the error string.
     #[test]
     fn failed_accept_stored_before_framing_still_loads() {
         let offered = offered_contract();

@@ -364,11 +364,8 @@ pub struct OfferDlc {
         feature = "use-serde",
         serde(default, skip_serializing_if = "TlvStream::is_empty")
     )]
-    /// The TLV records appended after the fixed fields.
-    ///
-    /// Empty for a peer that appends none, in which case it encodes to no bytes and the
-    /// message is byte-identical to one written before this field existed. Records this
-    /// build has no type for are held verbatim rather than dropped; see
+    /// The TLV records appended after the fixed fields. An empty stream writes
+    /// no bytes, and unknown records are kept and written back; see
     /// [`tlv_stream`](crate::tlv_stream).
     pub tlvs: TlvStream,
 }
@@ -548,11 +545,8 @@ pub struct AcceptDlc {
         feature = "use-serde",
         serde(default, skip_serializing_if = "TlvStream::is_empty")
     )]
-    /// The TLV records appended after the fixed fields.
-    ///
-    /// Empty for a peer that appends none, in which case it encodes to no bytes and the
-    /// message is byte-identical to one written before this field existed. Records this
-    /// build has no type for are held verbatim rather than dropped; see
+    /// The TLV records appended after the fixed fields. An empty stream writes
+    /// no bytes, and unknown records are kept and written back; see
     /// [`tlv_stream`](crate::tlv_stream).
     pub tlvs: TlvStream,
 }
@@ -607,11 +601,8 @@ pub struct SignDlc {
         feature = "use-serde",
         serde(default, skip_serializing_if = "TlvStream::is_empty")
     )]
-    /// The TLV records appended after the fixed fields.
-    ///
-    /// Empty for a peer that appends none, in which case it encodes to no bytes and the
-    /// message is byte-identical to one written before this field existed. Records this
-    /// build has no type for are held verbatim rather than dropped; see
+    /// The TLV records appended after the fixed fields. An empty stream writes
+    /// no bytes, and unknown records are kept and written back; see
     /// [`tlv_stream`](crate::tlv_stream).
     pub tlvs: TlvStream,
 }
@@ -831,8 +822,8 @@ mod tests {
 
     #[test]
     fn unknown_record_survives_a_decode_encode_cycle() {
-        // The regression this whole field exists for: before it, these 7 bytes were read
-        // past, never stored, and never written back — with no error at any layer.
+        // The regression this field exists for. Before it, these 7 bytes were
+        // read past, never stored, and never written back, with no error.
         let mut bytes = offer_fixture().encode();
         bytes.extend_from_slice(UNKNOWN_RECORD);
 
