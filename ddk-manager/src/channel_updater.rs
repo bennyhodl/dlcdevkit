@@ -1253,6 +1253,7 @@ where
         contract_flags: 0,
         chain_hash: Some(chain_hash),
         keys_id,
+        tlvs: Default::default(),
     };
 
     let mut state = SignedChannelState::RenewOffered {

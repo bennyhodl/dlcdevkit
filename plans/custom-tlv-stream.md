@@ -13,8 +13,9 @@ related: [[docs/oracle-message-serialization.md]]
 > back off a message it receives, and have records it does not understand survive
 > a round trip instead of being silently discarded.
 >
-> **Scope:** `ddk-messages` and the stateless `ddk::contract` module. The manager
-> path benefits without being touched.
+> **Scope:** `ddk-messages`, the stateless `ddk::contract` module, and the
+> `ddk-manager` storage path, which persists the streams so a message rebuilt
+> from a stored contract carries its records.
 >
 > **Prerequisite:** landed. The TLV primitives this plan builds on
 > (`TlvType`, `TlvRecord`, `read_tlv_body`) shipped with the oracle message
@@ -153,14 +154,19 @@ premise is already that "the three wire messages are the authoritative state":
 the application persists the messages itself. Put a field on the message and the
 application can use it — no new API of any kind.
 
-The manager path still gains relay fidelity for free: it stops discarding records
-it does not understand. It just cannot surface them to an application, which is
-acceptable because it is not the module an application would use for this.
-
-**`OfferedContract` does not embed `OfferDlc`** (`ddk-manager/src/contract/offered_contract.rs:26-55`);
-it decomposes the offer into its own fields. So a field on the message never
-reaches `contract_data`, and `stored_contracts_round_trip_byte_for_byte` keeps
-passing. No migration.
+The manager path was later brought along too (review feedback on PR #188): the
+manager rebuilds messages from stored contracts, for example when it pulls a
+previous contract in for a splice, so dropping the records at the storage
+boundary made those rebuilds wrong. `OfferedContract`, `AcceptedContract` and
+`SignedContract` each carry the stream of their own message now, persisted as a
+versioned suffix after the struct bytes in `contract_data` (`ddk::util::ser`).
+A suffix rather than in-struct fields because the structs nest, and the suffix
+is written only when a stream has records, so contracts stored before it exist
+still load and `stored_contracts_round_trip_byte_for_byte` still passes with the
+same fixtures. No migration. The `FailedAcceptContract`/`FailedSignContract`
+structs embed whole messages followed by an error string, which a read-to-end
+stream would swallow, so their stored messages are length-framed with the same
+old-format fallback.
 
 ---
 
@@ -287,10 +293,8 @@ the peek-based old-format branch — so it was wired up directly; `AcceptDlc` an
 go through the macro's trailing-stream arm from §4.2.
 
 Item 6 (a round trip against a real node-dlc payload) is still open and needs a captured
-message from BAL. The channel messages still drop records, as does the `ddk-manager`
-storage path: `OfferedContract`, `AcceptedContract` and `SignedContract` decompose their
-message and have no field for records, so a message rebuilt from stored state carries
-none. Applications that need records use the stateless `ddk::contract` module.
+message from BAL. The channel messages still drop records. The `ddk-manager` storage
+path persists the streams as of the second review round; see §3.
 
 
 1. **Macro hygiene.** Qualify paths in `impl_dlc_writeable!`, `field_write!`,
@@ -328,6 +332,7 @@ none. Applications that need records use the stateless `ddk::contract` module.
   for framing only — that its length fits inside the message — never for meaning,
   and never for uniqueness: duplicates are kept, so a caller reading a record it
   understands is reading the first of however many arrived.
-- If an application later needs records to survive into the manager's stored
-  contracts, that is the larger piece of work described in §3, and it does need a
-  `contract_data` migration. Nothing here forecloses it.
+- Records survive into the manager's stored contracts via the storage suffix
+  described in §3, with no `contract_data` migration. What the manager still has
+  no API for is an application attaching or reading records mid-flow; that
+  remains the stateless module's job.

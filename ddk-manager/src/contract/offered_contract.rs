@@ -13,6 +13,7 @@ use crate::{ContractId, KeysId};
 use bitcoin::Amount;
 use ddk_dlc::PartyParams;
 use ddk_messages::oracle_msgs::OracleAnnouncement;
+use ddk_messages::tlv_stream::TlvStream;
 use ddk_messages::{FundingInput, OfferDlc};
 use secp256k1_zkp::PublicKey;
 
@@ -60,6 +61,10 @@ pub struct OfferedContract {
     pub chain_hash: Option<[u8; 32]>,
     /// Keys Id for generating the signers
     pub(crate) keys_id: KeysId,
+    /// The TLV records from the offer message. Persisted by the storage layer
+    /// suffix, not by this struct's `Writeable` (see `ddk::util::ser`).
+    #[cfg_attr(feature = "use-serde", serde(default))]
+    pub tlvs: TlvStream,
 }
 
 impl OfferedContract {
@@ -140,6 +145,7 @@ impl OfferedContract {
             chain_hash: Some(chain_hash),
             counter_party: *counter_party,
             keys_id,
+            tlvs: Default::default(),
         }
     }
 
@@ -179,6 +185,7 @@ impl OfferedContract {
             chain_hash: Some(offer_dlc.chain_hash),
             counter_party,
             keys_id,
+            tlvs: offer_dlc.tlvs.clone(),
         })
     }
 
@@ -211,10 +218,7 @@ impl From<&OfferedContract> for OfferDlc {
             refund_locktime: offered_contract.refund_locktime,
             fee_rate_per_vb: offered_contract.fee_rate_per_vb,
             fund_output_serial_id: offered_contract.fund_output_serial_id,
-            // `OfferedContract` decomposes the offer into its own fields and has no room
-            // for TLV records, so a re-derived offer carries none. Applications that need
-            // records use the stateless `ddk::contract` module, which keeps the message.
-            tlvs: Default::default(),
+            tlvs: offered_contract.tlvs.clone(),
         }
     }
 }

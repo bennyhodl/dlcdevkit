@@ -4,6 +4,7 @@ use super::offered_contract::OfferedContract;
 use super::AdaptorInfo;
 use bitcoin::{Amount, SignedAmount, Transaction};
 use ddk_dlc::{DlcTransactions, PartyParams};
+use ddk_messages::tlv_stream::TlvStream;
 use ddk_messages::{AcceptDlc, FundingInput};
 use secp256k1_zkp::ecdsa::Signature;
 use secp256k1_zkp::EcdsaAdaptorSignature;
@@ -29,6 +30,9 @@ pub struct AcceptedContract {
     pub accept_refund_signature: Signature,
     /// The bitcoin set of bitcoin transactions for the contract.
     pub dlc_transactions: DlcTransactions,
+    /// The TLV records from the accept message. Persisted by the storage layer
+    /// suffix, not by this struct's `Writeable` (see `ddk::util::ser`).
+    pub tlvs: TlvStream,
 }
 
 impl AcceptedContract {
@@ -72,11 +76,7 @@ impl AcceptedContract {
             cet_adaptor_signatures: ecdsa_adaptor_signatures.into(),
             refund_signature: self.accept_refund_signature,
             negotiation_fields: None,
-            // `AcceptedContract` decomposes the message into its own fields and has no
-            // room for TLV records, so one rebuilt here carries none. Applications that
-            // need records use the stateless `ddk::contract` module, which keeps the
-            // message it was given.
-            tlvs: Default::default(),
+            tlvs: self.tlvs.clone(),
         }
     }
 

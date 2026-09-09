@@ -6,6 +6,7 @@ use crate::ChannelId;
 
 use super::accepted_contract::AcceptedContract;
 use ddk_dlc::dlc_input::DlcInputInfo;
+use ddk_messages::tlv_stream::TlvStream;
 use ddk_messages::CetAdaptorSignature;
 use ddk_messages::CetAdaptorSignatures;
 use ddk_messages::FundingSignatures;
@@ -26,6 +27,9 @@ pub struct SignedContract {
     pub funding_signatures: FundingSignatures,
     /// The [`ChannelId`] to which the contract was associated if any.
     pub channel_id: Option<ChannelId>,
+    /// The TLV records from the sign message. Persisted by the storage layer
+    /// suffix, not by this struct's `Writeable` (see `ddk::util::ser`).
+    pub tlvs: TlvStream,
 }
 
 impl SignedContract {
@@ -44,11 +48,7 @@ impl SignedContract {
             },
             refund_signature: self.offer_refund_signature,
             funding_signatures: self.funding_signatures.clone(),
-            // `SignedContract` decomposes the message into its own fields and has no room
-            // for TLV records, so one rebuilt here carries none. Applications that need
-            // records use the stateless `ddk::contract` module, which keeps the message
-            // it was given.
-            tlvs: Default::default(),
+            tlvs: self.tlvs.clone(),
         }
     }
 

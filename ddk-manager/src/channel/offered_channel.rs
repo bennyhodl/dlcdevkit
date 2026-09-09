@@ -125,6 +125,7 @@ impl OfferedChannel {
             contract_flags: offer_channel.contract_flags,
             chain_hash: Some(offer_channel.chain_hash),
             keys_id,
+            tlvs: Default::default(),
         };
 
         Ok((channel, contract))

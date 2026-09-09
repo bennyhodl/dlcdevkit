@@ -205,6 +205,23 @@ macro_rules! impl_dlc_writeable {
                 })
             }
         }
+
+        impl $st {
+            /// Reads the fixed fields after the type prefix, leaving the TLV
+            /// stream empty. For parsing data serialized before the message
+            /// carried a stream, where other fields follow the message bytes
+            /// and the caller has already consumed the type.
+            pub fn read_body_without_tlv_stream<R: $crate::lightning::io::Read>(
+                r: &mut R,
+            ) -> Result<Self, $crate::lightning::ln::msgs::DecodeError> {
+                Ok(Self {
+                    $(
+                        $field: $crate::field_read!(r, $fieldty),
+                    )*
+                    $tlv_field: $crate::tlv_stream::TlvStream::default(),
+                })
+            }
+        }
     };
 }
 

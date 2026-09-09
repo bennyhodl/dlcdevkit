@@ -8,8 +8,10 @@ use ddk_manager::contract::{
     ClosedContract, Contract, FailedAcceptContract, FailedSignContract, PreClosedContract,
 };
 use ddk_manager::error::Error;
+use ddk_messages::tlv_stream::TlvStream;
 use ddk_messages::Message;
 use lightning::io::Read;
+use lightning::util::ser::{BigSize, FixedLengthReader, Readable, Writeable};
 
 use crate::error::to_storage_error;
 
@@ -133,6 +135,63 @@ convertible_enum!(
     SignedChannelStateType
 );
 
+/// Version byte of the TLV suffix appended after the serialized contract.
+const TLV_SUFFIX_VERSION: u8 = 1;
+
+/// The TLV streams a contract carries, in the order the suffix stores them.
+///
+/// The streams live in a suffix after the struct bytes rather than inside the
+/// structs because the structs nest (a signed contract contains the accepted
+/// one, which contains the offered one), so a stream inside a struct could not
+/// be told apart from the fields of the struct that follows it in old data.
+/// At the end of the whole buffer, old data simply ends and new data carries
+/// the suffix, so contracts stored before the suffix existed still load.
+fn tlv_streams(contract: &Contract) -> Vec<&TlvStream> {
+    match contract {
+        Contract::Offered(o) | Contract::Rejected(o) => vec![&o.tlvs],
+        Contract::Accepted(a) => vec![&a.offered_contract.tlvs, &a.tlvs],
+        Contract::Signed(s) | Contract::Confirmed(s) | Contract::Refunded(s) => vec![
+            &s.accepted_contract.offered_contract.tlvs,
+            &s.accepted_contract.tlvs,
+            &s.tlvs,
+        ],
+        Contract::PreClosed(p) => vec![
+            &p.signed_contract.accepted_contract.offered_contract.tlvs,
+            &p.signed_contract.accepted_contract.tlvs,
+            &p.signed_contract.tlvs,
+        ],
+        Contract::FailedAccept(f) => vec![&f.offered_contract.tlvs],
+        Contract::FailedSign(f) => vec![
+            &f.accepted_contract.offered_contract.tlvs,
+            &f.accepted_contract.tlvs,
+        ],
+        Contract::Closed(_) => vec![],
+    }
+}
+
+fn tlv_streams_mut(contract: &mut Contract) -> Vec<&mut TlvStream> {
+    match contract {
+        Contract::Offered(o) | Contract::Rejected(o) => vec![&mut o.tlvs],
+        Contract::Accepted(a) => vec![&mut a.offered_contract.tlvs, &mut a.tlvs],
+        Contract::Signed(s) | Contract::Confirmed(s) | Contract::Refunded(s) => vec![
+            &mut s.accepted_contract.offered_contract.tlvs,
+            &mut s.accepted_contract.tlvs,
+            &mut s.tlvs,
+        ],
+        Contract::PreClosed(p) => vec![
+            &mut p.signed_contract.accepted_contract.offered_contract.tlvs,
+            &mut p.signed_contract.accepted_contract.tlvs,
+            &mut p.signed_contract.tlvs,
+        ],
+        Contract::FailedAccept(f) => vec![&mut f.offered_contract.tlvs],
+        Contract::FailedSign(f) => vec![
+            &mut f.accepted_contract.offered_contract.tlvs,
+            &mut f.accepted_contract.tlvs,
+        ],
+        Contract::Closed(_) => vec![],
+    }
+}
+
 pub fn serialize_contract(contract: &Contract) -> Result<Vec<u8>, Error> {
     let serialized = match contract {
         Contract::Offered(o) | Contract::Rejected(o) => o.serialize(),
@@ -147,6 +206,19 @@ pub fn serialize_contract(contract: &Contract) -> Result<Vec<u8>, Error> {
     let mut res = Vec::with_capacity(serialized.len() + 1);
     res.push(ContractPrefix::get_prefix(contract));
     res.append(&mut serialized);
+    // Written only when a stream has records, so a contract without any keeps
+    // the exact bytes older versions wrote.
+    let streams = tlv_streams(contract);
+    if streams.iter().any(|s| !s.is_empty()) {
+        res.push(TLV_SUFFIX_VERSION);
+        for stream in streams {
+            let bytes = stream.encode();
+            BigSize(bytes.len() as u64)
+                .write(&mut res)
+                .map_err(to_storage_error)?;
+            res.extend_from_slice(&bytes);
+        }
+    }
     Ok(res)
 }
 
@@ -187,6 +259,22 @@ pub fn deserialize_contract(buff: &Vec<u8>) -> Result<Contract, Error> {
             Contract::Rejected(OfferedContract::deserialize(&mut cursor).map_err(to_storage_error)?)
         }
     };
+    let mut contract = contract;
+    if (cursor.position() as usize) < buff.len() {
+        let mut version = [0u8; 1];
+        cursor.read_exact(&mut version)?;
+        if version[0] != TLV_SUFFIX_VERSION {
+            return Err(Error::StorageError(format!(
+                "unknown contract TLV suffix version {}",
+                version[0]
+            )));
+        }
+        for stream in tlv_streams_mut(&mut contract) {
+            let len: BigSize = Readable::read(&mut cursor).map_err(to_storage_error)?;
+            let mut frame = FixedLengthReader::new(&mut cursor, len.0);
+            *stream = TlvStream::read_to_end(&mut frame).map_err(to_storage_error)?;
+        }
+    }
     Ok(contract)
 }
 
@@ -205,6 +293,53 @@ pub fn message_variant_name(message: &Message) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A stream holding one record of type 65007 with `body` as its one-byte body.
+    fn stream_with_record(body: u8) -> TlvStream {
+        let bytes = [0xfd, 0xfd, 0xef, 0x01, body];
+        TlvStream::read_to_end(&mut lightning::io::Cursor::new(bytes)).unwrap()
+    }
+
+    /// Records set on a stored contract come back on the struct they were set
+    /// on. The fixtures predate the suffix, so `stored_contracts_round_trip_byte_for_byte`
+    /// below is also the proof that contracts stored without it still load, and
+    /// that a contract without records writes the exact bytes it did before.
+    #[test]
+    fn records_survive_contract_storage() {
+        let stored = include_bytes!("../../../testconfig/contract_binaries/Signed");
+        let mut contract = deserialize_contract(&stored.to_vec()).unwrap();
+        {
+            let Contract::Signed(s) = &mut contract else {
+                panic!("fixture is not a signed contract")
+            };
+            assert!(s.tlvs.is_empty());
+            assert!(s.accepted_contract.tlvs.is_empty());
+            assert!(s.accepted_contract.offered_contract.tlvs.is_empty());
+            s.accepted_contract.offered_contract.tlvs = stream_with_record(1);
+            s.accepted_contract.tlvs = stream_with_record(2);
+            s.tlvs = stream_with_record(3);
+        }
+
+        let serialized = serialize_contract(&contract).unwrap();
+        let Contract::Signed(read) = deserialize_contract(&serialized).unwrap() else {
+            panic!("state changed in storage")
+        };
+
+        assert_eq!(
+            read.accepted_contract.offered_contract.tlvs,
+            stream_with_record(1)
+        );
+        assert_eq!(read.accepted_contract.tlvs, stream_with_record(2));
+        assert_eq!(read.tlvs, stream_with_record(3));
+    }
+
+    /// An unknown suffix version is a hard error rather than a misparse.
+    #[test]
+    fn unknown_tlv_suffix_version_is_rejected() {
+        let mut stored = include_bytes!("../../../testconfig/contract_binaries/Offered").to_vec();
+        stored.push(99);
+        assert!(deserialize_contract(&stored).is_err());
+    }
 
     /// Every contract state, serialized by an earlier release and checked in.
     ///

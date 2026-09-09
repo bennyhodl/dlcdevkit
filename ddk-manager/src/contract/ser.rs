@@ -23,6 +23,7 @@ use ddk_messages::ser_impls::{
     read_ecdsa_adaptor_signatures, read_option_cb, read_usize, read_vec, read_vec_cb,
     write_ecdsa_adaptor_signatures, write_option_cb, write_usize, write_vec, write_vec_cb,
 };
+use ddk_messages::{AcceptDlc, SignDlc};
 use ddk_trie::digit_trie::{DigitNodeData, DigitTrieDump};
 use ddk_trie::multi_oracle_trie::{MultiOracleTrie, MultiOracleTrieDump};
 use ddk_trie::multi_oracle_trie_with_diff::{MultiOracleTrieWithDiff, MultiOracleTrieWithDiffDump};
@@ -30,7 +31,7 @@ use ddk_trie::multi_trie::{MultiTrieDump, MultiTrieNodeData, TrieNodeInfo};
 use ddk_trie::{OracleNumericInfo, RangeInfo};
 use lightning::io::Read;
 use lightning::ln::msgs::DecodeError;
-use lightning::util::ser::{Readable, Writeable, Writer};
+use lightning::util::ser::{BigSize, FixedLengthReader, Readable, Writeable, Writer};
 
 /// Trait used to de/serialize an object to/from a vector of bytes.
 pub trait Serializable
@@ -183,6 +184,8 @@ impl Readable for OfferedContract {
             chain_hash,
             counter_party,
             keys_id,
+            // Filled from the storage-layer suffix, not from these bytes.
+            tlvs: Default::default(),
         })
     }
 }
@@ -196,6 +199,23 @@ impl_dlc_writeable_external!(
     (funding_witness_script, writeable),
     (pending_close_txs, vec)}
 );
+
+/// The TLV streams on the contract structs are persisted by the storage layer as a
+/// versioned suffix (see `ddk::util::ser`), not inside the struct bytes, so stored
+/// contracts keep the exact byte layout of previous versions.
+fn write_external_tlvs<W: Writer>(
+    _: &ddk_messages::tlv_stream::TlvStream,
+    _: &mut W,
+) -> Result<(), lightning::io::Error> {
+    Ok(())
+}
+
+fn read_external_tlvs<R: Read>(
+    _: &mut R,
+) -> Result<ddk_messages::tlv_stream::TlvStream, DecodeError> {
+    Ok(Default::default())
+}
+
 impl_dlc_writeable!(AcceptedContract, {
     (offered_contract, writeable),
     (accept_params, { cb_writeable, ddk_messages::ser_impls::party_params::write, ddk_messages::ser_impls::party_params::read }),
@@ -203,14 +223,16 @@ impl_dlc_writeable!(AcceptedContract, {
     (adaptor_infos, vec),
     (adaptor_signatures, { cb_writeable, write_ecdsa_adaptor_signatures, read_ecdsa_adaptor_signatures }),
     (accept_refund_signature, writeable),
-    (dlc_transactions, {cb_writeable, dlc_transactions::write, dlc_transactions::read })
+    (dlc_transactions, {cb_writeable, dlc_transactions::write, dlc_transactions::read }),
+    (tlvs, {cb_writeable, write_external_tlvs, read_external_tlvs})
 });
 impl_dlc_writeable!(SignedContract, {
     (accepted_contract, writeable),
     (adaptor_signatures, { cb_writeable, write_ecdsa_adaptor_signatures, read_ecdsa_adaptor_signatures }),
     (offer_refund_signature, writeable),
     (funding_signatures, writeable),
-    (channel_id, option)
+    (channel_id, option),
+    (tlvs, {cb_writeable, write_external_tlvs, read_external_tlvs})
 });
 impl_dlc_writeable!(PreClosedContract, {
     (signed_contract, writeable),
@@ -227,8 +249,66 @@ impl_dlc_writeable!(ClosedContract, {
     (pnl, SignedAmount),
     (signed_contract, writeable)
 });
-impl_dlc_writeable!(FailedAcceptContract, {(offered_contract, writeable), (accept_message, writeable), (error_message, string)});
-impl_dlc_writeable!(FailedSignContract, {(accepted_contract, writeable), (sign_message, writeable), (error_message, string)});
+
+/// Zero marks a length-framed message. Data stored before the messages carried
+/// a TLV stream wrote the message raw, so it starts with the message's u16 wire
+/// type instead, which is never zero.
+const FRAMED_MESSAGE_MARKER: u16 = 0;
+
+/// Writes a message preceded by a marker and its byte length. The frame is
+/// needed because these messages read their TLV stream to the end of the
+/// buffer, which would otherwise swallow the fields stored after them.
+fn write_framed_message<T: Writeable + Readable, W: Writer>(
+    msg: &T,
+    w: &mut W,
+) -> Result<(), lightning::io::Error> {
+    FRAMED_MESSAGE_MARKER.write(w)?;
+    let bytes = msg.serialize()?;
+    BigSize(bytes.len() as u64).write(w)?;
+    w.write_all(&bytes)
+}
+
+fn read_framed_message<R: Read, T: Readable>(
+    r: &mut R,
+    v1_type: u16,
+    read_v1_body: fn(&mut R) -> Result<T, DecodeError>,
+) -> Result<T, DecodeError> {
+    let marker: u16 = Readable::read(r)?;
+    if marker == FRAMED_MESSAGE_MARKER {
+        let len: BigSize = Readable::read(r)?;
+        let mut frame = FixedLengthReader::new(&mut *r, len.0);
+        let msg: T = Readable::read(&mut frame)?;
+        if frame.bytes_remain() {
+            return Err(DecodeError::InvalidValue);
+        }
+        Ok(msg)
+    } else if marker == v1_type {
+        // Unframed data from before the frame existed: the two bytes just read
+        // are the message type, so only the body follows, with no TLV stream.
+        read_v1_body(r)
+    } else {
+        Err(DecodeError::InvalidValue)
+    }
+}
+
+fn read_framed_accept<R: Read>(r: &mut R) -> Result<AcceptDlc, DecodeError> {
+    read_framed_message(
+        r,
+        ddk_messages::types::ACCEPT_TYPE,
+        AcceptDlc::read_body_without_tlv_stream,
+    )
+}
+
+fn read_framed_sign<R: Read>(r: &mut R) -> Result<SignDlc, DecodeError> {
+    read_framed_message(
+        r,
+        ddk_messages::types::SIGN_TYPE,
+        SignDlc::read_body_without_tlv_stream,
+    )
+}
+
+impl_dlc_writeable!(FailedAcceptContract, {(offered_contract, writeable), (accept_message, {cb_writeable, write_framed_message, read_framed_accept}), (error_message, string)});
+impl_dlc_writeable!(FailedSignContract, {(accepted_contract, writeable), (sign_message, {cb_writeable, write_framed_message, read_framed_sign}), (error_message, string)});
 
 impl_dlc_writeable_external!(DigitTrieDump<Vec<RangeInfo> >, digit_trie_dump_vec_range, { (node_data, {vec_cb, write_digit_node_data_vec_range, read_digit_node_data_vec_range}), (root, {option_cb, write_usize, read_usize}), (base, usize)});
 impl_dlc_writeable_external!(DigitTrieDump<RangeInfo>, digit_trie_dump_range, { (node_data, {vec_cb, write_digit_node_data_range, read_digit_node_data_range}), (root, {option_cb, write_usize, read_usize}), (base, usize)});
@@ -377,6 +457,145 @@ mod tests {
             .parse()
             .unwrap();
         OfferedContract::try_from_offer_dlc(&offer_dlc, counter_party, [7u8; 32]).unwrap()
+    }
+
+    fn accepted_contract() -> AcceptedContract {
+        use secp256k1_zkp::{Message, Secp256k1, SecretKey};
+        let secp = Secp256k1::new();
+        let secret_key = SecretKey::from_slice(&[1; 32]).unwrap();
+        let dummy_transaction = bitcoin::Transaction {
+            version: bitcoin::transaction::Version::TWO,
+            lock_time: bitcoin::absolute::LockTime::ZERO,
+            input: Vec::new(),
+            output: Vec::new(),
+        };
+        let offered = offered_contract();
+        AcceptedContract {
+            accept_params: ddk_dlc::PartyParams {
+                fund_pubkey: secret_key.public_key(&secp),
+                change_script_pubkey: bitcoin::ScriptBuf::new(),
+                change_serial_id: 1,
+                payout_script_pubkey: bitcoin::ScriptBuf::new(),
+                payout_serial_id: 2,
+                inputs: Vec::new(),
+                dlc_inputs: Vec::new(),
+                input_amount: Amount::from_sat(1_000),
+                collateral: Amount::from_sat(500),
+            },
+            offered_contract: offered,
+            funding_inputs: Vec::new(),
+            adaptor_infos: Vec::new(),
+            adaptor_signatures: Vec::new(),
+            accept_refund_signature: secp.sign_ecdsa(&Message::from_digest([1; 32]), &secret_key),
+            dlc_transactions: DlcTransactions {
+                // The fund output must exist for `get_sign_dlc` to find it.
+                fund: bitcoin::Transaction {
+                    output: vec![bitcoin::TxOut {
+                        value: Amount::from_sat(1_000),
+                        script_pubkey: bitcoin::ScriptBuf::new().to_p2wsh(),
+                    }],
+                    ..dummy_transaction.clone()
+                },
+                cets: vec![dummy_transaction.clone()],
+                refund: dummy_transaction,
+                funding_witness_script: bitcoin::ScriptBuf::new(),
+                pending_close_txs: Vec::new(),
+            },
+            tlvs: Default::default(),
+        }
+    }
+
+    /// A stream holding one record of type 65007 with `body` as its one-byte body.
+    fn stream_with_record(body: u8) -> ddk_messages::tlv_stream::TlvStream {
+        let bytes = [0xfd, 0xfd, 0xef, 0x01, body];
+        ddk_messages::tlv_stream::TlvStream::read_to_end(&mut Cursor::new(bytes)).unwrap()
+    }
+
+    /// A failed accept stored before the message was length-framed: the message
+    /// was written raw, followed directly by the error string.
+    #[test]
+    fn failed_accept_stored_before_framing_still_loads() {
+        let offered = offered_contract();
+        let accept_message = accepted_contract().get_accept_contract_msg(&[]);
+        let mut stored = offered.serialize().unwrap();
+        stored.extend(accept_message.serialize().unwrap());
+        ddk_messages::ser_impls::write_string("kaput", &mut stored).unwrap();
+
+        let read = FailedAcceptContract::deserialize(&mut Cursor::new(&stored)).unwrap();
+
+        assert_eq!(read.accept_message, accept_message);
+        assert_eq!(read.error_message, "kaput");
+    }
+
+    /// The frame keeps the message's TLV stream from reading into the error
+    /// string that is stored after it.
+    #[test]
+    fn failed_accept_with_records_round_trips() {
+        let mut accept_message = accepted_contract().get_accept_contract_msg(&[]);
+        accept_message.tlvs = stream_with_record(7);
+        let contract = FailedAcceptContract {
+            offered_contract: offered_contract(),
+            accept_message,
+            error_message: "kaput".to_string(),
+        };
+
+        let stored = contract.serialize().unwrap();
+        let read = FailedAcceptContract::deserialize(&mut Cursor::new(&stored)).unwrap();
+
+        assert_eq!(read.accept_message, contract.accept_message);
+        assert_eq!(read.error_message, contract.error_message);
+    }
+
+    #[test]
+    fn failed_sign_stored_before_framing_still_loads() {
+        let accepted = accepted_contract();
+        let sign_message = SignedContract {
+            accepted_contract: accepted.clone(),
+            adaptor_signatures: Vec::new(),
+            offer_refund_signature: accepted.accept_refund_signature,
+            funding_signatures: ddk_messages::FundingSignatures {
+                funding_signatures: Vec::new(),
+            },
+            channel_id: None,
+            tlvs: Default::default(),
+        }
+        .get_sign_dlc(Vec::new());
+        let mut stored = accepted.serialize().unwrap();
+        stored.extend(sign_message.serialize().unwrap());
+        ddk_messages::ser_impls::write_string("kaput", &mut stored).unwrap();
+
+        let read = FailedSignContract::deserialize(&mut Cursor::new(&stored)).unwrap();
+
+        assert_eq!(read.sign_message, sign_message);
+        assert_eq!(read.error_message, "kaput");
+    }
+
+    #[test]
+    fn failed_sign_with_records_round_trips() {
+        let accepted = accepted_contract();
+        let mut sign_message = SignedContract {
+            accepted_contract: accepted.clone(),
+            adaptor_signatures: Vec::new(),
+            offer_refund_signature: accepted.accept_refund_signature,
+            funding_signatures: ddk_messages::FundingSignatures {
+                funding_signatures: Vec::new(),
+            },
+            channel_id: None,
+            tlvs: Default::default(),
+        }
+        .get_sign_dlc(Vec::new());
+        sign_message.tlvs = stream_with_record(9);
+        let contract = FailedSignContract {
+            accepted_contract: accepted,
+            sign_message,
+            error_message: "kaput".to_string(),
+        };
+
+        let stored = contract.serialize().unwrap();
+        let read = FailedSignContract::deserialize(&mut Cursor::new(&stored)).unwrap();
+
+        assert_eq!(read.sign_message, contract.sign_message);
+        assert_eq!(read.error_message, contract.error_message);
     }
 
     /// Serializes `contract` in the formats used before chain_hash (and,

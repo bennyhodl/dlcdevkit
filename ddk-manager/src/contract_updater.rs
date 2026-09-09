@@ -321,6 +321,7 @@ pub(crate) fn accept_contract_internal(
         funding_inputs: funding_inputs.to_vec(),
         dlc_transactions,
         accept_refund_signature: refund_signature,
+        tlvs: Default::default(),
     };
 
     Ok((accepted_contract, adaptor_sigs))
@@ -437,7 +438,7 @@ where
 
     let signer = signer_provider.derive_contract_signer(offered_contract.keys_id)?;
 
-    let (signed_contract, adaptor_sigs) = verify_accepted_and_sign_contract_internal(
+    let (mut signed_contract, adaptor_sigs) = verify_accepted_and_sign_contract_internal(
         secp,
         offered_contract,
         &accept_params,
@@ -456,6 +457,8 @@ where
         logger,
     )
     .await?;
+
+    signed_contract.accepted_contract.tlvs = accept_msg.tlvs.clone();
 
     let contract_id = signed_contract.accepted_contract.get_contract_id_string();
 
@@ -739,6 +742,7 @@ where
         adaptor_signatures: cet_adaptor_signatures.to_vec(),
         accept_refund_signature: *refund_signature,
         dlc_transactions,
+        tlvs: Default::default(),
     };
 
     let signed_contract = SignedContract {
@@ -747,6 +751,7 @@ where
         offer_refund_signature,
         funding_signatures: FundingSignatures { funding_signatures },
         channel_id,
+        tlvs: Default::default(),
     };
 
     Ok((signed_contract, own_signatures))
@@ -771,7 +776,7 @@ where
     L::Target: Logger,
 {
     let cet_adaptor_signatures: Vec<_> = (&sign_msg.cet_adaptor_signatures).into();
-    verify_signed_contract_internal(
+    let (mut signed_contract, fund_tx) = verify_signed_contract_internal(
         secp,
         accepted_contract,
         &sign_msg.refund_signature,
@@ -786,7 +791,9 @@ where
         signer_provider,
         logger,
     )
-    .await
+    .await?;
+    signed_contract.tlvs = sign_msg.tlvs.clone();
+    Ok((signed_contract, fund_tx))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1020,6 +1027,7 @@ where
         offer_refund_signature: *refund_signature,
         funding_signatures: funding_signatures.clone(),
         channel_id,
+        tlvs: Default::default(),
     };
 
     let transaction = fund_psbt.extract_tx_unchecked_fee_rate();
