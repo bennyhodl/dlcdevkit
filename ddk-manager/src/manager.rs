@@ -1032,11 +1032,11 @@ where
             let matured: Vec<_> = contract_info
                 .oracle_announcements
                 .iter()
-                .filter(|x| {
+                .enumerate()
+                .filter(|(_, x)| {
                     (x.oracle_event.event_maturity_epoch as u64) + MATURITY_SKEW_SECS
                         <= self.time.unix_time_now()
                 })
-                .enumerate()
                 .collect();
             if matured.len() >= contract_info.threshold {
                 let attestations = stream::iter(matured.iter())
@@ -1098,7 +1098,13 @@ where
                     .filter_map(|result| async move { result }) // Filter out None values
                     .collect::<Vec<_>>()
                     .await;
-                if attestations.len() >= contract_info.threshold {
+                // A quorum of responses is not necessarily a closable outcome
+                // (e.g. unavailable/empty responses or disagreeing oracles).
+                // Keep looking at later independent events in that case.
+                if contract_info
+                    .get_range_info_and_oracle_signatures(adaptor_info, &attestations, 0)
+                    .is_ok_and(|matched| matched.is_some())
+                {
                     log_info!(self.logger,
                         "Found enough attestations to close contract. contract_id={} attestations={}", 
                         contract.accepted_contract.get_contract_id_string(),

@@ -141,7 +141,7 @@ pub(crate) fn build_context(
             &accept_params.payout_script_pubkey,
             accept_params.payout_serial_id,
             &info.get_payouts(total_collateral)?,
-            0,
+            offer.cet_locktime,
         ));
         cet_ranges.push(start..transactions.cets.len());
     }

@@ -1729,3 +1729,113 @@ fn finalize_sign_spliced_rejects_a_tampered_offer_half() {
         Err(ContractError::InvalidSign(_))
     ));
 }
+
+/// The same funding output can be spent using any one of three independent
+/// baseball events. A 2-of-3 quorum is required within that event, not across
+/// the three different facts.
+#[tokio::test]
+async fn baseball_disjoint_union_settles_every_branch_from_either_party() {
+    use ddk_testenv::dlc::{
+        self,
+        baseball::{offer_payout, Baseball},
+    };
+    use lightning::util::ser::{Readable, Writeable};
+
+    let secp = Secp256k1::new();
+    for (branch, success, at_bats) in [
+        (0, true, 0),
+        (0, false, 0),
+        (1, false, 4),
+        (1, true, 5),
+        (1, true, 15),
+        (2, true, 0),
+        (2, false, 0),
+    ] {
+        let baseball = Baseball::new(TOTAL_COLLATERAL, 750).await;
+        let offerer = PartySetup::new(&secp, 1, NETWORK, Amount::from_sat(150_000), 1);
+        let accepter = PartySetup::new(&secp, 2, NETWORK, Amount::from_sat(150_000), 2);
+        let offer = create_offer(offer_params(
+            &secp,
+            &offerer,
+            dlc::contract_info(&baseball.legs, TOTAL_COLLATERAL),
+            Amount::from_sat(50_000),
+            NETWORK,
+            vec![offerer.funding_input.clone()],
+        ))
+        .unwrap();
+        let offer = OfferDlc::read(&mut offer.encode().as_slice()).unwrap();
+        let accept = accept_offer(
+            &offer,
+            AcceptOfferParams {
+                party: accepter.party_params(&secp, vec![accepter.funding_input.clone()]),
+                min_timeout_interval: MIN_TIMEOUT,
+                max_timeout_interval: MAX_TIMEOUT,
+            },
+            &accepter.funding_secret_key,
+        )
+        .unwrap()
+        .accept;
+        let accept = AcceptDlc::read(&mut accept.encode().as_slice()).unwrap();
+        let (sign, funding) = fund_with_xpriv(&secp, &offerer, &accepter, &offer, &accept);
+        let sign = SignDlc::read(&mut sign.encode().as_slice()).unwrap();
+        let mut attestations = baseball.attest(branch, success, at_bats).await;
+        attestations.reverse();
+        let transactions = create_dlc_transactions(&offer, &accept).unwrap();
+        for party in [&offerer, &accepter] {
+            assert!(sign_cet(&offer, &accept, &sign, &party.funding_secret_key, &[]).is_err());
+            assert!(sign_cet(
+                &offer,
+                &accept,
+                &sign,
+                &party.funding_secret_key,
+                &attestations[..1]
+            )
+            .is_err());
+            let cet = sign_cet(
+                &offer,
+                &accept,
+                &sign,
+                &party.funding_secret_key,
+                &attestations,
+            )
+            .unwrap_or_else(|error| panic!("branch {branch}, success {success}: {error}"));
+            assert_spends_funding_output(&cet, &offer, &accept, &funding);
+            assert_eq!(cet.lock_time.to_consensus_u32(), offer.cet_locktime);
+            let expected = offer_payout(TOTAL_COLLATERAL, branch, success);
+            assert_eq!(
+                cet.output
+                    .iter()
+                    .find(|o| o.script_pubkey == offer.payout_spk)
+                    .unwrap()
+                    .value,
+                expected
+            );
+            assert_eq!(
+                cet.output
+                    .iter()
+                    .find(|o| o.script_pubkey == accept.payout_spk)
+                    .unwrap()
+                    .value,
+                TOTAL_COLLATERAL - expected
+            );
+            // Verify the actual decrypted ECDSA signatures, not just the witness shape.
+            let mut keys = [offer.funding_pubkey, accept.funding_pubkey];
+            keys.sort_by_key(|key| key.serialize());
+            for (index, key) in keys.iter().enumerate() {
+                let signature =
+                    bitcoin::ecdsa::Signature::from_slice(&cet.input[0].witness[index + 1])
+                        .unwrap();
+                ddk_dlc::verify_tx_input_sig(
+                    &secp,
+                    &signature.signature,
+                    &cet,
+                    0,
+                    &transactions.funding_witness_script,
+                    transactions.get_fund_output().value,
+                    key,
+                )
+                .unwrap();
+            }
+        }
+    }
+}

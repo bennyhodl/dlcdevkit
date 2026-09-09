@@ -5,6 +5,7 @@ use super::AdaptorInfo;
 use bitcoin::{Amount, SignedAmount, Transaction};
 use ddk_dlc::{DlcTransactions, PartyParams};
 use ddk_messages::{AcceptDlc, FundingInput};
+use lightning::util::ser::Writeable;
 use secp256k1_zkp::ecdsa::Signature;
 use secp256k1_zkp::EcdsaAdaptorSignature;
 
@@ -32,6 +33,37 @@ pub struct AcceptedContract {
 }
 
 impl AcceptedContract {
+    /// Locate a branch's CET and adaptor-signature offsets without adding
+    /// fields to the persisted contract format. Accepts a borrowed or cloned
+    /// contract info; announcement identity alone cannot distinguish different
+    /// payout descriptors over the same event.
+    pub(crate) fn execution_offsets(
+        &self,
+        target: &super::contract_info::ContractInfo,
+    ) -> Result<(usize, usize), crate::error::Error> {
+        let mut cet_start = 0;
+        let mut adaptor_start = 0;
+        for (info, adaptor_info) in self
+            .offered_contract
+            .contract_info
+            .iter()
+            .zip(&self.adaptor_infos)
+        {
+            // The stored representation includes numerical difference params,
+            // which are not part of the wire contract descriptor itself.
+            if std::ptr::eq(info, target) || info.encode() == target.encode() {
+                return Ok((cet_start, adaptor_start));
+            }
+            cet_start += info
+                .get_payouts(self.offered_contract.total_collateral)?
+                .len();
+            adaptor_start += info.adaptor_signature_count(adaptor_info);
+        }
+        Err(crate::error::Error::InvalidParameters(
+            "Contract info does not belong to this contract".into(),
+        ))
+    }
+
     /// Returns the contract id for the contract computed as specified here:
     /// <https://github.com/discreetlogcontracts/dlcspecs/blob/master/Protocol.md#requirements-2>
     pub fn get_contract_id(&self) -> [u8; 32] {

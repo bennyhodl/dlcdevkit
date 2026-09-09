@@ -39,6 +39,25 @@ pub struct ContractInfo {
 }
 
 impl ContractInfo {
+    /// Number of signatures occupied by this branch in the combined array.
+    pub(crate) fn adaptor_signature_count(&self, adaptor_info: &AdaptorInfo) -> usize {
+        match adaptor_info {
+            AdaptorInfo::Enum => match &self.contract_descriptor {
+                ContractDescriptor::Enum(descriptor) => {
+                    descriptor.outcome_payouts.len()
+                        * ddk_trie::combination_iterator::CombinationIterator::new(
+                            self.oracle_announcements.len(),
+                            self.threshold,
+                        )
+                        .count()
+                }
+                _ => unreachable!(),
+            },
+            AdaptorInfo::Numerical(trie) => trie.iter().count(),
+            AdaptorInfo::NumericalWithDifference(trie) => trie.iter().count(),
+        }
+    }
+
     /// Get the payouts associated with the contract.
     pub fn get_payouts(&self, total_collateral: Amount) -> Result<Vec<Payout>, Error> {
         match &self.contract_descriptor {
@@ -210,10 +229,13 @@ impl ContractInfo {
         adaptor_sig_start: usize,
     ) -> Result<Option<RangeInfoAndOracleSignatures>, Error> {
         ensure_distinct_oracle_indices(attestations)?;
-        let outcomes: Vec<(usize, &Vec<String>)> = attestations
+        let mut outcomes: Vec<(usize, &Vec<String>)> = attestations
             .iter()
             .map(|(index, attestation)| (*index, &attestation.outcomes))
             .collect();
+        // Oracle requests complete asynchronously; combination indexes use
+        // announcement order, never the order attestations arrived in.
+        outcomes.sort_unstable_by_key(|(index, _)| *index);
         let Some((signature_infos, range_info)) =
             self.get_range_info_for_outcome(adaptor_info, &outcomes, adaptor_sig_start)
         else {
@@ -515,6 +537,18 @@ mod tests {
         assert_eq!(range_info.cet_index, 0);
         assert_eq!(signatures.len(), THRESHOLD);
         assert!(signatures.iter().all(|set| set.len() == 1));
+    }
+
+    #[test]
+    fn reversed_attestations_select_the_same_oracle_combination() {
+        let (forward, _) = lookup(&[(1, attestation("a")), (2, attestation("a"))])
+            .unwrap()
+            .unwrap();
+        let (reversed, _) = lookup(&[(2, attestation("a")), (1, attestation("a"))])
+            .unwrap()
+            .unwrap();
+        assert_eq!(forward, reversed);
+        assert_eq!(forward.adaptor_index, 2);
     }
 
     #[test]

@@ -185,6 +185,11 @@ async fn numerical_common_diff_nb_digits(
 
 #[derive(Eq, PartialEq, Clone, Debug)]
 enum TestPath {
+    BaseballClose {
+        branch: usize,
+        success: bool,
+        closer: Party,
+    },
     Close,
     Refund,
     ManualRefund,
@@ -1274,7 +1279,11 @@ async fn get_attestations(test_params: &TestParams) -> Vec<(usize, OracleAttesta
                 .find(|x| x.get_public_key() == *pk);
             if let Some(o) = oracle {
                 if let Ok(attestation) = o.get_attestation(&contract_info.oracles.event_id).await {
-                    attestations.push((i, attestation));
+                    // MemoryOracle represents a not-yet-attested event with
+                    // an empty attestation, rather than an error.
+                    if !attestation.signatures.is_empty() {
+                        attestations.push((i, attestation));
+                    }
                 }
             }
         }
@@ -1482,6 +1491,23 @@ async fn manager_execution_test_inner(test_params: TestParams, path: TestPath, m
     // body. That keeps this function's stack frame to the size of a call
     // instead of the largest branch of every path at once.
     match &path {
+        TestPath::BaseballClose {
+            branch,
+            success,
+            closer,
+        } => {
+            fund_contract(&mut ctx, contract_id, accept_msg).await;
+            baseball_close_path(
+                &mut ctx,
+                &test_params,
+                contract_id,
+                *branch,
+                *success,
+                *closer,
+                manual_close,
+            )
+            .await;
+        }
         TestPath::BadAcceptCetSignature | TestPath::BadAcceptRefundSignature => {
             bad_accept_path(
                 &mut ctx,
@@ -2238,4 +2264,131 @@ fn random_party() -> Party {
     } else {
         Party::Bob
     }
+}
+
+async fn baseball_manager_case(
+    branch: usize,
+    success: bool,
+    at_bats: i64,
+    closer: Party,
+    manual: bool,
+) {
+    use ddk_testenv::dlc::{self, baseball::Baseball};
+    eprintln!("baseball: branch={branch} success={success} at_bats={at_bats} closer={closer:?} manual={manual}");
+    let baseball = Baseball::new(TOTAL_COLLATERAL, EVENT_MATURITY).await;
+    baseball.attest(branch, success, at_bats).await;
+    let test_params = TestParams {
+        contract_input: dlc::contract_input(
+            &baseball.legs,
+            Amount::from_sat(OFFER_COLLATERAL),
+            Amount::from_sat(ACCEPT_COLLATERAL),
+            2,
+        ),
+        oracles: baseball.oracles.into_iter().flatten().collect(),
+    };
+    manager_execution_test(
+        test_params,
+        TestPath::BaseballClose {
+            branch,
+            success,
+            closer,
+        },
+        manual,
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "starts managed bitcoind/electrs; run with --ignored"]
+async fn baseball_disjoint_union_manual_close() {
+    for (branch, success, at_bats) in [
+        (0, true, 0),
+        (0, false, 0),
+        (1, false, 4),
+        (1, true, 5),
+        (1, true, 15),
+        (2, true, 0),
+        (2, false, 0),
+    ] {
+        for closer in [Party::Bob, Party::Alice] {
+            baseball_manager_case(branch, success, at_bats, closer, true).await;
+        }
+    }
+}
+
+#[tokio::test]
+#[ignore = "starts managed bitcoind/electrs; run with --ignored"]
+async fn baseball_disjoint_union_automatic_close() {
+    for branch in 0..3 {
+        for closer in [Party::Bob, Party::Alice] {
+            baseball_manager_case(branch, true, 5, closer, false).await;
+        }
+    }
+}
+
+async fn baseball_close_path(
+    ctx: &mut TestContext,
+    params: &TestParams,
+    contract_id: ContractId,
+    branch: usize,
+    success: bool,
+    closer: Party,
+    manual: bool,
+) {
+    use ddk_testenv::dlc::baseball::offer_payout;
+    let attestations = get_attestations(params).await;
+    // No oracle for either other event has attested. One branch's quorum must
+    // suffice, but one oracle from that quorum must never suffice.
+    test_utils::set_time(EVENT_MATURITY as u64 + 1);
+    for party in [Party::Bob, Party::Alice] {
+        for insufficient in [vec![], attestations[..1].to_vec()] {
+            ctx.manager(party)
+                .lock()
+                .await
+                .close_confirmed_contract(&contract_id, insufficient)
+                .await
+                .expect_err("a branch needs its full oracle quorum");
+        }
+        assert_manual_close_rejects_bad_attestations(ctx, party, contract_id, &attestations).await;
+    }
+    if manual {
+        ctx.manager(closer)
+            .lock()
+            .await
+            .close_confirmed_contract(&contract_id, attestations)
+            .await
+            .expect("baseball branch should close manually");
+    } else {
+        test_utils::set_time(EVENT_MATURITY as u64 + ddk_manager::manager::MATURITY_SKEW_SECS + 1);
+        periodic_check!(ctx.manager(closer), contract_id, PreClosed);
+    }
+    let Contract::PreClosed(closed) = ctx.contract(closer, &contract_id).await else {
+        panic!("baseball CET must be broadcast");
+    };
+    let accepted = &closed.signed_contract.accepted_contract;
+    let offered = &accepted.offered_contract;
+    let cet = &closed.signed_cet;
+    let expected = offer_payout(TOTAL_COLLATERAL, branch, success);
+    assert_eq!(cet.lock_time.to_consensus_u32(), offered.cet_locktime);
+    assert_eq!(
+        cet.output
+            .iter()
+            .find(|o| o.script_pubkey == offered.offer_params.payout_script_pubkey)
+            .unwrap()
+            .value,
+        expected
+    );
+    assert_eq!(
+        cet.output
+            .iter()
+            .find(|o| o.script_pubkey == accepted.accept_params.payout_script_pubkey)
+            .unwrap()
+            .value,
+        TOTAL_COLLATERAL - expected
+    );
+    // CI uses NB_CONFIRMATIONS=6 (the library default is 3).
+    ctx.mine(10).await;
+    test_utils::set_time(EVENT_MATURITY as u64 + ddk_manager::manager::MATURITY_SKEW_SECS + 1);
+    periodic_check!(ctx.manager(closer), contract_id, Closed);
+    periodic_check!(ctx.manager(closer.other()), contract_id, Closed);
 }
