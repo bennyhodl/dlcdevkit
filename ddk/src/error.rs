@@ -158,6 +158,10 @@ pub enum BuilderError {
     NoOracle,
     #[error("Failed to generate random seed.")]
     SeedGenerationFailed,
+    #[error("A wallet seed was not provided. Call Builder::set_seed_bytes before finish.")]
+    NoSeed,
+    #[error("The mnemonic could not be parsed.")]
+    InvalidMnemonic,
     #[error("Logger setup failed.")]
     LoggerSetupFailed,
 }
@@ -177,6 +181,8 @@ pub enum WalletError {
     WalletPersistanceError(String),
     #[error("Seed error: {0}")]
     Seed(#[from] bitcoin::bip32::Error),
+    #[error("The wallet seed is all zero bytes; every key derived from it is public knowledge.")]
+    AllZeroSeed,
     #[error("Error syncing the internal BDK wallet.")]
     SyncError,
     #[error("Wallet Ssorage error. {0}")]

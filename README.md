@@ -13,6 +13,7 @@ DLC Dev Kit is a self-custodial DLC node in library form. Its central goal is to
 The primary abstraction of the library is the [`DlcDevKit`](https://docs.rs/ddk/latest/ddk/struct.DlcDevKit.html), which can be retrieved by setting up and configuring a [`Builder`](https://docs.rs/ddk/latest/ddk/builder/struct.Builder.html) to your liking and calling `finish()`. `DlcDevKit` can then be controlled via commands such as `start`, `stop`, `send_dlc_offer`, `accept_dlc_offer`, etc.
 
 ```rust
+use bitcoin::key::rand::Fill;
 use ddk::builder::{Builder, SeedConfig};
 use ddk::logger::{LogLevel, Logger};
 use ddk::oracle::kormir::KormirOracleClient;
@@ -26,7 +27,13 @@ type ApplicationDdk = ddk::DlcDevKit<LightningTransport, SledStorage, KormirOrac
 async fn main() -> Result<(), ddk::error::Error> {
     let logger = Arc::new(Logger::console("ddk-example".to_string(), LogLevel::Info));
 
-    let transport = Arc::new(LightningTransport::new(&[0u8; 32], 1776, logger.clone())?);
+    // The transport seed is the node's identity key. Generate it once and
+    // persist it; a fixed or all-zero seed gives every node the same identity.
+    let mut transport_seed = [0u8; 32];
+    transport_seed
+        .try_fill(&mut bitcoin::key::rand::thread_rng())
+        .expect("system randomness is available");
+    let transport = Arc::new(LightningTransport::new(&transport_seed, 1776, logger.clone())?);
     let storage = Arc::new(SledStorage::new("/tmp/ddk-example", logger.clone())?);
     let oracle = Arc::new(KormirOracleClient::new("http://localhost:8082", None, logger.clone()).await?);
 
