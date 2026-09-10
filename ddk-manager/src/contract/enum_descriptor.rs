@@ -126,7 +126,12 @@ impl EnumDescriptor {
         let mut adaptor_sig_index = adaptor_sig_start;
         let mut callback =
             |adaptor_point: &PublicKey, cet_index: usize| -> Result<(), ddk_dlc::Error> {
-                let sig = adaptor_sigs[adaptor_sig_index];
+                let sig = *adaptor_sigs.get(adaptor_sig_index).ok_or_else(|| {
+                    ddk_dlc::Error::InvalidArgument(format!(
+                        "missing adaptor signature at index {adaptor_sig_index}, received {}",
+                        adaptor_sigs.len()
+                    ))
+                })?;
                 adaptor_sig_index += 1;
                 ddk_dlc::verify_cet_adaptor_sig_from_point(
                     secp,

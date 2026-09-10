@@ -172,7 +172,22 @@ impl LightningTransport {
                         let messages = message_handler.get_and_clear_received_messages();
                         for (counter_party, message) in messages {
                             log_info!(logger_clone, "Processing DLC message. counter_party={}", counter_party.to_string());
-                            match message_manager.on_dlc_message(&message, counter_party).await {
+                            // Each message runs in its own task so a panic in
+                            // the handler (a malformed message from a peer)
+                            // cannot take the processor down with it.
+                            let handler_manager = Arc::clone(&message_manager);
+                            let handled = tokio::spawn(async move {
+                                handler_manager.on_dlc_message(&message, counter_party).await
+                            })
+                            .await;
+                            let handled = match handled {
+                                Ok(handled) => handled,
+                                Err(e) => {
+                                    log_error!(logger_clone, "DLC message handler panicked. counter_party={} error={}", counter_party.to_string(), e.to_string());
+                                    continue;
+                                }
+                            };
+                            match handled {
                                 Ok(Some(message)) => {
                                     if peer_manager.peer_by_node_id(&counter_party).is_some() {
                                         log_info!(logger_clone, "Sending message to counter_party={}", counter_party.to_string());
@@ -187,7 +202,7 @@ impl LightningTransport {
                                 Ok(None) => (),
                                 Err(e) => {
                                     log_error!(logger_clone,
-                                        "Could not process dlc message. message={:?} counterparty={} error={}", message, counter_party.to_string(), e.to_string()
+                                        "Could not process dlc message. counterparty={} error={}", counter_party.to_string(), e.to_string()
                                     );
                                 }
                             }

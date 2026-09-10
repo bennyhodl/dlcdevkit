@@ -185,23 +185,38 @@ impl NostrDlc {
                                 }
                             };
 
-                            match manager.on_dlc_message(&message, pubkey).await {
-                                Ok(Some(msg)) => {
-                                    let event = create_dlc_msg_event(
+                            // Each message runs in its own task so a panic in
+                            // the handler (a malformed message from a peer)
+                            // cannot take the listener down with it.
+                            let handler_manager = manager.clone();
+                            let handled = tokio::spawn(async move {
+                                handler_manager.on_dlc_message(&message, pubkey).await
+                            })
+                            .await;
+                            match handled {
+                                Ok(Ok(Some(msg))) => {
+                                    let reply = match create_dlc_msg_event(
                                         event.pubkey,
                                         Some(event.id),
                                         msg,
                                         &keys,
-                                    )
-                                    .expect("no message");
-                                    nostr_client
-                                        .send_event(&event)
-                                        .await
-                                        .expect("Break out into functions.");
+                                    ) {
+                                        Ok(reply) => reply,
+                                        Err(e) => {
+                                            log_error!(logger_clone, "Could not build the reply event. pubkey={} error={}", pubkey.to_string(), e.to_string());
+                                            continue;
+                                        }
+                                    };
+                                    if let Err(e) = nostr_client.send_event(&reply).await {
+                                        log_error!(logger_clone, "Could not send the reply event. pubkey={} error={}", pubkey.to_string(), e.to_string());
+                                    }
                                 }
-                                Ok(None) => (),
-                                Err(_) => {
-                                    // handle the error case and send
+                                Ok(Ok(None)) => (),
+                                Ok(Err(e)) => {
+                                    log_error!(logger_clone, "Could not process DLC message. pubkey={} error={}", pubkey.to_string(), e.to_string());
+                                }
+                                Err(e) => {
+                                    log_error!(logger_clone, "DLC message handler panicked. pubkey={} error={}", pubkey.to_string(), e.to_string());
                                 }
                             }
                         }
