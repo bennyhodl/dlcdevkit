@@ -321,7 +321,8 @@ storage and sending paths persist the streams as of the third review round; see 
    serde attributes from §4.3.
 5. **Compatibility tests.** A message with an empty stream is byte-identical to
    the pre-change encoding; existing `test_inputs/*.json` parse unchanged;
-   `stored_contracts_round_trip_byte_for_byte` still passes.
+   `stored_contracts_round_trip_with_struct_bytes_intact` proves stored blobs
+   load and keep their struct bytes.
 6. **node-dlc interop.** Round-trip a real `DlcSign` carrying a
    `BatchFundingGroup` record produced by node-dlc, asserting the bytes come back
    identical. This is the test that would have caught the silent drop.

@@ -268,10 +268,10 @@ mod tests {
 
     /// The fixtures predate ddk tracking the chain hash, so they carry none.
     ///
-    /// This is what makes `stored_contracts_round_trip_byte_for_byte` above
-    /// meaningful for the chain hash: a contract with no stored chain hash
-    /// writes exactly the bytes it was read from, so upgrading ddk leaves
-    /// contracts already in a database untouched.
+    /// This is what makes `stored_contracts_round_trip_with_struct_bytes_intact`
+    /// above meaningful for the chain hash: a contract with no stored chain
+    /// hash writes exactly the struct bytes it was read from, so upgrading ddk
+    /// does not disturb the contract data already in a database.
     #[test]
     fn stored_contracts_predating_the_chain_hash_carry_none() {
         for (state, stored) in FIXTURES {
