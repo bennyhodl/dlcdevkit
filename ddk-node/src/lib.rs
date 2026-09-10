@@ -38,6 +38,12 @@ use tonic::Response;
 use tonic::Status;
 use tonic::{async_trait, Code};
 
+/// Maps a node-side failure to a gRPC internal error instead of panicking the
+/// connection task.
+fn internal(error: impl std::fmt::Display) -> Status {
+    Status::internal(error.to_string())
+}
+
 type Ddk = DlcDevKit<NostrDlc, PostgresStore, KormirOracleClient>;
 
 #[derive(Clone)]
@@ -59,9 +65,8 @@ impl DdkNode {
         ));
         let storage_path = match opts.storage_dir {
             Some(storage) => storage,
-            None => homedir::my_home()
-                .expect("Provide a directory for ddk.")
-                .unwrap()
+            None => homedir::my_home()?
+                .ok_or_else(|| anyhow::anyhow!("no home directory found; pass --storage-dir"))?
                 .join(".ddk")
                 .join("default-ddk"),
         };
@@ -147,8 +152,8 @@ impl DdkRpc for DdkNode {
             contract_input,
             counter_party,
         } = request.into_inner();
-        let contract_input: ContractInput =
-            serde_json::from_slice(&contract_input).expect("couldn't get bytes correct");
+        let contract_input: ContractInput = serde_json::from_slice(&contract_input)
+            .map_err(|e| Status::invalid_argument(format!("contract input is not valid: {e}")))?;
         let mut oracle_announcements = Vec::new();
         for info in &contract_input.contract_infos {
             let announcement = self
@@ -156,11 +161,17 @@ impl DdkRpc for DdkNode {
                 .oracle
                 .get_announcement(&info.oracles.event_id)
                 .await
-                .unwrap();
+                .map_err(|e| {
+                    Status::not_found(format!(
+                        "oracle announcement for event {} could not be fetched: {e}",
+                        info.oracles.event_id
+                    ))
+                })?;
             oracle_announcements.push(announcement)
         }
 
-        let counter_party = PublicKey::from_str(&counter_party).expect("no public key");
+        let counter_party = PublicKey::from_str(&counter_party)
+            .map_err(|e| Status::invalid_argument(format!("counterparty public key: {e}")))?;
         let offer_msg = self
             .node
             .send_dlc_offer(&contract_input, counter_party, oracle_announcements)
@@ -172,8 +183,7 @@ impl DdkRpc for DdkNode {
                 )
             })?;
 
-        let offer_dlc =
-            serde_json::to_vec(&offer_msg).expect("OfferDlc could not be converted to vec.");
+        let offer_dlc = serde_json::to_vec(&offer_msg).map_err(internal)?;
         Ok(Response::new(SendOfferResponse { offer_dlc }))
     }
 
@@ -183,9 +193,14 @@ impl DdkRpc for DdkNode {
         request: Request<AcceptOfferRequest>,
     ) -> Result<Response<AcceptOfferResponse>, Status> {
         tracing::info!("Request to accept offer.");
-        let mut contract_id = [0u8; 32];
-        let contract_id_bytes = hex::decode(&request.into_inner().contract_id).unwrap();
-        contract_id.copy_from_slice(&contract_id_bytes);
+        let contract_id_bytes = hex::decode(&request.into_inner().contract_id)
+            .map_err(|e| Status::invalid_argument(format!("contract id is not hex: {e}")))?;
+        let contract_id: [u8; 32] = contract_id_bytes.as_slice().try_into().map_err(|_| {
+            Status::invalid_argument(format!(
+                "contract id must be 32 bytes, got {}",
+                contract_id_bytes.len()
+            ))
+        })?;
         let (contract_id, counter_party, accept_dlc) =
             self.node.accept_dlc_offer(contract_id).await.map_err(|e| {
                 Status::new(
@@ -216,7 +231,7 @@ impl DdkRpc for DdkNode {
             .wallet
             .new_external_address()
             .await
-            .unwrap()
+            .map_err(internal)?
             .to_string();
         let response = NewAddressResponse { address };
         Ok(Response::new(response))
@@ -228,11 +243,17 @@ impl DdkRpc for DdkNode {
         _request: Request<ListOffersRequest>,
     ) -> Result<Response<ListOffersResponse>, Status> {
         tracing::info!("Request for offers to the node.");
-        let offers = self.node.storage.get_contract_offers().await.unwrap();
-        let offers: Vec<Vec<u8>> = offers
+        let offers = self
+            .node
+            .storage
+            .get_contract_offers()
+            .await
+            .map_err(internal)?;
+        let offers = offers
             .iter()
-            .map(|offer| serde_json::to_vec(offer).unwrap())
-            .collect();
+            .map(serde_json::to_vec)
+            .collect::<Result<Vec<Vec<u8>>, _>>()
+            .map_err(internal)?;
 
         Ok(Response::new(ListOffersResponse { offers }))
     }
@@ -243,7 +264,7 @@ impl DdkRpc for DdkNode {
         _request: Request<WalletBalanceRequest>,
     ) -> Result<Response<WalletBalanceResponse>, Status> {
         tracing::info!("Request for wallet balance.");
-        let wallet_balance = self.node.balance().await.unwrap();
+        let wallet_balance = self.node.balance().await.map_err(internal)?;
 
         let response = WalletBalanceResponse {
             confirmed: wallet_balance.confirmed.to_sat(),
@@ -260,11 +281,17 @@ impl DdkRpc for DdkNode {
         _request: Request<GetWalletTransactionsRequest>,
     ) -> Result<Response<GetWalletTransactionsResponse>, Status> {
         tracing::info!("Request for all wallet transactions.");
-        let wallet_transactions = self.node.wallet.get_transactions().await.unwrap();
-        let transactions: Vec<Vec<u8>> = wallet_transactions
+        let wallet_transactions = self
+            .node
+            .wallet
+            .get_transactions()
+            .await
+            .map_err(internal)?;
+        let transactions = wallet_transactions
             .iter()
-            .map(|t| serde_json::to_vec(&t).unwrap())
-            .collect();
+            .map(serde_json::to_vec)
+            .collect::<Result<Vec<Vec<u8>>, _>>()
+            .map_err(internal)?;
         Ok(Response::new(GetWalletTransactionsResponse {
             transactions,
         }))
@@ -276,11 +303,12 @@ impl DdkRpc for DdkNode {
         _request: Request<ListUtxosRequest>,
     ) -> Result<Response<ListUtxosResponse>, Status> {
         tracing::info!("Request to list all wallet utxos");
-        let utxos = self.node.wallet.list_utxos().await.unwrap();
-        let utxos: Vec<Vec<u8>> = utxos
+        let utxos = self.node.wallet.list_utxos().await.map_err(internal)?;
+        let utxos = utxos
             .iter()
-            .map(|utxo| serde_json::to_vec(utxo).unwrap())
-            .collect();
+            .map(serde_json::to_vec)
+            .collect::<Result<Vec<Vec<u8>>, _>>()
+            .map_err(internal)?;
         Ok(Response::new(ListUtxosResponse { utxos }))
     }
 
@@ -301,7 +329,8 @@ impl DdkRpc for DdkNode {
         request: Request<ConnectRequest>,
     ) -> Result<Response<ConnectResponse>, Status> {
         let ConnectRequest { pubkey, host } = request.into_inner();
-        let pubkey = PublicKey::from_str(&pubkey).unwrap();
+        let pubkey = PublicKey::from_str(&pubkey)
+            .map_err(|e| Status::invalid_argument(format!("peer public key: {e}")))?;
         self.node.transport.connect_outbound(pubkey, &host).await;
         Ok(Response::new(ConnectResponse {}))
     }
@@ -325,10 +354,11 @@ impl DdkRpc for DdkNode {
             .get_contracts()
             .await
             .map_err(|e| Status::new(Code::Cancelled, e.to_string()))?;
-        let contract_bytes: Vec<Vec<u8>> = contracts
+        let contract_bytes = contracts
             .iter()
-            .map(|contract| serialize_contract(contract).unwrap())
-            .collect();
+            .map(serialize_contract)
+            .collect::<Result<Vec<Vec<u8>>, _>>()
+            .map_err(internal)?;
         Ok(Response::new(ListContractsResponse {
             contracts: contract_bytes,
         }))
@@ -340,7 +370,9 @@ impl DdkRpc for DdkNode {
             amount,
             fee_rate,
         } = request.into_inner();
-        let address = Address::from_str(&address).unwrap().assume_checked();
+        let address = Address::from_str(&address)
+            .map_err(|e| Status::invalid_argument(format!("address: {e}")))?
+            .assume_checked();
         let amount = Amount::from_sat(amount);
         let fee_rate = match FeeRate::from_sat_per_vb(fee_rate) {
             Some(f) => f,
@@ -365,8 +397,13 @@ impl DdkRpc for DdkNode {
         request: Request<OracleAnnouncementsRequest>,
     ) -> Result<Response<OracleAnnouncementsResponse>, Status> {
         let OracleAnnouncementsRequest { event_id } = request.into_inner();
-        let oracle_announcement = self.node.oracle.get_announcement(&event_id).await.unwrap();
-        let announcement = serde_json::to_vec(&oracle_announcement).unwrap();
+        let oracle_announcement = self
+            .node
+            .oracle
+            .get_announcement(&event_id)
+            .await
+            .map_err(|e| Status::not_found(format!("announcement {event_id}: {e}")))?;
+        let announcement = serde_json::to_vec(&oracle_announcement).map_err(internal)?;
         Ok(Response::new(OracleAnnouncementsResponse { announcement }))
     }
 
@@ -380,8 +417,8 @@ impl DdkRpc for DdkNode {
             .oracle
             .create_enum_event(outcomes, maturity)
             .await
-            .unwrap();
-        let announcement = serde_json::to_vec(&announcement).unwrap();
+            .map_err(internal)?;
+        let announcement = serde_json::to_vec(&announcement).map_err(internal)?;
         Ok(Response::new(CreateEnumResponse { announcement }))
     }
 
