@@ -2056,3 +2056,35 @@ fn bip49_descriptors_sign_both_sides_of_the_funding_psbt() {
     assert_funding_transaction_complete(&funding_transaction, &offer, &accept);
     assert_all_p2sh(&funding_transaction, &offer, &accept);
 }
+
+#[test]
+fn truncated_counterparty_adaptor_signatures_are_rejected() {
+    // A counterparty that sends fewer adaptor signatures than the contract
+    // needs must get a protocol error, not panic the message handler.
+    let secp = Secp256k1::new();
+    let (offerer, _, offer, mut accept) = enum_contract(&secp, NETWORK);
+    accept
+        .cet_adaptor_signatures
+        .ecdsa_adaptor_signatures
+        .clear();
+
+    let mut psbt = create_funding_psbt(&offer, &accept).unwrap();
+    signing::sign_funding_psbt_with_xpriv(
+        &offer,
+        &accept,
+        &mut psbt,
+        &offerer.xpriv,
+        &offerer.derivations(),
+    )
+    .unwrap();
+
+    let error = sign_accept(&offer, &accept, &offerer.funding_secret_key, &psbt)
+        .err()
+        .expect("a truncated adaptor signature list is an invalid accept");
+    match error {
+        ContractError::InvalidAccept(message) => {
+            assert!(message.contains("adaptor signature"), "{message}");
+        }
+        other => panic!("expected an invalid accept error, got {other:?}"),
+    }
+}

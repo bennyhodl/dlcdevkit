@@ -1119,11 +1119,18 @@ where
     };
 
     let funding_sk = signer.get_secret_key()?;
+    let adaptor_sig = adaptor_sigs.get(range_info.adaptor_index).ok_or_else(|| {
+        Error::InvalidState(format!(
+            "missing adaptor signature at index {} of {}",
+            range_info.adaptor_index,
+            adaptor_sigs.len()
+        ))
+    })?;
 
     ddk_dlc::sign_cet(
         secp,
         &mut cet,
-        &adaptor_sigs[range_info.adaptor_index],
+        adaptor_sig,
         &sigs,
         &funding_sk,
         other_pubkey,

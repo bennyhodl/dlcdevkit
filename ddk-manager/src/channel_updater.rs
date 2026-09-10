@@ -2282,7 +2282,13 @@ where
         &accept_revoke_params,
         &own_sk,
         counter_pk,
-        &adaptor_sigs[range_info.adaptor_index],
+        adaptor_sigs.get(range_info.adaptor_index).ok_or_else(|| {
+            Error::InvalidState(format!(
+                "missing adaptor signature at index {} of {}",
+                range_info.adaptor_index,
+                adaptor_sigs.len()
+            ))
+        })?,
         &oracle_sigs,
     )?;
     let closed_channel = ClosedChannel {

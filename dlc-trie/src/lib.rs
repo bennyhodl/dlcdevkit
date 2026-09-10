@@ -292,6 +292,20 @@ fn sign_helper<T: Iterator<Item = TrieIterInfo>>(
     Ok(unsorted.into_iter().map(|(_, y)| y).collect())
 }
 
+/// Returns the adaptor signature at `index`, or an error when the
+/// counterparty sent fewer signatures than the contract needs.
+fn adaptor_signature_at(
+    adaptor_sigs: &[EcdsaAdaptorSignature],
+    index: usize,
+) -> Result<EcdsaAdaptorSignature, Error> {
+    adaptor_sigs.get(index).copied().ok_or_else(|| {
+        Error::InvalidArgument(format!(
+            "missing adaptor signature at index {index}, received {}",
+            adaptor_sigs.len()
+        ))
+    })
+}
+
 #[cfg(not(feature = "parallel"))]
 #[allow(clippy::too_many_arguments)]
 fn verify_helper<T: Iterator<Item = TrieIterInfo>>(
@@ -308,7 +322,7 @@ fn verify_helper<T: Iterator<Item = TrieIterInfo>>(
     for x in trie_info {
         let adaptor_point =
             utils::get_adaptor_point_for_indexed_paths(&x.indexes, &x.paths, precomputed_points)?;
-        let adaptor_sig = adaptor_sigs[x.value.adaptor_index];
+        let adaptor_sig = adaptor_signature_at(adaptor_sigs, x.value.adaptor_index)?;
         let cet = &cets[x.value.cet_index];
         if x.value.adaptor_index > max_adaptor_index {
             max_adaptor_index = x.value.adaptor_index;
@@ -327,6 +341,7 @@ fn verify_helper<T: Iterator<Item = TrieIterInfo>>(
 }
 
 #[cfg(feature = "parallel")]
+#[allow(clippy::too_many_arguments)]
 fn verify_helper<T: Iterator<Item = TrieIterInfo>>(
     secp: &Secp256k1<All>,
     cets: &[Transaction],
@@ -340,12 +355,13 @@ fn verify_helper<T: Iterator<Item = TrieIterInfo>>(
     let trie_info: Vec<TrieIterInfo> = trie_info.collect();
     let max_adaptor_index = trie_info
         .iter()
-        .max_by(|x, y| x.value.adaptor_index.cmp(&y.value.adaptor_index))
-        .unwrap();
+        .map(|x| x.value.adaptor_index)
+        .max()
+        .unwrap_or(0);
     trie_info.par_iter().try_for_each(|x| {
         let adaptor_point =
             utils::get_adaptor_point_for_indexed_paths(&x.indexes, &x.paths, precomputed_points)?;
-        let adaptor_sig = adaptor_sigs[x.value.adaptor_index];
+        let adaptor_sig = adaptor_signature_at(adaptor_sigs, x.value.adaptor_index)?;
         let cet = &cets[x.value.cet_index];
         ddk_dlc::verify_cet_adaptor_sig_from_point(
             secp,
@@ -358,5 +374,5 @@ fn verify_helper<T: Iterator<Item = TrieIterInfo>>(
         )
     })?;
 
-    Ok(max_adaptor_index.value.adaptor_index + 1)
+    Ok(max_adaptor_index + 1)
 }
