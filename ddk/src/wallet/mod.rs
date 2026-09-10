@@ -335,6 +335,11 @@ impl DlcDevKitWallet {
     ) -> Result<DlcDevKitWallet> {
         let secp = Secp256k1::new();
 
+        // An all-zero seed is a valid BIP32 seed whose every key is public
+        // knowledge; it is the value a forgotten initialisation produces.
+        if seed_bytes.iter().all(|byte| *byte == 0) {
+            return Err(WalletError::AllZeroSeed);
+        }
         let xprv = Xpriv::new_master(network, seed_bytes)?;
         let fingerprint = xprv.fingerprint(&secp);
 
@@ -1142,6 +1147,21 @@ mod tests {
     fn fund_address(address: &Address<NetworkChecked>) {
         ddk_testenv::env().fund_address(address, Amount::from_btc(1.0).unwrap());
         generate_blocks(4)
+    }
+
+    #[tokio::test]
+    async fn all_zero_seed_is_rejected() {
+        let esplora = ddk_testenv::env().esplora_host().to_string();
+        let storage = Arc::new(MemoryStorage::new());
+        let logger = Arc::new(Logger::disabled("zero-seed".to_string()));
+        let esplora =
+            Arc::new(EsploraClient::new(&esplora, Network::Regtest, logger.clone()).unwrap());
+        let error =
+            DlcDevKitWallet::new(&[0u8; 64], esplora, Network::Regtest, storage, None, logger)
+                .await
+                .err()
+                .expect("an all-zero seed must be rejected");
+        assert!(matches!(error, crate::error::WalletError::AllZeroSeed));
     }
 
     #[tokio::test]

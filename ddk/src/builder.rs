@@ -41,7 +41,7 @@ pub struct Builder<T, S, O> {
     esplora_host: String,
     zmq_blockhash_endpoint: Option<String>,
     network: Network,
-    seed_bytes: [u8; 64],
+    seed_bytes: Option<[u8; 64]>,
     wallet_config: crate::wallet::WalletConfig,
     logger: Option<Arc<Logger>>,
     close_approver: Option<Arc<dyn CooperativeCloseApprover>>,
@@ -63,7 +63,7 @@ impl<T: Transport, S: Storage, O: Oracle> Default for Builder<T, S, O> {
             esplora_host: DEFAULT_ESPLORA_HOST.to_string(),
             zmq_blockhash_endpoint: None,
             network: DEFAULT_NETWORK,
-            seed_bytes: [0u8; 64],
+            seed_bytes: None,
             wallet_config: crate::wallet::WalletConfig::default(),
             logger: None,
             close_approver: None,
@@ -137,20 +137,26 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
     }
 
     /// Set the seed bytes for the wallet.
+    ///
+    /// The seed is the root of the wallet keys and every DLC contract key.
+    /// It is required: [`Builder::finish`] fails with [`BuilderError::NoSeed`]
+    /// when it was never set, and the wallet rejects an all-zero seed.
     pub fn set_seed_bytes(&mut self, seed_config: SeedConfig) -> Result<&mut Self, BuilderError> {
-        match seed_config {
+        let seed = match seed_config {
             SeedConfig::Random => {
                 let mut seed = [0u8; 64];
                 seed.try_fill(&mut bitcoin::key::rand::thread_rng())
                     .map_err(|_| BuilderError::SeedGenerationFailed)?;
-                self.seed_bytes = seed
+                seed
             }
             SeedConfig::Mnemonic(mnemonic, passphrase) => {
-                let mnemonic = Mnemonic::parse_in_normalized(Language::English, &mnemonic).unwrap();
-                self.seed_bytes = mnemonic.to_seed(passphrase)
+                let mnemonic = Mnemonic::parse_in_normalized(Language::English, &mnemonic)
+                    .map_err(|_| BuilderError::InvalidMnemonic)?;
+                mnemonic.to_seed(passphrase)
             }
-            SeedConfig::Bytes(bytes) => self.seed_bytes = bytes,
-        }
+            SeedConfig::Bytes(bytes) => bytes,
+        };
+        self.seed_bytes = Some(seed);
         Ok(self)
     }
 
@@ -210,6 +216,10 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
             .as_ref()
             .map_or_else(|| Err(BuilderError::NoOracle), |o| Ok(o.clone()))?;
 
+        // Never fall back to a default seed: a forgotten seed must fail loudly,
+        // not produce a wallet whose keys anyone can derive.
+        let seed_bytes = self.seed_bytes.ok_or(BuilderError::NoSeed)?;
+
         let name = self
             .name
             .clone()
@@ -225,7 +235,7 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
 
         let wallet = Arc::new(
             DlcDevKitWallet::new_with_config(
-                &self.seed_bytes,
+                &seed_bytes,
                 esplora_client.clone(),
                 self.network,
                 storage.clone(),
@@ -330,5 +340,53 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
             logger,
             zmq_client,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::oracle::memory::MemoryOracle;
+    use crate::storage::memory::MemoryStorage;
+    use crate::transport::memory::MemoryTransport;
+    use bitcoin::secp256k1::Secp256k1;
+
+    fn builder_without_seed() -> Builder<MemoryTransport, MemoryStorage, MemoryOracle> {
+        let secp = Secp256k1::new();
+        let logger = Arc::new(Logger::disabled("builder-test".to_string()));
+        let mut builder = Builder::new();
+        builder.set_network(Network::Regtest);
+        builder.set_transport(Arc::new(MemoryTransport::new(&secp, logger.clone())));
+        builder.set_storage(Arc::new(MemoryStorage::new()));
+        builder.set_oracle(Arc::new(MemoryOracle::default()));
+        builder.set_logger(logger);
+        builder
+    }
+
+    #[tokio::test]
+    async fn finish_without_a_seed_is_an_error() {
+        let builder = builder_without_seed();
+        let error = builder
+            .finish()
+            .await
+            .err()
+            .expect("a builder without a seed must not produce a wallet");
+        assert!(
+            matches!(error, Error::Builder(BuilderError::NoSeed)),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn invalid_mnemonic_is_an_error() {
+        let mut builder = builder_without_seed();
+        let error = builder
+            .set_seed_bytes(SeedConfig::Mnemonic(
+                "not a mnemonic".to_string(),
+                String::new(),
+            ))
+            .err()
+            .expect("an invalid mnemonic must be rejected");
+        assert!(matches!(error, BuilderError::InvalidMnemonic));
     }
 }

@@ -16,6 +16,7 @@ $ cargo add ddk
 ## Example
 
 ```rust
+use bitcoin::key::rand::Fill;
 use ddk::builder::{Builder, SeedConfig};
 use ddk::oracle::kormir::KormirOracleClient;
 use ddk::storage::sled::SledStorage;
@@ -26,7 +27,13 @@ type ApplicationDdk = ddk::DlcDevKit<LightningTransport, SledStorage, KormirOrac
 
 #[tokio::main]
 async fn main() -> Result<(), ddk::error::Error> {
-    let transport = Arc::new(LightningTransport::new(&[0u8; 32], 1776, logger.clone())?);
+    // The transport seed is the node's identity key. Generate it once and
+    // persist it; a fixed or all-zero seed gives every node the same identity.
+    let mut transport_seed = [0u8; 32];
+    transport_seed
+        .try_fill(&mut bitcoin::key::rand::thread_rng())
+        .expect("system randomness is available");
+    let transport = Arc::new(LightningTransport::new(&transport_seed, 1776, logger.clone())?);
     let storage = Arc::new(SledStorage::new("/tmp/ddk-example", logger.clone())?);
     let oracle = Arc::new(KormirOracleClient::new("http://localhost:8082", None, logger.clone()).await?);
 
