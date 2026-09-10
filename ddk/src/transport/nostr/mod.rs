@@ -1,7 +1,7 @@
 mod relay_handler;
 
 use crate::logger::{log_error, log_info, WriteLog};
-pub use relay_handler::NostrDlc;
+pub use relay_handler::{nostr_keys, NostrDlc, NostrKeyDerivation, NOSTR_KEY_PATH};
 use tokio::sync::watch;
 
 use crate::error::TransportError;
