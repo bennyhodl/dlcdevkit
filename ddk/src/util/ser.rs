@@ -1,19 +1,8 @@
 use ddk_manager::channel::signed_channel::SignedChannelStateType;
 use ddk_manager::channel::Channel;
-use ddk_manager::contract::accepted_contract::AcceptedContract;
-use ddk_manager::contract::offered_contract::OfferedContract;
-use ddk_manager::contract::ser::Serializable;
-use ddk_manager::contract::signed_contract::SignedContract;
-use ddk_manager::contract::{
-    ClosedContract, Contract, FailedAcceptContract, FailedSignContract, PreClosedContract,
-};
+use ddk_manager::contract::Contract;
 use ddk_manager::error::Error;
-use ddk_messages::tlv_stream::TlvStream;
 use ddk_messages::Message;
-use lightning::io::Read;
-use lightning::util::ser::{BigSize, FixedLengthReader, Readable, Writeable};
-
-use crate::error::to_storage_error;
 
 /// Helper from rust-dlc to implement types for contracts.
 macro_rules! convertible_enum {
@@ -57,48 +46,7 @@ macro_rules! convertible_enum {
     }
 }
 
-convertible_enum!(
-    enum ContractPrefix {
-        Offered = 1,
-        // 2
-        Accepted,
-        // 3
-        Signed,
-        // 4
-        Confirmed,
-        // 5
-        PreClosed,
-        // 6
-        Closed,
-        // 7
-        FailedAccept,
-        // 8
-        FailedSign,
-        // 9
-        Refunded,
-        // 10
-        Rejected,;
-    },
-    Contract
-);
-
-impl From<String> for ContractPrefix {
-    fn from(s: String) -> Self {
-        match s.as_str() {
-            "offered" => ContractPrefix::Offered,
-            "accepted" => ContractPrefix::Accepted,
-            "signed" => ContractPrefix::Signed,
-            "confirmed" => ContractPrefix::Confirmed,
-            "pre-closed" => ContractPrefix::PreClosed,
-            "closed" => ContractPrefix::Closed,
-            "failed-accept" => ContractPrefix::FailedAccept,
-            "failed-sign" => ContractPrefix::FailedSign,
-            "refunded" => ContractPrefix::Refunded,
-            "rejected" => ContractPrefix::Rejected,
-            _ => ContractPrefix::Offered,
-        }
-    }
-}
+pub use ddk_manager::contract::ser::ContractPrefix;
 
 convertible_enum!(
     enum ChannelPrefix {
@@ -135,146 +83,12 @@ convertible_enum!(
     SignedChannelStateType
 );
 
-/// Version byte of the TLV suffix appended after the serialized contract.
-const TLV_SUFFIX_VERSION: u8 = 1;
-
-/// The TLV streams a contract carries, in the order the suffix stores them.
-///
-/// The streams go in a suffix after the struct bytes because the structs nest:
-/// a signed contract contains the accepted one, which contains the offered one.
-/// Old data has no stream bytes inside the structs, and a suffix keeps it that
-/// way. Old data ends where the struct ends, so contracts stored before the
-/// suffix existed still load.
-fn tlv_streams(contract: &Contract) -> Vec<&TlvStream> {
-    match contract {
-        Contract::Offered(o) | Contract::Rejected(o) => vec![&o.tlvs],
-        Contract::Accepted(a) => vec![&a.offered_contract.tlvs, &a.tlvs],
-        Contract::Signed(s) | Contract::Confirmed(s) | Contract::Refunded(s) => vec![
-            &s.accepted_contract.offered_contract.tlvs,
-            &s.accepted_contract.tlvs,
-            &s.tlvs,
-        ],
-        Contract::PreClosed(p) => vec![
-            &p.signed_contract.accepted_contract.offered_contract.tlvs,
-            &p.signed_contract.accepted_contract.tlvs,
-            &p.signed_contract.tlvs,
-        ],
-        Contract::FailedAccept(f) => vec![&f.offered_contract.tlvs],
-        Contract::FailedSign(f) => vec![
-            &f.accepted_contract.offered_contract.tlvs,
-            &f.accepted_contract.tlvs,
-        ],
-        Contract::Closed(_) => vec![],
-    }
-}
-
-fn tlv_streams_mut(contract: &mut Contract) -> Vec<&mut TlvStream> {
-    match contract {
-        Contract::Offered(o) | Contract::Rejected(o) => vec![&mut o.tlvs],
-        Contract::Accepted(a) => vec![&mut a.offered_contract.tlvs, &mut a.tlvs],
-        Contract::Signed(s) | Contract::Confirmed(s) | Contract::Refunded(s) => vec![
-            &mut s.accepted_contract.offered_contract.tlvs,
-            &mut s.accepted_contract.tlvs,
-            &mut s.tlvs,
-        ],
-        Contract::PreClosed(p) => vec![
-            &mut p.signed_contract.accepted_contract.offered_contract.tlvs,
-            &mut p.signed_contract.accepted_contract.tlvs,
-            &mut p.signed_contract.tlvs,
-        ],
-        Contract::FailedAccept(f) => vec![&mut f.offered_contract.tlvs],
-        Contract::FailedSign(f) => vec![
-            &mut f.accepted_contract.offered_contract.tlvs,
-            &mut f.accepted_contract.tlvs,
-        ],
-        Contract::Closed(_) => vec![],
-    }
-}
-
 pub fn serialize_contract(contract: &Contract) -> Result<Vec<u8>, Error> {
-    let serialized = match contract {
-        Contract::Offered(o) | Contract::Rejected(o) => o.serialize(),
-        Contract::Accepted(o) => o.serialize(),
-        Contract::Signed(o) | Contract::Confirmed(o) | Contract::Refunded(o) => o.serialize(),
-        Contract::FailedAccept(c) => c.serialize(),
-        Contract::FailedSign(c) => c.serialize(),
-        Contract::PreClosed(c) => c.serialize(),
-        Contract::Closed(c) => c.serialize(),
-    };
-    let mut serialized = serialized.map_err(to_storage_error)?;
-    let mut res = Vec::with_capacity(serialized.len() + 1);
-    res.push(ContractPrefix::get_prefix(contract));
-    res.append(&mut serialized);
-    // Only written when a stream has records, so a contract without records
-    // keeps the same bytes as before.
-    let streams = tlv_streams(contract);
-    if streams.iter().any(|s| !s.is_empty()) {
-        res.push(TLV_SUFFIX_VERSION);
-        for stream in streams {
-            let bytes = stream.encode();
-            BigSize(bytes.len() as u64)
-                .write(&mut res)
-                .map_err(to_storage_error)?;
-            res.extend_from_slice(&bytes);
-        }
-    }
-    Ok(res)
+    contract.serialize()
 }
 
-pub fn deserialize_contract(buff: &Vec<u8>) -> Result<Contract, Error> {
-    let mut cursor = ::lightning::io::Cursor::new(buff);
-    let mut prefix = [0u8; 1];
-    cursor.read_exact(&mut prefix)?;
-    let contract_prefix: ContractPrefix = prefix[0].try_into()?;
-    let contract = match contract_prefix {
-        ContractPrefix::Offered => {
-            Contract::Offered(OfferedContract::deserialize(&mut cursor).map_err(to_storage_error)?)
-        }
-        ContractPrefix::Accepted => Contract::Accepted(
-            AcceptedContract::deserialize(&mut cursor).map_err(to_storage_error)?,
-        ),
-        ContractPrefix::Signed => {
-            Contract::Signed(SignedContract::deserialize(&mut cursor).map_err(to_storage_error)?)
-        }
-        ContractPrefix::Confirmed => {
-            Contract::Confirmed(SignedContract::deserialize(&mut cursor).map_err(to_storage_error)?)
-        }
-        ContractPrefix::PreClosed => Contract::PreClosed(
-            PreClosedContract::deserialize(&mut cursor).map_err(to_storage_error)?,
-        ),
-        ContractPrefix::Closed => {
-            Contract::Closed(ClosedContract::deserialize(&mut cursor).map_err(to_storage_error)?)
-        }
-        ContractPrefix::FailedAccept => Contract::FailedAccept(
-            FailedAcceptContract::deserialize(&mut cursor).map_err(to_storage_error)?,
-        ),
-        ContractPrefix::FailedSign => Contract::FailedSign(
-            FailedSignContract::deserialize(&mut cursor).map_err(to_storage_error)?,
-        ),
-        ContractPrefix::Refunded => {
-            Contract::Refunded(SignedContract::deserialize(&mut cursor).map_err(to_storage_error)?)
-        }
-        ContractPrefix::Rejected => {
-            Contract::Rejected(OfferedContract::deserialize(&mut cursor).map_err(to_storage_error)?)
-        }
-    };
-    let mut contract = contract;
-    if (cursor.position() as usize) < buff.len() {
-        let mut version = [0u8; 1];
-        cursor.read_exact(&mut version)?;
-        if version[0] != TLV_SUFFIX_VERSION {
-            return Err(Error::StorageError(format!(
-                "unknown contract TLV suffix version {}",
-                version[0]
-            )));
-        }
-        for stream in tlv_streams_mut(&mut contract) {
-            let len: BigSize = Readable::read(&mut cursor).map_err(to_storage_error)?;
-            let mut frame = FixedLengthReader::new(&mut cursor, len.0);
-            *stream = TlvStream::read_to_end(&mut frame).map_err(to_storage_error)?;
-        }
-    }
-    Ok(contract)
+pub fn deserialize_contract(buff: &[u8]) -> Result<Contract, Error> {
+    Contract::deserialize(buff)
 }
 
 pub fn message_variant_name(message: &Message) -> String {
@@ -292,6 +106,7 @@ pub fn message_variant_name(message: &Message) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ddk_messages::tlv_stream::TlvStream;
 
     /// A stream holding one record of type 65007 with `body` as its one-byte body.
     fn stream_with_record(body: u8) -> TlvStream {
@@ -299,10 +114,7 @@ mod tests {
         TlvStream::read_to_end(&mut lightning::io::Cursor::new(bytes)).unwrap()
     }
 
-    /// Records set on a stored contract come back on the struct they were set
-    /// on. The fixtures predate the suffix, so `stored_contracts_round_trip_byte_for_byte`
-    /// also proves that contracts stored without a suffix still load and write
-    /// the same bytes back.
+    /// Records set on a stored contract come back on the struct they were set on.
     #[test]
     fn records_survive_contract_storage() {
         let stored = include_bytes!("../../../testconfig/contract_binaries/Signed");
@@ -332,12 +144,44 @@ mod tests {
         assert_eq!(read.tlvs, stream_with_record(3));
     }
 
-    /// An unknown suffix version returns an error instead of misreading the data.
+    /// An unknown blob version returns an error instead of misreading the data.
     #[test]
-    fn unknown_tlv_suffix_version_is_rejected() {
-        let mut stored = include_bytes!("../../../testconfig/contract_binaries/Offered").to_vec();
-        stored.push(99);
+    fn unknown_stored_contract_version_is_rejected() {
+        let legacy = include_bytes!("../../../testconfig/contract_binaries/Offered");
+        let mut stored = vec![0u8, 99];
+        stored.extend_from_slice(legacy);
         assert!(deserialize_contract(&stored).is_err());
+    }
+
+    /// A closed contract wraps the signed one, and its streams must survive
+    /// storage like every other state's.
+    #[test]
+    fn closed_contract_keeps_its_streams() {
+        let stored = include_bytes!("../../../testconfig/contract_binaries/Closed");
+        let mut contract = deserialize_contract(&stored.to_vec()).unwrap();
+        {
+            let Contract::Closed(c) = &mut contract else {
+                panic!("fixture is not a closed contract")
+            };
+            c.signed_contract.accepted_contract.offered_contract.tlvs = stream_with_record(1);
+            c.signed_contract.accepted_contract.tlvs = stream_with_record(2);
+            c.signed_contract.tlvs = stream_with_record(3);
+        }
+
+        let serialized = serialize_contract(&contract).unwrap();
+        let Contract::Closed(read) = deserialize_contract(&serialized).unwrap() else {
+            panic!("state changed in storage")
+        };
+
+        assert_eq!(
+            read.signed_contract.accepted_contract.offered_contract.tlvs,
+            stream_with_record(1)
+        );
+        assert_eq!(
+            read.signed_contract.accepted_contract.tlvs,
+            stream_with_record(2)
+        );
+        assert_eq!(read.signed_contract.tlvs, stream_with_record(3));
     }
 
     /// Every contract state, serialized by an earlier release and checked in.
@@ -371,14 +215,16 @@ mod tests {
         ),
     ];
 
-    /// Stored contracts must survive a read and a write with every byte intact.
+    /// Contracts stored by an earlier release load, and writing them back
+    /// only upgrades the envelope: the struct bytes stay intact.
     ///
     /// A contract carries its oracle announcements in the embedded body form, so any
     /// change to how those are written shows up here as a diff against bytes an
-    /// earlier release produced. This is what a stored `BYTEA` column would have to
-    /// be migrated for; while it passes, there is nothing to migrate.
+    /// earlier release produced. The new envelope is the marker and version
+    /// byte up front and one empty length-framed stream per message at the
+    /// end, which every release from here on can read.
     #[test]
-    fn stored_contracts_round_trip_byte_for_byte() {
+    fn stored_contracts_round_trip_with_struct_bytes_intact() {
         for (state, stored) in FIXTURES {
             let contract = deserialize_contract(&stored.to_vec())
                 .unwrap_or_else(|e| panic!("{state} contract failed to deserialize: {e:?}"));
@@ -386,10 +232,25 @@ mod tests {
             let reserialized = serialize_contract(&contract)
                 .unwrap_or_else(|e| panic!("{state} contract failed to serialize: {e:?}"));
 
+            let struct_end = 3 + stored.len() - 1;
+            assert_eq!(&reserialized[..2], &[0, 1], "{state}: marker and version");
+            assert_eq!(reserialized[2], stored[0], "{state}: state prefix");
             assert_eq!(
+                &reserialized[3..struct_end],
+                &stored[1..],
+                "{state} struct bytes changed; stored contracts would need a migration"
+            );
+            assert!(
+                reserialized[struct_end..].iter().all(|b| *b == 0),
+                "{state}: trailing streams should be empty"
+            );
+
+            let reread = deserialize_contract(&reserialized)
+                .unwrap_or_else(|e| panic!("{state} upgraded blob failed to deserialize: {e:?}"));
+            assert_eq!(
+                serialize_contract(&reread).unwrap(),
                 reserialized,
-                stored.to_vec(),
-                "{state} contract did not round trip; the storage format changed"
+                "{state} upgraded blob is not stable"
             );
         }
     }

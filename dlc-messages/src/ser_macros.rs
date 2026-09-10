@@ -37,6 +37,8 @@ macro_rules! field_write {
     ($stream: expr, $field: expr, option) => {
         $crate::ser_impls::write_option(&$field, $stream)?;
     };
+    // A field that is not part of the serialized bytes. Reads as its default.
+    ($stream: expr, $field: expr, default) => {};
 }
 
 /// Reads a field from a reader.
@@ -74,6 +76,9 @@ macro_rules! field_read {
     };
     ($stream: expr, option) => {
         $crate::ser_impls::read_option($stream)?
+    };
+    ($stream: expr, default) => {
+        Default::default()
     };
 }
 
@@ -181,9 +186,11 @@ macro_rules! impl_dlc_writeable {
 
         impl $st {
             /// Reads the fixed fields after the type prefix, leaving the TLV
-            /// stream empty. For parsing data serialized before the message
-            /// carried a stream, where other fields follow the message bytes
-            /// and the caller has already consumed the type.
+            /// stream empty. Exists for `ddk-manager` to load stored data
+            /// written before the message carried a stream, where other fields
+            /// follow the message bytes and the caller has already consumed
+            /// the type. Not part of the wire protocol.
+            #[doc(hidden)]
             pub fn read_body_without_tlv_stream<R: $crate::lightning::io::Read>(
                 r: &mut R,
             ) -> Result<Self, $crate::lightning::ln::msgs::DecodeError> {

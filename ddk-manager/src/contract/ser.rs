@@ -9,8 +9,10 @@ use crate::contract::offered_contract::OfferedContract;
 use crate::contract::signed_contract::SignedContract;
 use crate::contract::AdaptorInfo;
 use crate::contract::{
-    ClosedContract, ContractDescriptor, FailedAcceptContract, FailedSignContract, PreClosedContract,
+    ClosedContract, Contract, ContractDescriptor, FailedAcceptContract, FailedSignContract,
+    PreClosedContract,
 };
+use crate::error::Error;
 use crate::payout_curve::{
     HyperbolaPayoutCurvePiece, PayoutFunction, PayoutFunctionPiece, PayoutPoint,
     PolynomialPayoutCurvePiece, RoundingInterval, RoundingIntervals,
@@ -23,6 +25,7 @@ use ddk_messages::ser_impls::{
     read_ecdsa_adaptor_signatures, read_option_cb, read_usize, read_vec, read_vec_cb,
     write_ecdsa_adaptor_signatures, write_option_cb, write_usize, write_vec, write_vec_cb,
 };
+use ddk_messages::tlv_stream::TlvStream;
 use ddk_messages::{AcceptDlc, SignDlc};
 use ddk_trie::digit_trie::{DigitNodeData, DigitTrieDump};
 use ddk_trie::multi_oracle_trie::{MultiOracleTrie, MultiOracleTrieDump};
@@ -184,7 +187,7 @@ impl Readable for OfferedContract {
             chain_hash,
             counter_party,
             keys_id,
-            // Filled from the storage-layer suffix, not from these bytes.
+            // Filled by [`Contract::deserialize`], not from these bytes.
             tlvs: Default::default(),
         })
     }
@@ -200,22 +203,6 @@ impl_dlc_writeable_external!(
     (pending_close_txs, vec)}
 );
 
-/// The storage layer persists the TLV streams as a versioned suffix (see
-/// `ddk::util::ser`). Writing nothing here keeps the struct bytes identical to
-/// what previous versions stored.
-fn write_external_tlvs<W: Writer>(
-    _: &ddk_messages::tlv_stream::TlvStream,
-    _: &mut W,
-) -> Result<(), lightning::io::Error> {
-    Ok(())
-}
-
-fn read_external_tlvs<R: Read>(
-    _: &mut R,
-) -> Result<ddk_messages::tlv_stream::TlvStream, DecodeError> {
-    Ok(Default::default())
-}
-
 impl_dlc_writeable!(AcceptedContract, {
     (offered_contract, writeable),
     (accept_params, { cb_writeable, ddk_messages::ser_impls::party_params::write, ddk_messages::ser_impls::party_params::read }),
@@ -224,7 +211,8 @@ impl_dlc_writeable!(AcceptedContract, {
     (adaptor_signatures, { cb_writeable, write_ecdsa_adaptor_signatures, read_ecdsa_adaptor_signatures }),
     (accept_refund_signature, writeable),
     (dlc_transactions, {cb_writeable, dlc_transactions::write, dlc_transactions::read }),
-    (tlvs, {cb_writeable, write_external_tlvs, read_external_tlvs})
+    // The streams are stored by [`Contract::serialize`], not in the struct bytes.
+    (tlvs, default)
 });
 impl_dlc_writeable!(SignedContract, {
     (accepted_contract, writeable),
@@ -232,7 +220,7 @@ impl_dlc_writeable!(SignedContract, {
     (offer_refund_signature, writeable),
     (funding_signatures, writeable),
     (channel_id, option),
-    (tlvs, {cb_writeable, write_external_tlvs, read_external_tlvs})
+    (tlvs, default)
 });
 impl_dlc_writeable!(PreClosedContract, {
     (signed_contract, writeable),
@@ -308,6 +296,270 @@ fn read_framed_sign<R: Read>(r: &mut R) -> Result<SignDlc, DecodeError> {
 
 impl_dlc_writeable!(FailedAcceptContract, {(offered_contract, writeable), (accept_message, {cb_writeable, write_framed_message, read_framed_accept}), (error_message, string)});
 impl_dlc_writeable!(FailedSignContract, {(accepted_contract, writeable), (sign_message, {cb_writeable, write_framed_message, read_framed_sign}), (error_message, string)});
+
+/// Marker for a versioned contract blob. Old blobs start with the state
+/// prefix, which is never zero.
+const STORED_CONTRACT_MARKER: u8 = 0;
+
+/// Version of the blob layout written after the marker.
+const STORED_CONTRACT_VERSION: u8 = 1;
+
+/// State prefix of a stored [`Contract`].
+#[derive(Debug)]
+pub enum ContractPrefix {
+    /// See [`Contract::Offered`].
+    Offered = 1,
+    /// See [`Contract::Accepted`].
+    Accepted,
+    /// See [`Contract::Signed`].
+    Signed,
+    /// See [`Contract::Confirmed`].
+    Confirmed,
+    /// See [`Contract::PreClosed`].
+    PreClosed,
+    /// See [`Contract::Closed`].
+    Closed,
+    /// See [`Contract::FailedAccept`].
+    FailedAccept,
+    /// See [`Contract::FailedSign`].
+    FailedSign,
+    /// See [`Contract::Refunded`].
+    Refunded,
+    /// See [`Contract::Rejected`].
+    Rejected,
+}
+
+impl From<ContractPrefix> for u8 {
+    fn from(prefix: ContractPrefix) -> u8 {
+        prefix as u8
+    }
+}
+
+impl std::convert::TryFrom<u8> for ContractPrefix {
+    type Error = Error;
+
+    fn try_from(v: u8) -> Result<Self, Error> {
+        match v {
+            1 => Ok(ContractPrefix::Offered),
+            2 => Ok(ContractPrefix::Accepted),
+            3 => Ok(ContractPrefix::Signed),
+            4 => Ok(ContractPrefix::Confirmed),
+            5 => Ok(ContractPrefix::PreClosed),
+            6 => Ok(ContractPrefix::Closed),
+            7 => Ok(ContractPrefix::FailedAccept),
+            8 => Ok(ContractPrefix::FailedSign),
+            9 => Ok(ContractPrefix::Refunded),
+            10 => Ok(ContractPrefix::Rejected),
+            _ => Err(Error::StorageError("Unknown prefix".to_string())),
+        }
+    }
+}
+
+impl From<String> for ContractPrefix {
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "offered" => ContractPrefix::Offered,
+            "accepted" => ContractPrefix::Accepted,
+            "signed" => ContractPrefix::Signed,
+            "confirmed" => ContractPrefix::Confirmed,
+            "pre-closed" => ContractPrefix::PreClosed,
+            "closed" => ContractPrefix::Closed,
+            "failed-accept" => ContractPrefix::FailedAccept,
+            "failed-sign" => ContractPrefix::FailedSign,
+            "refunded" => ContractPrefix::Refunded,
+            "rejected" => ContractPrefix::Rejected,
+            _ => ContractPrefix::Offered,
+        }
+    }
+}
+
+impl ContractPrefix {
+    /// The prefix byte for the contract's state.
+    pub fn get_prefix(input: &Contract) -> u8 {
+        let prefix = match input {
+            Contract::Offered(_) => ContractPrefix::Offered,
+            Contract::Accepted(_) => ContractPrefix::Accepted,
+            Contract::Signed(_) => ContractPrefix::Signed,
+            Contract::Confirmed(_) => ContractPrefix::Confirmed,
+            Contract::PreClosed(_) => ContractPrefix::PreClosed,
+            Contract::Closed(_) => ContractPrefix::Closed,
+            Contract::FailedAccept(_) => ContractPrefix::FailedAccept,
+            Contract::FailedSign(_) => ContractPrefix::FailedSign,
+            Contract::Refunded(_) => ContractPrefix::Refunded,
+            Contract::Rejected(_) => ContractPrefix::Rejected,
+        };
+        prefix as u8
+    }
+}
+
+// Each struct owns its TLV streams and delegates to the struct it nests, so a
+// state that wraps another cannot drop the wrapped streams.
+impl OfferedContract {
+    fn tlv_streams(&self) -> Vec<&TlvStream> {
+        vec![&self.tlvs]
+    }
+
+    fn tlv_streams_mut(&mut self) -> Vec<&mut TlvStream> {
+        vec![&mut self.tlvs]
+    }
+}
+
+impl AcceptedContract {
+    fn tlv_streams(&self) -> Vec<&TlvStream> {
+        let mut streams = self.offered_contract.tlv_streams();
+        streams.push(&self.tlvs);
+        streams
+    }
+
+    fn tlv_streams_mut(&mut self) -> Vec<&mut TlvStream> {
+        let mut streams = self.offered_contract.tlv_streams_mut();
+        streams.push(&mut self.tlvs);
+        streams
+    }
+}
+
+impl SignedContract {
+    fn tlv_streams(&self) -> Vec<&TlvStream> {
+        let mut streams = self.accepted_contract.tlv_streams();
+        streams.push(&self.tlvs);
+        streams
+    }
+
+    fn tlv_streams_mut(&mut self) -> Vec<&mut TlvStream> {
+        let mut streams = self.accepted_contract.tlv_streams_mut();
+        streams.push(&mut self.tlvs);
+        streams
+    }
+}
+
+impl Contract {
+    fn tlv_streams(&self) -> Vec<&TlvStream> {
+        match self {
+            Contract::Offered(o) | Contract::Rejected(o) => o.tlv_streams(),
+            Contract::Accepted(a) => a.tlv_streams(),
+            Contract::Signed(s) | Contract::Confirmed(s) | Contract::Refunded(s) => s.tlv_streams(),
+            Contract::PreClosed(p) => p.signed_contract.tlv_streams(),
+            Contract::Closed(c) => c.signed_contract.tlv_streams(),
+            Contract::FailedAccept(f) => f.offered_contract.tlv_streams(),
+            Contract::FailedSign(f) => f.accepted_contract.tlv_streams(),
+        }
+    }
+
+    fn tlv_streams_mut(&mut self) -> Vec<&mut TlvStream> {
+        match self {
+            Contract::Offered(o) | Contract::Rejected(o) => o.tlv_streams_mut(),
+            Contract::Accepted(a) => a.tlv_streams_mut(),
+            Contract::Signed(s) | Contract::Confirmed(s) | Contract::Refunded(s) => {
+                s.tlv_streams_mut()
+            }
+            Contract::PreClosed(p) => p.signed_contract.tlv_streams_mut(),
+            Contract::Closed(c) => c.signed_contract.tlv_streams_mut(),
+            Contract::FailedAccept(f) => f.offered_contract.tlv_streams_mut(),
+            Contract::FailedSign(f) => f.accepted_contract.tlv_streams_mut(),
+        }
+    }
+
+    /// Serializes the contract for storage. The blob is the marker and
+    /// version byte, the state prefix, the struct bytes, and one
+    /// length-framed TLV stream per message the contract stands for.
+    pub fn serialize(&self) -> Result<Vec<u8>, Error> {
+        let struct_bytes = match self {
+            Contract::Offered(o) | Contract::Rejected(o) => Serializable::serialize(o),
+            Contract::Accepted(a) => Serializable::serialize(a),
+            Contract::Signed(s) | Contract::Confirmed(s) | Contract::Refunded(s) => {
+                Serializable::serialize(s)
+            }
+            Contract::PreClosed(p) => Serializable::serialize(p),
+            Contract::Closed(c) => Serializable::serialize(c),
+            Contract::FailedAccept(f) => Serializable::serialize(f),
+            Contract::FailedSign(f) => Serializable::serialize(f),
+        }
+        .map_err(to_storage_error)?;
+        let mut res = vec![
+            STORED_CONTRACT_MARKER,
+            STORED_CONTRACT_VERSION,
+            ContractPrefix::get_prefix(self),
+        ];
+        res.extend_from_slice(&struct_bytes);
+        for stream in self.tlv_streams() {
+            let bytes = stream.encode();
+            BigSize(bytes.len() as u64)
+                .write(&mut res)
+                .map_err(to_storage_error)?;
+            res.extend_from_slice(&bytes);
+        }
+        Ok(res)
+    }
+
+    /// Deserializes a stored contract. Blobs written before the marker
+    /// existed start with the state prefix and carry no streams.
+    pub fn deserialize(buff: &[u8]) -> Result<Contract, Error> {
+        let mut cursor = lightning::io::Cursor::new(buff);
+        let mut first = [0u8; 1];
+        cursor.read_exact(&mut first)?;
+        if first[0] != STORED_CONTRACT_MARKER {
+            return Self::read_struct(first[0], &mut cursor);
+        }
+        let mut version = [0u8; 1];
+        cursor.read_exact(&mut version)?;
+        if version[0] != STORED_CONTRACT_VERSION {
+            return Err(Error::StorageError(format!(
+                "unknown stored contract version {}",
+                version[0]
+            )));
+        }
+        let mut prefix = [0u8; 1];
+        cursor.read_exact(&mut prefix)?;
+        let mut contract = Self::read_struct(prefix[0], &mut cursor)?;
+        for stream in contract.tlv_streams_mut() {
+            let len: BigSize = Readable::read(&mut cursor).map_err(to_storage_error)?;
+            let mut frame = FixedLengthReader::new(&mut cursor, len.0);
+            *stream = ddk_messages::tlv_stream::TlvStream::read_to_end(&mut frame)
+                .map_err(to_storage_error)?;
+        }
+        Ok(contract)
+    }
+
+    fn read_struct<R: Read>(prefix: u8, r: &mut R) -> Result<Contract, Error> {
+        let prefix: ContractPrefix = prefix.try_into()?;
+        Ok(match prefix {
+            ContractPrefix::Offered => {
+                Contract::Offered(OfferedContract::deserialize(r).map_err(to_storage_error)?)
+            }
+            ContractPrefix::Accepted => {
+                Contract::Accepted(AcceptedContract::deserialize(r).map_err(to_storage_error)?)
+            }
+            ContractPrefix::Signed => {
+                Contract::Signed(SignedContract::deserialize(r).map_err(to_storage_error)?)
+            }
+            ContractPrefix::Confirmed => {
+                Contract::Confirmed(SignedContract::deserialize(r).map_err(to_storage_error)?)
+            }
+            ContractPrefix::PreClosed => {
+                Contract::PreClosed(PreClosedContract::deserialize(r).map_err(to_storage_error)?)
+            }
+            ContractPrefix::Closed => {
+                Contract::Closed(ClosedContract::deserialize(r).map_err(to_storage_error)?)
+            }
+            ContractPrefix::FailedAccept => Contract::FailedAccept(
+                FailedAcceptContract::deserialize(r).map_err(to_storage_error)?,
+            ),
+            ContractPrefix::FailedSign => {
+                Contract::FailedSign(FailedSignContract::deserialize(r).map_err(to_storage_error)?)
+            }
+            ContractPrefix::Refunded => {
+                Contract::Refunded(SignedContract::deserialize(r).map_err(to_storage_error)?)
+            }
+            ContractPrefix::Rejected => {
+                Contract::Rejected(OfferedContract::deserialize(r).map_err(to_storage_error)?)
+            }
+        })
+    }
+}
+
+fn to_storage_error<E: std::fmt::Debug>(e: E) -> Error {
+    Error::StorageError(format!("{e:?}"))
+}
 
 impl_dlc_writeable_external!(DigitTrieDump<Vec<RangeInfo> >, digit_trie_dump_vec_range, { (node_data, {vec_cb, write_digit_node_data_vec_range, read_digit_node_data_vec_range}), (root, {option_cb, write_usize, read_usize}), (base, usize)});
 impl_dlc_writeable_external!(DigitTrieDump<RangeInfo>, digit_trie_dump_range, { (node_data, {vec_cb, write_digit_node_data_range, read_digit_node_data_range}), (root, {option_cb, write_usize, read_usize}), (base, usize)});
