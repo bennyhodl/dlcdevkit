@@ -4,8 +4,11 @@
 //! party data, and PSBTs — no storage backend, contract manager, or
 //! blockchain client is constructed anywhere in this file.
 
+use bdk_wallet::template::Bip49;
+use bdk_wallet::{KeychainKind, SignOptions, Wallet};
 use bitcoin::absolute::LockTime;
 use bitcoin::bip32::{DerivationPath, Xpriv};
+use bitcoin::hashes::Hash;
 use bitcoin::psbt::Psbt;
 use bitcoin::transaction::Version;
 use bitcoin::{Amount, Network, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Witness};
@@ -34,13 +37,14 @@ const MIN_TIMEOUT: u32 = 100;
 const MAX_TIMEOUT: u32 = 500;
 const TOTAL_COLLATERAL: Amount = Amount::from_sat(100_000);
 
-/// One side of a contract: a DLC funding key plus a BIP84 wallet key
-/// controlling a single funding UTXO.
+/// One side of a contract: a DLC funding key plus a wallet key controlling a
+/// single funding UTXO. The payout and change go to `payout_spk`.
 struct PartySetup {
     funding_secret_key: SecretKey,
     xpriv: Xpriv,
     derivation_path: DerivationPath,
     funding_input: FundingInput,
+    payout_spk: ScriptBuf,
 }
 
 impl PartySetup {
@@ -51,12 +55,33 @@ impl PartySetup {
         utxo_value: Amount,
         input_serial_id: u64,
     ) -> Self {
+        Self::with_wrapping(secp, seed_byte, network, utxo_value, input_serial_id, false)
+    }
+
+    /// Like [`PartySetup::new`], but the funding UTXO is P2SH-P2WPKH when
+    /// `wrapped` is set: the P2WPKH script becomes the redeem script.
+    fn with_wrapping(
+        secp: &Secp256k1<All>,
+        seed_byte: u8,
+        network: Network,
+        utxo_value: Amount,
+        input_serial_id: u64,
+        wrapped: bool,
+    ) -> Self {
         let funding_secret_key = SecretKey::from_slice(&[seed_byte; 32]).unwrap();
         let xpriv = Xpriv::new_master(network, &[seed_byte.wrapping_add(100); 64]).unwrap();
         let coin_type = if network == Network::Bitcoin { 0 } else { 1 };
         let derivation_path =
             DerivationPath::from_str(&format!("84h/{coin_type}h/0h/0/0")).unwrap();
-        let script_pubkey = p2wpkh_script(secp, &xpriv, &derivation_path);
+        let witness_script = p2wpkh_script(secp, &xpriv, &derivation_path);
+        let (script_pubkey, redeem_script) = if wrapped {
+            (
+                ScriptBuf::new_p2sh(&witness_script.script_hash()),
+                witness_script.clone(),
+            )
+        } else {
+            (witness_script.clone(), ScriptBuf::new())
+        };
         let previous_transaction = previous_transaction(utxo_value, script_pubkey);
         let funding_input = funding_input(
             &previous_transaction,
@@ -64,7 +89,7 @@ impl PartySetup {
             Some(input_serial_id),
             u32::MAX,
             108,
-            ScriptBuf::new(),
+            redeem_script,
         )
         .unwrap();
         Self {
@@ -72,15 +97,91 @@ impl PartySetup {
             xpriv,
             derivation_path,
             funding_input,
+            payout_spk: witness_script,
         }
+    }
+
+    /// A party whose funding UTXO, payout, and change all belong to a BDK
+    /// BIP49 (`sh(wpkh())`) wallet. The wallet is returned so a test can let
+    /// BDK sign the funding PSBT itself.
+    fn bip49(
+        _secp: &Secp256k1<All>,
+        seed_byte: u8,
+        network: Network,
+        utxo_value: Amount,
+        input_serial_id: u64,
+    ) -> (Wallet, Self) {
+        let funding_secret_key = SecretKey::from_slice(&[seed_byte; 32]).unwrap();
+        let xpriv = Xpriv::new_master(network, &[seed_byte.wrapping_add(100); 64]).unwrap();
+        let mut wallet = Wallet::create(
+            Bip49(xpriv, KeychainKind::External),
+            Bip49(xpriv, KeychainKind::Internal),
+        )
+        .network(network)
+        .create_wallet_no_persist()
+        .unwrap();
+
+        let address = wallet.reveal_next_address(KeychainKind::External);
+        let script_pubkey = address.script_pubkey();
+        assert!(script_pubkey.is_p2sh(), "BIP49 addresses are P2SH");
+        let redeem_script = wallet
+            .public_descriptor(KeychainKind::External)
+            .at_derivation_index(address.index)
+            .unwrap()
+            .explicit_script()
+            .unwrap();
+        assert!(redeem_script.is_p2wpkh(), "BIP49 redeem script is P2WPKH");
+        assert_eq!(
+            ScriptBuf::new_p2sh(&redeem_script.script_hash()),
+            script_pubkey
+        );
+
+        // Hand the wallet its funding UTXO so BDK can find the key on signing.
+        // BDK rejects a coinbase as an unconfirmed transaction, so the
+        // previous transaction spends a dummy non-null outpoint.
+        let mut previous_transaction = previous_transaction(utxo_value, script_pubkey);
+        previous_transaction.input[0].previous_output = OutPoint {
+            txid: bitcoin::Txid::from_slice(&[seed_byte; 32]).unwrap(),
+            vout: 0,
+        };
+        wallet.apply_unconfirmed_txs([(previous_transaction.clone(), 0u64)]);
+        let utxo = wallet
+            .list_unspent()
+            .next()
+            .expect("wallet tracks the funding UTXO");
+        assert_eq!(utxo.txout.value, utxo_value);
+
+        let funding_input = funding_input(
+            &previous_transaction,
+            utxo.outpoint.vout,
+            Some(input_serial_id),
+            u32::MAX,
+            108,
+            redeem_script,
+        )
+        .unwrap();
+        let coin_type = if network == Network::Bitcoin { 0 } else { 1 };
+        let derivation_path =
+            DerivationPath::from_str(&format!("49h/{coin_type}h/0h/0/{}", address.index)).unwrap();
+        let payout_spk = wallet
+            .reveal_next_address(KeychainKind::External)
+            .script_pubkey();
+        let party = Self {
+            funding_secret_key,
+            xpriv,
+            derivation_path,
+            funding_input,
+            payout_spk,
+        };
+        (wallet, party)
     }
 
     fn funding_pubkey(&self, secp: &Secp256k1<All>) -> PublicKey {
         self.funding_secret_key.public_key(secp)
     }
 
-    fn payout_script(&self, secp: &Secp256k1<All>) -> ScriptBuf {
-        p2wpkh_script(secp, &self.xpriv, &self.derivation_path)
+    fn payout_script(&self, _secp: &Secp256k1<All>) -> ScriptBuf {
+        self.payout_spk.clone()
     }
 
     fn party_params(
@@ -270,6 +371,16 @@ fn enum_contract(
 ) -> (PartySetup, PartySetup, OfferDlc, AcceptDlc) {
     let offerer = PartySetup::new(secp, 1, network, Amount::from_sat(150_000), 1);
     let accepter = PartySetup::new(secp, 2, network, Amount::from_sat(150_000), 2);
+    enum_contract_between(secp, network, offerer, accepter)
+}
+
+/// Builds an enum contract offer/accept pair between two prepared parties.
+fn enum_contract_between(
+    secp: &Secp256k1<All>,
+    network: Network,
+    offerer: PartySetup,
+    accepter: PartySetup,
+) -> (PartySetup, PartySetup, OfferDlc, AcceptDlc) {
     let offer = create_offer(offer_params(
         secp,
         &offerer,
@@ -374,11 +485,29 @@ fn assert_funding_transaction_complete(
             .expect("funding transaction spends an unknown outpoint");
         assert_eq!(tx_input.witness.len(), 2, "expected P2WPKH witness");
         let public_key = bitcoin::PublicKey::from_slice(&tx_input.witness[1]).unwrap();
-        assert_eq!(
-            prevout.script_pubkey,
-            ScriptBuf::new_p2wpkh(&public_key.wpubkey_hash().unwrap()),
-            "witness key does not control the spent output"
-        );
+        let witness_script = ScriptBuf::new_p2wpkh(&public_key.wpubkey_hash().unwrap());
+        if prevout.script_pubkey.is_p2sh() {
+            assert_eq!(
+                prevout.script_pubkey,
+                ScriptBuf::new_p2sh(&witness_script.script_hash()),
+                "witness key does not control the wrapped output"
+            );
+            let push = bitcoin::script::PushBytesBuf::try_from(witness_script.to_bytes()).unwrap();
+            assert_eq!(
+                tx_input.script_sig,
+                ScriptBuf::builder().push_slice(push).into_script(),
+                "wrapped input must push its redeem script"
+            );
+        } else {
+            assert_eq!(
+                prevout.script_pubkey, witness_script,
+                "witness key does not control the spent output"
+            );
+            assert!(
+                tx_input.script_sig.is_empty(),
+                "native SegWit input has no script sig"
+            );
+        }
     }
 }
 
@@ -1728,4 +1857,191 @@ fn finalize_sign_spliced_rejects_a_tampered_offer_half() {
         ),
         Err(ContractError::InvalidSign(_))
     ));
+}
+
+#[test]
+fn p2sh_p2wpkh_funding_inputs_carry_the_redeem_script_push() {
+    // A wrapped SegWit input needs its script signature to push the redeem
+    // script, next to the witness. Until this was fixed, building the funding
+    // transaction for such an input panicked.
+    let secp = Secp256k1::new();
+    let offerer = PartySetup::with_wrapping(&secp, 1, NETWORK, Amount::from_sat(150_000), 1, true);
+    let accepter = PartySetup::new(&secp, 2, NETWORK, Amount::from_sat(150_000), 2);
+    let (offerer, accepter, offer, accept) =
+        enum_contract_between(&secp, NETWORK, offerer, accepter);
+
+    let funding_transaction = complete_with_xpriv(&secp, &offerer, &accepter, &offer, &accept);
+
+    let offerer_prev_tx: Transaction =
+        bitcoin::consensus::deserialize(&offerer.funding_input.prev_tx).unwrap();
+    let offerer_outpoint = OutPoint {
+        txid: offerer_prev_tx.compute_txid(),
+        vout: offerer.funding_input.prev_tx_vout,
+    };
+    let redeem_script = offerer.funding_input.redeem_script.clone();
+    let expected_script_sig = ScriptBuf::builder()
+        .push_slice(bitcoin::script::PushBytesBuf::try_from(redeem_script.to_bytes()).unwrap())
+        .into_script();
+
+    let mut saw_wrapped_input = false;
+    for input in &funding_transaction.input {
+        if input.previous_output == offerer_outpoint {
+            assert_eq!(input.script_sig, expected_script_sig);
+            assert_eq!(
+                input.witness.len(),
+                2,
+                "P2WPKH witness is signature + pubkey"
+            );
+            saw_wrapped_input = true;
+        } else {
+            assert!(
+                input.script_sig.is_empty(),
+                "native SegWit inputs stay empty"
+            );
+        }
+    }
+    assert!(
+        saw_wrapped_input,
+        "the wrapped input is spent by the funding transaction"
+    );
+}
+
+/// Checks that every input the wallet owns is finalized with a redeem script
+/// push and a two-element P2WPKH witness, and that the counterparty's inputs
+/// are untouched.
+fn assert_bdk_signed_own_inputs(psbt: &Psbt, wallet: &Wallet) {
+    for input in &psbt.inputs {
+        let script_pubkey = &input.witness_utxo.as_ref().unwrap().script_pubkey;
+        if wallet.is_mine(script_pubkey.clone()) {
+            let witness = input
+                .final_script_witness
+                .as_ref()
+                .expect("BDK finalizes its own input");
+            assert_eq!(witness.len(), 2, "P2WPKH witness is signature + pubkey");
+            // BDK clears the redeem_script field on finalize, so derive the
+            // expected push from the wallet descriptor.
+            let (keychain, index) = wallet.derivation_of_spk(script_pubkey.clone()).unwrap();
+            let redeem_script = wallet
+                .public_descriptor(keychain)
+                .at_derivation_index(index)
+                .unwrap()
+                .explicit_script()
+                .unwrap();
+            let push = bitcoin::script::PushBytesBuf::try_from(redeem_script.to_bytes()).unwrap();
+            assert_eq!(
+                input.final_script_sig,
+                Some(ScriptBuf::builder().push_slice(push).into_script()),
+                "BDK pushes the redeem script"
+            );
+        } else {
+            assert!(input.final_script_witness.is_none());
+            assert!(input.final_script_sig.is_none());
+        }
+    }
+}
+
+/// Every funding input, payout, and change output in the completed contract is
+/// P2SH, as two BIP49 wallets produce.
+fn assert_all_p2sh(funding_transaction: &Transaction, offer: &OfferDlc, accept: &AcceptDlc) {
+    for input in &funding_transaction.input {
+        assert!(
+            !input.script_sig.is_empty(),
+            "wrapped inputs push a redeem script"
+        );
+        assert_eq!(input.witness.len(), 2);
+    }
+    assert!(offer.payout_spk.is_p2sh());
+    assert!(offer.change_spk.is_p2sh());
+    assert!(accept.payout_spk.is_p2sh());
+    assert!(accept.change_spk.is_p2sh());
+    let change_outputs = funding_transaction
+        .output
+        .iter()
+        .filter(|output| output.script_pubkey.is_p2sh())
+        .count();
+    assert_eq!(change_outputs, 2, "one P2SH change output per party");
+}
+
+#[test]
+fn bip49_bdk_wallets_sign_both_sides_of_the_funding_psbt() {
+    // Both parties bring their own BDK BIP49 wallet. Each wallet is given only
+    // the funding PSBT from create_funding_psbt (witness UTXO, no BIP32
+    // derivation info) and must sign and finalize its own P2SH-P2WPKH input.
+    let secp = Secp256k1::new();
+    let (offer_wallet, offerer) =
+        PartySetup::bip49(&secp, 1, NETWORK, Amount::from_sat(150_000), 1);
+    let (accept_wallet, accepter) =
+        PartySetup::bip49(&secp, 2, NETWORK, Amount::from_sat(150_000), 2);
+    let (offerer, _accepter, offer, accept) =
+        enum_contract_between(&secp, NETWORK, offerer, accepter);
+
+    let sign_options = SignOptions {
+        trust_witness_utxo: true,
+        ..Default::default()
+    };
+
+    let mut offer_psbt = create_funding_psbt(&offer, &accept).unwrap();
+    let finalized = offer_wallet
+        .sign(&mut offer_psbt, sign_options.clone())
+        .unwrap();
+    assert!(!finalized, "the accepter's input is still unsigned");
+    assert_bdk_signed_own_inputs(&offer_psbt, &offer_wallet);
+    let sign_result =
+        sign_accept(&offer, &accept, &offerer.funding_secret_key, &offer_psbt).unwrap();
+
+    let mut accept_psbt = create_funding_psbt(&offer, &accept).unwrap();
+    let finalized = accept_wallet.sign(&mut accept_psbt, sign_options).unwrap();
+    assert!(!finalized, "the offerer's input is still unsigned");
+    assert_bdk_signed_own_inputs(&accept_psbt, &accept_wallet);
+    let funding_transaction =
+        finalize_sign(&offer, &accept, &sign_result.sign, &accept_psbt).unwrap();
+
+    assert_funding_transaction_complete(&funding_transaction, &offer, &accept);
+    assert_all_p2sh(&funding_transaction, &offer, &accept);
+}
+
+#[test]
+fn bip49_descriptors_sign_both_sides_of_the_funding_psbt() {
+    // The same two BIP49 wallets, but each side signs through the stateless
+    // sh(wpkh()) descriptor path instead of handing the PSBT to BDK.
+    let secp = Secp256k1::new();
+    let (_, offerer) = PartySetup::bip49(&secp, 1, NETWORK, Amount::from_sat(150_000), 1);
+    let (_, accepter) = PartySetup::bip49(&secp, 2, NETWORK, Amount::from_sat(150_000), 2);
+    let (offerer, accepter, offer, accept) =
+        enum_contract_between(&secp, NETWORK, offerer, accepter);
+
+    let offer_descriptor = format!("sh(wpkh({}/49h/1h/0h/0/*))", offerer.xpriv);
+    let mut offer_psbt = create_funding_psbt(&offer, &accept).unwrap();
+    signing::sign_funding_psbt_with_descriptor(
+        &offer,
+        &accept,
+        &mut offer_psbt,
+        &offer_descriptor,
+        &[DescriptorInput {
+            input_serial_id: offerer.funding_input.input_serial_id,
+            derivation_index: 0,
+        }],
+    )
+    .unwrap();
+    let sign_result =
+        sign_accept(&offer, &accept, &offerer.funding_secret_key, &offer_psbt).unwrap();
+
+    let accept_descriptor = format!("sh(wpkh({}/49h/1h/0h/0/*))", accepter.xpriv);
+    let mut accept_psbt = create_funding_psbt(&offer, &accept).unwrap();
+    signing::sign_funding_psbt_with_descriptor(
+        &offer,
+        &accept,
+        &mut accept_psbt,
+        &accept_descriptor,
+        &[DescriptorInput {
+            input_serial_id: accepter.funding_input.input_serial_id,
+            derivation_index: 0,
+        }],
+    )
+    .unwrap();
+    let funding_transaction =
+        finalize_sign(&offer, &accept, &sign_result.sign, &accept_psbt).unwrap();
+
+    assert_funding_transaction_complete(&funding_transaction, &offer, &accept);
+    assert_all_p2sh(&funding_transaction, &offer, &accept);
 }

@@ -335,7 +335,7 @@ impl PartyParams {
         inputs_weight += dlc_input::get_dlc_inputs_weight(&self.dlc_inputs);
 
         for w in &self.inputs {
-            let script_weight = util::redeem_script_to_script_sig(&w.redeem_script)
+            let script_weight = util::redeem_script_to_script_sig(&w.redeem_script)?
                 .len()
                 .checked_mul(4)
                 .ok_or(Error::InvalidArgument(format!(
@@ -415,14 +415,17 @@ impl PartyParams {
         Ok((change_output, fund_fee, cet_or_refund_fee))
     }
 
-    fn get_unsigned_tx_inputs_and_serial_ids(&self, sequence: Sequence) -> (Vec<TxIn>, Vec<u64>) {
+    fn get_unsigned_tx_inputs_and_serial_ids(
+        &self,
+        sequence: Sequence,
+    ) -> Result<(Vec<TxIn>, Vec<u64>), Error> {
         let mut tx_ins = Vec::with_capacity(self.inputs.len());
         let mut serial_ids = Vec::with_capacity(self.inputs.len());
 
         for input in &self.inputs {
             let tx_in = TxIn {
                 previous_output: input.outpoint,
-                script_sig: util::redeem_script_to_script_sig(&input.redeem_script),
+                script_sig: util::redeem_script_to_script_sig(&input.redeem_script)?,
                 sequence,
                 witness: Witness::new(),
             };
@@ -430,7 +433,7 @@ impl PartyParams {
             serial_ids.push(input.serial_id);
         }
 
-        (tx_ins, serial_ids)
+        Ok((tx_ins, serial_ids))
     }
 }
 
@@ -583,9 +586,9 @@ pub fn create_fund_transaction_with_fees(
 
     let fund_sequence = util::get_sequence(fund_lock_time);
     let (offer_tx_ins, offer_inputs_serial_ids) =
-        offer_params.get_unsigned_tx_inputs_and_serial_ids(fund_sequence);
+        offer_params.get_unsigned_tx_inputs_and_serial_ids(fund_sequence)?;
     let (accept_tx_ins, accept_inputs_serial_ids) =
-        accept_params.get_unsigned_tx_inputs_and_serial_ids(fund_sequence);
+        accept_params.get_unsigned_tx_inputs_and_serial_ids(fund_sequence)?;
 
     let funding_witness_script =
         make_funding_redeemscript(&offer_params.fund_pubkey, &accept_params.fund_pubkey);

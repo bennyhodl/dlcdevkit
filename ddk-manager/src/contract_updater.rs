@@ -4,8 +4,9 @@ use std::ops::Deref;
 
 use bitcoin::hex::DisplayHex;
 use bitcoin::psbt::Psbt;
+use bitcoin::script::PushBytesBuf;
 use bitcoin::Amount;
-use bitcoin::{consensus::Decodable, Script, Transaction, Witness};
+use bitcoin::{consensus::Decodable, Script, ScriptBuf, Transaction, Witness};
 use ddk_dlc::dlc_input::DlcInputInfo;
 use ddk_dlc::{DlcTransactions, PartyParams};
 use ddk_messages::{
@@ -472,6 +473,40 @@ where
     Ok((signed_contract, signed_msg))
 }
 
+/// Returns the funding transaction with every script signature cleared, as
+/// `Psbt::from_unsigned_tx` requires. A P2SH-P2WPKH input carries the redeem
+/// script push in its script signature; [`restore_p2sh_script_sigs`] puts it
+/// back before the transaction is extracted.
+fn unsigned_funding_transaction(fund: &Transaction) -> Transaction {
+    let mut fund = fund.clone();
+    for input in &mut fund.input {
+        input.script_sig = ScriptBuf::new();
+    }
+    fund
+}
+
+/// Sets the final script signature of every P2SH-wrapped input to the push of
+/// its redeem script, which `unsigned_funding_transaction` removed.
+fn restore_p2sh_script_sigs(
+    psbt: &mut Psbt,
+    all_funding_inputs: &[&FundingInput],
+) -> Result<(), Error> {
+    for (input_index, funding_input) in all_funding_inputs.iter().enumerate() {
+        if funding_input.redeem_script.is_empty() {
+            continue;
+        }
+        let push =
+            PushBytesBuf::try_from(funding_input.redeem_script.to_bytes()).map_err(|_| {
+                Error::InvalidParameters(format!(
+                    "redeem script of funding input {input_index} is too long to push"
+                ))
+            })?;
+        psbt.inputs[input_index].final_script_sig =
+            Some(ScriptBuf::builder().push_slice(push).into_script());
+    }
+    Ok(())
+}
+
 fn populate_psbt(psbt: &mut Psbt, all_funding_inputs: &[&FundingInput]) -> Result<(), Error> {
     // add witness utxo to fund_psbt for all inputs
     for (input_index, x) in all_funding_inputs.iter().enumerate() {
@@ -531,7 +566,7 @@ where
         pending_close_txs: _,
     } = dlc_transactions;
 
-    let mut fund_psbt = Psbt::from_unsigned_tx(fund.clone())
+    let mut fund_psbt = Psbt::from_unsigned_tx(unsigned_funding_transaction(fund))
         .map_err(|_| Error::InvalidState("Tried to create PSBT from signed tx".to_string()))?;
     let mut cets = cets.clone();
 
@@ -870,7 +905,7 @@ where
     );
 
     let fund_tx = &accepted_contract.dlc_transactions.fund;
-    let mut fund_psbt = Psbt::from_unsigned_tx(fund_tx.clone())
+    let mut fund_psbt = Psbt::from_unsigned_tx(unsigned_funding_transaction(fund_tx))
         .map_err(|_| Error::InvalidState("Tried to create PSBT from signed tx".to_string()))?;
 
     // get all funding inputs
@@ -1022,6 +1057,7 @@ where
         channel_id,
     };
 
+    restore_p2sh_script_sigs(&mut fund_psbt, &all_funding_inputs)?;
     let transaction = fund_psbt.extract_tx_unchecked_fee_rate();
 
     Ok((signed_contract, transaction))
