@@ -810,44 +810,72 @@ where
 
         // Check if there are any DLC inputs in the funding inputs of the contract.
         // If there are, mark the contract as pre-closed.
-        if accepted_contract
+        // The funding transaction was just broadcast, so every previous
+        // contract it splices is now closing.
+        self.preclose_spliced_contracts(&signed_contract).await?;
+
+        Ok(())
+    }
+
+    /// Marks every Confirmed contract that `signed_contract` spends through a
+    /// DLC input as PreClosed by the splice funding transaction.
+    ///
+    /// A splice can spend several previous contracts at once; each of them
+    /// must move on, or its watcher keeps trying to settle or refund a spent
+    /// output. A previous contract that is not Confirmed (already pre-closed
+    /// by an earlier pass, for example) is skipped; other errors propagate.
+    async fn preclose_spliced_contracts(
+        &self,
+        signed_contract: &SignedContract,
+    ) -> Result<(), Error> {
+        let splice_fund_tx = &signed_contract.accepted_contract.dlc_transactions.fund;
+        for funding_input in &signed_contract
+            .accepted_contract
             .offered_contract
             .funding_inputs
-            .iter()
-            .any(|c| c.dlc_input.is_some())
         {
-            let Some(dlc_input) = accepted_contract
-                .offered_contract
-                .funding_inputs
-                .iter()
-                .find(|c| c.dlc_input.is_some())
-            else {
-                return Ok(());
+            let Some(dlc_input) = &funding_input.dlc_input else {
+                continue;
             };
-            let preclosed_contract = get_contract_in_state!(
+            let contract_id = dlc_input.contract_id;
+
+            let previous_contract = match get_contract_in_state!(
                 self,
-                &dlc_input.dlc_input.as_ref().unwrap().contract_id,
+                &contract_id,
                 Confirmed,
                 None as Option<PublicKey>
-            )?;
+            ) {
+                Ok(contract) => contract,
+                Err(Error::InvalidState(e)) => {
+                    log_trace!(self.logger,
+                        "The previous contract referenced in a splice transaction is in an unexpected state. contract_id={} error={}",
+                        contract_id.to_lower_hex_string(), e.to_string(),
+                    );
+                    continue;
+                }
+                Err(e) => {
+                    log_debug!(self.logger,
+                        "The previous contract referenced in a splice transaction failed to retrieve. contract_id={} error={}",
+                        contract_id.to_lower_hex_string(), e.to_string(),
+                    );
+                    return Err(e);
+                }
+            };
 
             let preclosed_contract = PreClosedContract {
-                signed_contract: preclosed_contract.clone(),
+                signed_contract: previous_contract.clone(),
                 attestations: None,
-                signed_cet: signed_contract
-                    .accepted_contract
-                    .dlc_transactions
-                    .fund
-                    .clone(),
+                signed_cet: splice_fund_tx.clone(),
             };
 
             log_debug!(self.logger,
-                "Contract contains a DLC input. Marking the previous contract as pre-closed. dlc_input_contract_id={}", 
-                preclosed_contract.signed_contract.accepted_contract.get_contract_id_string()
+                "Contract contains a DLC input. Marking the previous contract as pre-closed. dlc_input_contract_id={} splice_contract_id={}",
+                contract_id.to_lower_hex_string(),
+                signed_contract.accepted_contract.get_contract_id_string(),
             );
 
             self.store
-                .update_contract(&Contract::PreClosed(preclosed_contract.clone()))
+                .update_contract(&Contract::PreClosed(preclosed_contract))
                 .await?;
         }
 
@@ -980,41 +1008,15 @@ where
     async fn check_for_spliced_contract(&self) -> Result<Vec<SignedContract>, Error> {
         let contracts = self.get_store().get_signed_contracts().await?;
         for contract in &contracts {
-            let dlc_input = contract
+            if !contract
                 .accepted_contract
                 .offered_contract
                 .funding_inputs
                 .iter()
-                .find(|d| d.dlc_input.is_some());
-
-            let Some(funding_input) = dlc_input else {
+                .any(|d| d.dlc_input.is_some())
+            {
                 continue;
-            };
-
-            let contract_id = funding_input.dlc_input.as_ref().unwrap().contract_id;
-
-            let confirmed_contract_in_splice = match get_contract_in_state!(
-                self,
-                &contract_id,
-                Confirmed,
-                None as Option<PublicKey>
-            ) {
-                Ok(c) => Ok(c),
-                Err(Error::InvalidState(e)) => {
-                    log_trace!(self.logger,
-                        "The previouse contract referenced in a splice transaction is in an unexpected state. contract_id={} error={}", 
-                        contract_id.to_lower_hex_string(), e.to_string(),
-                    );
-                    continue;
-                }
-                Err(e) => {
-                    log_debug!(self.logger,
-                        "The previouse contract referenced in a splice transaction failed to retrieve. contract_id={} error={}",
-                        contract_id.to_lower_hex_string(), e.to_string(),
-                    );
-                    Err(e)
-                }
-            }?;
+            }
 
             // The funding transaction of the splice contract closes the
             // previous contract. Only pre-close the previous contract when
@@ -1033,27 +1035,14 @@ where
                 == ConfirmationStatus::NotFound
             {
                 log_debug!(self.logger,
-                    "Splice funding transaction not found in mempool or on-chain. Not pre-closing the previous contract. splice_fund_txid={} contract_id={}",
+                    "Splice funding transaction not found in mempool or on-chain. Not pre-closing the previous contracts. splice_fund_txid={} splice_contract_id={}",
                     splice_fund_txid.to_string(),
-                    contract_id.to_lower_hex_string(),
+                    contract.accepted_contract.get_contract_id_string(),
                 );
                 continue;
             }
 
-            let preclosed_contract = PreClosedContract {
-                signed_contract: confirmed_contract_in_splice.clone(),
-                attestations: None,
-                signed_cet: contract.accepted_contract.dlc_transactions.fund.clone(),
-            };
-
-            log_debug!(self.logger,
-                "The previous contract that was spliced is now closed because the splice contract is confirmed. contract_id={}", 
-                contract_id.to_lower_hex_string(),
-            );
-
-            self.store
-                .update_contract(&Contract::PreClosed(preclosed_contract.clone()))
-                .await?;
+            self.preclose_spliced_contracts(contract).await?;
         }
         Ok(contracts)
     }
