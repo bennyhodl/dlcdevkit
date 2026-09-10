@@ -1,9 +1,11 @@
 //! Utility functions not uniquely related to DLC
 
+use bitcoin::script::PushBytesBuf;
 use bitcoin::sighash::SighashCache;
+use bitcoin::PubkeyHash;
 use bitcoin::{sighash::EcdsaSighashType, Script, Transaction, TxOut};
 use bitcoin::{Amount, ScriptBuf, Sequence, Witness};
-use bitcoin::{PubkeyHash, WitnessProgram, WitnessVersion};
+use core::convert::TryFrom;
 use secp256k1_zkp::{ecdsa::Signature, Message, PublicKey, Secp256k1, SecretKey, Signing};
 
 use crate::Error;
@@ -205,14 +207,21 @@ pub fn sign_multi_sig_input<C: Signing>(
 }
 
 /// Transforms a redeem script for a p2sh-p2w* output to a script signature.
-pub(crate) fn redeem_script_to_script_sig(redeem: &Script) -> ScriptBuf {
-    match redeem.len() {
-        0 => ScriptBuf::new(),
-        _ => {
-            let bytes = redeem.as_bytes();
-            ScriptBuf::new_witness_program(&WitnessProgram::new(WitnessVersion::V0, bytes).unwrap())
-        }
+///
+/// Spending a P2SH output requires the script signature to be a single push
+/// of the redeem script. An empty redeem script (a native SegWit input)
+/// yields an empty script signature.
+pub(crate) fn redeem_script_to_script_sig(redeem: &Script) -> Result<ScriptBuf, Error> {
+    if redeem.is_empty() {
+        return Ok(ScriptBuf::new());
     }
+    let push = PushBytesBuf::try_from(redeem.to_bytes()).map_err(|_| {
+        Error::InvalidArgument(format!(
+            "redeem script of {} bytes is too long to push",
+            redeem.len()
+        ))
+    })?;
+    Ok(ScriptBuf::builder().push_slice(push).into_script())
 }
 
 /// Sorts the given inputs in following the order of the ids.
@@ -262,4 +271,41 @@ pub fn validate_fee_rate(fee_rate_per_vb: u64) -> Result<(), Error> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bitcoin::hashes::Hash;
+    use bitcoin::WPubkeyHash;
+
+    #[test]
+    fn empty_redeem_script_gives_an_empty_script_sig() {
+        let script_sig = redeem_script_to_script_sig(&ScriptBuf::new()).unwrap();
+        assert!(script_sig.is_empty());
+    }
+
+    #[test]
+    fn p2sh_p2wpkh_redeem_script_is_pushed_whole() {
+        // A P2SH-P2WPKH redeem script is the 22-byte witness program itself,
+        // which is not a valid witness program length for a top-level push.
+        let redeem = ScriptBuf::new_p2wpkh(&WPubkeyHash::from_byte_array([7u8; 20]));
+        assert_eq!(redeem.len(), 22);
+
+        let script_sig = redeem_script_to_script_sig(&redeem).unwrap();
+        let mut expected = vec![22u8];
+        expected.extend_from_slice(redeem.as_bytes());
+        assert_eq!(script_sig.as_bytes(), expected.as_slice());
+    }
+
+    #[test]
+    fn p2sh_p2wsh_redeem_script_is_pushed_whole() {
+        let redeem = ScriptBuf::new_p2wsh(&bitcoin::WScriptHash::from_byte_array([9u8; 32]));
+        assert_eq!(redeem.len(), 34);
+
+        let script_sig = redeem_script_to_script_sig(&redeem).unwrap();
+        let mut expected = vec![34u8];
+        expected.extend_from_slice(redeem.as_bytes());
+        assert_eq!(script_sig.as_bytes(), expected.as_slice());
+    }
 }
