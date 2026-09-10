@@ -27,6 +27,30 @@ where
     Error::StorageError(e.to_string())
 }
 
+impl SledStorage {
+    /// Contracts in the given state, decoded through [`deserialize_contract`]
+    /// so the store never parses the blob layout itself.
+    fn get_contracts_in_state<T>(
+        &self,
+        state: ContractPrefix,
+        extract: fn(Contract) -> Option<T>,
+    ) -> Result<Vec<T>, Error> {
+        let state = u8::from(state);
+        Ok(self
+            .contract_tree()?
+            .iter()
+            .values()
+            .filter_map(|res| {
+                let value = res.unwrap().to_vec();
+                if ContractPrefix::peek(&value).ok()? != state {
+                    return None;
+                }
+                extract(deserialize_contract(&value).ok()?)
+            })
+            .collect())
+    }
+}
+
 #[async_trait::async_trait]
 impl Storage for SledStorage {
     async fn get_contract(&self, contract_id: &ContractId) -> Result<Option<Contract>, Error> {
@@ -86,35 +110,31 @@ impl Storage for SledStorage {
     }
 
     async fn get_contract_offers(&self) -> Result<Vec<OfferedContract>, Error> {
-        self.get_data_with_prefix(
-            &self.contract_tree()?,
-            &[ContractPrefix::Offered.into()],
-            None,
-        )
+        self.get_contracts_in_state(ContractPrefix::Offered, |c| match c {
+            Contract::Offered(o) => Some(o),
+            _ => None,
+        })
     }
 
     async fn get_signed_contracts(&self) -> Result<Vec<SignedContract>, Error> {
-        self.get_data_with_prefix(
-            &self.contract_tree()?,
-            &[ContractPrefix::Signed.into()],
-            None,
-        )
+        self.get_contracts_in_state(ContractPrefix::Signed, |c| match c {
+            Contract::Signed(s) => Some(s),
+            _ => None,
+        })
     }
 
     async fn get_confirmed_contracts(&self) -> Result<Vec<SignedContract>, Error> {
-        self.get_data_with_prefix(
-            &self.contract_tree()?,
-            &[ContractPrefix::Confirmed.into()],
-            None,
-        )
+        self.get_contracts_in_state(ContractPrefix::Confirmed, |c| match c {
+            Contract::Confirmed(s) => Some(s),
+            _ => None,
+        })
     }
 
     async fn get_preclosed_contracts(&self) -> Result<Vec<PreClosedContract>, Error> {
-        self.get_data_with_prefix(
-            &self.contract_tree()?,
-            &[ContractPrefix::PreClosed.into()],
-            None,
-        )
+        self.get_contracts_in_state(ContractPrefix::PreClosed, |c| match c {
+            Contract::PreClosed(p) => Some(p),
+            _ => None,
+        })
     }
 
     async fn upsert_channel(

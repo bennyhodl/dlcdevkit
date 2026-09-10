@@ -390,6 +390,19 @@ impl ContractPrefix {
         };
         prefix as u8
     }
+
+    /// The state prefix byte of a stored contract blob, without decoding it.
+    /// Lets a store filter by state before paying for [`Contract::deserialize`].
+    pub fn peek(buff: &[u8]) -> Result<u8, Error> {
+        let position = match buff.first() {
+            Some(&STORED_CONTRACT_MARKER) => 2,
+            Some(_) => 0,
+            None => return Err(Error::StorageError("empty contract blob".to_string())),
+        };
+        buff.get(position)
+            .copied()
+            .ok_or_else(|| Error::StorageError("contract blob too short".to_string()))
+    }
 }
 
 // Each struct owns its TLV streams and delegates to the struct it nests, so a

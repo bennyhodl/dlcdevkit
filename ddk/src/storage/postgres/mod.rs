@@ -24,8 +24,8 @@ use bdk_wallet::KeychainKind;
 use bdk_wallet::KeychainKind::{External, Internal};
 use ddk_manager::{
     contract::{
-        offered_contract::OfferedContract, ser::Serializable, signed_contract::SignedContract,
-        Contract, PreClosedContract,
+        offered_contract::OfferedContract, signed_contract::SignedContract, Contract,
+        PreClosedContract,
     },
     Storage as ManagerStorage,
 };
@@ -48,6 +48,10 @@ pub const DEFAULT_MAX_CONNECTIONS: u32 = 5;
 ///
 /// Reads the `DATABASE_MAX_CONNECTIONS` environment variable, falling back to
 /// [`DEFAULT_MAX_CONNECTIONS`] when the variable is unset, unparseable, or zero.
+fn wrong_state_error(state: &str) -> ddk_manager::error::Error {
+    ddk_manager::error::Error::StorageError(format!("contract is not in the {state} state"))
+}
+
 fn max_connections_from_env() -> u32 {
     std::env::var("DATABASE_MAX_CONNECTIONS")
         .ok()
@@ -675,10 +679,9 @@ impl ManagerStorage for PostgresStore {
 
         let signed = contracts
             .into_iter()
-            .map(|c| {
-                let mut cursor = lightning::io::Cursor::new(&c.contract_data);
-                cursor.set_position(cursor.position() + 1);
-                SignedContract::deserialize(&mut cursor).map_err(to_storage_error)
+            .map(|c| match deserialize_contract(&c.contract_data)? {
+                Contract::Signed(s) => Ok(s),
+                _ => Err(wrong_state_error("signed")),
             })
             .collect::<Result<Vec<_>, ddk_manager::error::Error>>()?;
 
@@ -699,10 +702,9 @@ impl ManagerStorage for PostgresStore {
 
         let offers = contracts
             .into_iter()
-            .map(|c| {
-                let mut cursor = lightning::io::Cursor::new(&c.contract_data);
-                cursor.set_position(cursor.position() + 1);
-                OfferedContract::deserialize(&mut cursor).map_err(to_storage_error)
+            .map(|c| match deserialize_contract(&c.contract_data)? {
+                Contract::Offered(o) => Ok(o),
+                _ => Err(wrong_state_error("offered")),
             })
             .collect::<Result<Vec<_>, ddk_manager::error::Error>>()?;
 
@@ -721,10 +723,9 @@ impl ManagerStorage for PostgresStore {
 
         let signed = contracts
             .into_iter()
-            .map(|c| {
-                let mut cursor = lightning::io::Cursor::new(&c.contract_data);
-                cursor.set_position(cursor.position() + 1);
-                SignedContract::deserialize(&mut cursor).map_err(to_storage_error)
+            .map(|c| match deserialize_contract(&c.contract_data)? {
+                Contract::Confirmed(s) => Ok(s),
+                _ => Err(wrong_state_error("confirmed")),
             })
             .collect::<Result<Vec<_>, ddk_manager::error::Error>>()?;
 
@@ -743,10 +744,9 @@ impl ManagerStorage for PostgresStore {
 
         let preclosed = contracts
             .into_iter()
-            .map(|c| {
-                let mut cursor = lightning::io::Cursor::new(&c.contract_data);
-                cursor.set_position(cursor.position() + 1);
-                PreClosedContract::deserialize(&mut cursor).map_err(to_storage_error)
+            .map(|c| match deserialize_contract(&c.contract_data)? {
+                Contract::PreClosed(p) => Ok(p),
+                _ => Err(wrong_state_error("pre-closed")),
             })
             .collect::<Result<Vec<_>, ddk_manager::error::Error>>()?;
 
