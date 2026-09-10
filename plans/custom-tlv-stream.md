@@ -158,15 +158,23 @@ The manager path was later brought along too (review feedback on PR #188): the
 manager rebuilds messages from stored contracts, for example when it pulls a
 previous contract in for a splice, so dropping the records at the storage
 boundary made those rebuilds wrong. `OfferedContract`, `AcceptedContract` and
-`SignedContract` each carry the stream of their own message now, persisted as a
-versioned suffix after the struct bytes in `contract_data` (`ddk::util::ser`).
-A suffix rather than in-struct fields because the structs nest, and the suffix
-is written only when a stream has records, so contracts stored before it exist
-still load and `stored_contracts_round_trip_byte_for_byte` still passes with the
-same fixtures. No migration. The `FailedAcceptContract`/`FailedSignContract`
+`SignedContract` each carry the stream of their own message. The contract blob
+encoding lives on the `Contract` enum in `ddk-manager` (third review round):
+the blob opens with a zero marker and a version byte, then the state prefix,
+the struct bytes, and one length-framed stream per message, with each struct
+returning its own streams and delegating to the struct it nests so a wrapping
+state such as `Closed` cannot drop them. Blobs from before the marker start
+with the state prefix, which is never zero, so they still load with empty
+streams. No migration. The `FailedAcceptContract`/`FailedSignContract`
 structs embed whole messages followed by an error string, which a read-to-end
 stream would swallow, so their stored messages are length-framed with the same
 old-format fallback.
+
+For sending, the manager keeps its builders — `send_offer`,
+`accept_contract_offer`, and `on_accept_message` already return the message
+they build — and `commit_offer`/`commit_accept`/`commit_sign` take the final
+message back and copy its stream onto the stored struct, so an application can
+append records to a manager-built message before it goes out.
 
 ---
 
@@ -293,8 +301,9 @@ the peek-based old-format branch — so it was wired up directly; `AcceptDlc` an
 go through the macro's trailing-stream arm from §4.2.
 
 Item 6 (a round trip against a real node-dlc payload) is still open and needs a captured
-message from BAL. The channel messages still drop records. The `ddk-manager` storage
-path persists the streams as of the second review round; see §3.
+message from BAL. The channel messages still drop records, and the postgres store's
+direct struct reads skip the blob envelope (getting its own issue). The `ddk-manager`
+storage and sending paths persist the streams as of the third review round; see §3.
 
 
 1. **Macro hygiene.** Qualify paths in `impl_dlc_writeable!`, `field_write!`,
@@ -332,7 +341,8 @@ path persists the streams as of the second review round; see §3.
   for framing only — that its length fits inside the message — never for meaning,
   and never for uniqueness: duplicates are kept, so a caller reading a record it
   understands is reading the first of however many arrived.
-- Records survive into the manager's stored contracts via the storage suffix
-  described in §3, with no `contract_data` migration. What the manager still has
-  no API for is an application attaching or reading records mid-flow; that
-  remains the stateless module's job.
+- Records survive into the manager's stored contracts via the blob encoding
+  described in §3, with no `contract_data` migration. An application using the
+  manager attaches records by mutating the returned message and calling the
+  matching `commit_*` step; reading records mid-flow remains the stateless
+  module's job.
