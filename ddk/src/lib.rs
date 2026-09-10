@@ -82,6 +82,7 @@ pub use ddk_messages;
 
 /// DDK object with all services
 #[cfg(feature = "manager")]
+pub use ddk::group_announcements;
 pub use ddk::DlcDevKit;
 #[cfg(feature = "manager")]
 pub use ddk::DlcManagerMessage;

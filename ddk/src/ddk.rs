@@ -73,6 +73,52 @@ pub type DlcDevKitDlcManager<S, O> = ddk_manager::manager::Manager<
 type Result<T> = std::result::Result<T, Error>;
 type StdResult<T, E> = std::result::Result<T, E>;
 
+/// Groups the flat announcement list of [`DlcDevKit::send_dlc_offer`] into
+/// one list per contract info of `contract_input`.
+///
+/// Each contract info consumes as many announcements as it names oracle
+/// public keys, in order, and every announcement must carry that contract
+/// info's event id. Too few, too many, or misplaced announcements are an
+/// error instead of a mismatch that the manager would otherwise reject
+/// later, or previously panic on.
+pub fn group_announcements(
+    contract_input: &ContractInput,
+    oracle_announcements: Vec<OracleAnnouncement>,
+) -> std::result::Result<Vec<Vec<OracleAnnouncement>>, ManagerError> {
+    let expected: usize = contract_input
+        .contract_infos
+        .iter()
+        .map(|info| info.oracles.public_keys.len())
+        .sum();
+    if oracle_announcements.len() != expected {
+        return Err(ManagerError::InvalidParameters(format!(
+            "expected {expected} oracle announcements for {} contract infos, got {}",
+            contract_input.contract_infos.len(),
+            oracle_announcements.len()
+        )));
+    }
+
+    let mut remaining = oracle_announcements.into_iter();
+    let mut grouped = Vec::with_capacity(contract_input.contract_infos.len());
+    for (index, info) in contract_input.contract_infos.iter().enumerate() {
+        let group: Vec<OracleAnnouncement> = remaining
+            .by_ref()
+            .take(info.oracles.public_keys.len())
+            .collect();
+        if let Some(announcement) = group
+            .iter()
+            .find(|announcement| announcement.oracle_event.event_id != info.oracles.event_id)
+        {
+            return Err(ManagerError::InvalidParameters(format!(
+                "contract info {index} expects event {} but was given an announcement for event {}",
+                info.oracles.event_id, announcement.oracle_event.event_id
+            )));
+        }
+        grouped.push(group);
+    }
+    Ok(grouped)
+}
+
 /// Messages that can be sent to the DLC manager actor.
 /// These messages represent the core operations in the DLC lifecycle:
 /// - Offering new contracts
@@ -337,6 +383,12 @@ where
     /// 2. Sends it through the transport layer
     /// 3. Returns the created offer for further processing
     #[tracing::instrument(skip(self, contract_input))]
+    /// Creates and sends a DLC offer to `counter_party`.
+    ///
+    /// `oracle_announcements` is flat: it lists, in order, the announcements
+    /// of every contract info in `contract_input`, each contributing as many
+    /// announcements as it names oracle public keys. See
+    /// [`group_announcements`] for the exact shape; a mismatch is an error.
     pub async fn send_dlc_offer(
         &self,
         contract_input: &ContractInput,
