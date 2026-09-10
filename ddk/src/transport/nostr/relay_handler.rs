@@ -7,12 +7,64 @@ use crate::nostr::messages::{create_dlc_msg_event, handle_dlc_msg_event};
 use crate::DlcDevKitDlcManager;
 use crate::{nostr, Transport};
 use crate::{Oracle, Storage};
-use bitcoin::bip32::Xpriv;
+use bitcoin::bip32::{DerivationPath, Xpriv};
 use bitcoin::Network;
 use nostr_rs::{secp256k1::Secp256k1, Keys, Timestamp, Url};
 use nostr_sdk::{Client, RelayPoolNotification};
+use std::str::FromStr;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
+
+/// The NIP-06 derivation path of the nostr identity: the first account of
+/// nostr's registered coin type, hardened up to the account level.
+///
+/// The wallet lives under `m/84'/…` and the contract keys under `m/420'/…`,
+/// so a key that leaks through the nostr stack reveals nothing about either.
+pub const NOSTR_KEY_PATH: &str = "m/44'/1237'/0'/0/0";
+
+/// How the nostr transport derives its identity key from the wallet seed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NostrKeyDerivation {
+    /// The NIP-06 child at [`NOSTR_KEY_PATH`]. This is what
+    /// [`NostrDlc::new`] uses.
+    Nip06,
+    /// The raw BIP32 master private key of the wallet seed.
+    ///
+    /// This was the identity before 2.0.0-rc.4. It ties the wallet, every
+    /// contract key, and the nostr identity to one secret: whatever the nostr
+    /// stack does with its key, it does with the wallet master key. Keep it
+    /// only for a deployment whose peers already know the old identity, and
+    /// plan the move to [`NostrKeyDerivation::Nip06`].
+    #[deprecated(
+        since = "2.0.0-rc.4",
+        note = "the nostr identity is the wallet master private key; use NostrKeyDerivation::Nip06"
+    )]
+    Master,
+}
+
+/// Derives the nostr identity keys from the wallet seed with `derivation`.
+pub fn nostr_keys(
+    seed_bytes: &[u8; 64],
+    network: Network,
+    derivation: NostrKeyDerivation,
+) -> Result<Keys, TransportError> {
+    let secp = Secp256k1::new();
+    let master =
+        Xpriv::new_master(network, seed_bytes).map_err(|e| TransportError::Init(e.to_string()))?;
+    let secret_key = match derivation {
+        NostrKeyDerivation::Nip06 => {
+            let path = DerivationPath::from_str(NOSTR_KEY_PATH)
+                .map_err(|e| TransportError::Init(e.to_string()))?;
+            master
+                .derive_priv(&secp, &path)
+                .map_err(|e| TransportError::Init(e.to_string()))?
+                .private_key
+        }
+        #[allow(deprecated)]
+        NostrKeyDerivation::Master => master.private_key,
+    };
+    Ok(Keys::new_with_ctx(&secp, secret_key.into()))
+}
 
 pub struct NostrDlc {
     pub keys: Keys,
@@ -22,6 +74,13 @@ pub struct NostrDlc {
 }
 
 impl NostrDlc {
+    /// Creates the transport with a NIP-06 identity derived from the wallet
+    /// seed ([`NostrKeyDerivation::Nip06`]).
+    ///
+    /// Before 2.0.0-rc.4 the identity was the wallet's master private key. A
+    /// node upgraded from such a release gets a new nostr public key; use
+    /// [`NostrDlc::new_with_derivation`] with
+    /// [`NostrKeyDerivation::Master`] to keep the old one.
     #[tracing::instrument(skip(seed_bytes, logger))]
     pub async fn new(
         seed_bytes: &[u8; 64],
@@ -29,10 +88,26 @@ impl NostrDlc {
         network: Network,
         logger: Arc<Logger>,
     ) -> Result<NostrDlc, TransportError> {
-        let secp = Secp256k1::new();
-        let seed = Xpriv::new_master(network, seed_bytes)
-            .map_err(|e| TransportError::Init(e.to_string()))?;
-        let keys = Keys::new_with_ctx(&secp, seed.private_key.into());
+        Self::new_with_derivation(
+            seed_bytes,
+            relay_host,
+            network,
+            NostrKeyDerivation::Nip06,
+            logger,
+        )
+        .await
+    }
+
+    /// Creates the transport with the identity `derivation` selects.
+    #[tracing::instrument(skip(seed_bytes, logger))]
+    pub async fn new_with_derivation(
+        seed_bytes: &[u8; 64],
+        relay_host: &str,
+        network: Network,
+        derivation: NostrKeyDerivation,
+        logger: Arc<Logger>,
+    ) -> Result<NostrDlc, TransportError> {
+        let keys = nostr_keys(seed_bytes, network, derivation)?;
 
         let relay_url = relay_host
             .parse()
@@ -135,5 +210,49 @@ impl NostrDlc {
             }
             Ok::<_, TransportError>(())
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bitcoin::bip32::ChildNumber;
+
+    const SEED: [u8; 64] = [7u8; 64];
+
+    #[test]
+    fn nip06_identity_is_a_hardened_child_of_the_seed() {
+        let secp = Secp256k1::new();
+        let master = Xpriv::new_master(Network::Regtest, &SEED).unwrap();
+        let expected = master
+            .derive_priv(
+                &secp,
+                &[
+                    ChildNumber::from_hardened_idx(44).unwrap(),
+                    ChildNumber::from_hardened_idx(1237).unwrap(),
+                    ChildNumber::from_hardened_idx(0).unwrap(),
+                    ChildNumber::from_normal_idx(0).unwrap(),
+                    ChildNumber::from_normal_idx(0).unwrap(),
+                ],
+            )
+            .unwrap()
+            .private_key;
+
+        let keys = nostr_keys(&SEED, Network::Regtest, NostrKeyDerivation::Nip06).unwrap();
+        assert_eq!(keys.secret_key().as_secret_bytes(), &expected[..]);
+    }
+
+    #[test]
+    fn nip06_identity_differs_from_the_wallet_master_key() {
+        let master = Xpriv::new_master(Network::Regtest, &SEED).unwrap();
+        let keys = nostr_keys(&SEED, Network::Regtest, NostrKeyDerivation::Nip06).unwrap();
+        assert_ne!(keys.secret_key().as_secret_bytes(), &master.private_key[..]);
+
+        #[allow(deprecated)]
+        let legacy = nostr_keys(&SEED, Network::Regtest, NostrKeyDerivation::Master).unwrap();
+        assert_eq!(
+            legacy.secret_key().as_secret_bytes(),
+            &master.private_key[..]
+        );
     }
 }
