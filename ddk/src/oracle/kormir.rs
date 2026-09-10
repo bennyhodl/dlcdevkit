@@ -99,7 +99,7 @@ impl KormirOracleClient {
 
     /// List all events stored with the connected Kormir server.
     ///
-    /// Kormir events includes announcements info, nonce index, signatures
+    /// Kormir events includes announcements info, signatures
     /// if announcement has been signed, and nostr information.
     pub async fn list_events(&self) -> Result<Vec<OracleEventData>, OracleError> {
         get(&self.host, "list-events").await.map_err(|e| {

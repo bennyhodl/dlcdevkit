@@ -7,8 +7,8 @@ pub mod storage;
 
 use crate::error::Error;
 use crate::storage::Storage;
-use bitcoin::bip32::{ChildNumber, DerivationPath, Xpriv};
-use bitcoin::hashes::{sha256, Hash};
+use bitcoin::bip32::{DerivationPath, Xpriv};
+use bitcoin::hashes::{sha256, Hash, HashEngine, Hmac, HmacEngine};
 use bitcoin::key::XOnlyPublicKey;
 use bitcoin::secp256k1::{All, Secp256k1, SecretKey};
 use bitcoin::Network;
@@ -32,6 +32,9 @@ pub use nostr;
 ///
 /// Follows BIP-86 single-sig Taproot path: `m/86'/0'/0'/0/0`.
 const SIGNING_KEY_PATH: &str = "m/86'/0'/0'/0/0";
+
+/// Domain separation tag mixed into every event-bound nonce key.
+const NONCE_TAG: &[u8] = b"kormir/nonce/v1";
 
 /// Creates an enum event announcement for oracle events with discrete outcomes.
 ///
@@ -122,6 +125,14 @@ pub fn create_enum_event(
 /// This function creates an `OracleAttestation` by signing the chosen outcome
 /// for a previously announced enum event. The signature uses the oracle's private key
 /// and the nonce key to ensure cryptographic security.
+///
+/// # Security
+/// A nonce key must sign exactly one message, ever. Two signatures made with
+/// the same `nonce_key` over different outcomes reveal the oracle's signing
+/// key to anyone who sees both attestations. This function keeps no state and
+/// cannot detect a repeated call; callers that retry, correct an outcome, or
+/// run more than one instance must guard against it themselves. Prefer the
+/// stateful [`Oracle`], which records signatures in its [`Storage`].
 ///
 /// # Arguments
 /// * `secp` - Secp256k1 context for cryptographic operations
@@ -350,6 +361,13 @@ pub fn create_numeric_event(
 /// This function creates an `OracleAttestation` by signing a numeric outcome
 /// for a previously announced numeric event. The numeric value is decomposed into
 /// individual digits, each signed with its corresponding nonce key.
+///
+/// # Security
+/// Each nonce key must sign exactly one digit, ever. Signing two different
+/// values with the same `nonce_keys` reveals the oracle's signing key to anyone
+/// who sees both attestations. This function keeps no state and cannot detect
+/// a repeated call. Prefer the stateful [`Oracle`], which records signatures in
+/// its [`Storage`].
 ///
 /// The function includes special clamping logic as described in the DLC spec:
 /// - For unsigned events: negative values are clamped to 0, values exceeding the maximum are clamped to the maximum
@@ -591,15 +609,46 @@ impl<S: Storage> Oracle<S> {
         nostr::Keys::new(sec)
     }
 
-    /// Derives the hardened nonce private key at `index` from the oracle's `nonce_xpriv`.
-    fn get_nonce_key(&self, index: u32) -> SecretKey {
-        self.nonce_xpriv
-            .derive_priv(
-                &self.secp,
-                &[ChildNumber::from_hardened_idx(index).unwrap()],
-            )
-            .unwrap()
-            .private_key
+    /// Derives the nonce key for the nonce at `position` in the announcement
+    /// of `event_id`.
+    ///
+    /// The key is `HMAC-SHA256(nonce_xpriv, tag || event_id || position)`.
+    /// Nothing else goes into it: no counter and no storage state. Two
+    /// announcements share a nonce only when they share the event id, so a
+    /// restarted instance, a restore from seed, or a second instance on the
+    /// same signing key derives the same nonce for the same event and a
+    /// different nonce for every other event. The storage rejects a second
+    /// announcement of an event id, which is the only rule nonce safety
+    /// depends on.
+    fn nonce_key(&self, event_id: &str, position: u32) -> Result<SecretKey, Error> {
+        let mut engine =
+            HmacEngine::<sha256::Hash>::new(&self.nonce_xpriv.private_key.secret_bytes());
+        engine.input(NONCE_TAG);
+        engine.input(event_id.as_bytes());
+        engine.input(&position.to_be_bytes());
+        let bytes = Hmac::<sha256::Hash>::from_engine(engine).to_byte_array();
+        SecretKey::from_slice(&bytes).map_err(|_| Error::Internal)
+    }
+
+    /// Derives the nonce keys of a stored announcement and checks each one
+    /// against the announced nonce, so an announcement this oracle did not
+    /// make is never signed with a key that does not match it.
+    fn nonce_keys_for(
+        &self,
+        event_id: &str,
+        announced: &[XOnlyPublicKey],
+    ) -> Result<Vec<SecretKey>, Error> {
+        announced
+            .iter()
+            .enumerate()
+            .map(|(position, announced)| {
+                let key = self.nonce_key(event_id, position as u32)?;
+                if key.x_only_public_key(&self.secp).0 != *announced {
+                    return Err(Error::InvalidNonces);
+                }
+                Ok(key)
+            })
+            .collect()
     }
 
     /// Creates an enum event announcement with a fresh nonce and persists it to `storage`.
@@ -609,11 +658,7 @@ impl<S: Storage> Oracle<S> {
         outcomes: Vec<String>,
         event_maturity_epoch: u32,
     ) -> Result<OracleAnnouncement, Error> {
-        let nonce_indexes = self.storage.get_next_nonce_indexes(1).await?;
-        if nonce_indexes.len() != 1 {
-            return Err(Error::Internal);
-        }
-        let nonce_key = self.get_nonce_key(nonce_indexes[0]);
+        let nonce_key = self.nonce_key(&event_id, 0)?;
         let nonce = nonce_key.x_only_public_key(&self.secp).0;
         let ann = create_enum_event(
             &self.secp,
@@ -623,10 +668,7 @@ impl<S: Storage> Oracle<S> {
             event_maturity_epoch,
             &nonce,
         )?;
-        let _ = self
-            .storage
-            .save_announcement(ann.clone(), nonce_indexes)
-            .await?;
+        let _ = self.storage.save_announcement(ann.clone()).await?;
         Ok(ann)
     }
 
@@ -642,12 +684,11 @@ impl<S: Storage> Oracle<S> {
         if !data.signatures.is_empty() {
             return Err(Error::EventAlreadySigned);
         }
-        if data.indexes.len() != 1 {
-            return Err(Error::Internal);
+        let announced_nonces = &data.announcement.oracle_event.oracle_nonces;
+        if announced_nonces.len() != 1 {
+            return Err(Error::InvalidNonces);
         }
-
-        let nonce_index = data.indexes[0];
-        let nonce_key = self.get_nonce_key(nonce_index);
+        let nonce_key = self.nonce_keys_for(&event_id, announced_nonces)?[0];
 
         let attestation = sign_enum_event(
             &self.secp,
@@ -682,14 +723,12 @@ impl<S: Storage> Oracle<S> {
             num_digits as usize
         };
 
-        let indexes = self.storage.get_next_nonce_indexes(num_nonces).await?;
-        let oracle_nonces = indexes
-            .iter()
-            .map(|i| {
-                let nonce_key = self.get_nonce_key(*i);
-                nonce_key.x_only_public_key(&self.secp).0
+        let oracle_nonces = (0..num_nonces as u32)
+            .map(|position| {
+                let nonce_key = self.nonce_key(&event_id, position)?;
+                Ok(nonce_key.x_only_public_key(&self.secp).0)
             })
-            .collect::<Vec<XOnlyPublicKey>>();
+            .collect::<Result<Vec<XOnlyPublicKey>, Error>>()?;
 
         let ann = create_numeric_event(
             &self.secp,
@@ -704,7 +743,7 @@ impl<S: Storage> Oracle<S> {
             &oracle_nonces,
         )?;
 
-        let _ = self.storage.save_announcement(ann.clone(), indexes).await?;
+        let _ = self.storage.save_announcement(ann.clone()).await?;
 
         Ok(ann)
     }
@@ -722,11 +761,8 @@ impl<S: Storage> Oracle<S> {
             return Err(Error::EventAlreadySigned);
         }
 
-        let nonce_keys = data
-            .indexes
-            .iter()
-            .map(|i| self.get_nonce_key(*i))
-            .collect::<Vec<SecretKey>>();
+        let nonce_keys =
+            self.nonce_keys_for(&event_id, &data.announcement.oracle_event.oracle_nonces)?;
 
         let attestation = sign_numeric_event(
             &self.secp,
@@ -1442,14 +1478,9 @@ mod test {
         struct FailingStorage;
 
         impl crate::storage::Storage for FailingStorage {
-            async fn get_next_nonce_indexes(&self, _num: usize) -> Result<Vec<u32>, Error> {
-                Err(Error::StorageFailure)
-            }
-
             async fn save_announcement(
                 &self,
                 _announcement: OracleAnnouncement,
-                _indexes: Vec<u32>,
             ) -> Result<String, Error> {
                 Err(Error::StorageFailure)
             }
@@ -1760,5 +1791,165 @@ mod test {
 
             assert_eq!(rx, expected_nonce)
         }
+    }
+
+    #[tokio::test]
+    async fn fresh_storage_does_not_reuse_nonces_across_event_ids() {
+        // Two instances on the same signing key with independent, fresh
+        // storages. Before nonces were bound to the event id both derived
+        // their first nonce from counter index 0, so two different events
+        // shared one nonce.
+        let signing_key = SecretKey::from_slice(&[42u8; 32]).unwrap();
+        let first = Oracle::from_signing_key(MemoryStorage::new(), signing_key).unwrap();
+        let second = Oracle::from_signing_key(MemoryStorage::new(), signing_key).unwrap();
+        let outcomes = vec!["heads".to_string(), "tails".to_string()];
+
+        let first_ann = first
+            .create_enum_event("event-a".to_string(), outcomes.clone(), 2_000_000_000)
+            .await
+            .unwrap();
+        let second_ann = second
+            .create_enum_event("event-b".to_string(), outcomes, 2_000_000_001)
+            .await
+            .unwrap();
+
+        assert_ne!(
+            first_ann.oracle_event.oracle_nonces[0],
+            second_ann.oracle_event.oracle_nonces[0]
+        );
+
+        let first_att = first
+            .sign_enum_event("event-a".to_string(), "heads".to_string())
+            .await
+            .unwrap();
+        let second_att = second
+            .sign_enum_event("event-b".to_string(), "tails".to_string())
+            .await
+            .unwrap();
+        assert_ne!(
+            &first_att.signatures[0].as_ref()[..32],
+            &second_att.signatures[0].as_ref()[..32],
+            "different events must not share a BIP340 nonce R"
+        );
+    }
+
+    #[tokio::test]
+    async fn numeric_nonces_are_bound_to_the_event_id() {
+        let signing_key = SecretKey::from_slice(&[43u8; 32]).unwrap();
+        let first = Oracle::from_signing_key(MemoryStorage::new(), signing_key).unwrap();
+        let second = Oracle::from_signing_key(MemoryStorage::new(), signing_key).unwrap();
+
+        let first_ann = first
+            .create_numeric_event("price-a".to_string(), 4, false, 0, "usd".to_string(), 1)
+            .await
+            .unwrap();
+        let second_ann = second
+            .create_numeric_event("price-b".to_string(), 4, false, 0, "usd".to_string(), 1)
+            .await
+            .unwrap();
+
+        for (a, b) in first_ann
+            .oracle_event
+            .oracle_nonces
+            .iter()
+            .zip(&second_ann.oracle_event.oracle_nonces)
+        {
+            assert_ne!(a, b);
+        }
+
+        let att = second
+            .sign_numeric_event("price-b".to_string(), 7)
+            .await
+            .unwrap();
+        for (sig, nonce) in att
+            .signatures
+            .iter()
+            .zip(&second_ann.oracle_event.oracle_nonces)
+        {
+            assert_eq!(&sig.as_ref()[..32], &nonce.serialize());
+        }
+    }
+
+    #[tokio::test]
+    async fn a_restored_instance_signs_an_event_announced_before_the_restore() {
+        // The nonce depends only on the signing key and the event id, so an
+        // instance rebuilt from the same key, sharing the stored announcement,
+        // signs with the nonce that was announced.
+        let signing_key = SecretKey::from_slice(&[44u8; 32]).unwrap();
+        let storage = MemoryStorage::new();
+        let before = Oracle::from_signing_key(storage.clone(), signing_key).unwrap();
+        let after = Oracle::from_signing_key(storage, signing_key).unwrap();
+        let event_id = "restore".to_string();
+
+        let ann = before
+            .create_enum_event(event_id.clone(), vec!["a".to_string(), "b".to_string()], 1)
+            .await
+            .unwrap();
+        let attestation = after
+            .sign_enum_event(event_id, "b".to_string())
+            .await
+            .unwrap();
+        assert_eq!(
+            &attestation.signatures[0].as_ref()[..32],
+            &ann.oracle_event.oracle_nonces[0].serialize()
+        );
+    }
+
+    #[tokio::test]
+    async fn sign_rejects_a_nonce_from_another_key() {
+        // The derived nonce does not match an announcement made by a different oracle.
+        let oracle = setup_test_oracle();
+        let stranger = setup_test_oracle();
+        let event_id = "stranger".to_string();
+        let ann = stranger
+            .create_enum_event(event_id.clone(), vec!["a".to_string()], 1)
+            .await
+            .unwrap();
+        oracle.storage.save_announcement(ann).await.unwrap();
+
+        let result = oracle.sign_enum_event(event_id, "a".to_string()).await;
+        assert!(matches!(result, Err(Error::InvalidNonces)));
+    }
+
+    #[tokio::test]
+    async fn announcing_an_existing_event_id_is_rejected() {
+        let oracle = setup_test_oracle();
+        let event_id = "twice".to_string();
+        oracle
+            .create_enum_event(event_id.clone(), vec!["a".to_string()], 1)
+            .await
+            .unwrap();
+        let _ = oracle
+            .sign_enum_event(event_id.clone(), "a".to_string())
+            .await
+            .unwrap();
+
+        let result = oracle
+            .create_enum_event(event_id.clone(), vec!["a".to_string()], 1)
+            .await;
+        assert!(matches!(result, Err(Error::EventAlreadyExists)));
+
+        // The recorded signature survived the rejected overwrite.
+        let stored = oracle.storage.get_event(event_id).await.unwrap().unwrap();
+        assert_eq!(stored.signatures.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn concurrent_sign_requests_produce_one_attestation() {
+        let oracle = setup_test_oracle();
+        oracle
+            .create_enum_event(
+                "race".to_string(),
+                vec!["heads".to_string(), "tails".to_string()],
+                1,
+            )
+            .await
+            .unwrap();
+        let other = oracle.clone();
+        let (heads, tails) = tokio::join!(
+            oracle.sign_enum_event("race".to_string(), "heads".to_string()),
+            other.sign_enum_event("race".to_string(), "tails".to_string())
+        );
+        assert_eq!(heads.is_ok() as u8 + tails.is_ok() as u8, 1);
     }
 }

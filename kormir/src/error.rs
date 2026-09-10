@@ -18,6 +18,8 @@ pub enum Error {
     InvalidNonces,
     /// Attempted to sign an event that was already signed
     EventAlreadySigned,
+    /// Attempted to announce an event id that is already stored
+    EventAlreadyExists,
     /// Event data was not found
     NotFound,
     /// The storage failed to read/save the data
@@ -43,6 +45,7 @@ impl Display for Error {
             Error::InvalidNumberOfDigits => write!(f, "Invalid number of digits given"),
             Error::InvalidNonces => write!(f, "Invalid nonces given"),
             Error::EventAlreadySigned => write!(f, "Event already signed"),
+            Error::EventAlreadyExists => write!(f, "Event already exists"),
             Error::NotFound => write!(f, "Event data not found"),
             Error::StorageFailure => write!(f, "Storage failure"),
             Error::InvalidOutcome => write!(f, "Invalid outcome"),
