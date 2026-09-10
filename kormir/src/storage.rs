@@ -3,22 +3,42 @@ use bitcoin::secp256k1::schnorr::Signature;
 use ddk_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, RwLock};
 
+/// Persistence for an [`Oracle`](crate::Oracle).
+///
+/// The oracle signs each event with a nonce derived from its signing key and
+/// the event id. Signing two different outcomes with one nonce reveals the
+/// signing key, so a storage implementation carries two safety obligations:
+///
+/// - `save_announcement` must refuse an event id that is already stored. An
+///   event id is single-use per signing key, forever: a second announcement
+///   under the same id would repeat the nonce.
+/// - `save_signatures` must refuse to sign an event twice. Re-check the stored
+///   signatures inside the same lock or transaction as the write, so that two
+///   concurrent sign requests cannot both pass an earlier read.
 pub trait Storage {
-    /// Get the next `num` nonce indexes
-    async fn get_next_nonce_indexes(&self, num: usize) -> Result<Vec<u32>, Error>;
+    /// Nonce indexes are no longer used. Nonces are derived from the event id.
+    #[deprecated(
+        since = "2.0.0",
+        note = "nonces are derived from the event id; the oracle no longer requests indexes"
+    )]
+    async fn get_next_nonce_indexes(&self, _num: usize) -> Result<Vec<u32>, Error> {
+        Ok(Vec::new())
+    }
 
     /// Save the announcement and return the identifier
-    /// for the announcement
-    async fn save_announcement(
-        &self,
-        announcement: OracleAnnouncement,
-        indexes: Vec<u32>,
-    ) -> Result<String, Error>;
+    /// for the announcement.
+    ///
+    /// Must return [`Error::EventAlreadyExists`] when an event with the same id
+    /// is already stored. Overwriting an announcement would discard its
+    /// recorded signatures and repeat its nonce. See the trait documentation.
+    async fn save_announcement(&self, announcement: OracleAnnouncement) -> Result<String, Error>;
 
-    /// Save signatures and outcomes for a given event
+    /// Save signatures and outcomes for a given event.
+    ///
+    /// Must return [`Error::EventAlreadySigned`] when signatures are already
+    /// stored, checked atomically with the write. See the trait documentation.
     async fn save_signatures(
         &self,
         event_id: String,
@@ -34,7 +54,6 @@ pub trait Storage {
 pub struct OracleEventData {
     pub event_id: String,
     pub announcement: OracleAnnouncement,
-    pub indexes: Vec<u32>,
     pub signatures: Vec<(String, Signature)>,
     #[cfg(feature = "nostr")]
     pub announcement_event_id: Option<String>,
@@ -57,16 +76,19 @@ impl OracleEventData {
     }
 }
 
+/// In-memory [`Storage`] for tests and local development.
+///
+/// Nothing is persisted. A fresh `MemoryStorage` has no record of the event
+/// ids an earlier instance announced, so it cannot refuse a repeated id. Use
+/// a durable storage for any oracle whose attestations are published.
 #[derive(Debug, Clone)]
 pub struct MemoryStorage {
-    current_index: Arc<AtomicU32>,
     data: Arc<RwLock<HashMap<String, OracleEventData>>>,
 }
 
 impl MemoryStorage {
     pub fn new() -> Self {
         Self {
-            current_index: Arc::new(AtomicU32::new(0)),
             data: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -87,26 +109,11 @@ impl Default for MemoryStorage {
 }
 
 impl Storage for MemoryStorage {
-    async fn get_next_nonce_indexes(&self, num: usize) -> Result<Vec<u32>, Error> {
-        let mut current_index = self.current_index.fetch_add(num as u32, Ordering::Relaxed);
-        let mut indexes = Vec::with_capacity(num);
-        for _ in 0..num {
-            indexes.push(current_index);
-            current_index += 1;
-        }
-        Ok(indexes)
-    }
-
-    async fn save_announcement(
-        &self,
-        announcement: OracleAnnouncement,
-        indexes: Vec<u32>,
-    ) -> Result<String, Error> {
+    async fn save_announcement(&self, announcement: OracleAnnouncement) -> Result<String, Error> {
         let event_id = announcement.oracle_event.event_id.clone();
         let event = OracleEventData {
             event_id: event_id.clone(),
             announcement,
-            indexes,
             signatures: Default::default(),
             #[cfg(feature = "nostr")]
             announcement_event_id: None,
@@ -115,6 +122,9 @@ impl Storage for MemoryStorage {
         };
 
         let mut data = self.data.try_write().unwrap();
+        if data.contains_key(&event_id) {
+            return Err(Error::EventAlreadyExists);
+        }
         data.insert(event_id.clone(), event);
 
         Ok(event_id)

@@ -28,6 +28,12 @@ sha256t_hash_newtype! {
 }
 
 /// Create a Schnorr signature using the provided nonce instead of generating one.
+///
+/// # Security
+/// The caller owns nonce safety. A nonce must sign exactly one message: two
+/// signatures with the same `nonce` over different messages reveal the private
+/// key of `keypair` by simple arithmetic. Nothing in this function can detect
+/// or prevent reuse.
 pub fn schnorrsig_sign_with_nonce<S: Signing>(
     secp: &Secp256k1<S>,
     msg: &Message,

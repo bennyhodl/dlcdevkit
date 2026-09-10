@@ -50,12 +50,17 @@ Implement the `Storage` trait for your backend:
 ```rust
 #[async_trait]
 pub trait Storage {
-    async fn get_next_nonce_indexes(&self, num: usize) -> Result<Vec<u32>, Error>;
-    async fn save_announcement(&self, announcement: OracleAnnouncement, indexes: Vec<u32>) -> Result<String, Error>;
+    async fn save_announcement(&self, announcement: OracleAnnouncement) -> Result<String, Error>;
     async fn save_signatures(&self, event_id: String, sigs: Vec<(String, Signature)>) -> Result<OracleEventData, Error>;
     async fn get_event(&self, event_id: String) -> Result<Option<OracleEventData>, Error>;
 }
 ```
+
+`save_announcement` must return `Error::EventAlreadyExists` for an event id
+that is already stored, and `save_signatures` must return
+`Error::EventAlreadySigned` when signatures exist, checked atomically with the
+write. Nonces are derived from the signing key and the event id, so a repeated
+event id would repeat a nonce and reveal the signing key.
 
 A `MemoryStorage` implementation is provided for testing.
 
