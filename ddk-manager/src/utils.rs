@@ -198,6 +198,9 @@ fn get_approximate_required_amount(
     // 20 bytes pubkey hash + 2 bytes opcodes + 9 bytes base output size = 31 bytes * 4 = 124 bytes
     // TODO: handle different address types for CET execution (multisig, p2wsh, p2tr, etc.)
     const ASSUME_P2WPKH_WEIGHT: usize = 124;
+    // The counterparty's p2wpkh payout script, which the party funding the
+    // whole contract also pays for: 22 script bytes * 4 = 88 weight units.
+    const ASSUME_COUNTERPARTY_P2WPKH_SPK_WEIGHT: usize = 88;
 
     let dlc_weight = ddk_dlc::dlc_input::get_dlc_inputs_weight(dlc_inputs);
 
@@ -205,10 +208,11 @@ fn get_approximate_required_amount(
         // No collateral = no fees
         Amount::ZERO
     } else if own_collateral == total_collateral {
-        // Full collateral = full fees
+        // Full collateral = full fees, including the counterparty's payout output
         own_collateral
             + get_common_fee(fee_rate)?
             + ddk_dlc::util::weight_to_fee(ASSUME_P2WPKH_WEIGHT, fee_rate)?
+            + ddk_dlc::util::weight_to_fee(ASSUME_COUNTERPARTY_P2WPKH_SPK_WEIGHT, fee_rate)?
             + ddk_dlc::util::weight_to_fee(dlc_weight, fee_rate)?
     } else {
         // Partial collateral = split fees
@@ -351,7 +355,9 @@ mod tests {
         let appr_required_amount =
             get_approximate_required_amount(&[], total_collateral, own_collateral, fee_rate)
                 .unwrap();
-        let expected_amount = Amount::ONE_BTC + Amount::from_sat(420);
+        // common fee (714 WU) + own payout output (124 WU) + counterparty
+        // payout script (88 WU) at 2 sat/vB.
+        let expected_amount = Amount::ONE_BTC + Amount::from_sat(420 + 44);
         assert_eq!(appr_required_amount, expected_amount);
     }
 

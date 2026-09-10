@@ -320,6 +320,32 @@ impl PartyParams {
         fee_rate_per_vb: u64,
         extra_fee: Amount,
     ) -> Result<(TxOut, Amount, Amount), Error> {
+        self.get_change_output_and_fees_with_counterparty(
+            total_collateral,
+            fee_rate_per_vb,
+            extra_fee,
+            None,
+        )
+    }
+
+    /// Like [`PartyParams::get_change_output_and_fees`], but when this party
+    /// funds the whole contract its CET fee also prices the counterparty's
+    /// payout output.
+    ///
+    /// `CET_BASE_WEIGHT` covers everything in a CET except the payout script
+    /// bytes. In a dual funded contract each party pays half the base weight
+    /// plus its own payout script, which sums to the full CET. In a single
+    /// funded contract the zero-collateral party pays nothing, so the funding
+    /// party must also pay for the counterparty's payout script, otherwise the
+    /// pre-signed CETs carry a lower fee rate than the one negotiated.
+    /// [`create_dlc_transactions`] always passes the counterparty script.
+    pub fn get_change_output_and_fees_with_counterparty(
+        &self,
+        total_collateral: Amount,
+        fee_rate_per_vb: u64,
+        extra_fee: Amount,
+        counterparty_payout_script_pubkey: Option<&Script>,
+    ) -> Result<(TxOut, Amount, Amount), Error> {
         let mut inputs_weight: usize = 0;
 
         // first check if a party does not need to fund the contract if so, then it is zero
@@ -395,7 +421,23 @@ impl PartyParams {
                     "Output spk checked multiplication failed: {} * 4",
                     self.payout_script_pubkey.len()
                 )))?;
-        let total_cet_weight = checked_add!(this_party_cet_base_weight, output_spk_weight)?;
+        // A party funding the whole contract also pays for the counterparty's
+        // payout output, which nobody else prices.
+        let counterparty_spk_weight = match counterparty_payout_script_pubkey {
+            Some(script_pubkey) if self.collateral == total_collateral => script_pubkey
+                .len()
+                .checked_mul(4)
+                .ok_or(Error::InvalidArgument(format!(
+                    "Counterparty output spk checked multiplication failed: {} * 4",
+                    script_pubkey.len()
+                )))?,
+            _ => 0,
+        };
+        let total_cet_weight = checked_add!(
+            this_party_cet_base_weight,
+            output_spk_weight,
+            counterparty_spk_weight
+        )?;
         let cet_or_refund_fee = util::weight_to_fee(total_cet_weight, fee_rate_per_vb)?;
 
         let required_input_funds =
@@ -554,10 +596,20 @@ pub fn create_fund_transaction_with_fees(
 ) -> Result<(Transaction, ScriptBuf), Error> {
     let total_collateral = checked_add!(offer_params.collateral, accept_params.collateral)?;
 
-    let (offer_change_output, offer_fund_fee, offer_cet_fee) =
-        offer_params.get_change_output_and_fees(total_collateral, fee_rate_per_vb, extra_fee)?;
-    let (accept_change_output, accept_fund_fee, accept_cet_fee) =
-        accept_params.get_change_output_and_fees(total_collateral, fee_rate_per_vb, extra_fee)?;
+    let (offer_change_output, offer_fund_fee, offer_cet_fee) = offer_params
+        .get_change_output_and_fees_with_counterparty(
+            total_collateral,
+            fee_rate_per_vb,
+            extra_fee,
+            Some(&accept_params.payout_script_pubkey),
+        )?;
+    let (accept_change_output, accept_fund_fee, accept_cet_fee) = accept_params
+        .get_change_output_and_fees_with_counterparty(
+            total_collateral,
+            fee_rate_per_vb,
+            extra_fee,
+            Some(&offer_params.payout_script_pubkey),
+        )?;
 
     let fund_output_value = checked_add!(offer_params.input_amount, accept_params.input_amount)?
         - offer_change_output.value
@@ -1496,6 +1548,127 @@ mod tests {
         assert!(change_out_single_funded.value < change_out_dual_funded.value);
         assert!(fund_fee_single_funded > fund_fee_dual_funded);
         assert!(cet_fee_single_funded > cet_fee_dual_funded);
+    }
+
+    #[test]
+    fn single_funded_cet_fee_prices_both_payout_outputs() {
+        let fee_rate = 4;
+        let (funding_party, _) =
+            get_party_params(Amount::from_sat(150_000_000), Amount::ONE_BTC, None);
+        let (zero_collateral_party, _) = get_party_params(Amount::ZERO, Amount::ZERO, Some(2));
+        let total_collateral = Amount::ONE_BTC;
+
+        let (_, _, cet_fee) = funding_party
+            .get_change_output_and_fees_with_counterparty(
+                total_collateral,
+                fee_rate,
+                Amount::ZERO,
+                Some(&zero_collateral_party.payout_script_pubkey),
+            )
+            .unwrap();
+        let (_, _, counterparty_cet_fee) = zero_collateral_party
+            .get_change_output_and_fees_with_counterparty(
+                total_collateral,
+                fee_rate,
+                Amount::ZERO,
+                Some(&funding_party.payout_script_pubkey),
+            )
+            .unwrap();
+
+        // The whole CET, both payout scripts included, is paid by the one
+        // party that funds it.
+        let full_cet_weight = CET_BASE_WEIGHT
+            + funding_party.payout_script_pubkey.len() * 4
+            + zero_collateral_party.payout_script_pubkey.len() * 4;
+        assert_eq!(
+            cet_fee,
+            util::weight_to_fee(full_cet_weight, fee_rate).unwrap()
+        );
+        assert_eq!(counterparty_cet_fee, Amount::ZERO);
+    }
+
+    #[test]
+    fn dual_funded_cet_fee_ignores_the_counterparty_output() {
+        let fee_rate = 4;
+        let (party, _) = get_party_params(Amount::from_sat(150_000_000), Amount::ONE_BTC, None);
+        let (counterparty, _) =
+            get_party_params(Amount::from_sat(150_000_000), Amount::ONE_BTC, Some(2));
+        let total_collateral = Amount::ONE_BTC + Amount::ONE_BTC;
+
+        let (_, _, cet_fee) = party
+            .get_change_output_and_fees_with_counterparty(
+                total_collateral,
+                fee_rate,
+                Amount::ZERO,
+                Some(&counterparty.payout_script_pubkey),
+            )
+            .unwrap();
+        let (_, _, legacy_cet_fee) = party
+            .get_change_output_and_fees(total_collateral, fee_rate, Amount::ZERO)
+            .unwrap();
+
+        // Each party prices half the base weight plus its own payout script.
+        let half_cet_weight = CET_BASE_WEIGHT / 2 + party.payout_script_pubkey.len() * 4;
+        assert_eq!(
+            cet_fee,
+            util::weight_to_fee(half_cet_weight, fee_rate).unwrap()
+        );
+        assert_eq!(cet_fee, legacy_cet_fee);
+    }
+
+    #[test]
+    fn single_funded_transactions_reserve_the_full_cet_fee() {
+        let fee_rate = 4;
+        let (offer_params, _) =
+            get_party_params(Amount::from_sat(150_000_000), Amount::ONE_BTC, None);
+        let (accept_params, _) = get_party_params(Amount::ZERO, Amount::ZERO, Some(2));
+        let payouts = vec![
+            Payout {
+                offer: Amount::ONE_BTC,
+                accept: Amount::ZERO,
+            },
+            Payout {
+                offer: Amount::ZERO,
+                accept: Amount::ONE_BTC,
+            },
+        ];
+
+        let transactions = create_dlc_transactions(
+            &offer_params,
+            &accept_params,
+            &payouts,
+            100,
+            fee_rate,
+            0,
+            10,
+            0,
+            0,
+        )
+        .unwrap();
+
+        let fund_output_value = transactions.get_fund_output().value;
+        for cet in &transactions.cets {
+            let outputs_value: Amount = cet.output.iter().map(|o| o.value).sum();
+            let reserved_fee = fund_output_value - outputs_value;
+            // The unsigned CET plus the 2-of-2 witness the base weight assumes.
+            let cet_weight = cet.weight().to_wu() as usize
+                + (CET_BASE_WEIGHT
+                    - Transaction {
+                        version: TX_VERSION,
+                        lock_time: LockTime::ZERO,
+                        input: vec![TxIn::default()],
+                        output: vec![TxOut::NULL, TxOut::NULL],
+                    }
+                    .weight()
+                    .to_wu() as usize);
+            assert!(
+                reserved_fee >= util::weight_to_fee(cet_weight, fee_rate).unwrap(),
+                "reserved {} for a CET of {} WU at {} sat/vB",
+                reserved_fee,
+                cet_weight,
+                fee_rate
+            );
+        }
     }
 
     #[test]
