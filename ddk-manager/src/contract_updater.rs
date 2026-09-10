@@ -62,6 +62,14 @@ where
     L::Target: Logger,
 {
     contract_input.validate()?;
+    // Check the shape before any wallet input is reserved for the offer.
+    if contract_input.contract_infos.len() != oracle_announcements.len() {
+        return Err(Error::InvalidParameters(format!(
+            "expected one announcement list per contract info, got {} lists for {} contract infos",
+            oracle_announcements.len(),
+            contract_input.contract_infos.len()
+        )));
+    }
 
     let id = crate::utils::get_new_temporary_id();
     let keys_id = signer_provider.derive_signer_key_id(id);
@@ -104,7 +112,7 @@ where
         refund_delay,
         keys_id,
         chain_hash,
-    );
+    )?;
 
     let offer_msg = OfferDlc::from(&offered_contract);
 

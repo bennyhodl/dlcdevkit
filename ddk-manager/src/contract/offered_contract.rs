@@ -4,6 +4,7 @@ use crate::conversion_utils::{
     get_contract_info_and_announcements, get_tx_input_infos, LEGACY_CHAINHASH, PROTOCOL_VERSION,
 };
 use crate::dlc_input::get_dlc_inputs_from_funding_inputs;
+use crate::error::Error;
 use crate::utils::get_new_serial_id;
 
 use super::contract_info::ContractInfo;
@@ -96,8 +97,11 @@ impl OfferedContract {
 
     /// Creates a new [`OfferedContract`] from the given parameters.
     ///
-    /// The CET locktime is pinned to the closest oracle event maturity so that
-    /// CETs are spendable exactly when the first event matures, never before.
+    /// `oracle_announcements` holds one list per entry of
+    /// `contract.contract_infos`, in the same order; any other shape is an
+    /// error. The CET locktime is pinned to the closest oracle event maturity
+    /// so that CETs are spendable exactly when the first event matures, never
+    /// before.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: ContractId,
@@ -109,15 +113,19 @@ impl OfferedContract {
         refund_delay: u32,
         keys_id: KeysId,
         chain_hash: [u8; 32],
-    ) -> Self {
+    ) -> Result<Self, Error> {
         let total_collateral = contract.offer_collateral + contract.accept_collateral;
 
-        assert_eq!(contract.contract_infos.len(), oracle_announcements.len());
+        if contract.contract_infos.len() != oracle_announcements.len() {
+            return Err(Error::InvalidParameters(format!(
+                "expected one announcement list per contract info, got {} lists for {} contract infos",
+                oracle_announcements.len(),
+                contract.contract_infos.len()
+            )));
+        }
 
-        let latest_maturity = crate::utils::get_latest_maturity_date(&oracle_announcements)
-            .expect("to be able to retrieve latest maturity date");
-        let cet_locktime = crate::utils::get_closest_maturity_date(&oracle_announcements)
-            .expect("to be able to retrieve closest maturity date");
+        let latest_maturity = crate::utils::get_latest_maturity_date(&oracle_announcements)?;
+        let cet_locktime = crate::utils::get_closest_maturity_date(&oracle_announcements)?;
 
         let fund_output_serial_id = get_new_serial_id();
         let contract_info = contract
@@ -130,7 +138,7 @@ impl OfferedContract {
                 threshold: x.oracles.threshold as usize,
             })
             .collect::<Vec<ContractInfo>>();
-        OfferedContract {
+        Ok(OfferedContract {
             id,
             is_offer_party: true,
             contract_info,
@@ -146,7 +154,7 @@ impl OfferedContract {
             counter_party: *counter_party,
             keys_id,
             tlvs: Default::default(),
-        }
+        })
     }
 
     /// Convert an [`OfferDlc`] message to an [`OfferedContract`].

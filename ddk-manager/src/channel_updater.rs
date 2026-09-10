@@ -119,7 +119,7 @@ where
         refund_delay,
         keys_id,
         crate::contract::chain_hash_from_network(blockchain.get_network()?),
-    );
+    )?;
 
     let per_update_seed = signer_provider.get_new_secret_key()?;
 
@@ -1169,7 +1169,7 @@ where
         refund_delay,
         keys_id,
         chain_hash,
-    );
+    )?;
 
     offered_contract.fund_output_serial_id = 0;
 

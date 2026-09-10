@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use crate::chain::{EsploraClient, ZeromqClient};
-use crate::ddk::{DlcDevKit, DlcManagerMessage};
+use crate::ddk::{group_announcements, DlcDevKit, DlcManagerMessage};
 use crate::error::{BuilderError, Error};
 use crate::logger::{LogLevel, Logger};
 use crate::wallet::address::AddressGenerator;
@@ -270,6 +270,8 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
         let manager_clone = manager.clone();
         let logger_clone = logger.clone();
         tokio::spawn(async move {
+            // Every message runs in its own task: a panic in one request must
+            // not take down the loop that also drives the periodic checks.
             while let Some(msg) = receiver.recv().await {
                 match msg {
                     DlcManagerMessage::OfferDlc {
@@ -278,13 +280,24 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
                         oracle_announcements,
                         responder,
                     } => {
-                        let offer = manager_clone
-                            .send_offer_with_announcements(
-                                &contract_input,
-                                counter_party,
-                                vec![oracle_announcements],
-                            )
-                            .await;
+                        let manager = manager_clone.clone();
+                        let offer = tokio::spawn(async move {
+                            let announcements =
+                                group_announcements(&contract_input, oracle_announcements)?;
+                            manager
+                                .send_offer_with_announcements(
+                                    &contract_input,
+                                    counter_party,
+                                    announcements,
+                                )
+                                .await
+                        })
+                        .await
+                        .unwrap_or_else(|e| {
+                            Err(ddk_manager::error::Error::InvalidState(format!(
+                                "offer creation panicked: {e}"
+                            )))
+                        });
 
                         let _ = responder.send(offer).map_err(|e| {
                             log_error!(logger_clone.clone(), "Error sending offer: {:?}", e);
@@ -294,14 +307,29 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
                         contract,
                         responder,
                     } => {
-                        let accept_dlc = manager_clone.accept_contract_offer(&contract).await;
+                        let manager = manager_clone.clone();
+                        let accept_dlc =
+                            tokio::spawn(
+                                async move { manager.accept_contract_offer(&contract).await },
+                            )
+                            .await
+                            .unwrap_or_else(|e| {
+                                Err(ddk_manager::error::Error::InvalidState(format!(
+                                    "offer acceptance panicked: {e}"
+                                )))
+                            });
 
                         let _ = responder.send(accept_dlc).map_err(|e| {
                             log_error!(logger_clone.clone(), "Error sending accept DLC: {:?}", e);
                         });
                     }
                     DlcManagerMessage::PeriodicCheck => {
-                        let _ = manager_clone.periodic_check(false).await;
+                        let manager = manager_clone.clone();
+                        if let Err(e) =
+                            tokio::spawn(async move { manager.periodic_check(false).await }).await
+                        {
+                            log_error!(logger_clone.clone(), "Periodic check panicked: {}", e);
+                        }
                     }
                 }
             }

@@ -9,6 +9,7 @@ use ddk::wallet::DlcDevKitWallet;
 use ddk::{chain::EsploraClient, logger::Logger};
 use ddk_manager::{manager::Manager, CachedContractSignerProvider, Oracle, SimpleSigner};
 use ddk_messages::Message;
+use ddk_testenv::dlc::{announce_enum_event, contract_input, enum_descriptor, ContractLeg};
 use secp256k1_zkp::{rand::Fill, PublicKey, XOnlyPublicKey};
 use std::{collections::HashMap, sync::Arc};
 use test_utils::{set_time, MockTime};
@@ -148,6 +149,34 @@ async fn reject_accept_on_matured_event() {
         .accept_contract_offer(&contract_id)
         .await
         .expect_err("To reject accepting an offer whose event matured while it waited");
+}
+
+#[tokio::test]
+async fn reject_offer_creation_with_mismatched_announcements() {
+    let logger = Arc::new(Logger::disabled("test_manager".to_string()));
+    let manager = get_manager(logger).await;
+
+    let oracles = vec![MemoryOracle::default(), MemoryOracle::default()];
+    let announcements = announce_enum_event(&oracles, "mismatch", 2_000_000_000).await;
+    let total = bitcoin::Amount::from_sat(100_000);
+    let two_legs = contract_input(
+        &[
+            ContractLeg::new(enum_descriptor(total), vec![announcements[0].clone()], 1),
+            ContractLeg::new(enum_descriptor(total), vec![announcements[1].clone()], 1),
+        ],
+        total,
+        bitcoin::Amount::ZERO,
+        2,
+    );
+
+    // One announcement list for two contract infos used to hit an assert.
+    let result = manager
+        .send_offer_with_announcements(&two_legs, pubkey(), vec![announcements])
+        .await;
+    assert!(
+        matches!(result, Err(ddk_manager::error::Error::InvalidParameters(_))),
+        "unexpected result: {result:?}"
+    );
 }
 
 #[tokio::test]
