@@ -28,10 +28,10 @@ Usage: ddk-node [OPTIONS]
 
 Options:
       --log <LOG>                  Set the log level [default: info]
-  -n, --network <NETWORK>          Set the Bitcoin network [default: signet]
+  -n, --network <NETWORK>          Set the Bitcoin network: regtest or signet [default: signet]
   -s, --storage-dir <STORAGE_DIR>  Data storage path [default: ~/.ddk]
   -p, --port <PORT>                Transport listening port [default: 1776]
-      --grpc <GRPC_HOST>           gRPC server host:port [default: 0.0.0.0:3030]
+      --grpc <GRPC_HOST>           gRPC server host:port [default: 127.0.0.1:3030]
       --esplora <ESPLORA_HOST>     Esplora server URL [default: https://mutinynet.com/api]
       --oracle <ORACLE_HOST>       Kormir oracle URL [default: https://kormir.dlcdevkit.com]
       --seed <SEED>                Seed strategy: 'file' or 'bytes' [default: file]
@@ -121,3 +121,15 @@ $ just cli-one accept-offer <CONTRACT_ID>
 ## License
 
 This project is licensed under the MIT License.
+
+## Security
+
+`ddk-node` is a development and test node. Its gRPC server has no
+authentication and no TLS, and it exposes calls that spend the wallet
+(`Send`) and commit collateral (`AcceptOffer`). It binds to loopback by
+default; only pass another `--grpc` address on a network where every client
+is trusted. Mainnet is not offered for this reason.
+
+The wallet seed is written to `<storage-dir>/seed.ddk` in the clear with
+owner-only permissions. Anyone who can read that file controls the wallet,
+every contract key, and the nostr identity.

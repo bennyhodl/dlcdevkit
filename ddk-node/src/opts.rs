@@ -15,9 +15,11 @@ pub struct NodeOpts {
     #[arg(value_parser = ["info", "debug"])]
     pub log: String,
     #[arg(short, long)]
-    #[arg(help = "Set the Bitcoin network for DDK")]
+    #[arg(
+        help = "Set the Bitcoin network for DDK. The node's RPC is unauthenticated, so mainnet is not offered."
+    )]
     #[arg(default_value = "signet")]
-    #[arg(value_parser = ["regtest", "mainnet", "signet"])]
+    #[arg(value_parser = ["regtest", "signet"])]
     pub network: String,
     #[arg(short, long)]
     #[arg(
@@ -30,8 +32,10 @@ pub struct NodeOpts {
     #[arg(help = "Listening port for the lightning network transport.")]
     pub listening_port: u16,
     #[arg(long = "grpc")]
-    #[arg(default_value = "0.0.0.0:3030")]
-    #[arg(help = "Host and port the gRPC server will run on.")]
+    #[arg(default_value = "127.0.0.1:3030")]
+    #[arg(
+        help = "Host and port the gRPC server will run on. The RPC has no authentication and no TLS and can spend the wallet, so only bind an address that trusted clients can reach."
+    )]
     pub grpc_host: String,
     #[arg(long = "esplora")]
     #[arg(default_value = "https://mutinynet.com/api")]
