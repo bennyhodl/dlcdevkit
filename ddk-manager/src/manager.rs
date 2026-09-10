@@ -439,7 +439,9 @@ where
     }
 
     /// Function called to create a new DLC. The offered contract will be stored
-    /// and an OfferDlc message returned.
+    /// and an OfferDlc message returned. The application may append TLV
+    /// records to the returned message and pass it to
+    /// [`Manager::commit_offer`] before sending it.
     ///
     /// This function will fetch the oracle announcements from the oracle.
     #[tracing::instrument(skip_all)]
@@ -488,7 +490,9 @@ where
         Ok(offer_msg)
     }
 
-    /// Function to call to accept a DLC for which an offer was received.
+    /// Function to call to accept a DLC for which an offer was received. The
+    /// application may append TLV records to the returned message and pass it
+    /// to [`Manager::commit_accept`] before sending it.
     #[tracing::instrument(skip_all)]
     pub async fn accept_contract_offer(
         &self,
@@ -528,6 +532,61 @@ where
         );
 
         Ok((contract_id, counter_party, accept_msg))
+    }
+
+    /// Function to call with the final offer message before sending it. The
+    /// application may have appended TLV records to the message returned by
+    /// [`Manager::send_offer`]; this copies the message's stream onto the
+    /// stored contract so the store matches what goes out on the wire.
+    #[tracing::instrument(skip_all)]
+    pub async fn commit_offer(&self, offer_msg: &OfferDlc) -> Result<(), Error> {
+        let mut offered_contract = get_contract_in_state!(
+            self,
+            &offer_msg.temporary_contract_id,
+            Offered,
+            None as Option<PublicKey>
+        )?;
+        offered_contract.tlvs = offer_msg.tlvs.clone();
+        self.store
+            .update_contract(&Contract::Offered(offered_contract))
+            .await
+    }
+
+    /// Function to call with the final accept message before sending it. See
+    /// [`Manager::commit_offer`].
+    #[tracing::instrument(skip_all)]
+    pub async fn commit_accept(
+        &self,
+        contract_id: &ContractId,
+        accept_msg: &AcceptDlc,
+    ) -> Result<(), Error> {
+        let mut accepted_contract =
+            get_contract_in_state!(self, contract_id, Accepted, None as Option<PublicKey>)?;
+        if accepted_contract.offered_contract.id != accept_msg.temporary_contract_id {
+            return Err(Error::InvalidParameters(
+                "accept message does not match the contract".to_string(),
+            ));
+        }
+        accepted_contract.tlvs = accept_msg.tlvs.clone();
+        self.store
+            .update_contract(&Contract::Accepted(accepted_contract))
+            .await
+    }
+
+    /// Function to call with the final sign message before sending it. See
+    /// [`Manager::commit_offer`].
+    #[tracing::instrument(skip_all)]
+    pub async fn commit_sign(&self, sign_msg: &SignDlc) -> Result<(), Error> {
+        let mut signed_contract = get_contract_in_state!(
+            self,
+            &sign_msg.contract_id,
+            Signed,
+            None as Option<PublicKey>
+        )?;
+        signed_contract.tlvs = sign_msg.tlvs.clone();
+        self.store
+            .update_contract(&Contract::Signed(signed_contract))
+            .await
     }
 
     /// Function to update the state of the [`ChainMonitor`] with new
@@ -636,7 +695,10 @@ where
         Ok(())
     }
 
-    /// Function to call to accept a DLC for which an offer was received.
+    /// Function to call when an accept message is received. Verifies the
+    /// accept, stores the signed contract, and returns the sign message for
+    /// the application to finish. The application may append TLV records to
+    /// it and pass it to [`Manager::commit_sign`] before sending it.
     #[tracing::instrument(skip_all)]
     pub async fn on_accept_message(
         &self,

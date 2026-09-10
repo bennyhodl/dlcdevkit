@@ -122,3 +122,38 @@ async fn reject_channel_offer_with_existing_channel_id() {
         .await
         .expect_err("To reject the second offer message");
 }
+
+#[tokio::test]
+async fn commit_offer_stores_the_message_stream() {
+    use ddk_manager::contract::Contract;
+    use ddk_manager::Storage;
+
+    let logger = Arc::new(Logger::disabled("test_manager".to_string()));
+    let mut offer: ddk_messages::OfferDlc =
+        serde_json::from_str(include_str!("../test_inputs/offer_contract.json")).unwrap();
+
+    let manager = get_manager(logger).await;
+    manager
+        .on_dlc_message(&Message::Offer(offer.clone()), pubkey())
+        .await
+        .unwrap();
+
+    // A record of type 65007 with a one-byte body.
+    let record_bytes = [0xfd, 0xfd, 0xef, 0x01, 7];
+    offer.tlvs = ddk_messages::tlv_stream::TlvStream::read_to_end(
+        &mut ddk_messages::lightning::io::Cursor::new(record_bytes),
+    )
+    .unwrap();
+    manager.commit_offer(&offer).await.unwrap();
+
+    let contract = manager
+        .get_store()
+        .get_contract(&offer.temporary_contract_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let Contract::Offered(offered) = contract else {
+        panic!("contract is not offered")
+    };
+    assert_eq!(offered.tlvs, offer.tlvs);
+}

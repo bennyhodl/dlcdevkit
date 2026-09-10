@@ -321,6 +321,9 @@ pub(crate) fn accept_contract_internal(
         funding_inputs: funding_inputs.to_vec(),
         dlc_transactions,
         accept_refund_signature: refund_signature,
+        // The accept message clones this stream, so the two start out equal.
+        // Records the application adds to the message land here through
+        // `Manager::commit_accept` before the message is sent.
         tlvs: Default::default(),
     };
 
