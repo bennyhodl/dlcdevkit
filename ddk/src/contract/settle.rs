@@ -66,6 +66,7 @@ pub fn sign_cet(
     let fund_value = context.transactions.get_fund_output().value;
 
     let mut signature_index = 0;
+    let mut invalid_attestation = None;
     for (info, cet_range) in context.execution_infos.iter().zip(&context.cet_ranges) {
         // Verifying the counterparty's adaptor signatures is also how the
         // adaptor info and the next signature offset are obtained.
@@ -95,7 +96,14 @@ pub fn sign_cet(
             continue;
         };
 
-        validate_attestations(&secp, &info.oracle_announcements, attestations)?;
+        // Independent events can share outcome labels. An attestation that
+        // doesn't validate for this branch can still belong to a later one.
+        // Preserve the validation error if no branch accepts the attestations.
+        if let Err(error) = validate_attestations(&secp, &info.oracle_announcements, attestations) {
+            invalid_attestation = Some(error);
+            signature_index = next_index;
+            continue;
+        }
 
         // `cet_index` is relative to the CETs of this contract info; the
         // adaptor index already carries the running offset.
@@ -114,7 +122,7 @@ pub fn sign_cet(
         return Ok(cet);
     }
 
-    Err(ContractError::NoMatchingOutcome)
+    Err(invalid_attestation.unwrap_or(ContractError::NoMatchingOutcome))
 }
 
 /// Signs the refund transaction.

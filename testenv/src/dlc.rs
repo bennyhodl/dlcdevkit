@@ -35,6 +35,8 @@ use ddk_messages::oracle_msgs::{
 };
 use ddk_trie::OracleNumericInfo;
 
+pub mod baseball;
+
 /// Oracle event maturity, deliberately in the past.
 ///
 /// CET and refund locktimes are derived from it, and regtest block timestamps

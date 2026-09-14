@@ -277,7 +277,7 @@ pub(crate) fn accept_contract_internal(
             &accept_params.payout_script_pubkey,
             accept_params.payout_serial_id,
             &payouts,
-            0,
+            dlc_transactions.cets[0].lock_time.to_consensus_u32(),
         );
 
         let (adaptor_info, adaptor_sig) = contract_info.get_adaptor_info(
@@ -589,14 +589,14 @@ where
             &accept_params.payout_script_pubkey,
             accept_params.payout_serial_id,
             &payouts,
-            0,
+            cets[0].lock_time.to_consensus_u32(),
         );
 
         let (adaptor_info, tmp_adaptor_index) = contract_info.verify_and_get_adaptor_info(
             secp,
             offered_contract.total_collateral,
-            &accept_params.fund_pubkey,
-            funding_witness_script,
+            &counter_adaptor_pk,
+            input_script_pubkey,
             input_value,
             &tmp_cets,
             cet_adaptor_signatures,
@@ -611,21 +611,24 @@ where
     }
 
     let mut own_signatures: Vec<EcdsaAdaptorSignature> = Vec::new();
+    let mut cet_start = 0;
 
     for (contract_info, adaptor_info) in offered_contract
         .contract_info
         .iter()
         .zip(adaptor_infos.iter())
     {
+        let cet_end = cet_start + contract_info.get_payouts(total_collateral)?.len();
         let sigs = contract_info.get_adaptor_signatures(
             secp,
             adaptor_info,
             &signer,
             input_script_pubkey,
             input_value,
-            &cets,
+            &cets[cet_start..cet_end],
         )?;
         own_signatures.extend(sigs);
+        cet_start = cet_end;
     }
 
     // get all funding inputs
@@ -854,22 +857,28 @@ where
             .to_string(),
     );
     let mut adaptor_sig_start = 0;
+    let mut cet_start = 0;
 
     for (adaptor_info, contract_info) in accepted_contract
         .adaptor_infos
         .iter()
         .zip(offered_contract.contract_info.iter())
     {
+        let cet_end = cet_start
+            + contract_info
+                .get_payouts(offered_contract.total_collateral)?
+                .len();
         adaptor_sig_start = contract_info.verify_adaptor_info(
             secp,
             &counter_adaptor_pk,
             input_script_pubkey,
             input_value,
-            &accepted_contract.dlc_transactions.cets,
+            &accepted_contract.dlc_transactions.cets[cet_start..cet_end],
             cet_adaptor_signatures,
             adaptor_sig_start,
             adaptor_info,
         )?;
+        cet_start = cet_end;
     }
 
     log_debug!(
@@ -1065,9 +1074,16 @@ where
             .first()
             .map_or("", |(_, attestation)| attestation.event_id.as_str()),
     );
-    let (range_info, sigs) =
-        crate::utils::get_range_info_and_oracle_sigs(contract_info, adaptor_info, attestations)?;
-    let mut cet = contract.accepted_contract.dlc_transactions.cets[range_info.cet_index].clone();
+    let (cet_start, adaptor_start) = contract
+        .accepted_contract
+        .execution_offsets(contract_info)?;
+    let (range_info, sigs) = contract_info
+        .get_range_info_and_oracle_signatures(adaptor_info, attestations, adaptor_start)?
+        .ok_or_else(|| {
+            Error::InvalidState("Could not find closing info for given outcomes".into())
+        })?;
+    let mut cet =
+        contract.accepted_contract.dlc_transactions.cets[cet_start + range_info.cet_index].clone();
     let offered_contract = &contract.accepted_contract.offered_contract;
 
     let (adaptor_sigs, other_pubkey) = if offered_contract.is_offer_party {
