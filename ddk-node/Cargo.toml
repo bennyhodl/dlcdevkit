@@ -20,7 +20,7 @@ anyhow = { workspace = true }
 clap = { version = "4.5.9", features = ["derive"] }
 hex = { workspace = true }
 homedir = "0.3.3"
-inquire = "0.7.5"
+inquire = "0.9.4"
 prost = "0.14.3"
 serde = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true }
