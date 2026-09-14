@@ -1,3 +1,4 @@
+use std::num::NonZeroUsize;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -9,17 +10,21 @@ use bitcoin::XOnlyPublicKey;
 use ddk_manager::error::Error as ManagerError;
 use ddk_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
 use ddk_messages::TlvRecord;
-use nostr_database::MemoryDatabase;
 use nostr_database::NostrDatabase;
+use nostr_memory::MemoryDatabase;
 use nostr_rs::event::EventId;
 use nostr_rs::event::Kind;
+use nostr_rs::filter::Filter;
 use nostr_rs::key::PublicKey as NostrPublicKey;
-use nostr_rs::types::{Timestamp, TryIntoUrl};
-use nostr_sdk::Client;
-use nostr_sdk::Filter;
-use nostr_sdk::RelayPoolNotification;
+use nostr_rs::types::Timestamp;
+use nostr_sdk::client::{Client, ClientNotification};
+use nostr_sdk::prelude::StreamExt;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
+
+/// How many oracle events the in-memory cache keeps before it evicts the
+/// oldest. Matches the cap the nostr-database 0.44 memory backend used.
+const ORACLE_EVENT_CACHE_SIZE: NonZeroUsize = NonZeroUsize::new(35_000).unwrap();
 
 /// A Nostr-based oracle implementation for DLCs that listens for and processes
 /// oracle announcements and attestations over the Nostr network.
@@ -37,7 +42,7 @@ pub struct NostrOracle {
     /// Nostr client for connecting to relays and handling message subscriptions
     client: Client,
     /// In-memory database for storing oracle events (announcements and attestations)
-    db: nostr_database::MemoryDatabase,
+    db: Arc<MemoryDatabase>,
     /// Bitcoin x-only public key used for DLC operations
     xonly_oracle_pubkey: XOnlyPublicKey,
     /// Nostr public key for message verification and routing
@@ -64,7 +69,7 @@ impl NostrOracle {
     /// # Returns
     /// * `Ok(NostrOracle)` - Successfully initialized oracle
     /// * `Err(OracleError)` - If initialization fails (invalid key, connection issues, etc.)
-    pub async fn new<U: TryIntoUrl>(
+    pub async fn new<U: AsRef<str>>(
         relays: Vec<U>,
         since: Option<Timestamp>,
         nostr_oracle_pubkey: NostrPublicKey,
@@ -80,9 +85,7 @@ impl NostrOracle {
         let client = Client::default();
 
         for relay in relays {
-            if let Ok(url) = relay.try_into_url() {
-                client.add_relay(url).await.unwrap();
-            } else {
+            if client.add_relay(relay.as_ref()).await.is_err() {
                 log_error!(logger, "Invalid relay URL.");
             }
         }
@@ -93,11 +96,11 @@ impl NostrOracle {
         let filter = crate::nostr::messages::create_oracle_message_filter(since);
 
         client
-            .subscribe(filter, None)
+            .subscribe(filter)
             .await
             .map_err(|_| OracleError::Init("Failed to make subscription.".to_string()))?;
 
-        let db = MemoryDatabase::new();
+        let db = Arc::new(MemoryDatabase::bounded(ORACLE_EVENT_CACHE_SIZE));
 
         Ok(Self {
             client,
@@ -154,10 +157,10 @@ impl NostrOracle {
                             break;
                         }
                     },
-                    Ok(notification) = notifications.recv() => {
+                    Some(notification) = notifications.next() => {
                         log_info!(logger, "Received notification {:?}", notification);
                         match notification {
-                            RelayPoolNotification::Event {
+                            ClientNotification::Event {
                                 relay_url: _,
                                 subscription_id: _,
                                 event,
@@ -219,10 +222,8 @@ impl ddk_manager::Oracle for NostrOracle {
 
         let event = self
             .client
-            .fetch_events(
-                Filter::new().event(event_id).since(Timestamp::zero()),
-                Duration::from_secs(10),
-            )
+            .fetch_events(Filter::new().event(event_id).since(Timestamp::zero()))
+            .timeout(Duration::from_secs(10))
             .await
             .map_err(|_| {
                 ManagerError::OracleError(format!("Failed to fetch event: {}", event_id))
@@ -251,7 +252,8 @@ impl ddk_manager::Oracle for NostrOracle {
 
         let event = self
             .client
-            .fetch_events(Filter::new().event(event_id), Duration::from_secs(10))
+            .fetch_events(Filter::new().event(event_id))
+            .timeout(Duration::from_secs(10))
             .await
             .map_err(|_| {
                 ManagerError::OracleError(format!("Failed to fetch event: {}", event_id))
@@ -342,7 +344,7 @@ mod tests {
             kormir::nostr_events::create_announcement_event(&oracle.nostr_keys(), &announcement)
                 .unwrap();
 
-        let nostr_client = nostr_sdk::Client::new(key);
+        let nostr_client = Client::new();
         nostr_client.add_relay(relay_url).await.unwrap();
         nostr_client.connect().await;
         nostr_client.send_event(&ann_event).await.unwrap();

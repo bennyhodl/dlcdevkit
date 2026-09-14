@@ -121,11 +121,11 @@ pub enum TransportError {
 #[derive(Error, Debug)]
 pub enum NostrError {
     #[error("Nostr nip4: {0}")]
-    Nip04(#[from] nostr_rs::nips::nip04::Error),
+    Nip04(#[from] nostr_rs::error::Error),
     #[error("Message parsing error: {0}")]
     MessageParsing(String),
     #[error("Signing nostr event error: {0}")]
-    Signing(#[from] nostr_rs::event::builder::Error),
+    Signing(nostr_rs::error::Error),
     #[error("Nostr generic: {0}")]
     Generic(String),
 }

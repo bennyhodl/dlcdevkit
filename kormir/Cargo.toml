@@ -19,7 +19,7 @@ ddk-dlc = { workspace = true, features = ["std", "use-serde"] }
 ddk-messages = { workspace = true, features = ["std", "use-serde"] }
 lightning = { workspace = true, features = ["std"] }
 log = { workspace = true }
-nostr = { version = "0.44.8", optional = true }
+nostr = { version = "0.45", optional = true }
 base64 = { version = "0.22.1", optional = true }
 serde = { workspace = true, features = ["std", "derive"] }
 secp256k1-zkp = { workspace = true }
@@ -28,3 +28,4 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full"] }
+nostr = { version = "0.45", features = ["os-rng"] }

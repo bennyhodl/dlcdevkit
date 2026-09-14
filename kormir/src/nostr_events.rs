@@ -2,8 +2,9 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
 use ddk_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
 use ddk_messages::TlvRecord;
-use nostr::event::Error;
-use nostr::{Event, EventBuilder, EventId, Keys, Kind, Tag};
+use nostr::error::Error;
+use nostr::event::{Event, EventBuilder, EventId, FinalizeEvent, Kind, Tag};
+use nostr::key::Keys;
 
 /// Creates an Oracle Announcement event for nostr.
 ///
@@ -17,9 +18,7 @@ pub fn create_announcement_event(
     announcement: &OracleAnnouncement,
 ) -> Result<Event, Error> {
     let content = announcement.to_tlv_bytes();
-    let event = EventBuilder::new(Kind::Custom(88), BASE64.encode(content))
-        .build(keys.public_key)
-        .sign_with_keys(keys)?;
+    let event = EventBuilder::new(Kind::Custom(88), BASE64.encode(content)).finalize(keys)?;
     Ok(event)
 }
 
@@ -34,8 +33,7 @@ pub fn create_attestation_event(
     let content = attestation.to_tlv_bytes();
     let event = EventBuilder::new(Kind::Custom(89), BASE64.encode(content))
         .tag(Tag::event(event_id))
-        .build(keys.public_key)
-        .sign_with_keys(keys)?;
+        .finalize(keys)?;
     Ok(event)
 }
 

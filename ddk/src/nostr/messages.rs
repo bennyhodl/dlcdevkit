@@ -20,10 +20,11 @@ use ddk_messages::message_handler::read_dlc_message;
 use ddk_messages::{Message, WireMessage};
 use lightning::ln::wire::Type;
 use lightning::util::ser::{Readable, Writeable};
+use nostr_rs::event::{Event, EventBuilder, EventId, FinalizeEvent, Kind, Tag};
+use nostr_rs::filter::Filter;
+use nostr_rs::key::{Keys, PublicKey, SecretKey};
 use nostr_rs::nips::nip04;
-use nostr_rs::{
-    Event, EventBuilder, EventId, Filter, Keys, Kind, PublicKey, SecretKey, Tag, Timestamp,
-};
+use nostr_rs::types::Timestamp;
 
 /// Creates a Nostr filter to listen for DLC protocol messages.
 ///
@@ -193,7 +194,8 @@ pub fn create_dlc_msg_event(
 
     let event = EventBuilder::new(DLC_MESSAGE_KIND, content)
         .tags(tags)
-        .sign_with_keys(keys)?;
+        .finalize(keys)
+        .map_err(NostrError::Signing)?;
 
     Ok(event)
 }

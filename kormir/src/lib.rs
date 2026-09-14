@@ -585,10 +585,10 @@ impl<S: Storage> Oracle<S> {
 
     /// Returns the keys for the oracle, used for Nostr.
     #[cfg(feature = "nostr")]
-    pub fn nostr_keys(&self) -> nostr::Keys {
+    pub fn nostr_keys(&self) -> nostr::key::Keys {
         let sec = nostr::key::SecretKey::from_slice(&self.key_pair.secret_key().secret_bytes()[..])
             .expect("just converting types");
-        nostr::Keys::new(sec)
+        nostr::key::Keys::new(sec)
     }
 
     /// Derives the hardened nonce private key at `index` from the oracle's `nonce_xpriv`.

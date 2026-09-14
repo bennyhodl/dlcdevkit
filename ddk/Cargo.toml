@@ -39,7 +39,7 @@ lightning = ["manager", "dep:lightning-net-tokio"]
 # oracle features
 kormir = ["manager", "dep:reqwest"]
 p2pderivatives = ["manager", "dep:reqwest"]
-nostr-oracle = ["dep:nostr-database", "nostr", "kormir", "kormir/nostr"]
+nostr-oracle = ["dep:nostr-database", "dep:nostr-memory", "nostr", "kormir", "kormir/nostr"]
 
 # storage features
 sled = ["manager", "dep:sled"]
@@ -74,8 +74,8 @@ sqlx = { version = "0.8.3", optional = true, default-features = false, features 
 
 # Nostr transport dependencies
 base64 = { version = "0.22.1", optional = true }
-nostr-rs = { package = "nostr", version = "0.44.8", features = ["std", "nip04"], optional = true }
-nostr-sdk = { version = "0.44.0", optional = true }
+nostr-rs = { package = "nostr", version = "0.45", features = ["std", "nip04", "os-rng"], optional = true }
+nostr-sdk = { version = "0.45", optional = true }
 
 # lightning transport
 lightning-net-tokio = { version = "0.2.0", optional = true }
@@ -84,7 +84,8 @@ lightning-net-tokio = { version = "0.2.0", optional = true }
 reqwest = { version = "0.13.3", features = ["json"], optional = true }
 hmac = { version = "0.13.0", optional = true }
 sha2 = { version = "0.11.0", optional = true }
-nostr-database = { version = "0.44.0", optional = true }
+nostr-database = { version = "0.45", optional = true }
+nostr-memory = { version = "0.45", optional = true }
 bip39 = "2.2.0"
 zeroize = "1"
 

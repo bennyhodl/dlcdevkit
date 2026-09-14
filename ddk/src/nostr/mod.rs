@@ -15,7 +15,8 @@ pub mod messages;
 
 use bitcoin::key::Parity;
 use bitcoin::secp256k1::PublicKey as BitcoinPublicKey;
-use nostr_rs::{Kind, PublicKey};
+use nostr_rs::event::Kind;
+use nostr_rs::key::PublicKey;
 
 /// Event kind for DLC protocol messages (NIP-88)
 pub const DLC_MESSAGE_KIND: Kind = Kind::Custom(8_888);
@@ -68,7 +69,8 @@ pub fn bitcoin_to_nostr_pubkey(bitcoin_pk: &BitcoinPublicKey) -> PublicKey {
 /// The function always assumes even y-coordinate parity when reconstructing the Bitcoin public key.
 /// This is sufficient for DLC operations as the actual parity is handled within the DLC protocol.
 pub fn nostr_to_bitcoin_pubkey(nostr_pk: &PublicKey) -> BitcoinPublicKey {
-    let xonly = nostr_pk.xonly().expect("Could not get xonly public key.");
+    let xonly = bitcoin::XOnlyPublicKey::from_slice(nostr_pk.as_bytes())
+        .expect("Could not get xonly public key.");
     BitcoinPublicKey::from_x_only_public_key(xonly, Parity::Even)
 }
 
