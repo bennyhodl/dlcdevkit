@@ -8,9 +8,12 @@ use crate::DlcDevKitDlcManager;
 use crate::{nostr, Transport};
 use crate::{Oracle, Storage};
 use bitcoin::bip32::{DerivationPath, Xpriv};
+use bitcoin::secp256k1::Secp256k1;
 use bitcoin::Network;
-use nostr_rs::{secp256k1::Secp256k1, Keys, Timestamp, Url};
-use nostr_sdk::{Client, RelayPoolNotification};
+use nostr_rs::key::{Keys, SecretKey};
+use nostr_rs::types::{Timestamp, Url};
+use nostr_sdk::client::{Client, ClientNotification};
+use nostr_sdk::prelude::StreamExt;
 use std::str::FromStr;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
@@ -63,7 +66,9 @@ pub fn nostr_keys(
         #[allow(deprecated)]
         NostrKeyDerivation::Master => master.private_key,
     };
-    Ok(Keys::new_with_ctx(&secp, secret_key.into()))
+    let secret_key = SecretKey::from_slice(&secret_key.secret_bytes())
+        .map_err(|e| TransportError::Init(e.to_string()))?;
+    Ok(Keys::new(secret_key))
 }
 
 pub struct NostrDlc {
@@ -109,12 +114,12 @@ impl NostrDlc {
     ) -> Result<NostrDlc, TransportError> {
         let keys = nostr_keys(seed_bytes, network, derivation)?;
 
-        let relay_url = relay_host
+        let relay_url: Url = relay_host
             .parse()
             .map_err(|_| TransportError::Init("Could not parse relay url.".to_string()))?;
-        let client = Client::new(keys.clone());
+        let client = Client::new();
         client
-            .add_relay(&relay_url)
+            .add_relay(relay_url.as_str())
             .await
             .map_err(|e| TransportError::Init(e.to_string()))?;
         client.connect().await;
@@ -146,7 +151,7 @@ impl NostrDlc {
             let msg_subscription =
                 nostr::messages::create_dlc_message_filter(since, keys.public_key());
             nostr_client
-                .subscribe(msg_subscription, None)
+                .subscribe(msg_subscription)
                 .await
                 .map_err(|e| TransportError::Listen(e.to_string()))?;
             log_info!(
@@ -165,8 +170,8 @@ impl NostrDlc {
                             break;
                         }
                     },
-                    Ok(notification) = notifications.recv() => {
-                        if let RelayPoolNotification::Event {
+                    Some(notification) = notifications.next() => {
+                        if let ClientNotification::Event {
                             relay_url: _,
                             subscription_id: _,
                             event,

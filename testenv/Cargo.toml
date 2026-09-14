@@ -14,7 +14,7 @@ publish = false
 [features]
 default = []
 # In-process nostr relay, for the `nostr` transport tests.
-nostr = ["dep:nostr-relay-builder"]
+nostr = ["dep:nostr-sdk"]
 # Embedded PostgreSQL server, for the `postgres` storage tests.
 postgres = ["dep:postgresql_embedded"]
 # Oracles, events and contract shapes, shared by the `ddk` and `ddk-manager`
@@ -36,6 +36,6 @@ ddk-manager = { workspace = true, features = ["manager"], optional = true }
 ddk-messages = { workspace = true, optional = true }
 ddk-trie = { workspace = true, optional = true }
 
-nostr-relay-builder = { version = "0.44.1", optional = true }
+nostr-sdk = { version = "0.45", features = ["local-relay"], optional = true }
 # Pinned to 0.19: 0.20+ raise the MSRV to 1.94, above this workspace's toolchain.
 postgresql_embedded = { version = "0.19.0", optional = true }

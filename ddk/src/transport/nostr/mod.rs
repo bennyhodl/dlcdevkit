@@ -52,7 +52,7 @@ impl Transport for NostrDlc {
             Ok(e) => log_info!(
                 self.logger,
                 "Sent DLC message event. event_id={}",
-                e.val.to_string()
+                e.value.to_string()
             ),
             Err(e) => log_error!(
                 self.logger,
