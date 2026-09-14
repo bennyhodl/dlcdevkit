@@ -26,6 +26,10 @@ use std::str::FromStr;
 
 pub const TOTAL_COLLATERAL: Amount = Amount::from_sat(100_000);
 
+/// The accepting party's clock, one second before the example oracle event
+/// matures.
+pub const NOW_UNIX: u64 = 749;
+
 /// The contract's temporary id. Each party's DLC funding key is derived
 /// deterministically from this via its [`ContractKeyProvider`], so the key can
 /// be recomputed later (for example to splice) without being stored.

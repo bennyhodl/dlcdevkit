@@ -32,9 +32,10 @@ pub fn accept_offer(
         party,
         min_timeout_interval,
         max_timeout_interval,
+        now_unix,
     } = params;
 
-    validate_offer(offer, min_timeout_interval, max_timeout_interval)?;
+    validate_offer(offer, min_timeout_interval, max_timeout_interval, now_unix)?;
     ensure_no_dlc_inputs(&party.funding_inputs)?;
 
     let secp = Secp256k1::new();

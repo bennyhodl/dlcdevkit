@@ -35,6 +35,9 @@ use std::str::FromStr;
 const NETWORK: Network = Network::Regtest;
 const MIN_TIMEOUT: u32 = 100;
 const MAX_TIMEOUT: u32 = 500;
+/// The accepting party's clock, one second before the test oracle event
+/// matures.
+const NOW_UNIX: u64 = 749;
 const TOTAL_COLLATERAL: Amount = Amount::from_sat(100_000);
 
 /// One side of a contract: a DLC funding key plus a wallet key controlling a
@@ -396,6 +399,7 @@ fn enum_contract_between(
             party: accepter.party_params(secp, vec![accepter.funding_input.clone()]),
             min_timeout_interval: MIN_TIMEOUT,
             max_timeout_interval: MAX_TIMEOUT,
+            now_unix: NOW_UNIX,
         },
         &accepter.funding_secret_key,
     )
@@ -538,6 +542,7 @@ fn numerical_lifecycle_with_xpriv_signing() {
             party: accepter.party_params(&secp, vec![accepter.funding_input.clone()]),
             min_timeout_interval: MIN_TIMEOUT,
             max_timeout_interval: MAX_TIMEOUT,
+            now_unix: NOW_UNIX,
         },
         &accepter.funding_secret_key,
     )
@@ -693,6 +698,7 @@ async fn wallet_interface_signs_the_funding_psbt() {
             party: accepter.party_params(&secp, vec![accept_input]),
             min_timeout_interval: MIN_TIMEOUT,
             max_timeout_interval: MAX_TIMEOUT,
+            now_unix: NOW_UNIX,
         },
         &accepter.funding_secret_key,
     )
@@ -825,6 +831,7 @@ fn single_funded_contract_with_no_accept_inputs() {
             party: accepter.party_params(&secp, vec![]),
             min_timeout_interval: MIN_TIMEOUT,
             max_timeout_interval: MAX_TIMEOUT,
+            now_unix: NOW_UNIX,
         },
         &accepter.funding_secret_key,
     )
@@ -888,6 +895,7 @@ fn shuffled_serial_ids_map_witnesses_to_the_right_inputs() {
             party: accepter.party_params(&secp, vec![accepter.funding_input.clone()]),
             min_timeout_interval: MIN_TIMEOUT,
             max_timeout_interval: MAX_TIMEOUT,
+            now_unix: NOW_UNIX,
         },
         &accepter.funding_secret_key,
     )
@@ -1104,6 +1112,7 @@ fn accept_result_psbt_matches_create_funding_psbt() {
             party: accepter.party_params(&secp, vec![accepter.funding_input.clone()]),
             min_timeout_interval: MIN_TIMEOUT,
             max_timeout_interval: MAX_TIMEOUT,
+            now_unix: NOW_UNIX,
         },
         &accepter.funding_secret_key,
     )
@@ -1256,6 +1265,7 @@ fn numerical_contracts_settle_with_a_cet() {
             party: accepter.party_params(&secp, vec![accepter.funding_input.clone()]),
             min_timeout_interval: MIN_TIMEOUT,
             max_timeout_interval: MAX_TIMEOUT,
+            now_unix: NOW_UNIX,
         },
         &accepter.funding_secret_key,
     )
@@ -1594,6 +1604,7 @@ fn prepare_splice(splice_in: bool) -> PreparedSplice {
             party: accepter_b.party_params(&secp, vec![]),
             min_timeout_interval: MIN_TIMEOUT,
             max_timeout_interval: MAX_TIMEOUT,
+            now_unix: NOW_UNIX,
         },
         &accepter_b.funding_secret_key,
     )

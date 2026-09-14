@@ -43,6 +43,7 @@ fn main() {
             party: accepter.party_params(&secp),
             min_timeout_interval: 100,
             max_timeout_interval: 500,
+            now_unix: util::NOW_UNIX,
         },
         &accepter.funding_secret_key,
     )

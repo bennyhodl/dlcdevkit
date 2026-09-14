@@ -380,11 +380,17 @@ impl OfferDlc {
     }
 
     /// Returns whether the message satisfies validity requirements.
+    ///
+    /// `now_unix` is the receiver's clock as a unix timestamp. An offer whose
+    /// closest oracle event has already matured is rejected: the oracle may
+    /// have published the attestation, so the offering party knows the outcome
+    /// before the accepting party commits any collateral.
     pub fn validate<C: Verification>(
         &self,
         secp: &Secp256k1<C>,
         min_timeout_interval: u32,
         max_timeout_interval: u32,
+        now_unix: u64,
     ) -> Result<(), Error> {
         match &self.contract_info {
             ContractInfo::SingleContractInfo(s) => s.contract_info.oracle_info.validate(secp)?,
@@ -412,6 +418,12 @@ impl OfferDlc {
             return Err(Error::InvalidArgument(
                 "CET locktime must equal the closest maturity date and the refund locktime must be within the timeout interval".to_string(),
             ));
+        }
+
+        if u64::from(closest_maturity_date) <= now_unix {
+            return Err(Error::InvalidArgument(format!(
+                "oracle event has already matured (maturity {closest_maturity_date}, time {now_unix})"
+            )));
         }
 
         Ok(())
@@ -1044,13 +1056,33 @@ mod tests {
         roundtrip_test!(CloseDlc, input);
     }
 
+    /// One second before the fixture offers' oracle event matures.
+    const FIXTURE_NOW: u64 = 1_623_133_103;
+
     #[test]
     fn valid_offer_message_passes_validation() {
         let input = include_str!("./test_inputs/offer_msg.json");
         let valid_offer: OfferDlc = serde_json::from_str(input).unwrap();
         valid_offer
-            .validate(SECP256K1, 86400 * 7, 86400 * 14)
+            .validate(SECP256K1, 86400 * 7, 86400 * 14, FIXTURE_NOW)
             .expect("to validate valid offer messages.");
+    }
+
+    #[test]
+    fn offer_on_matured_event_fails_validation() {
+        let input = include_str!("./test_inputs/offer_msg.json");
+        let offer: OfferDlc = serde_json::from_str(input).unwrap();
+        let maturity = u64::from(offer.contract_info.get_closest_maturity_date());
+
+        offer
+            .validate(SECP256K1, 86400 * 7, 86400 * 14, maturity - 1)
+            .expect("an event in the future to pass validation");
+        offer
+            .validate(SECP256K1, 86400 * 7, 86400 * 14, maturity)
+            .expect_err("an event at its maturity to fail validation");
+        offer
+            .validate(SECP256K1, 86400 * 7, 86400 * 14, maturity + 86_400)
+            .expect_err("an event past its maturity to fail validation");
     }
 
     #[test]
@@ -1062,7 +1094,7 @@ mod tests {
             assert!(input.dlc_input.is_some());
         }
         valid_offer
-            .validate(SECP256K1, 86400 * 7, 86400 * 14)
+            .validate(SECP256K1, 86400 * 7, 86400 * 14, FIXTURE_NOW)
             .expect("to validate valid offer messages.");
     }
 
@@ -1094,7 +1126,7 @@ mod tests {
             too_long_timeout,
         ] {
             invalid
-                .validate(SECP256K1, 86400 * 7, 86400 * 14)
+                .validate(SECP256K1, 86400 * 7, 86400 * 14, FIXTURE_NOW)
                 .expect_err("Should not pass validation of invalid offer message.");
         }
     }
@@ -1123,7 +1155,7 @@ mod tests {
 
         for invalid in &[no_contract_input, single_contract_input] {
             invalid
-                .validate(SECP256K1, 86400 * 7, 86400 * 14)
+                .validate(SECP256K1, 86400 * 7, 86400 * 14, FIXTURE_NOW)
                 .expect_err("Should not pass validation of invalid offer message.");
         }
     }

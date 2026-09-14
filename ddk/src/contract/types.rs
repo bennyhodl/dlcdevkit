@@ -80,6 +80,11 @@ pub struct AcceptOfferParams {
     /// The maximum accepted interval between the oracle event maturity and the
     /// refund locktime.
     pub max_timeout_interval: u32,
+    /// The accepting party's clock as a unix timestamp.
+    ///
+    /// An offer whose closest oracle event matured at or before this time is
+    /// rejected, because the offering party may already know the outcome.
+    pub now_unix: u64,
 }
 
 /// The result of [`accept_offer`](super::accept_offer).

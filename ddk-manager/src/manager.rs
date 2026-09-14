@@ -501,6 +501,17 @@ where
         let offered_contract =
             get_contract_in_state!(self, contract_id, Offered, None as Option<PublicKey>)?;
 
+        // The offer was validated on receipt, but the oracle event may have
+        // matured while the offer waited for a decision. The CET locktime is
+        // pinned to the closest event maturity.
+        let now = self.time.unix_time_now();
+        if u64::from(offered_contract.cet_locktime) <= now {
+            return Err(Error::InvalidParameters(format!(
+                "oracle event has already matured (maturity {}, time {now})",
+                offered_contract.cet_locktime
+            )));
+        }
+
         let counter_party = offered_contract.counter_party;
 
         let (accepted_contract, accept_msg) = accept_contract(
@@ -642,7 +653,12 @@ where
         offered_message: &OfferDlc,
         counter_party: PublicKey,
     ) -> Result<(), Error> {
-        offered_message.validate(&self.secp, REFUND_DELAY, REFUND_DELAY * 2)?;
+        offered_message.validate(
+            &self.secp,
+            REFUND_DELAY,
+            REFUND_DELAY * 2,
+            self.time.unix_time_now(),
+        )?;
         let keys_id = self
             .signer_provider
             .derive_signer_key_id(offered_message.temporary_contract_id);
