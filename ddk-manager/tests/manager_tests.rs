@@ -103,6 +103,53 @@ async fn reject_offer_with_existing_contract_id() {
         .expect_err("To reject the second offer message");
 }
 
+/// The fixture offer's oracle event matures at this unix time.
+const FIXTURE_MATURITY: u64 = 1_623_133_104;
+
+#[tokio::test]
+async fn reject_offer_on_matured_event() {
+    let logger = Arc::new(Logger::disabled("test_manager".to_string()));
+    let offer_message = Message::Offer(
+        serde_json::from_str(include_str!("../test_inputs/offer_contract.json")).unwrap(),
+    );
+
+    let manager = get_manager(logger).await;
+
+    set_time(FIXTURE_MATURITY);
+    manager
+        .on_dlc_message(&offer_message, pubkey())
+        .await
+        .expect_err("To reject an offer whose event has matured");
+
+    set_time(FIXTURE_MATURITY - 1);
+    manager
+        .on_dlc_message(&offer_message, pubkey())
+        .await
+        .expect("To accept an offer whose event is still in the future");
+}
+
+#[tokio::test]
+async fn reject_accept_on_matured_event() {
+    let logger = Arc::new(Logger::disabled("test_manager".to_string()));
+    let offer: ddk_messages::OfferDlc =
+        serde_json::from_str(include_str!("../test_inputs/offer_contract.json")).unwrap();
+    let contract_id = offer.temporary_contract_id;
+
+    let manager = get_manager(logger).await;
+
+    set_time(FIXTURE_MATURITY - 1);
+    manager
+        .on_dlc_message(&Message::Offer(offer), pubkey())
+        .await
+        .expect("To accept an offer whose event is still in the future");
+
+    set_time(FIXTURE_MATURITY);
+    manager
+        .accept_contract_offer(&contract_id)
+        .await
+        .expect_err("To reject accepting an offer whose event matured while it waited");
+}
+
 #[tokio::test]
 async fn reject_channel_offer_with_existing_channel_id() {
     let logger = Arc::new(Logger::disabled("test_manager".to_string()));

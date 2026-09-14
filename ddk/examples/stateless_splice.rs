@@ -171,6 +171,7 @@ async fn main() {
             ),
             min_timeout_interval: 100,
             max_timeout_interval: 500,
+            now_unix: util::NOW_UNIX,
         },
         &accepter_keys.funding_secret_key(temp_id_a).unwrap(),
     )
@@ -256,6 +257,7 @@ async fn main() {
             ),
             min_timeout_interval: 100,
             max_timeout_interval: 500,
+            now_unix: util::NOW_UNIX,
         },
         &accepter_keys.funding_secret_key(temp_id_b).unwrap(),
     )

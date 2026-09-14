@@ -137,6 +137,7 @@ async fn main() {
             party: accepter.party_params_with_inputs(&secp, vec![accept_input]),
             min_timeout_interval: 100,
             max_timeout_interval: 500,
+            now_unix: util::NOW_UNIX,
         },
         &accepter.funding_secret_key,
     )

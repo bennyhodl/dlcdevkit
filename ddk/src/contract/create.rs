@@ -91,11 +91,13 @@ pub fn create_offer(params: CreateOfferParams) -> Result<OfferDlc, ContractError
 ///
 /// `min_timeout_interval` and `max_timeout_interval` bound the distance between
 /// the oracle event maturity and the offer's refund locktime, and are the
-/// accepting party's local policy.
+/// accepting party's local policy. `now_unix` is the accepting party's clock;
+/// an offer whose closest oracle event has already matured is rejected.
 pub fn validate_offer(
     offer: &OfferDlc,
     min_timeout_interval: u32,
     max_timeout_interval: u32,
+    now_unix: u64,
 ) -> Result<(), ContractError> {
     ensure_protocol_version(offer.protocol_version, ContractError::InvalidOffer)?;
     validate_offer_funding_inputs(&offer.funding_inputs)?;
@@ -111,6 +113,7 @@ pub fn validate_offer(
             &Secp256k1::verification_only(),
             min_timeout_interval,
             max_timeout_interval,
+            now_unix,
         )
         .map_err(|e| ContractError::InvalidOffer(e.to_string()))?;
     Ok(())

@@ -1210,6 +1210,7 @@ pub async fn fund_contract(ctx: &ChainContext, setup: ContractSetup) -> FundedCo
             party: accepter.party_params(vec![]),
             min_timeout_interval: MIN_TIMEOUT_INTERVAL,
             max_timeout_interval: MAX_TIMEOUT_INTERVAL,
+            now_unix: u64::from(EVENT_MATURITY) - 1,
         },
         &accepter.funding_secret_key,
     )
