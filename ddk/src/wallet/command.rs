@@ -461,19 +461,14 @@ pub async fn select_utxos(
 mod tests {
     use super::*;
     use crate::util::ser::deserialize_contract;
+    use ddk_testenv::{contract_binary, ContractBinary};
 
     #[test]
     fn funding_spk_follows_the_contract_state() {
-        let offered = deserialize_contract(
-            &include_bytes!("../../../testconfig/contract_binaries/Offered").to_vec(),
-        )
-        .unwrap();
+        let offered = deserialize_contract(contract_binary(ContractBinary::Offered)).unwrap();
         assert!(contract_funding_info(&offered).is_none());
 
-        let accepted = deserialize_contract(
-            &include_bytes!("../../../testconfig/contract_binaries/Accepted").to_vec(),
-        )
-        .unwrap();
+        let accepted = deserialize_contract(contract_binary(ContractBinary::Accepted)).unwrap();
         let (accepted_id, accepted_spk, accepted_outpoint) =
             contract_funding_info(&accepted).unwrap();
         assert!(accepted_spk.is_p2wsh());
@@ -481,11 +476,11 @@ mod tests {
         // The same contract keeps the same funding script through its
         // lifecycle.
         for binary in [
-            include_bytes!("../../../testconfig/contract_binaries/Signed").to_vec(),
-            include_bytes!("../../../testconfig/contract_binaries/Confirmed").to_vec(),
-            include_bytes!("../../../testconfig/contract_binaries/PreClosed").to_vec(),
+            contract_binary(ContractBinary::Signed),
+            contract_binary(ContractBinary::Confirmed),
+            contract_binary(ContractBinary::PreClosed),
         ] {
-            let contract = deserialize_contract(&binary).unwrap();
+            let contract = deserialize_contract(binary).unwrap();
             let (contract_id, spk, outpoint) = contract_funding_info(&contract).unwrap();
             assert_eq!(contract_id, accepted_id);
             assert_eq!(spk, accepted_spk);
@@ -495,17 +490,14 @@ mod tests {
 
     #[test]
     fn close_labels_carry_the_outcome() {
-        let confirmed = deserialize_contract(
-            &include_bytes!("../../../testconfig/contract_binaries/Confirmed").to_vec(),
-        )
-        .unwrap();
+        let confirmed = deserialize_contract(contract_binary(ContractBinary::Confirmed)).unwrap();
         assert!(contract_close_label(&confirmed).is_none());
 
         for binary in [
-            include_bytes!("../../../testconfig/contract_binaries/PreClosed").to_vec(),
-            include_bytes!("../../../testconfig/contract_binaries/Closed").to_vec(),
+            contract_binary(ContractBinary::PreClosed),
+            contract_binary(ContractBinary::Closed),
         ] {
-            let contract = deserialize_contract(&binary).unwrap();
+            let contract = deserialize_contract(binary).unwrap();
             let (_txid, label) = contract_close_label(&contract).unwrap();
             assert!(label.starts_with("DLC close "));
         }

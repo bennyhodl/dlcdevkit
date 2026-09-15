@@ -71,9 +71,9 @@ earlier release and writes it back, asserting every byte matches; a production
 announcement likewise round-trips to the exact hex its oracle signed. While those
 pass, a `contract_data` column holds what this code expects.
 
-(The fixtures under `testconfig/contract_binaries/old/` are a separate matter. All
-but `Offered` stopped deserializing some time ago because of unrelated changes to
-the contract structs, and that was already true before any of this.)
+(`testenv/contract_binaries/legacy/Offered`, an offered contract from before
+`contract_flags`, is a separate matter: it checks that a contract stored without
+the flags byte still reads.)
 
 **Standalone oracle bytes may need one.** A store that persisted announcements or
 attestations on their own holds the body form if it was written through

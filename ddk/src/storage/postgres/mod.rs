@@ -1223,6 +1223,7 @@ mod tests {
     use crate::{logger::LogLevel, util::ser::deserialize_contract};
     use ddk_manager::Storage;
     use ddk_testenv::postgres::TestPostgres;
+    use ddk_testenv::{contract_binary, ContractBinary};
 
     /// Returns the store alongside the server backing it: the server stops when
     /// dropped, so the caller has to keep it alive.
@@ -1240,7 +1241,7 @@ mod tests {
         .await
         .unwrap();
 
-        let offered = include_bytes!("../../../../testconfig/contract_binaries/Offered");
+        let offered = contract_binary(ContractBinary::Offered);
         let offered_contract = deserialize_contract(offered).unwrap();
         match offered_contract {
             Contract::Offered(offered_contract) => {
@@ -1251,32 +1252,32 @@ mod tests {
             }
             _ => panic!("Offered contract is not an OfferedContract"),
         }
-        let accept = include_bytes!("../../../../testconfig/contract_binaries/Accepted");
+        let accept = contract_binary(ContractBinary::Accepted);
         let accepted_contract = deserialize_contract(accept).unwrap();
         store
             .update_contract(&accepted_contract)
             .await
             .expect("Failed to update accepted contract");
-        let signed = include_bytes!("../../../../testconfig/contract_binaries/Signed");
+        let signed = contract_binary(ContractBinary::Signed);
         let signed_contract = deserialize_contract(signed).unwrap();
         store
             .update_contract(&signed_contract)
             .await
             .expect("Failed to update signed contract");
-        let confirmed = include_bytes!("../../../../testconfig/contract_binaries/Confirmed");
+        let confirmed = contract_binary(ContractBinary::Confirmed);
         let confirmed_contract = deserialize_contract(confirmed).unwrap();
         store
             .update_contract(&confirmed_contract)
             .await
             .expect("Failed to update confirmed contract");
-        let preclosed = include_bytes!("../../../../testconfig/contract_binaries/PreClosed");
+        let preclosed = contract_binary(ContractBinary::PreClosed);
         let preclosed_contract = deserialize_contract(preclosed).unwrap();
         store
             .update_contract(&preclosed_contract)
             .await
             .expect("Failed to update preclosed contract");
 
-        let closed = include_bytes!("../../../../testconfig/contract_binaries/Closed");
+        let closed = contract_binary(ContractBinary::Closed);
         let closed_contract = deserialize_contract(closed).unwrap();
         store
             .update_contract(&closed_contract)
@@ -1534,7 +1535,7 @@ mod tests {
         // The metadata row was recreated by update_contract after the temp-id
         // delete (the Accepted transition); it must carry the contract's real
         // values instead of hardcoded ones.
-        let accept = include_bytes!("../../../../testconfig/contract_binaries/Accepted");
+        let accept = contract_binary(ContractBinary::Accepted);
         let accepted_contract = deserialize_contract(accept).unwrap();
 
         let metadata = db.get_contract_metadata(None).await.unwrap();
@@ -1662,12 +1663,8 @@ mod tests {
         .unwrap();
     }
 
-    fn fixture(name: &str) -> Contract {
-        let path = format!(
-            "{}/../testconfig/contract_binaries/{name}",
-            env!("CARGO_MANIFEST_DIR")
-        );
-        deserialize_contract(&std::fs::read(path).unwrap()).unwrap()
+    fn fixture(state: ContractBinary) -> Contract {
+        deserialize_contract(contract_binary(state)).unwrap()
     }
 
     async fn open(server: &TestPostgres, migrations: bool) -> PostgresStore {
@@ -1694,8 +1691,8 @@ mod tests {
     async fn legacy_contracts_migrate_at_startup() {
         let server = TestPostgres::start("ddk").await;
         let schema = open(&server, true).await;
-        let offered = fixture("Offered");
-        let closed = fixture("Closed");
+        let offered = fixture(ContractBinary::Offered);
+        let closed = fixture(ContractBinary::Closed);
         seed_legacy(&schema.pool, &offered).await;
         seed_legacy(&schema.pool, &closed).await;
         assert_eq!(schema.count_legacy_contracts().await.unwrap(), 2);
@@ -1729,7 +1726,7 @@ mod tests {
     async fn legacy_contract_loads_and_moves_on_update() {
         let server = TestPostgres::start("ddk").await;
         let schema = open(&server, true).await;
-        let signed = fixture("Signed");
+        let signed = fixture(ContractBinary::Signed);
         seed_legacy(&schema.pool, &signed).await;
         drop(schema);
 
@@ -1759,7 +1756,7 @@ mod tests {
     async fn migration_reports_the_rows_it_cannot_move() {
         let server = TestPostgres::start("ddk").await;
         let schema = open(&server, true).await;
-        seed_legacy(&schema.pool, &fixture("Confirmed")).await;
+        seed_legacy(&schema.pool, &fixture(ContractBinary::Confirmed)).await;
         sqlx::query(
             "INSERT INTO contract_metadata (
                 id, state, is_offer_party, counter_party, offer_collateral, accept_collateral,
@@ -1846,7 +1843,7 @@ mod tests {
     async fn tlv_records_survive_the_legacy_migration() {
         let server = TestPostgres::start("ddk").await;
         let schema = open(&server, true).await;
-        let Contract::Signed(mut signed) = fixture("Signed") else {
+        let Contract::Signed(mut signed) = fixture(ContractBinary::Signed) else {
             panic!("fixture is not signed")
         };
         signed.accepted_contract.offered_contract.tlvs = stream_with_record(1);
@@ -1876,7 +1873,7 @@ mod tests {
     #[tokio::test]
     async fn closed_by_refund_round_trips() {
         let (_server, db) = seed_db().await;
-        let Contract::Closed(mut closed) = fixture("Closed") else {
+        let Contract::Closed(mut closed) = fixture(ContractBinary::Closed) else {
             panic!("fixture is not closed")
         };
         closed.signed_cet = None;
@@ -1906,7 +1903,7 @@ mod tests {
     async fn contract_offers_are_the_ones_we_received() {
         let server = TestPostgres::start("ddk").await;
         let db = open(&server, true).await;
-        let Contract::Offered(mut received) = fixture("Offered") else {
+        let Contract::Offered(mut received) = fixture(ContractBinary::Offered) else {
             panic!("fixture is not offered")
         };
         received.is_offer_party = false;
