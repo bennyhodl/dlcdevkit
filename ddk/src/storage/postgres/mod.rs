@@ -1241,7 +1241,7 @@ mod tests {
         .unwrap();
 
         let offered = include_bytes!("../../../../testconfig/contract_binaries/Offered");
-        let offered_contract = deserialize_contract(&offered.to_vec()).unwrap();
+        let offered_contract = deserialize_contract(offered).unwrap();
         match offered_contract {
             Contract::Offered(offered_contract) => {
                 store
@@ -1252,32 +1252,32 @@ mod tests {
             _ => panic!("Offered contract is not an OfferedContract"),
         }
         let accept = include_bytes!("../../../../testconfig/contract_binaries/Accepted");
-        let accepted_contract = deserialize_contract(&accept.to_vec()).unwrap();
+        let accepted_contract = deserialize_contract(accept).unwrap();
         store
             .update_contract(&accepted_contract)
             .await
             .expect("Failed to update accepted contract");
         let signed = include_bytes!("../../../../testconfig/contract_binaries/Signed");
-        let signed_contract = deserialize_contract(&signed.to_vec()).unwrap();
+        let signed_contract = deserialize_contract(signed).unwrap();
         store
             .update_contract(&signed_contract)
             .await
             .expect("Failed to update signed contract");
         let confirmed = include_bytes!("../../../../testconfig/contract_binaries/Confirmed");
-        let confirmed_contract = deserialize_contract(&confirmed.to_vec()).unwrap();
+        let confirmed_contract = deserialize_contract(confirmed).unwrap();
         store
             .update_contract(&confirmed_contract)
             .await
             .expect("Failed to update confirmed contract");
         let preclosed = include_bytes!("../../../../testconfig/contract_binaries/PreClosed");
-        let preclosed_contract = deserialize_contract(&preclosed.to_vec()).unwrap();
+        let preclosed_contract = deserialize_contract(preclosed).unwrap();
         store
             .update_contract(&preclosed_contract)
             .await
             .expect("Failed to update preclosed contract");
 
         let closed = include_bytes!("../../../../testconfig/contract_binaries/Closed");
-        let closed_contract = deserialize_contract(&closed.to_vec()).unwrap();
+        let closed_contract = deserialize_contract(closed).unwrap();
         store
             .update_contract(&closed_contract)
             .await
@@ -1303,7 +1303,7 @@ mod tests {
         assert_eq!(confirmed_rows.len(), 1);
         assert_eq!(confirmed_rows[0].state, ContractPrefix::Closed as i16);
         let contracts = db.get_contracts().await.unwrap();
-        assert!(contracts.len() > 0);
+        assert!(!contracts.is_empty());
     }
 
     #[tokio::test]
@@ -1315,9 +1315,11 @@ mod tests {
             .unwrap();
         let did = descriptor.descriptor_id();
 
-        let mut changeset = ChangeSet::default();
-        changeset.network = Some(Network::Regtest);
-        changeset.descriptor = Some(descriptor);
+        let mut changeset = ChangeSet {
+            network: Some(Network::Regtest),
+            descriptor: Some(descriptor),
+            ..Default::default()
+        };
         changeset.indexer.last_revealed.insert(did, 7);
         db.write(&changeset).await.unwrap();
 
@@ -1419,8 +1421,10 @@ mod tests {
             vout: 0,
         };
 
-        let mut lock = ChangeSet::default();
-        lock.network = Some(Network::Regtest);
+        let mut lock = ChangeSet {
+            network: Some(Network::Regtest),
+            ..Default::default()
+        };
         lock.locked_outpoints.outpoints.insert(outpoint, true);
         db.write(&lock).await.unwrap();
         let read = db.read().await.unwrap();
@@ -1443,9 +1447,11 @@ mod tests {
             .unwrap();
         let did = descriptor.descriptor_id();
 
-        let mut changeset = ChangeSet::default();
-        changeset.network = Some(Network::Regtest);
-        changeset.descriptor = Some(descriptor.clone());
+        let mut changeset = ChangeSet {
+            network: Some(Network::Regtest),
+            descriptor: Some(descriptor.clone()),
+            ..Default::default()
+        };
         changeset.indexer.last_revealed.insert(did, 4);
         db.write(&changeset).await.unwrap();
 
@@ -1455,16 +1461,18 @@ mod tests {
 
         // A keychain row written without a revealed index must read back as
         // "nothing revealed", not index 0.
-        let mut fresh = ChangeSet::default();
-        fresh.change_descriptor = Some(
-            "wpkh([73c5da0a/84'/1'/0']tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M/1/*)"
-                .parse()
-                .unwrap(),
-        );
+        let fresh = ChangeSet {
+            change_descriptor: Some(
+                "wpkh([73c5da0a/84'/1'/0']tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M/1/*)"
+                    .parse()
+                    .unwrap(),
+            ),
+            ..Default::default()
+        };
         db.write(&fresh).await.unwrap();
         let read = db.read().await.unwrap();
         let fresh_did = fresh.change_descriptor.as_ref().unwrap().descriptor_id();
-        assert!(read.indexer.last_revealed.get(&fresh_did).is_none());
+        assert!(!read.indexer.last_revealed.contains_key(&fresh_did));
 
         let read = db.read().await.unwrap();
         assert_eq!(read.network, Some(Network::Regtest));
@@ -1479,8 +1487,10 @@ mod tests {
         let hash_a = BlockHash::from_byte_array([0xAA; 32]);
         let hash_b = BlockHash::from_byte_array([0xBB; 32]);
 
-        let mut changeset = ChangeSet::default();
-        changeset.network = Some(Network::Regtest);
+        let mut changeset = ChangeSet {
+            network: Some(Network::Regtest),
+            ..Default::default()
+        };
         changeset.local_chain.blocks.insert(100, Some(hash_a));
         db.write(&changeset).await.unwrap();
 
@@ -1514,7 +1524,7 @@ mod tests {
         db.write(&remove).await.unwrap();
 
         let read = db.read().await.unwrap();
-        assert!(read.local_chain.blocks.get(&100).is_none());
+        assert!(!read.local_chain.blocks.contains_key(&100));
     }
 
     #[tokio::test]
@@ -1525,7 +1535,7 @@ mod tests {
         // delete (the Accepted transition); it must carry the contract's real
         // values instead of hardcoded ones.
         let accept = include_bytes!("../../../../testconfig/contract_binaries/Accepted");
-        let accepted_contract = deserialize_contract(&accept.to_vec()).unwrap();
+        let accepted_contract = deserialize_contract(accept).unwrap();
 
         let metadata = db.get_contract_metadata(None).await.unwrap();
         assert_eq!(metadata.len(), 1);
@@ -1546,8 +1556,10 @@ mod tests {
         let txid = dummy_tx().compute_txid();
 
         // No tx row exists yet for this txid; the value must not be dropped.
-        let mut changeset = ChangeSet::default();
-        changeset.network = Some(Network::Regtest);
+        let mut changeset = ChangeSet {
+            network: Some(Network::Regtest),
+            ..Default::default()
+        };
         changeset.tx_graph.last_seen.insert(txid, 100);
         db.write(&changeset).await.unwrap();
 
@@ -1571,8 +1583,10 @@ mod tests {
         let did = DescriptorId(sha256::Hash::from_byte_array([0x11; 32]));
         let script = ScriptBuf::from(vec![0x00, 0x14]);
 
-        let mut changeset = ChangeSet::default();
-        changeset.network = Some(Network::Regtest);
+        let mut changeset = ChangeSet {
+            network: Some(Network::Regtest),
+            ..Default::default()
+        };
         changeset.tx_graph.txs.insert(Arc::new(tx));
         changeset.tx_graph.first_seen.insert(txid, 100);
         changeset.tx_graph.last_evicted.insert(txid, 200);
