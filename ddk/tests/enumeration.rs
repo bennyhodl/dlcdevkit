@@ -24,13 +24,7 @@ macro_rules! write_contract {
             Contract::$state(_) => {
                 let serialized =
                     serialize_contract(&$contract).expect("to be able to serialize the contract.");
-                // CARGO_MANIFEST_DIR points to ddk/, so we go up one level to workspace root
-                let manifest_dir =
-                    std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR should be set");
-                let workspace_root = std::path::Path::new(&manifest_dir)
-                    .parent()
-                    .expect("to have a parent directory");
-                let dest_dir = workspace_root.join("testconfig/contract_binaries");
+                let dest_dir = ddk_testenv::contract_binaries_dir();
                 std::fs::create_dir_all(&dest_dir)
                     .expect("to be able to create the destination directory.");
                 let dest_path = dest_dir.join(stringify!($state));

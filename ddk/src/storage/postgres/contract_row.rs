@@ -435,14 +435,11 @@ mod tests {
     use super::*;
     use crate::util::ser::{deserialize_contract, serialize_contract};
     use ddk_messages::tlv_stream::TlvStream;
+    use ddk_testenv::{contract_binary, legacy_contract_binary, ContractBinary};
 
-    fn fixture(name: &str) -> Contract {
-        let path = format!(
-            "{}/../testconfig/contract_binaries/{name}",
-            env!("CARGO_MANIFEST_DIR")
-        );
-        let bytes = std::fs::read(path).unwrap();
-        deserialize_contract(&bytes).unwrap_or_else(|e| panic!("fixture {name}: {e}"))
+    fn fixture(state: ContractBinary) -> Contract {
+        deserialize_contract(contract_binary(state))
+            .unwrap_or_else(|e| panic!("fixture {}: {e}", state.name()))
     }
 
     /// The row keeps everything the legacy blob kept: a contract written as
@@ -457,29 +454,23 @@ mod tests {
 
     #[test]
     fn stored_contracts_round_trip_byte_for_byte() {
-        for name in [
-            "Offered",
-            "Accepted",
-            "Signed",
-            "Confirmed",
-            "PreClosed",
-            "Closed",
-            "old/Offered",
-        ] {
-            assert_round_trips(&fixture(name));
+        for state in ContractBinary::ALL {
+            assert_round_trips(&fixture(state));
         }
+        let legacy = deserialize_contract(legacy_contract_binary()).unwrap();
+        assert_round_trips(&legacy);
     }
 
     /// The states that wrap another state's struct share its columns.
     #[test]
     fn wrapped_states_round_trip() {
-        let Contract::Signed(signed) = fixture("Signed") else {
+        let Contract::Signed(signed) = fixture(ContractBinary::Signed) else {
             panic!("fixture is not signed")
         };
-        let Contract::Offered(offered) = fixture("Offered") else {
+        let Contract::Offered(offered) = fixture(ContractBinary::Offered) else {
             panic!("fixture is not offered")
         };
-        let Contract::Accepted(accepted) = fixture("Accepted") else {
+        let Contract::Accepted(accepted) = fixture(ContractBinary::Accepted) else {
             panic!("fixture is not accepted")
         };
         let accept_message = accepted.get_accept_contract_msg(&accepted.adaptor_signatures);
@@ -508,7 +499,7 @@ mod tests {
     /// The TLV streams travel inside the stored messages, on every state.
     #[test]
     fn tlv_streams_survive_on_every_state() {
-        let Contract::Closed(mut closed) = fixture("Closed") else {
+        let Contract::Closed(mut closed) = fixture(ContractBinary::Closed) else {
             panic!("fixture is not closed")
         };
         closed
@@ -535,7 +526,7 @@ mod tests {
     /// A row of an unknown layout is an error, not a misread.
     #[test]
     fn unknown_format_version_is_rejected() {
-        let mut row = ContractRow::from_contract(&fixture("Offered")).unwrap();
+        let mut row = ContractRow::from_contract(&fixture(ContractBinary::Offered)).unwrap();
         row.format_version = 99;
         assert!(row.into_contract().is_err());
     }
@@ -544,7 +535,7 @@ mod tests {
     /// names the column.
     #[test]
     fn missing_column_names_the_column() {
-        let mut row = ContractRow::from_contract(&fixture("Signed")).unwrap();
+        let mut row = ContractRow::from_contract(&fixture(ContractBinary::Signed)).unwrap();
         row.sign_message = None;
         let error = row.into_contract().unwrap_err().to_string();
         assert!(error.contains("sign_message"), "{error}");

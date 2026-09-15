@@ -82,7 +82,7 @@ services:
       - "8081:8081"
     volumes:
       - nostr-relay:/usr/src/app/db
-      - ./testconfig/nostr-relay.toml:/usr/src/app/config.toml
+      - ./testenv/nostr-relay.toml:/usr/src/app/config.toml
 volumes:
   postgres-data:
   ddk-bitcoin:

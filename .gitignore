@@ -2,8 +2,8 @@
 
 .idea
 
-/testconfig/kormir
-/testconfig/kormir-server
+/testenv/kormir
+/testenv/kormir-server
 
 /ddk/.env
 .env

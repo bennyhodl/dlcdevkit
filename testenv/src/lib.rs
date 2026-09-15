@@ -26,6 +26,9 @@
 //! let env = ddk_testenv::TestEnv::new();
 //! let esplora = env.esplora_host();
 //! ```
+//!
+//! Alongside the backends, [`contract_binary`] hands out the contracts
+//! serialized by earlier releases and checked in under `contract_binaries/`.
 
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
@@ -36,6 +39,11 @@ use bitcoincore_rpc::{jsonrpc, Client, RpcApi};
 pub use bitcoincore_rpc;
 pub use bitcoind;
 pub use electrsd;
+
+mod contract_binaries;
+pub use contract_binaries::{
+    contract_binaries_dir, contract_binary, legacy_contract_binary, ContractBinary,
+};
 
 #[cfg(feature = "dlc")]
 pub mod dlc;
