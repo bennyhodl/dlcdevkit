@@ -61,7 +61,7 @@ async fn main() -> Result<(), ddk::error::Error> {
 DDK is designed with a pluggable architecture, allowing you to choose or implement your own components:
 
 - **Transport**: Communication layer for DLC messages between peers. Implementations include Lightning Network gossip and Nostr protocol messaging.
-- **Storage**: Persistence backend for contracts and wallet data. Implementations include Sled (embedded) and PostgreSQL.
+- **Storage**: Persistence backend for contracts and wallet data. Implementations include Sled (embedded) and PostgreSQL. Databases written by releases up to 2.0 are moved to the columnar contract layout on upgrade; see [docs/postgres-contract-migration.md](./docs/postgres-contract-migration.md).
 - **Oracle**: External data source for contract attestations. Implementations include HTTP and Nostr-based oracle clients.
 
 You can create a custom DDK instance by implementing the required traits defined in [`ddk/src/lib.rs`](./ddk/src/lib.rs).

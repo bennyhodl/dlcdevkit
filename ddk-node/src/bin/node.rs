@@ -1,5 +1,5 @@
 use clap::Parser;
-use ddk_node::opts::NodeOpts;
+use ddk_node::opts::{NodeCommand, NodeOpts};
 use ddk_node::DdkNode;
 use std::str::FromStr;
 use tracing::level_filters::LevelFilter;
@@ -34,7 +34,10 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
-    DdkNode::serve(opts).await?;
+    match opts.command {
+        Some(NodeCommand::Migrate) => DdkNode::migrate(opts).await?,
+        None => DdkNode::serve(opts).await?,
+    }
 
     Ok(())
 }

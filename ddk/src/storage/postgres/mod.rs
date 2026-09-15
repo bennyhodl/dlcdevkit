@@ -1,12 +1,12 @@
-use super::sqlx::{ContractData, ContractMetadata, SqlxError};
+pub mod contract_row;
+pub mod legacy;
+
+use super::sqlx::{ContractMetadata, SqlxError};
 use crate::error::{StorageError, WalletError};
 use crate::logger::Logger;
-use crate::logger::{log_info, WriteLog};
+use crate::logger::{log_info, log_warn, WriteLog};
 use crate::Storage;
-use crate::{
-    error::to_storage_error,
-    util::ser::{deserialize_contract, serialize_contract, ContractPrefix},
-};
+use crate::{error::to_storage_error, util::ser::ContractPrefix};
 use bdk_chain::{
     local_chain, tx_graph, Anchor, ConfirmationBlockTime, DescriptorExt, DescriptorId, Merge,
 };
@@ -22,6 +22,7 @@ use bdk_wallet::keys::DescriptorPublicKey;
 use bdk_wallet::ChangeSet;
 use bdk_wallet::KeychainKind;
 use bdk_wallet::KeychainKind::{External, Internal};
+use contract_row::ContractRow;
 use ddk_manager::{
     contract::{
         offered_contract::OfferedContract, signed_contract::SignedContract, Contract,
@@ -29,6 +30,7 @@ use ddk_manager::{
     },
     Storage as ManagerStorage,
 };
+pub use legacy::LegacyMigrationReport;
 use serde_json::json;
 use sqlx::pool::PoolOptions;
 use sqlx::postgres::PgRow;
@@ -99,19 +101,38 @@ impl PostgresStore {
             .connect(url)
             .await
             .map_err(|e| StorageError::Sqlx(e.into()))?;
-        if migrations {
-            log_info!(logger, "Migrating postgres");
-            MIGRATOR
-                .run(&pool)
-                .await
-                .map_err(|e| StorageError::Sqlx(e.into()))?;
-        }
-
-        Ok(Self {
+        let store = Self {
             pool,
             logger,
             wallet_name,
-        })
+        };
+
+        if migrations {
+            store.run_migrations().await?;
+        }
+        if let Err(e) = store.warn_if_legacy_contracts_remain().await {
+            log_warn!(
+                store.logger,
+                "Could not count contracts in the legacy blob layout. error={}",
+                e
+            );
+        }
+
+        Ok(store)
+    }
+
+    /// Applies the schema migrations, then moves every contract still in the
+    /// legacy blob layout to the columnar layout. `new` runs this when
+    /// `migrations` is on.
+    pub async fn run_migrations(&self) -> Result<LegacyMigrationReport, StorageError> {
+        log_info!(self.logger, "Migrating postgres");
+        MIGRATOR
+            .run(&self.pool)
+            .await
+            .map_err(|e| StorageError::Sqlx(e.into()))?;
+        self.migrate_legacy_contracts()
+            .await
+            .map_err(|e| StorageError::Init(e.to_string()))
     }
 
     pub async fn get_contract_metadata(
@@ -124,7 +145,8 @@ impl PostgresStore {
                 .collect::<Vec<_>>()
                 .join(", ");
 
-            let query = format!("SELECT * FROM contract_metadata WHERE state IN ({placeholders})");
+            let query =
+                format!("SELECT * FROM ({CONTRACT_METADATA}) c WHERE c.state IN ({placeholders})");
 
             let mut query = sqlx::query_as::<_, ContractMetadata>(&query);
 
@@ -137,7 +159,7 @@ impl PostgresStore {
                 .await
                 .map_err(|e| StorageError::Sqlx(e.into()))?
         } else {
-            sqlx::query_as::<Postgres, ContractMetadata>("SELECT * FROM contract_metadata")
+            sqlx::query_as::<Postgres, ContractMetadata>(CONTRACT_METADATA)
                 .fetch_all(&self.pool)
                 .await
                 .map_err(|e| StorageError::Sqlx(e.into()))?
@@ -149,9 +171,9 @@ impl PostgresStore {
         &self,
         id: &str,
     ) -> Result<ContractMetadata, StorageError> {
-        let row = sqlx::query_as::<Postgres, ContractMetadata>(
-            "SELECT * FROM contract_metadata WHERE id = $1",
-        )
+        let row = sqlx::query_as::<Postgres, ContractMetadata>(&format!(
+            "SELECT * FROM ({CONTRACT_METADATA}) c WHERE c.id = $1"
+        ))
         .bind(id)
         .fetch_one(&self.pool)
         .await
@@ -160,13 +182,34 @@ impl PostgresStore {
     }
 
     pub async fn get_offer_metadata(&self) -> Result<Vec<ContractMetadata>, StorageError> {
-        let rows = sqlx::query_as::<Postgres, ContractMetadata>(
-            "SELECT * FROM contract_metadata WHERE state = 1",
-        )
+        let rows = sqlx::query_as::<Postgres, ContractMetadata>(&format!(
+            "SELECT * FROM ({CONTRACT_METADATA}) c WHERE c.state = 1"
+        ))
         .fetch_all(&self.pool)
         .await
         .map_err(|e| StorageError::Sqlx(e.into()))?;
         Ok(rows)
+    }
+
+    /// The contracts in `state`, read through the one decoder, plus any
+    /// still in the legacy blob layout.
+    async fn contracts_in_state(
+        &self,
+        state: ContractPrefix,
+    ) -> Result<Vec<Contract>, ddk_manager::error::Error> {
+        let state = state as i16;
+        let rows =
+            sqlx::query_as::<Postgres, ContractRow>("SELECT * FROM dlc_contracts WHERE state = $1")
+                .bind(state)
+                .fetch_all(&self.pool)
+                .await
+                .map_err(to_storage_error)?;
+        let mut contracts = rows
+            .into_iter()
+            .map(ContractRow::into_contract)
+            .collect::<Result<Vec<_>, _>>()?;
+        contracts.extend(self.legacy_contracts(Some(state)).await?);
+        Ok(contracts)
     }
 
     #[tracing::instrument(skip(self))]
@@ -449,32 +492,32 @@ impl ManagerStorage for PostgresStore {
         &self,
         id: &ddk_manager::ContractId,
     ) -> Result<Option<Contract>, ddk_manager::error::Error> {
-        let contract =
-            sqlx::query_as::<Postgres, ContractData>("SELECT * FROM contract_data WHERE id = $1")
-                .bind(hex::encode(id))
+        let id = hex::encode(id);
+        let row =
+            sqlx::query_as::<Postgres, ContractRow>("SELECT * FROM dlc_contracts WHERE id = $1")
+                .bind(&id)
                 .fetch_optional(&self.pool)
                 .await
                 .map_err(to_storage_error)?;
 
-        if let Some(contract) = contract {
-            Ok(Some(deserialize_contract(&contract.contract_data)?))
-        } else {
-            Ok(None)
+        match row {
+            Some(row) => Ok(Some(row.into_contract()?)),
+            None => self.legacy_contract(&id).await,
         }
     }
 
     #[tracing::instrument(skip(self))]
     async fn get_contracts(&self) -> Result<Vec<Contract>, ddk_manager::error::Error> {
-        let contracts = sqlx::query_as::<Postgres, ContractData>("SELECT * FROM contract_data")
+        let rows = sqlx::query_as::<Postgres, ContractRow>("SELECT * FROM dlc_contracts")
             .fetch_all(&self.pool)
             .await
             .map_err(to_storage_error)?;
 
-        let contracts = contracts
+        let mut contracts = rows
             .into_iter()
-            .map(|c| deserialize_contract(&c.contract_data))
+            .map(ContractRow::into_contract)
             .collect::<Result<Vec<_>, _>>()?;
-
+        contracts.extend(self.legacy_contracts(None).await?);
         Ok(contracts)
     }
 
@@ -482,53 +525,9 @@ impl ManagerStorage for PostgresStore {
         &self,
         contract: &OfferedContract,
     ) -> Result<(), ddk_manager::error::Error> {
+        let row = ContractRow::from_contract(&Contract::Offered(contract.clone()))?;
         let mut tx = self.pool.begin().await.map_err(to_storage_error)?;
-        let oracle_pubkey = contract.contract_info[0].oracle_announcements[0].oracle_public_key;
-        let announcement_id = contract.contract_info[0].oracle_announcements[0]
-            .oracle_event
-            .event_id
-            .clone();
-
-        sqlx::query(
-            r#"
-           INSERT INTO contract_metadata (
-               id, state, is_offer_party, counter_party,
-               offer_collateral, accept_collateral, total_collateral, fee_rate_per_vb, 
-               cet_locktime, refund_locktime, pnl, funding_txid, cet_txid, announcement_id, oracle_pubkey
-           )
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-           "#,
-        )
-        .bind(hex::encode(contract.id))
-        .bind(1_i16)
-        .bind(contract.is_offer_party)
-        .bind(hex::encode(contract.counter_party.serialize()))
-        .bind(contract.offer_params.collateral.to_sat() as i64)
-        .bind((contract.total_collateral - contract.offer_params.collateral).to_sat() as i64)
-        .bind(contract.total_collateral.to_sat() as i64)
-        .bind(contract.fee_rate_per_vb as i64)
-        .bind(contract.cet_locktime as i32)
-        .bind(contract.refund_locktime as i32)
-        .bind(None as Option<i64>)
-        .bind(None as Option<String>)
-        .bind(None as Option<String>)
-        .bind(announcement_id)
-        .bind(oracle_pubkey.to_string())
-        .execute(&mut *tx)
-        .await
-        .map_err(to_storage_error)?;
-
-        sqlx::query(
-            "INSERT INTO contract_data (id, state, contract_data, is_compressed) VALUES ($1, $2, $3, $4)"
-        )
-        .bind(hex::encode(contract.id))
-        .bind(1_i16)
-        .bind(serialize_contract(&Contract::Offered(contract.clone()))?)
-        .bind(false)
-        .execute(&mut *tx)
-        .await
-        .map_err(to_storage_error)?;
-
+        upsert_contract_row(&mut tx, &row).await?;
         tx.commit().await.map_err(to_storage_error)?;
 
         log_info!(
@@ -547,18 +546,7 @@ impl ManagerStorage for PostgresStore {
     ) -> Result<(), ddk_manager::error::Error> {
         let mut tx = self.pool.begin().await.map_err(to_storage_error)?;
         let id = hex::encode(id);
-        sqlx::query("DELETE FROM contract_data WHERE id = $1")
-            .bind(id.clone())
-            .execute(&mut *tx)
-            .await
-            .map_err(to_storage_error)?;
-
-        sqlx::query("DELETE FROM contract_metadata WHERE id = $1")
-            .bind(id)
-            .execute(&mut *tx)
-            .await
-            .map_err(to_storage_error)?;
-
+        delete_contract_rows(&mut tx, &id).await?;
         tx.commit().await.map_err(to_storage_error)?;
 
         Ok(())
@@ -570,99 +558,28 @@ impl ManagerStorage for PostgresStore {
             "Updating contract. id={}",
             hex::encode(contract.get_id())
         );
-        let prefix = ContractPrefix::get_prefix(contract);
-        let contract_id = hex::encode(contract.get_id());
-        let (offer_collateral, accept_collateral, total_collateral) = contract.get_collateral();
+        let row = ContractRow::from_contract(contract)?;
 
-        // Start a transaction
         let mut tx = self.pool.begin().await.map_err(to_storage_error)?;
 
-        // Step 1: Remove by temp_id if Accepted or Signed
+        // The offered row is keyed by the temporary id. Once the contract has
+        // its real id, that row goes.
         match contract {
-            a @ Contract::Accepted(_) | a @ Contract::Signed(_) => {
+            Contract::Accepted(_) | Contract::Signed(_) => {
                 log_info!(
                     self.logger,
                     "Deleting contract by temp_id. tmp_id={}",
-                    hex::encode(a.get_temporary_id())
+                    row.temporary_id
                 );
-                let temp_id = hex::encode(a.get_temporary_id());
-                sqlx::query("DELETE FROM contract_data WHERE id = $1")
-                    .bind(temp_id.clone())
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(to_storage_error)?;
-                sqlx::query("DELETE FROM contract_metadata WHERE id = $1")
-                    .bind(temp_id)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(to_storage_error)?;
+                delete_contract_rows(&mut tx, &row.temporary_id).await?;
             }
             _ => {}
         }
 
-        let funding_txid = contract.get_funding_txid().map(|txid| txid.to_string());
-        let cet_txid = contract.get_cet_txid().map(|txid| txid.to_string());
-        let oracle_pubkey = contract
-            .get_oracle_announcement()
-            .map(|ann| ann.oracle_public_key.to_string());
-        let announcement_id = contract
-            .get_oracle_announcement()
-            .map(|ann| ann.oracle_event.event_id.clone());
-
-        // A single atomic upsert: the read-modify-write it replaces raced under
-        // concurrent updates, and its insert arm hardcoded is_offer_party and
-        // fee_rate_per_vb. The update arm deliberately leaves the columns set
-        // at insert time untouched and only advances the mutable ones.
-        sqlx::query(
-            r#"
-            INSERT INTO contract_metadata (
-                id, state, is_offer_party, counter_party,
-                offer_collateral, accept_collateral, total_collateral, fee_rate_per_vb,
-                cet_locktime, refund_locktime, pnl, funding_txid, cet_txid, announcement_id, oracle_pubkey
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-            ON CONFLICT (id) DO UPDATE SET
-                state = EXCLUDED.state,
-                pnl = EXCLUDED.pnl,
-                funding_txid = COALESCE(EXCLUDED.funding_txid, contract_metadata.funding_txid),
-                cet_txid = COALESCE(EXCLUDED.cet_txid, contract_metadata.cet_txid)
-            "#,
-        )
-        .bind(&contract_id)
-        .bind(prefix as i16)
-        .bind(contract.is_offer_party())
-        .bind(hex::encode(contract.get_counter_party_id().serialize()))
-        .bind(offer_collateral.to_sat() as i64)
-        .bind(accept_collateral.to_sat() as i64)
-        .bind(total_collateral.to_sat() as i64)
-        .bind(contract.get_fee_rate_per_vb() as i64)
-        .bind(contract.get_cet_locktime() as i32)
-        .bind(contract.get_refund_locktime() as i32)
-        .bind(Some(contract.get_pnl().to_sat()))
-        .bind(&funding_txid)
-        .bind(&cet_txid)
-        .bind(announcement_id.unwrap_or_else(|| "legacy_data".to_string()))
-        .bind(oracle_pubkey.unwrap_or_else(|| "legacy_data".to_string()))
-        .execute(&mut *tx)
-        .await
-        .map_err(to_storage_error)?;
-
-        let serialized_contract = serialize_contract(contract)?;
-
-        sqlx::query(
-            "INSERT INTO contract_data (id, state, contract_data, is_compressed)
-             VALUES ($1, $2, $3, $4)
-             ON CONFLICT (id) DO UPDATE SET
-                 state = EXCLUDED.state,
-                 contract_data = EXCLUDED.contract_data",
-        )
-        .bind(&contract_id)
-        .bind(prefix as i16)
-        .bind(&serialized_contract)
-        .bind(false)
-        .execute(&mut *tx)
-        .await
-        .map_err(to_storage_error)?;
+        upsert_contract_row(&mut tx, &row).await?;
+        // A contract read from the legacy blob layout moves over on its
+        // first update.
+        legacy::delete_legacy_rows(&mut tx, &row.id).await?;
 
         tx.commit().await.map_err(to_storage_error)?;
 
@@ -671,87 +588,180 @@ impl ManagerStorage for PostgresStore {
 
     #[tracing::instrument(skip(self))]
     async fn get_signed_contracts(&self) -> Result<Vec<SignedContract>, ddk_manager::error::Error> {
-        let contracts =
-            sqlx::query_as::<Postgres, ContractData>("SELECT * FROM contract_data WHERE state = 3")
-                .fetch_all(&self.pool)
-                .await
-                .map_err(to_storage_error)?;
-
-        let signed = contracts
+        self.contracts_in_state(ContractPrefix::Signed)
+            .await?
             .into_iter()
-            .map(|c| match deserialize_contract(&c.contract_data)? {
+            .map(|c| match c {
                 Contract::Signed(s) => Ok(s),
                 _ => Err(wrong_state_error("signed")),
             })
-            .collect::<Result<Vec<_>, ddk_manager::error::Error>>()?;
-
-        Ok(signed)
+            .collect()
     }
 
     #[tracing::instrument(skip(self))]
     async fn get_contract_offers(&self) -> Result<Vec<OfferedContract>, ddk_manager::error::Error> {
-        let contracts = sqlx::query_as::<Postgres, ContractData>(
-            "SELECT cd.id, cd.state, cd.contract_data, cd.is_compressed 
-         FROM contract_data cd
-         INNER JOIN contract_metadata cm ON cd.id = cm.id
-         WHERE cm.state = 1 AND cm.is_offer_party = false",
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(to_storage_error)?;
-
-        let offers = contracts
+        self.contracts_in_state(ContractPrefix::Offered)
+            .await?
             .into_iter()
-            .map(|c| match deserialize_contract(&c.contract_data)? {
+            .filter(|c| !c.is_offer_party())
+            .map(|c| match c {
                 Contract::Offered(o) => Ok(o),
                 _ => Err(wrong_state_error("offered")),
             })
-            .collect::<Result<Vec<_>, ddk_manager::error::Error>>()?;
-
-        Ok(offers)
+            .collect()
     }
 
     #[tracing::instrument(skip(self))]
     async fn get_confirmed_contracts(
         &self,
     ) -> Result<Vec<SignedContract>, ddk_manager::error::Error> {
-        let contracts =
-            sqlx::query_as::<Postgres, ContractData>("SELECT * FROM contract_data WHERE state = 4")
-                .fetch_all(&self.pool)
-                .await
-                .map_err(to_storage_error)?;
-
-        let signed = contracts
+        self.contracts_in_state(ContractPrefix::Confirmed)
+            .await?
             .into_iter()
-            .map(|c| match deserialize_contract(&c.contract_data)? {
+            .map(|c| match c {
                 Contract::Confirmed(s) => Ok(s),
                 _ => Err(wrong_state_error("confirmed")),
             })
-            .collect::<Result<Vec<_>, ddk_manager::error::Error>>()?;
-
-        Ok(signed)
+            .collect()
     }
 
     #[tracing::instrument(skip(self))]
     async fn get_preclosed_contracts(
         &self,
     ) -> Result<Vec<PreClosedContract>, ddk_manager::error::Error> {
-        let contracts =
-            sqlx::query_as::<Postgres, ContractData>("SELECT * FROM contract_data WHERE state = 5")
-                .fetch_all(&self.pool)
-                .await
-                .map_err(to_storage_error)?;
-
-        let preclosed = contracts
+        self.contracts_in_state(ContractPrefix::PreClosed)
+            .await?
             .into_iter()
-            .map(|c| match deserialize_contract(&c.contract_data)? {
+            .map(|c| match c {
                 Contract::PreClosed(p) => Ok(p),
                 _ => Err(wrong_state_error("pre-closed")),
             })
-            .collect::<Result<Vec<_>, ddk_manager::error::Error>>()?;
-
-        Ok(preclosed)
+            .collect()
     }
+}
+
+/// The metadata columns, from `dlc_contracts` and from the legacy
+/// `contract_metadata` rows that have not been migrated yet.
+const CONTRACT_METADATA: &str = "SELECT id, state, is_offer_party, counter_party,
+        offer_collateral, accept_collateral, total_collateral, fee_rate_per_vb,
+        cet_locktime, refund_locktime, pnl, funding_txid, cet_txid, announcement_id, oracle_pubkey
+    FROM dlc_contracts
+    UNION ALL
+    SELECT id, state, is_offer_party, counter_party,
+        offer_collateral, accept_collateral, total_collateral, fee_rate_per_vb,
+        cet_locktime, refund_locktime, pnl, funding_txid, cet_txid, announcement_id, oracle_pubkey
+    FROM contract_metadata m
+    WHERE NOT EXISTS (SELECT 1 FROM dlc_contracts d WHERE d.id = m.id)";
+
+/// Writes a contract row, replacing the row with the same id.
+pub(super) async fn upsert_contract_row(
+    tx: &mut Transaction<'_, Postgres>,
+    row: &ContractRow,
+) -> Result<(), ddk_manager::error::Error> {
+    sqlx::query(
+        r#"
+        INSERT INTO dlc_contracts (
+            id, format_version, state, temporary_id, is_offer_party, counter_party,
+            keys_id, contract_flags, chain_hash,
+            offer_collateral, accept_collateral, total_collateral, fee_rate_per_vb,
+            cet_locktime, refund_locktime, announcement_id, oracle_pubkey,
+            funding_txid, cet_txid, pnl,
+            offer_message, accept_message, sign_message,
+            offer_params, accept_params, adaptor_infos, dlc_transactions,
+            channel_id, attestations, signed_cet, error_message
+        )
+        VALUES (
+            $1, $2, $3, $4, $5, $6,
+            $7, $8, $9,
+            $10, $11, $12, $13,
+            $14, $15, $16, $17,
+            $18, $19, $20,
+            $21, $22, $23,
+            $24, $25, $26, $27,
+            $28, $29, $30, $31
+        )
+        ON CONFLICT (id) DO UPDATE SET
+            format_version = EXCLUDED.format_version,
+            state = EXCLUDED.state,
+            temporary_id = EXCLUDED.temporary_id,
+            is_offer_party = EXCLUDED.is_offer_party,
+            counter_party = EXCLUDED.counter_party,
+            keys_id = EXCLUDED.keys_id,
+            contract_flags = EXCLUDED.contract_flags,
+            chain_hash = EXCLUDED.chain_hash,
+            offer_collateral = EXCLUDED.offer_collateral,
+            accept_collateral = EXCLUDED.accept_collateral,
+            total_collateral = EXCLUDED.total_collateral,
+            fee_rate_per_vb = EXCLUDED.fee_rate_per_vb,
+            cet_locktime = EXCLUDED.cet_locktime,
+            refund_locktime = EXCLUDED.refund_locktime,
+            announcement_id = EXCLUDED.announcement_id,
+            oracle_pubkey = EXCLUDED.oracle_pubkey,
+            funding_txid = EXCLUDED.funding_txid,
+            cet_txid = EXCLUDED.cet_txid,
+            pnl = EXCLUDED.pnl,
+            offer_message = EXCLUDED.offer_message,
+            accept_message = EXCLUDED.accept_message,
+            sign_message = EXCLUDED.sign_message,
+            offer_params = EXCLUDED.offer_params,
+            accept_params = EXCLUDED.accept_params,
+            adaptor_infos = EXCLUDED.adaptor_infos,
+            dlc_transactions = EXCLUDED.dlc_transactions,
+            channel_id = EXCLUDED.channel_id,
+            attestations = EXCLUDED.attestations,
+            signed_cet = EXCLUDED.signed_cet,
+            error_message = EXCLUDED.error_message,
+            updated_at = now()
+        "#,
+    )
+    .bind(&row.id)
+    .bind(row.format_version)
+    .bind(row.state)
+    .bind(&row.temporary_id)
+    .bind(row.is_offer_party)
+    .bind(&row.counter_party)
+    .bind(&row.keys_id)
+    .bind(row.contract_flags)
+    .bind(&row.chain_hash)
+    .bind(row.offer_collateral)
+    .bind(row.accept_collateral)
+    .bind(row.total_collateral)
+    .bind(row.fee_rate_per_vb)
+    .bind(row.cet_locktime)
+    .bind(row.refund_locktime)
+    .bind(&row.announcement_id)
+    .bind(&row.oracle_pubkey)
+    .bind(&row.funding_txid)
+    .bind(&row.cet_txid)
+    .bind(row.pnl)
+    .bind(&row.offer_message)
+    .bind(&row.accept_message)
+    .bind(&row.sign_message)
+    .bind(&row.offer_params)
+    .bind(&row.accept_params)
+    .bind(&row.adaptor_infos)
+    .bind(&row.dlc_transactions)
+    .bind(&row.channel_id)
+    .bind(&row.attestations)
+    .bind(&row.signed_cet)
+    .bind(&row.error_message)
+    .execute(&mut **tx)
+    .await
+    .map_err(to_storage_error)?;
+    Ok(())
+}
+
+/// Deletes a contract from `dlc_contracts` and from the legacy tables.
+async fn delete_contract_rows(
+    tx: &mut Transaction<'_, Postgres>,
+    id: &str,
+) -> Result<(), ddk_manager::error::Error> {
+    sqlx::query("DELETE FROM dlc_contracts WHERE id = $1")
+        .bind(id)
+        .execute(&mut **tx)
+        .await
+        .map_err(to_storage_error)?;
+    legacy::delete_legacy_rows(tx, id).await
 }
 
 /// Insert keychain descriptors.
@@ -1596,6 +1606,172 @@ mod tests {
         let read = db.read().await.unwrap();
         assert_eq!(read.tx_graph.first_seen.get(&txid), Some(&50));
         assert_eq!(read.tx_graph.last_evicted.get(&txid), Some(&250));
+    }
+
+    /// Writes a contract the way releases up to 2.0 did: a blob in
+    /// contract_data and a metadata row in contract_metadata.
+    async fn seed_legacy(pool: &Pool<Postgres>, contract: &Contract) {
+        let id = hex::encode(contract.get_id());
+        let state = ContractPrefix::get_prefix(contract) as i16;
+        let (offer, accept, total) = contract.get_collateral();
+        sqlx::query(
+            "INSERT INTO contract_metadata (
+                id, state, is_offer_party, counter_party, offer_collateral, accept_collateral,
+                total_collateral, fee_rate_per_vb, cet_locktime, refund_locktime, pnl
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+        )
+        .bind(&id)
+        .bind(state)
+        .bind(contract.is_offer_party())
+        .bind(hex::encode(contract.get_counter_party_id().serialize()))
+        .bind(offer.to_sat() as i64)
+        .bind(accept.to_sat() as i64)
+        .bind(total.to_sat() as i64)
+        .bind(contract.get_fee_rate_per_vb() as i64)
+        .bind(contract.get_cet_locktime() as i32)
+        .bind(contract.get_refund_locktime() as i32)
+        .bind(Some(contract.get_pnl().to_sat()))
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO contract_data (id, state, contract_data, is_compressed)
+             VALUES ($1, $2, $3, false)",
+        )
+        .bind(&id)
+        .bind(state)
+        .bind(crate::util::ser::serialize_contract(contract).unwrap())
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    fn fixture(name: &str) -> Contract {
+        let path = format!(
+            "{}/../testconfig/contract_binaries/{name}",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        deserialize_contract(&std::fs::read(path).unwrap()).unwrap()
+    }
+
+    async fn open(server: &TestPostgres, migrations: bool) -> PostgresStore {
+        PostgresStore::new(
+            server.url(),
+            migrations,
+            Arc::new(Logger::console(
+                "console_logger".to_string(),
+                LogLevel::Info,
+            )),
+            "test".to_string(),
+        )
+        .await
+        .unwrap()
+    }
+
+    fn bytes(contract: &Contract) -> Vec<u8> {
+        crate::util::ser::serialize_contract(contract).unwrap()
+    }
+
+    /// A database written by 2.0 is moved to the columnar layout when the
+    /// store opens with migrations on, and every contract survives.
+    #[tokio::test]
+    async fn legacy_contracts_migrate_at_startup() {
+        let server = TestPostgres::start("ddk").await;
+        let schema = open(&server, true).await;
+        let offered = fixture("Offered");
+        let closed = fixture("Closed");
+        seed_legacy(&schema.pool, &offered).await;
+        seed_legacy(&schema.pool, &closed).await;
+        assert_eq!(schema.count_legacy_contracts().await.unwrap(), 2);
+        drop(schema);
+
+        let db = open(&server, true).await;
+        assert_eq!(db.count_legacy_contracts().await.unwrap(), 0);
+
+        let (rows,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM dlc_contracts WHERE format_version = 2")
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
+        assert_eq!(rows, 2);
+        let (legacy,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM contract_data")
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(legacy, 0);
+
+        let read = db.get_contract(&offered.get_id()).await.unwrap().unwrap();
+        assert_eq!(bytes(&read), bytes(&offered));
+        let read = db.get_contract(&closed.get_id()).await.unwrap().unwrap();
+        assert_eq!(bytes(&read), bytes(&closed));
+        assert_eq!(db.get_contract_metadata(None).await.unwrap().len(), 2);
+    }
+
+    /// With migrations off, a legacy contract still loads through every read
+    /// path and moves to the columnar layout on its first update.
+    #[tokio::test]
+    async fn legacy_contract_loads_and_moves_on_update() {
+        let server = TestPostgres::start("ddk").await;
+        let schema = open(&server, true).await;
+        let signed = fixture("Signed");
+        seed_legacy(&schema.pool, &signed).await;
+        drop(schema);
+
+        let db = open(&server, false).await;
+        assert_eq!(db.count_legacy_contracts().await.unwrap(), 1);
+        let read = db.get_contract(&signed.get_id()).await.unwrap().unwrap();
+        assert_eq!(bytes(&read), bytes(&signed));
+        assert_eq!(db.get_contracts().await.unwrap().len(), 1);
+        assert_eq!(db.get_signed_contracts().await.unwrap().len(), 1);
+        assert_eq!(db.get_contract_metadata(None).await.unwrap().len(), 1);
+
+        db.update_contract(&signed).await.unwrap();
+        assert_eq!(db.count_legacy_contracts().await.unwrap(), 0);
+        assert_eq!(db.get_signed_contracts().await.unwrap().len(), 1);
+        assert_eq!(db.get_contract_metadata(None).await.unwrap().len(), 1);
+        let read = db.get_contract(&signed.get_id()).await.unwrap().unwrap();
+        assert_eq!(bytes(&read), bytes(&signed));
+
+        let report = db.migrate_legacy_contracts().await.unwrap();
+        assert_eq!(report, LegacyMigrationReport::default());
+    }
+
+    /// A blob that cannot be decoded stays where it is, is named in the
+    /// report, and does not stop the store from opening or the other
+    /// contracts from moving.
+    #[tokio::test]
+    async fn migration_reports_the_rows_it_cannot_move() {
+        let server = TestPostgres::start("ddk").await;
+        let schema = open(&server, true).await;
+        seed_legacy(&schema.pool, &fixture("Confirmed")).await;
+        sqlx::query(
+            "INSERT INTO contract_metadata (
+                id, state, is_offer_party, counter_party, offer_collateral, accept_collateral,
+                total_collateral, fee_rate_per_vb, cet_locktime, refund_locktime
+            ) VALUES ('bad', 3, true, 'aa', 0, 0, 0, 0, 0, 0)",
+        )
+        .execute(&schema.pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO contract_data (id, state, contract_data, is_compressed)
+             VALUES ('bad', 3, $1, false)",
+        )
+        .bind(vec![3u8, 1, 2, 3])
+        .execute(&schema.pool)
+        .await
+        .unwrap();
+        drop(schema);
+
+        let db = open(&server, true).await;
+        assert_eq!(db.count_legacy_contracts().await.unwrap(), 1);
+        assert_eq!(db.get_confirmed_contracts().await.unwrap().len(), 1);
+
+        let report = db.migrate_legacy_contracts().await.unwrap();
+        assert_eq!(report.migrated, 0);
+        assert_eq!(report.failed.len(), 1);
+        assert_eq!(report.failed[0].0, "bad");
+        assert!(!report.is_complete());
     }
 
     #[tokio::test]
