@@ -1819,6 +1819,97 @@ mod tests {
         println!("{} contracts round-trip byte for byte", rows.len());
     }
 
+    /// A stream holding one record of type 65007 with `body` as its one-byte body.
+    fn stream_with_record(body: u8) -> ddk_messages::tlv_stream::TlvStream {
+        let bytes = [0xfd, 0xfd, 0xef, 0x01, body];
+        ddk_messages::tlv_stream::TlvStream::read_to_end(&mut lightning::io::Cursor::new(bytes))
+            .unwrap()
+    }
+
+    /// TLV records on a legacy blob come through the migration and back out
+    /// of the row, on every layer of a signed contract.
+    #[tokio::test]
+    async fn tlv_records_survive_the_legacy_migration() {
+        let server = TestPostgres::start("ddk").await;
+        let schema = open(&server, true).await;
+        let Contract::Signed(mut signed) = fixture("Signed") else {
+            panic!("fixture is not signed")
+        };
+        signed.accepted_contract.offered_contract.tlvs = stream_with_record(1);
+        signed.accepted_contract.tlvs = stream_with_record(2);
+        signed.tlvs = stream_with_record(3);
+        let contract = Contract::Signed(signed);
+        seed_legacy(&schema.pool, &contract).await;
+        drop(schema);
+
+        let db = open(&server, true).await;
+        assert_eq!(db.count_legacy_contracts().await.unwrap(), 0);
+        let Some(Contract::Signed(read)) = db.get_contract(&contract.get_id()).await.unwrap()
+        else {
+            panic!("contract not found or not signed")
+        };
+        assert_eq!(
+            read.accepted_contract.offered_contract.tlvs,
+            stream_with_record(1)
+        );
+        assert_eq!(read.accepted_contract.tlvs, stream_with_record(2));
+        assert_eq!(read.tlvs, stream_with_record(3));
+        assert_eq!(bytes(&Contract::Signed(read)), bytes(&contract));
+    }
+
+    /// A contract closed by refund has no CET and no attestations. Both
+    /// columns are null and the contract still round-trips.
+    #[tokio::test]
+    async fn closed_by_refund_round_trips() {
+        let (_server, db) = seed_db().await;
+        let Contract::Closed(mut closed) = fixture("Closed") else {
+            panic!("fixture is not closed")
+        };
+        closed.signed_cet = None;
+        closed.attestations = None;
+        let contract = Contract::Closed(closed);
+
+        db.update_contract(&contract).await.unwrap();
+
+        let (cet, attestations): (Option<Vec<u8>>, Option<Vec<u8>>) =
+            sqlx::query_as("SELECT signed_cet, attestations FROM dlc_contracts WHERE id = $1")
+                .bind(hex::encode(contract.get_id()))
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
+        assert!(cet.is_none());
+        assert!(attestations.is_none());
+
+        let read = db.get_contract(&contract.get_id()).await.unwrap().unwrap();
+        assert_eq!(bytes(&read), bytes(&contract));
+        let metadata = db.get_contract_metadata(None).await.unwrap();
+        assert_eq!(metadata.len(), 1);
+        assert!(metadata[0].cet_txid.is_none());
+    }
+
+    /// Offers we received are offers to act on; offers we made are not.
+    #[tokio::test]
+    async fn contract_offers_are_the_ones_we_received() {
+        let server = TestPostgres::start("ddk").await;
+        let db = open(&server, true).await;
+        let Contract::Offered(mut received) = fixture("Offered") else {
+            panic!("fixture is not offered")
+        };
+        received.is_offer_party = false;
+        let mut made = received.clone();
+        made.is_offer_party = true;
+        made.id = [9u8; 32];
+
+        db.create_contract(&received).await.unwrap();
+        db.create_contract(&made).await.unwrap();
+
+        assert_eq!(db.get_contracts().await.unwrap().len(), 2);
+        let offers = db.get_contract_offers().await.unwrap();
+        assert_eq!(offers.len(), 1);
+        assert_eq!(offers[0].id, received.id);
+        assert!(!offers[0].is_offer_party);
+    }
+
     #[tokio::test]
     async fn delete_contract_removes_rows() {
         let (_server, db) = seed_db().await;
