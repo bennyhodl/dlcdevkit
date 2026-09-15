@@ -197,6 +197,11 @@ impl OfferedContract {
         })
     }
 
+    /// The id of the keys this contract signs with.
+    pub fn keys_id(&self) -> KeysId {
+        self.keys_id
+    }
+
     /// The chain hash to put on offer messages for this contract.
     ///
     /// Contracts stored before ddk tracked the chain hash have none to

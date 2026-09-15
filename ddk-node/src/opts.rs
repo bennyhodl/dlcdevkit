@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 #[derive(Parser, Clone, Debug)]
@@ -60,4 +60,15 @@ pub struct NodeOpts {
     #[arg(long)]
     #[arg(help = "Endpoint for bitcoind ZeroMQ blockhash notifications")]
     pub zmq_blockhash_endpoint: Option<String>,
+    #[command(subcommand)]
+    pub command: Option<NodeCommand>,
+}
+
+/// A one-shot task to run instead of serving the node.
+#[derive(Subcommand, Clone, Debug)]
+pub enum NodeCommand {
+    /// Apply the schema migrations and move every contract still stored in
+    /// the legacy blob layout to the columnar layout, then exit. Safe to run
+    /// again. Takes a backup of the database first.
+    Migrate,
 }

@@ -58,6 +58,38 @@ impl DdkNode {
         }
     }
 
+    /// Applies the schema migrations and moves every contract still stored
+    /// in the legacy blob layout to the columnar layout, then returns.
+    ///
+    /// `PostgresStore::new` with migrations on does the same work, so a node
+    /// that starts normally migrates as well. This is for operators who want
+    /// to run the migration ahead of an upgrade, or against a restored
+    /// backup first.
+    pub async fn migrate(opts: NodeOpts) -> anyhow::Result<()> {
+        let logger = Arc::new(Logger::console(
+            "console_logger".to_string(),
+            LogLevel::from(opts.log),
+        ));
+        let storage =
+            PostgresStore::new(&opts.postgres_url, false, logger.clone(), opts.name).await?;
+        let report = storage.run_migrations().await?;
+        println!(
+            "Migrated {} contract(s) to the columnar layout. {} could not be moved.",
+            report.migrated,
+            report.failed.len()
+        );
+        for (id, error) in &report.failed {
+            println!("  {id}: {error}");
+        }
+        if !report.is_complete() {
+            anyhow::bail!(
+                "{} contract(s) are still in the legacy blob layout",
+                report.failed.len()
+            );
+        }
+        Ok(())
+    }
+
     pub async fn serve(opts: NodeOpts) -> anyhow::Result<()> {
         let logger = Arc::new(Logger::console(
             "console_logger".to_string(),
