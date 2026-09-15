@@ -4,7 +4,7 @@ pub mod legacy;
 use super::sqlx::{ContractMetadata, SqlxError};
 use crate::error::{StorageError, WalletError};
 use crate::logger::Logger;
-use crate::logger::{log_info, log_warn, WriteLog};
+use crate::logger::{log_debug, log_info, WriteLog};
 use crate::Storage;
 use crate::{error::to_storage_error, util::ser::ContractPrefix};
 use bdk_chain::{
@@ -110,8 +110,10 @@ impl PostgresStore {
         if migrations {
             store.run_migrations().await?;
         }
+        // Without migrations the new table may not exist yet, and every read
+        // will say so; the count is not the place to fail.
         if let Err(e) = store.warn_if_legacy_contracts_remain().await {
-            log_warn!(
+            log_debug!(
                 store.logger,
                 "Could not count contracts in the legacy blob layout. error={}",
                 e
@@ -1772,6 +1774,49 @@ mod tests {
         assert_eq!(report.failed.len(), 1);
         assert_eq!(report.failed[0].0, "bad");
         assert!(!report.is_complete());
+    }
+
+    /// Every blob in a live legacy database survives the row layout byte for
+    /// byte. Read only: it never writes to the database it is pointed at.
+    ///
+    /// ```sh
+    /// DDK_MIGRATION_CHECK_URL=postgres://... cargo test -p ddk --features postgres \
+    ///     legacy_blobs_round_trip_against_a_live_database -- --ignored --nocapture
+    /// ```
+    #[tokio::test]
+    #[ignore = "needs DDK_MIGRATION_CHECK_URL"]
+    async fn legacy_blobs_round_trip_against_a_live_database() {
+        let url = std::env::var("DDK_MIGRATION_CHECK_URL").expect("DDK_MIGRATION_CHECK_URL");
+        let pool = PoolOptions::<Postgres>::new()
+            .max_connections(1)
+            .connect(&url)
+            .await
+            .unwrap();
+        let rows = sqlx::query_as::<Postgres, super::super::sqlx::ContractData>(
+            "SELECT id, state, contract_data, is_compressed FROM contract_data ORDER BY id",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert!(!rows.is_empty(), "no legacy rows to check");
+        for legacy in &rows {
+            let contract = deserialize_contract(&legacy.contract_data)
+                .unwrap_or_else(|e| panic!("{}: legacy decode: {e}", legacy.id));
+            let row = ContractRow::from_contract(&contract)
+                .unwrap_or_else(|e| panic!("{}: to row: {e}", legacy.id));
+            assert_eq!(row.id, legacy.id, "row id differs from the legacy id");
+            let read = row
+                .into_contract()
+                .unwrap_or_else(|e| panic!("{}: from row: {e}", legacy.id));
+            assert_eq!(
+                bytes(&read),
+                bytes(&contract),
+                "{}: bytes differ",
+                legacy.id
+            );
+            println!("ok {} state={}", legacy.id, legacy.state);
+        }
+        println!("{} contracts round-trip byte for byte", rows.len());
     }
 
     #[tokio::test]
