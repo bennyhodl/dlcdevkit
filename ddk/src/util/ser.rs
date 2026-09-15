@@ -28,6 +28,7 @@ pub fn message_variant_name(message: &Message) -> String {
 mod tests {
     use super::*;
     use ddk_messages::tlv_stream::TlvStream;
+    use ddk_testenv::{contract_binary, legacy_contract_binary, ContractBinary};
 
     /// A stream holding one record of type 65007 with `body` as its one-byte body.
     fn stream_with_record(body: u8) -> TlvStream {
@@ -38,8 +39,8 @@ mod tests {
     /// Records set on a stored contract come back on the struct they were set on.
     #[test]
     fn records_survive_contract_storage() {
-        let stored = include_bytes!("../../../testconfig/contract_binaries/Signed");
-        let mut contract = deserialize_contract(&stored.to_vec()).unwrap();
+        let stored = contract_binary(ContractBinary::Signed);
+        let mut contract = deserialize_contract(stored).unwrap();
         {
             let Contract::Signed(s) = &mut contract else {
                 panic!("fixture is not a signed contract")
@@ -68,7 +69,7 @@ mod tests {
     /// An unknown blob version returns an error instead of misreading the data.
     #[test]
     fn unknown_stored_contract_version_is_rejected() {
-        let legacy = include_bytes!("../../../testconfig/contract_binaries/Offered");
+        let legacy = contract_binary(ContractBinary::Offered);
         let mut stored = vec![0u8, 99];
         stored.extend_from_slice(legacy);
         assert!(deserialize_contract(&stored).is_err());
@@ -78,8 +79,8 @@ mod tests {
     /// storage like every other state's.
     #[test]
     fn closed_contract_keeps_its_streams() {
-        let stored = include_bytes!("../../../testconfig/contract_binaries/Closed");
-        let mut contract = deserialize_contract(&stored.to_vec()).unwrap();
+        let stored = contract_binary(ContractBinary::Closed);
+        let mut contract = deserialize_contract(stored).unwrap();
         {
             let Contract::Closed(c) = &mut contract else {
                 panic!("fixture is not a closed contract")
@@ -109,32 +110,11 @@ mod tests {
     ///
     /// Each embeds at least one [`ddk_messages::oracle_msgs::OracleAnnouncement`],
     /// which is what makes these the evidence that matters for oracle serialization.
-    const FIXTURES: &[(&str, &[u8])] = &[
-        (
-            "Offered",
-            include_bytes!("../../../testconfig/contract_binaries/Offered"),
-        ),
-        (
-            "Accepted",
-            include_bytes!("../../../testconfig/contract_binaries/Accepted"),
-        ),
-        (
-            "Signed",
-            include_bytes!("../../../testconfig/contract_binaries/Signed"),
-        ),
-        (
-            "Confirmed",
-            include_bytes!("../../../testconfig/contract_binaries/Confirmed"),
-        ),
-        (
-            "PreClosed",
-            include_bytes!("../../../testconfig/contract_binaries/PreClosed"),
-        ),
-        (
-            "Closed",
-            include_bytes!("../../../testconfig/contract_binaries/Closed"),
-        ),
-    ];
+    fn fixtures() -> impl Iterator<Item = (&'static str, &'static [u8])> {
+        ContractBinary::ALL
+            .into_iter()
+            .map(|state| (state.name(), contract_binary(state)))
+    }
 
     /// Contracts stored by an earlier release load, and writing them back
     /// only upgrades the envelope: the struct bytes stay intact.
@@ -146,8 +126,8 @@ mod tests {
     /// end, which every release from here on can read.
     #[test]
     fn stored_contracts_round_trip_with_struct_bytes_intact() {
-        for (state, stored) in FIXTURES {
-            let contract = deserialize_contract(&stored.to_vec())
+        for (state, stored) in fixtures() {
+            let contract = deserialize_contract(stored)
                 .unwrap_or_else(|e| panic!("{state} contract failed to deserialize: {e:?}"));
 
             let reserialized = serialize_contract(&contract)
@@ -176,15 +156,11 @@ mod tests {
         }
     }
 
-    /// The oldest offered contract we keep a fixture for still reads.
-    ///
-    /// Only `old/Offered` is asserted. The other fixtures under `old/` predate
-    /// unrelated changes to the contract structs and have not deserialized for
-    /// some time, which is a separate matter from how oracle messages are written.
+    /// An offered contract stored before `contract_flags` still reads.
     #[test]
-    fn oldest_offered_contract_still_deserializes() {
-        let stored = include_bytes!("../../../testconfig/contract_binaries/old/Offered");
-        deserialize_contract(&stored.to_vec()).expect("oldest offered contract to deserialize");
+    fn legacy_offered_contract_still_deserializes() {
+        let stored = legacy_contract_binary();
+        deserialize_contract(stored).expect("legacy offered contract to deserialize");
     }
 
     /// The fixtures predate ddk tracking the chain hash, so they carry none.
@@ -195,8 +171,8 @@ mod tests {
     /// does not disturb the contract data already in a database.
     #[test]
     fn stored_contracts_predating_the_chain_hash_carry_none() {
-        for (state, stored) in FIXTURES {
-            let contract = deserialize_contract(&stored.to_vec())
+        for (state, stored) in fixtures() {
+            let contract = deserialize_contract(stored)
                 .unwrap_or_else(|e| panic!("{state} contract failed to deserialize: {e:?}"));
 
             let offered = match &contract {
@@ -226,8 +202,8 @@ mod tests {
     fn announcement_inside_a_stored_contract_survives_as_a_standalone_record() {
         use ddk_messages::TlvRecord;
 
-        let stored = include_bytes!("../../../testconfig/contract_binaries/Offered");
-        let Contract::Offered(offered) = deserialize_contract(&stored.to_vec()).unwrap() else {
+        let stored = contract_binary(ContractBinary::Offered);
+        let Contract::Offered(offered) = deserialize_contract(stored).unwrap() else {
             panic!("fixture is not an offered contract");
         };
 

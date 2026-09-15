@@ -124,7 +124,7 @@ jobs:
       # the first. The features named here are the ones the integration tests
       # actually want.
       - id: set-matrix
-        run: cargo test --no-run --features ddk-manager/parallel,ddk-manager/use-serde && echo "matrix=$(testconfig/scripts/get_test_list.sh manager_execution manager_tests contract_updater stateless_execution)" >> "$GITHUB_OUTPUT"
+        run: cargo test --no-run --features ddk-manager/parallel,ddk-manager/use-serde && echo "matrix=$(testenv/scripts/get_test_list.sh manager_execution manager_tests contract_updater stateless_execution)" >> "$GITHUB_OUTPUT"
   integration_tests:
     name: integration tests
     needs: integration_tests_prepare

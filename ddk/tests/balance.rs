@@ -10,6 +10,7 @@ use ddk::oracle::memory::MemoryOracle;
 use ddk::util::ser::deserialize_contract;
 use ddk_manager::contract::Contract;
 use ddk_manager::Storage;
+use ddk_testenv::{contract_binary, ContractBinary};
 use test_util::generate_blocks;
 
 use crate::test_util::get_bitcoind_client;
@@ -17,8 +18,7 @@ use crate::test_util::get_bitcoind_client;
 #[tokio::test]
 async fn contract_balance() {
     dotenvy::dotenv().ok();
-    let contract_bytes = include_bytes!("../../testconfig/contract_binaries/PreClosed");
-    let contract = deserialize_contract(&contract_bytes.to_vec()).unwrap();
+    let contract = deserialize_contract(contract_binary(ContractBinary::PreClosed)).unwrap();
     let preclosed = match contract {
         Contract::PreClosed(c) => c,
         _ => panic!("Contract is not a PreClosedContract"),

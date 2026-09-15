@@ -146,6 +146,7 @@ mod tests {
 
     use super::*;
     use crate::logger::Logger;
+    use ddk_testenv::{contract_binary, legacy_contract_binary, ContractBinary};
     use std::sync::Arc;
 
     macro_rules! sled_test {
@@ -167,8 +168,8 @@ mod tests {
     sled_test!(
         create_contract_can_be_retrieved,
         |storage: SledStorage| async move {
-            let serialized = include_bytes!("../../../../testconfig/contract_binaries/Offered");
-            let contract = deserialize_contract(&serialized.to_vec());
+            let serialized = contract_binary(ContractBinary::Offered);
+            let contract = deserialize_contract(serialized);
             let contract = match contract {
                 Ok(c) => {
                     if let Contract::Offered(c) = c {
@@ -204,8 +205,8 @@ mod tests {
     );
 
     async fn insert_offered_signed_and_confirmed(storage: &mut SledStorage) {
-        let serialized = include_bytes!("../../../../testconfig/contract_binaries/Offered");
-        let offered_contract = deserialize_contract(&serialized.to_vec());
+        let serialized = contract_binary(ContractBinary::Offered);
+        let offered_contract = deserialize_contract(serialized);
         let offered_contract = match offered_contract {
             Ok(c) => {
                 if let Contract::Offered(c) = c {
@@ -223,34 +224,22 @@ mod tests {
             .await
             .expect("Error creating contract");
 
-        let serialized = include_bytes!("../../../../testconfig/contract_binaries/Signed");
-        let contract = deserialize_contract(&serialized.to_vec());
+        let serialized = contract_binary(ContractBinary::Signed);
+        let contract = deserialize_contract(serialized);
         storage
             .update_contract(&contract.unwrap())
             .await
             .expect("Error creating contract");
-        // let serialized = include_bytes!("../../../../testconfig/contract_binaries/Signed1");
-        // let signed_contract = Contract::Signed(deserialize_object(serialized));
-        // storage
-        //     .update_contract(&signed_contract)
-        //     .await
-        //     .expect("Error creating contract");
 
-        let serialized = include_bytes!("../../../../testconfig/contract_binaries/Confirmed");
-        let confirmed_contract = deserialize_contract(&serialized.to_vec()).unwrap();
+        let serialized = contract_binary(ContractBinary::Confirmed);
+        let confirmed_contract = deserialize_contract(serialized).unwrap();
         storage
             .update_contract(&confirmed_contract)
             .await
             .expect("Error creating contract");
-        // let serialized = include_bytes!("../../../tests/data/dlc_storage/Confirmed1");
-        // let confirmed_contract = Contract::Confirmed(deserialize_object(serialized));
-        // storage
-        //     .update_contract(&confirmed_contract)
-        //     .await
-        //     .expect("Error creating contract");
 
-        let serialized = include_bytes!("../../../../testconfig/contract_binaries/PreClosed");
-        let preclosed_contract = deserialize_contract(&serialized.to_vec()).unwrap();
+        let serialized = contract_binary(ContractBinary::PreClosed);
+        let preclosed_contract = deserialize_contract(serialized).unwrap();
         storage
             .update_contract(&preclosed_contract)
             .await
@@ -260,8 +249,8 @@ mod tests {
     sled_test!(
         update_contract_is_updated,
         |storage: SledStorage| async move {
-            let serialized = include_bytes!("../../../../testconfig/contract_binaries/Offered");
-            let offered_contract = deserialize_contract(&serialized.to_vec()).unwrap();
+            let serialized = contract_binary(ContractBinary::Offered);
+            let offered_contract = deserialize_contract(serialized).unwrap();
             if let Contract::Offered(offered_contract) = offered_contract {
                 storage
                     .create_contract(&offered_contract)
@@ -270,8 +259,8 @@ mod tests {
             } else {
                 panic!("Contract is not an offered contract");
             }
-            let serialized = include_bytes!("../../../../testconfig/contract_binaries/Accepted");
-            let accepted_contract = deserialize_contract(&serialized.to_vec()).unwrap();
+            let serialized = contract_binary(ContractBinary::Accepted);
+            let accepted_contract = deserialize_contract(serialized).unwrap();
             if let Contract::Accepted(accepted_contract) = &accepted_contract {
                 storage
                     .update_contract(&Contract::Accepted(accepted_contract.clone()))
@@ -363,10 +352,10 @@ mod tests {
     );
 
     #[test]
-    fn old_format_offered_contract_deserializes() {
-        let serialized = include_bytes!("../../../../testconfig/contract_binaries/old/Offered");
-        let contract = deserialize_contract(&serialized.to_vec())
-            .expect("Old format Offered binary should deserialize");
+    fn legacy_offered_contract_deserializes() {
+        let serialized = legacy_contract_binary();
+        let contract =
+            deserialize_contract(serialized).expect("legacy Offered binary should deserialize");
         if let Contract::Offered(offered) = contract {
             assert_eq!(offered.contract_flags, 0);
         } else {
@@ -375,10 +364,9 @@ mod tests {
     }
 
     #[test]
-    fn new_format_offered_contract_deserializes() {
-        let serialized = include_bytes!("../../../../testconfig/contract_binaries/Offered");
-        let contract = deserialize_contract(&serialized.to_vec())
-            .expect("New format Offered binary should deserialize");
+    fn offered_contract_deserializes() {
+        let serialized = contract_binary(ContractBinary::Offered);
+        let contract = deserialize_contract(serialized).expect("Offered binary should deserialize");
         if let Contract::Offered(offered) = contract {
             assert_eq!(offered.contract_flags, 0);
         } else {
