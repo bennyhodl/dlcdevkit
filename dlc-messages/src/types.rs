@@ -19,37 +19,11 @@ macro_rules! impl_type {
 // Re-export the types that will get impl_type
 pub use crate::{AcceptDlc, CloseDlc, OfferDlc, SignDlc};
 
-pub use crate::channel::{
-    AcceptChannel, CollaborativeCloseOffer, OfferChannel, Reject, RenewAccept, RenewConfirm,
-    RenewFinalize, RenewOffer, RenewRevoke, SettleAccept, SettleConfirm, SettleFinalize,
-    SettleOffer, SignChannel,
-};
-
 // DLC message types
 impl_type!(OFFER_TYPE, OfferDlc, 42778);
 impl_type!(ACCEPT_TYPE, AcceptDlc, 42780);
 impl_type!(SIGN_TYPE, SignDlc, 42782);
 impl_type!(CLOSE_TYPE, CloseDlc, 42784);
-
-// Channel message types
-impl_type!(OFFER_CHANNEL_TYPE, OfferChannel, 43000);
-impl_type!(ACCEPT_CHANNEL_TYPE, AcceptChannel, 43002);
-impl_type!(SIGN_CHANNEL_TYPE, SignChannel, 43004);
-impl_type!(SETTLE_CHANNEL_OFFER_TYPE, SettleOffer, 43006);
-impl_type!(SETTLE_CHANNEL_ACCEPT_TYPE, SettleAccept, 43008);
-impl_type!(SETTLE_CHANNEL_CONFIRM_TYPE, SettleConfirm, 43010);
-impl_type!(SETTLE_CHANNEL_FINALIZE_TYPE, SettleFinalize, 43012);
-impl_type!(RENEW_CHANNEL_OFFER_TYPE, RenewOffer, 43014);
-impl_type!(RENEW_CHANNEL_ACCEPT_TYPE, RenewAccept, 43016);
-impl_type!(RENEW_CHANNEL_CONFIRM_TYPE, RenewConfirm, 43018);
-impl_type!(RENEW_CHANNEL_FINALIZE_TYPE, RenewFinalize, 43020);
-impl_type!(RENEW_CHANNEL_REVOKE_TYPE, RenewRevoke, 43026);
-impl_type!(
-    COLLABORATIVE_CLOSE_OFFER_TYPE,
-    CollaborativeCloseOffer,
-    43022
-);
-impl_type!(REJECT, Reject, 43024);
 
 #[cfg(test)]
 mod tests {

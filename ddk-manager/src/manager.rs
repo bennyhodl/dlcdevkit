@@ -207,9 +207,6 @@ where
                 self.on_close_message(c, &counter_party).await?;
                 Ok(None)
             }
-            _ => Err(Error::InvalidParameters(
-                "Invalid channel DLC message".to_string(),
-            )),
         }
     }
 

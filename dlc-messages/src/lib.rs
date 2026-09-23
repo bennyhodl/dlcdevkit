@@ -31,7 +31,6 @@ extern crate serde;
 #[cfg(test)]
 extern crate serde_json;
 
-pub mod channel;
 pub mod contract_msgs;
 pub mod message_handler;
 pub mod oracle_msgs;
@@ -48,11 +47,6 @@ use crate::ser_impls::{read_ecdsa_adaptor_signature, write_ecdsa_adaptor_signatu
 use crate::types::*;
 use bitcoin::{consensus::Decodable, OutPoint, Transaction};
 use bitcoin::{Amount, ScriptBuf};
-use channel::{
-    AcceptChannel, CollaborativeCloseOffer, OfferChannel, Reject, RenewAccept, RenewConfirm,
-    RenewFinalize, RenewOffer, RenewRevoke, SettleAccept, SettleConfirm, SettleFinalize,
-    SettleOffer, SignChannel,
-};
 use contract_msgs::ContractInfo;
 use ddk_dlc::dlc_input::DlcInputInfo;
 use ddk_dlc::{Error, TxInputInfo};
@@ -678,25 +672,12 @@ impl_dlc_writeable!(CloseDlc, CLOSE_TYPE, {
 
 #[allow(missing_docs)]
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum Message {
     Offer(OfferDlc),
     Accept(AcceptDlc),
     Sign(SignDlc),
     Close(CloseDlc),
-    OfferChannel(OfferChannel),
-    AcceptChannel(AcceptChannel),
-    SignChannel(SignChannel),
-    SettleOffer(SettleOffer),
-    SettleAccept(SettleAccept),
-    SettleConfirm(SettleConfirm),
-    SettleFinalize(SettleFinalize),
-    RenewOffer(RenewOffer),
-    RenewAccept(RenewAccept),
-    RenewConfirm(RenewConfirm),
-    RenewFinalize(RenewFinalize),
-    RenewRevoke(RenewRevoke),
-    CollaborativeCloseOffer(CollaborativeCloseOffer),
-    Reject(Reject),
 }
 
 macro_rules! impl_type_writeable_for_enum {
@@ -719,27 +700,7 @@ macro_rules! impl_type_writeable_for_enum {
     };
 }
 
-impl_type_writeable_for_enum!(Message,
-{
-    Offer,
-    Accept,
-    Sign,
-    Close,
-    OfferChannel,
-    AcceptChannel,
-    SignChannel,
-    SettleOffer,
-    SettleAccept,
-    SettleConfirm,
-    SettleFinalize,
-    RenewOffer,
-    RenewAccept,
-    RenewConfirm,
-    RenewFinalize,
-    RenewRevoke,
-    CollaborativeCloseOffer,
-    Reject
-});
+impl_type_writeable_for_enum!(Message, { Offer, Accept, Sign, Close });
 
 #[derive(Debug, Clone)]
 /// Wrapper for DLC related message and segmentation related messages.

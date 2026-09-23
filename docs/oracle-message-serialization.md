@@ -120,8 +120,8 @@ nest the field with `write_as_tlv`/`read_as_tlv` as usual.
 
 Two things this macro is not for:
 
-- **Peer-to-peer protocol messages.** `OfferDlc`, `AcceptDlc`, `SignDlc` and the channel
-  messages are *wire messages*: a `u16` type and the body, with no length. That is a
+- **Peer-to-peer protocol messages.** `OfferDlc`, `AcceptDlc`, `SignDlc` and `CloseDlc`
+  are *wire messages*: a `u16` type and the body, with no length. That is a
   different framing, and the `Message` enum plus the wire read/write path already add
   and strip the prefix in one place — which is precisely why those types never grew this
   problem despite also being body-only. Give them a bare `Type` impl.
