@@ -257,10 +257,6 @@ pub(crate) fn get_sequence(lock_time: u32) -> Sequence {
     }
 }
 
-pub(crate) fn compute_var_int_prefix_size(len: usize) -> usize {
-    bitcoin::VarInt(len as u64).size()
-}
-
 /// Validate that the fee rate is not too high
 pub fn validate_fee_rate(fee_rate_per_vb: u64) -> Result<(), Error> {
     if fee_rate_per_vb > 25 * 250 {

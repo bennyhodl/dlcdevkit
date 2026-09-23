@@ -1231,7 +1231,7 @@ where
 
     // Create the cooperative close transaction, paying the close fee at the
     // contract's fee rate out of the fund output.
-    let close_tx = ddk_dlc::channel::create_collaborative_close_transaction(
+    let close_tx = ddk_dlc::create_collaborative_close_transaction(
         &offered_contract.offer_params,
         offer_payout,
         &accepted_contract.accept_params,
@@ -1313,7 +1313,7 @@ where
 
     // Recreate the close transaction to verify, using the contract's fee rate
     // like the creating side does.
-    let mut close_tx = ddk_dlc::channel::create_collaborative_close_transaction(
+    let mut close_tx = ddk_dlc::create_collaborative_close_transaction(
         &offered_contract.offer_params,
         offer_payout,
         &accepted_contract.accept_params,

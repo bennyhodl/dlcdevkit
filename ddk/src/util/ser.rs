@@ -17,8 +17,7 @@ pub fn message_variant_name(message: &Message) -> String {
         Message::Accept(_) => "Accept",
         Message::Offer(_) => "Offer",
         Message::Sign(_) => "Sign",
-        Message::Reject(_) => "Reject",
-        _ => "Channel Related",
+        Message::Close(_) => "Close",
     };
 
     str.to_string()
