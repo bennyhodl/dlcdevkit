@@ -79,7 +79,7 @@ mod tests {
     #[test]
     fn generate_combinations_test() {
         let combination_iterator = CombinationIterator::new(4, 3);
-        let expected = vec![vec![0, 1, 2], vec![0, 1, 3], vec![0, 2, 3], vec![1, 2, 3]];
+        let expected = [vec![0, 1, 2], vec![0, 1, 3], vec![0, 2, 3], vec![1, 2, 3]];
 
         for (i, cur) in combination_iterator.enumerate() {
             assert_eq!(cur, expected[i]);

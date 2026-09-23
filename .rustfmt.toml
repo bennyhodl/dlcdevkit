@@ -1,1 +1,0 @@
-ignore = ["ddk-node/src/ddkrpc.rs"]

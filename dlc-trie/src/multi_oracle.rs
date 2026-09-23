@@ -701,16 +701,8 @@ mod tests {
                         (primary_right, primary_left, cover_left)
                     };
 
-                    let diff = |x: usize, y: usize| -> usize {
-                        if x > y {
-                            x - y
-                        } else {
-                            y - x
-                        }
-                    };
-
-                    assert!(diff(least_inner, most_outer) >= min_support);
-                    assert!(diff(most_inner, most_outer) < max_error);
+                    assert!(least_inner.abs_diff(most_outer) >= min_support);
+                    assert!(most_inner.abs_diff(most_outer) < max_error);
                 }
             };
 

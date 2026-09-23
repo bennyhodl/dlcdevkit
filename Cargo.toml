@@ -5,6 +5,7 @@ members = ["ddk", "dlc", "dlc-messages", "dlc-trie", "payouts", "ddk-node", "ddk
 [workspace.package]
 version = "2.0.0-rc.4"
 edition = "2021"
+rust-version = "1.88"
 license = "MIT"
 repository = "https://github.com/bennyhodl/dlcdevkit"
 homepage = "https://github.com/bennyhodl/dlcdevkit"

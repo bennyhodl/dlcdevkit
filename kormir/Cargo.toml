@@ -7,6 +7,7 @@ documentation = "https://docs.rs/kormir"
 homepage = "https://github.com/bennyhodl/kormir"
 repository = "https://github.com/bennyhodl/kormir"
 version.workspace = true
+rust-version.workspace = true
 edition.workspace = true
 
 [features]

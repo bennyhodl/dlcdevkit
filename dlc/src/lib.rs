@@ -1810,17 +1810,13 @@ mod tests {
             let mut nonces: Vec<XOnlyPublicKey> = Vec::with_capacity(NB_DIGITS);
             let mut sk_nonces: Vec<[u8; 32]> = Vec::with_capacity(NB_DIGITS);
             oracle_sigs.push(Vec::with_capacity(NB_DIGITS));
-            for j in 0..NB_DIGITS {
+            for message in &messages[0][i] {
                 let mut sk_nonce = [0u8; 32];
                 rng.fill_bytes(&mut sk_nonce);
                 let oracle_r_kp = Keypair::from_seckey_slice(&secp, &sk_nonce).unwrap();
                 let nonce = XOnlyPublicKey::from_keypair(&oracle_r_kp).0;
-                let sig = secp_utils::schnorrsig_sign_with_nonce(
-                    &secp,
-                    &messages[0][i][j],
-                    &oracle_kp,
-                    &sk_nonce,
-                );
+                let sig =
+                    secp_utils::schnorrsig_sign_with_nonce(&secp, message, &oracle_kp, &sk_nonce);
                 oracle_sigs[i].push(sig);
                 nonces.push(nonce);
                 sk_nonces.push(sk_nonce);

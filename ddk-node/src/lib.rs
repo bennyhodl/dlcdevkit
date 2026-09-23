@@ -1,6 +1,9 @@
 pub mod cli_opts;
 pub mod command;
-pub mod ddkrpc;
+/// gRPC types and services generated from `src/proto/ddkrpc.proto` at build time.
+pub mod ddkrpc {
+    include!(concat!(env!("OUT_DIR"), "/ddkrpc.rs"));
+}
 pub mod opts;
 mod seed;
 

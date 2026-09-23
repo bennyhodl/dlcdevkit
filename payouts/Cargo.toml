@@ -5,6 +5,7 @@ description = "Library to build payout functions for DLC contracts."
 license.workspace = true
 repository.workspace = true
 version.workspace = true
+rust-version.workspace = true
 edition.workspace = true
 
 [dependencies]
