@@ -171,7 +171,7 @@ impl KormirOracleClient {
 
         let attestation = self
             .client
-            .post(format!("{}/sign-enum", &self.host))
+            .post(format!("{}/sign-enum", self.host))
             .body(body)
             .headers(headers)
             .send()
@@ -256,7 +256,7 @@ impl KormirOracleClient {
 
         let attestation = self
             .client
-            .post(format!("{}/sign-numeric", &self.host))
+            .post(format!("{}/sign-numeric", self.host))
             .body(body)
             .headers(headers)
             .send()

@@ -6,7 +6,7 @@ pub(crate) fn same_num_digits_oracle_numeric_infos(
     base: usize,
 ) -> OracleNumericInfo {
     OracleNumericInfo {
-        nb_digits: std::iter::repeat(nb_digits).take(nb_oracles).collect(),
+        nb_digits: std::iter::repeat_n(nb_digits, nb_oracles).collect(),
         base,
     }
 }

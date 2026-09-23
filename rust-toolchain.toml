@@ -1,0 +1,7 @@
+# The toolchain every local build and CI job uses. Bump it on purpose, in its
+# own commit. The minimum supported version for downstream users is the
+# `rust-version` in Cargo.toml and is checked by the `msrv` CI job.
+[toolchain]
+channel = "1.98.0"
+components = ["clippy", "rustfmt"]
+profile = "minimal"

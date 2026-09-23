@@ -6,6 +6,7 @@ license-file = "../LICENSE"
 repository = "https://github.com/bennyhodl/dlcdevkit/tree/master/dlc-messages"
 homepage.workspace = true
 version.workspace = true
+rust-version.workspace = true
 edition = "2015"
 
 [features]
