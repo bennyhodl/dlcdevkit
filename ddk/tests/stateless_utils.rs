@@ -1147,6 +1147,7 @@ pub fn splice_from(
         funding_input: create_dlc_splice_input(
             &previous.offer,
             &previous.accept,
+            &previous.sign,
             splicer,
             Some(input_serial_id),
             DLC_INPUT_MAX_WITNESS_LEN,

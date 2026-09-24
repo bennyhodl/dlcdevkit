@@ -153,7 +153,7 @@ mod types;
 #[cfg(test)]
 mod tests;
 
-pub use accept::{accept_offer, create_dlc_transactions};
+pub use accept::{accept_offer, create_dlc_transactions, create_signed_dlc_transactions};
 pub use create::{create_offer, validate_offer};
 pub use error::ContractError;
 pub use finalize::{finalize_sign, finalize_sign_spliced};

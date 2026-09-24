@@ -7,9 +7,11 @@
 use bitcoin::consensus::Decodable;
 use bitcoin::{Amount, ScriptBuf, Transaction, Witness};
 use ddk_dlc::secp256k1_zkp::{All, EcdsaAdaptorSignature, PublicKey, Secp256k1, SecretKey};
-use ddk_dlc::{DlcTransactions, PartyParams as DlcPartyParams, TxInputInfo};
+use ddk_dlc::{DlcTransactions, FeeRule, PartyParams as DlcPartyParams, TxInputInfo};
 use ddk_manager::contract::contract_info::ContractInfo as ExecutionContractInfo;
-use ddk_messages::{AcceptDlc, CetAdaptorSignatures, FundingInput, FundingSignatures, OfferDlc};
+use ddk_messages::{
+    AcceptDlc, CetAdaptorSignatures, FundingInput, FundingSignatures, OfferDlc, SignDlc,
+};
 
 use super::error::ContractError;
 use super::types::Party;
@@ -26,6 +28,43 @@ pub(crate) struct ContractContext {
 pub(crate) fn context_from_messages(
     offer: &OfferDlc,
     accept: &AcceptDlc,
+) -> Result<ContractContext, ContractError> {
+    context_from_messages_with_fee_rule(offer, accept, FeeRule::default())
+}
+
+/// Rebuilds a signed contract under the [`FeeRule`] whose funding transaction
+/// matches the sign message's contract id.
+///
+/// The two rules give different funding transactions when one party funds the
+/// whole contract. The contract id comes from the funding transaction that
+/// both parties signed, so only the rule the contract was built with matches
+/// it. [`FeeRule::CounterpartyPayout`] is tried first. If it cannot build the
+/// transactions, or its contract id does not match, [`FeeRule::OwnPayoutOnly`]
+/// is tried. If neither rule matches, the error from the first rule is
+/// returned.
+///
+/// Use this only for a contract that is already signed. New contracts use
+/// [`context_from_messages`].
+pub(crate) fn signed_context(
+    offer: &OfferDlc,
+    accept: &AcceptDlc,
+    sign: &SignDlc,
+) -> Result<ContractContext, ContractError> {
+    let rebuild = |rule| {
+        let context = context_from_messages_with_fee_rule(offer, accept, rule)?;
+        ensure_sign_message(offer, sign, &context)?;
+        Ok(context)
+    };
+    // The inputs of an OwnPayoutOnly contract can be too small for the
+    // CounterpartyPayout fee, so a build error also moves to the next rule.
+    rebuild(FeeRule::default())
+        .or_else(|current_error| rebuild(FeeRule::OwnPayoutOnly).map_err(|_| current_error))
+}
+
+fn context_from_messages_with_fee_rule(
+    offer: &OfferDlc,
+    accept: &AcceptDlc,
+    fee_rule: FeeRule,
 ) -> Result<ContractContext, ContractError> {
     ensure_protocol_version(offer.protocol_version, ContractError::InvalidOffer)?;
     ensure_protocol_version(accept.protocol_version, ContractError::InvalidAccept)?;
@@ -57,7 +96,7 @@ pub(crate) fn context_from_messages(
         accept.accept_collateral,
         &accept.funding_inputs,
     )?;
-    build_context(offer, &accept_params)
+    build_context_with_fee_rule(offer, &accept_params, fee_rule)
 }
 
 /// Rebuilds the contract transactions from an offer and the accepting party's
@@ -66,6 +105,14 @@ pub(crate) fn context_from_messages(
 pub(crate) fn build_context(
     offer: &OfferDlc,
     accept_params: &DlcPartyParams,
+) -> Result<ContractContext, ContractError> {
+    build_context_with_fee_rule(offer, accept_params, FeeRule::default())
+}
+
+fn build_context_with_fee_rule(
+    offer: &OfferDlc,
+    accept_params: &DlcPartyParams,
+    fee_rule: FeeRule,
 ) -> Result<ContractContext, ContractError> {
     let total_collateral = offer.get_total_collateral();
     if offer.offer_collateral + accept_params.collateral != total_collateral {
@@ -99,7 +146,7 @@ pub(crate) fn build_context(
     let has_dlc_inputs =
         !offer_params.dlc_inputs.is_empty() || !accept_params.dlc_inputs.is_empty();
     let mut transactions = if has_dlc_inputs {
-        ddk_dlc::create_spliced_dlc_transactions(
+        ddk_dlc::create_spliced_dlc_transactions_with_fee_rule(
             &offer_params,
             accept_params,
             &payouts,
@@ -109,9 +156,10 @@ pub(crate) fn build_context(
             offer.cet_locktime,
             offer.fund_output_serial_id,
             offer.contract_flags,
+            fee_rule,
         )?
     } else {
-        ddk_dlc::create_dlc_transactions(
+        ddk_dlc::create_dlc_transactions_with_fee_rule(
             &offer_params,
             accept_params,
             &payouts,
@@ -121,6 +169,7 @@ pub(crate) fn build_context(
             offer.cet_locktime,
             offer.fund_output_serial_id,
             offer.contract_flags,
+            fee_rule,
         )?
     };
     let mut cet_ranges = Vec::with_capacity(execution_infos.len());
@@ -401,7 +450,7 @@ pub(crate) fn ensure_protocol_version(
 /// and accept messages.
 pub(crate) fn ensure_sign_message(
     offer: &OfferDlc,
-    sign: &ddk_messages::SignDlc,
+    sign: &SignDlc,
     context: &ContractContext,
 ) -> Result<(), ContractError> {
     ensure_protocol_version(sign.protocol_version, ContractError::InvalidSign)?;
@@ -538,4 +587,75 @@ pub(crate) fn contract_id_from_transactions(
     contract_id[30] ^= ((fund_output_index >> 8) & 0xff) as u8;
     contract_id[31] ^= (fund_output_index & 0xff) as u8;
     contract_id
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ddk_messages::lightning::util::ser::Readable;
+
+    #[test]
+    fn legacy_contract_with_only_enough_input_value_for_the_old_fee_can_refund() {
+        let fixture = include_str!("../../tests/fixtures/pre_rc4_single_funded.txt");
+        let bytes = |name: &str| -> Vec<u8> {
+            let prefix = format!("{name} ");
+            let hex = fixture
+                .lines()
+                .find_map(|line| line.strip_prefix(&prefix))
+                .unwrap();
+            hex::decode(hex).unwrap()
+        };
+        fn message<T: Readable>(bytes: Vec<u8>) -> T {
+            T::read(&mut ddk_messages::lightning::io::Cursor::new(bytes)).unwrap()
+        }
+        let mut offer: OfferDlc = message(bytes("offer"));
+        let mut accept: AcceptDlc = message(bytes("accept"));
+        let mut sign: SignDlc = message(bytes("sign"));
+        let offer_key = SecretKey::from_slice(&bytes("offerer_funding_secret_key")).unwrap();
+        let accept_key = SecretKey::from_slice(&bytes("accepter_funding_secret_key")).unwrap();
+        let params = dlc_party_params(
+            offer.funding_pubkey,
+            offer.payout_spk.clone(),
+            offer.payout_serial_id,
+            offer.change_spk.clone(),
+            offer.change_serial_id,
+            offer.offer_collateral,
+            &offer.funding_inputs,
+        )
+        .unwrap();
+        let (_, fund_fee, cet_fee) = params
+            .get_change_output_and_fees(
+                offer.get_total_collateral(),
+                offer.fee_rate_per_vb,
+                Amount::ZERO,
+            )
+            .unwrap();
+
+        let input = &mut offer.funding_inputs[0];
+        let mut previous: Transaction = bitcoin::consensus::deserialize(&input.prev_tx).unwrap();
+        previous.output[input.prev_tx_vout as usize].value =
+            offer.offer_collateral + fund_fee + cet_fee;
+        input.prev_tx = bitcoin::consensus::serialize(&previous);
+        let legacy =
+            context_from_messages_with_fee_rule(&offer, &accept, FeeRule::OwnPayoutOnly).unwrap();
+        assert!(context_from_messages(&offer, &accept).is_err());
+
+        let secp = Secp256k1::new();
+        sign.contract_id =
+            contract_id_from_transactions(&legacy.transactions, &offer.temporary_contract_id);
+        sign.refund_signature = create_refund_signature(&secp, &legacy, &offer_key).unwrap();
+        accept.refund_signature = create_refund_signature(&secp, &legacy, &accept_key).unwrap();
+        let refund = crate::contract::sign_refund(&offer, &accept, &sign, &accept_key).unwrap();
+        assert_eq!(
+            refund.compute_txid(),
+            legacy.transactions.refund.compute_txid()
+        );
+        assert!(!refund.input[0].witness.is_empty());
+        let rebuilt =
+            crate::contract::create_signed_dlc_transactions(&offer, &accept, &sign).unwrap();
+        assert_eq!(rebuilt.fund, legacy.transactions.fund);
+
+        sign.contract_id[0] ^= 1;
+        assert!(signed_context(&offer, &accept, &sign).is_err());
+    }
 }

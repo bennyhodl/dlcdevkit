@@ -214,6 +214,7 @@ async fn main() {
     let splice_input = create_dlc_splice_input(
         &offer_a,
         &accept_a,
+        &sign_a.sign,
         Party::Offer,
         Some(splice_serial),
         DLC_INPUT_MAX_WITNESS_LEN,

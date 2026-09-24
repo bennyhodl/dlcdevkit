@@ -3,17 +3,16 @@
 //! A splice reuses the 2-of-2 funding output of a previous, on-chain DLC as an
 //! input to a new contract's funding transaction (this is how rollovers and
 //! collateral changes are expressed). [`create_dlc_splice_input`] rebuilds that
-//! output from the previous contract's offer and accept messages, so callers
-//! never have to supply raw transaction data.
+//! output from the previous contract's offer, accept and sign messages, so
+//! callers never have to supply raw transaction data.
 //!
 //! Only the offering party may contribute a DLC input; the accepting party's
 //! funding inputs must be ordinary wallet UTXOs.
 
 use bitcoin::ScriptBuf;
-use ddk_messages::{AcceptDlc, DlcInput, FundingInput, OfferDlc};
+use ddk_messages::{AcceptDlc, DlcInput, FundingInput, OfferDlc, SignDlc};
 
-use super::accept::create_dlc_transactions;
-use super::context::contract_id_from_transactions;
+use super::accept::create_signed_dlc_transactions;
 use super::error::ContractError;
 use super::types::{random_serial_id, Party};
 
@@ -42,6 +41,7 @@ pub const DLC_INPUT_MAX_WITNESS_LEN: u16 = 220;
 pub fn create_dlc_splice_input(
     prev_offer: &OfferDlc,
     prev_accept: &AcceptDlc,
+    prev_sign: &SignDlc,
     local_party: Party,
     input_serial_id: Option<u64>,
     max_witness_len: u16,
@@ -51,10 +51,9 @@ pub fn create_dlc_splice_input(
             "DLC input max witness length must be greater than 108".to_string(),
         ));
     }
-    let transactions = create_dlc_transactions(prev_offer, prev_accept)?;
+    let transactions = create_signed_dlc_transactions(prev_offer, prev_accept, prev_sign)?;
     let fund_vout = transactions.get_fund_output_index() as u32;
-    let contract_id =
-        contract_id_from_transactions(&transactions, &prev_offer.temporary_contract_id);
+    let contract_id = prev_sign.contract_id;
     let (local_fund_pubkey, remote_fund_pubkey) = match local_party {
         Party::Offer => (prev_offer.funding_pubkey, prev_accept.funding_pubkey),
         Party::Accept => (prev_accept.funding_pubkey, prev_offer.funding_pubkey),

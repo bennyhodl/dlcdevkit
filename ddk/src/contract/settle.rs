@@ -18,7 +18,7 @@ use ddk_dlc::secp256k1_zkp::{
 use ddk_messages::oracle_msgs::OracleAttestation;
 use ddk_messages::{AcceptDlc, OfferDlc, SignDlc};
 
-use super::context::{context_from_messages, ensure_sign_message};
+use super::context::signed_context;
 use super::error::ContractError;
 use super::types::Party;
 
@@ -55,8 +55,7 @@ pub fn sign_cet(
     attestations: &[(usize, OracleAttestation)],
 ) -> Result<Transaction, ContractError> {
     let secp = Secp256k1::new();
-    let context = context_from_messages(offer, accept)?;
-    ensure_sign_message(offer, sign, &context)?;
+    let context = signed_context(offer, accept, sign)?;
     let party = settling_party(&secp, offer, accept, funding_secret_key)?;
     let (counterparty_pubkey, adaptor_signatures) =
         counterparty_adaptor_signatures(offer, accept, sign, party);
@@ -134,8 +133,7 @@ pub fn sign_refund(
     funding_secret_key: &SecretKey,
 ) -> Result<Transaction, ContractError> {
     let secp = Secp256k1::new();
-    let context = context_from_messages(offer, accept)?;
-    ensure_sign_message(offer, sign, &context)?;
+    let context = signed_context(offer, accept, sign)?;
     let party = settling_party(&secp, offer, accept, funding_secret_key)?;
     let (counterparty_pubkey, counterparty_signature): (PublicKey, Signature) = match party {
         Party::Offer => (accept.funding_pubkey, accept.refund_signature),

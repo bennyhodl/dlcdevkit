@@ -2,11 +2,11 @@
 
 use ddk_dlc::secp256k1_zkp::{PublicKey, Secp256k1, SecretKey};
 use ddk_dlc::DlcTransactions;
-use ddk_messages::{AcceptDlc, CetAdaptorSignatures, OfferDlc};
+use ddk_messages::{AcceptDlc, CetAdaptorSignatures, OfferDlc, SignDlc};
 
 use super::context::{
     build_context, context_from_messages, create_adaptor_signatures, create_refund_signature,
-    dlc_party_params, ensure_no_dlc_inputs, ensure_unique_input_serial_ids,
+    dlc_party_params, ensure_no_dlc_inputs, ensure_unique_input_serial_ids, signed_context,
 };
 use super::create::validate_offer;
 use super::error::ContractError;
@@ -106,4 +106,17 @@ pub fn create_dlc_transactions(
     accept: &AcceptDlc,
 ) -> Result<DlcTransactions, ContractError> {
     Ok(context_from_messages(offer, accept)?.transactions)
+}
+
+/// Rebuilds a signed contract's transactions under the [`ddk_dlc::FeeRule`]
+/// whose funding transaction matches `sign`'s contract id.
+///
+/// Tries [`ddk_dlc::FeeRule::CounterpartyPayout`] first, then
+/// [`ddk_dlc::FeeRule::OwnPayoutOnly`]. Fails when neither rule matches.
+pub fn create_signed_dlc_transactions(
+    offer: &OfferDlc,
+    accept: &AcceptDlc,
+    sign: &SignDlc,
+) -> Result<DlcTransactions, ContractError> {
+    Ok(signed_context(offer, accept, sign)?.transactions)
 }
