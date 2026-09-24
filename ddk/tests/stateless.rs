@@ -14,10 +14,10 @@ use bitcoin::transaction::Version;
 use bitcoin::{Amount, Network, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Witness};
 use ddk::contract::{
     accept_offer, chain_hash_from_network, create_dlc_splice_input, create_dlc_transactions,
-    create_funding_psbt, create_offer, finalize_sign, finalize_sign_spliced, funding_input,
-    sign_accept, sign_accept_spliced, sign_cet, sign_refund, signing, AcceptOfferParams,
-    ContractError, CreateOfferParams, DescriptorInput, DlcInputSigningKey, InputDerivation, Party,
-    PartyParams, DLC_INPUT_MAX_WITNESS_LEN,
+    create_funding_psbt, create_offer, create_signed_dlc_transactions, finalize_sign,
+    finalize_sign_spliced, funding_input, sign_accept, sign_accept_spliced, sign_cet, sign_refund,
+    signing, AcceptOfferParams, ContractError, CreateOfferParams, DescriptorInput,
+    DlcInputSigningKey, InputDerivation, Party, PartyParams, DLC_INPUT_MAX_WITNESS_LEN,
 };
 use ddk_dlc::secp256k1_zkp::{All, Keypair, PublicKey, Secp256k1, SecretKey, XOnlyPublicKey};
 use ddk_messages::contract_msgs::{
@@ -1557,7 +1557,8 @@ fn prepare_splice(splice_in: bool) -> PreparedSplice {
 
     // Contract A: an ordinary dual-funded enum contract, fully signed.
     let (offerer_a, accepter_a, offer_a, accept_a) = enum_contract(&secp, NETWORK);
-    let funding_tx_a = complete_with_xpriv(&secp, &offerer_a, &accepter_a, &offer_a, &accept_a);
+    let (sign_a, funding_tx_a) =
+        fund_with_xpriv(&secp, &offerer_a, &accepter_a, &offer_a, &accept_a);
     let transactions_a = create_dlc_transactions(&offer_a, &accept_a).unwrap();
     let fund_value_a = transactions_a.get_fund_output().value;
     let fund_outpoint_a = OutPoint {
@@ -1570,6 +1571,7 @@ fn prepare_splice(splice_in: bool) -> PreparedSplice {
     let splice_input = create_dlc_splice_input(
         &offer_a,
         &accept_a,
+        &sign_a,
         Party::Offer,
         Some(splice_serial),
         DLC_INPUT_MAX_WITNESS_LEN,
@@ -2087,4 +2089,140 @@ fn truncated_counterparty_adaptor_signatures_are_rejected() {
         }
         other => panic!("expected an invalid accept error, got {other:?}"),
     }
+}
+
+struct PreRc4Contract {
+    offer: OfferDlc,
+    accept: AcceptDlc,
+    sign: SignDlc,
+    offerer_key: SecretKey,
+    accepter_key: SecretKey,
+    funding_transaction: Transaction,
+    refund_signed_by_accepter: Transaction,
+    cet_up_signed_by_offerer: Transaction,
+}
+
+fn pre_rc4_single_funded_contract() -> PreRc4Contract {
+    use ddk_messages::lightning::util::ser::Readable;
+    let fields: std::collections::HashMap<&str, Vec<u8>> =
+        include_str!("fixtures/pre_rc4_single_funded.txt")
+            .lines()
+            .filter(|line| !line.starts_with('#') && !line.is_empty())
+            .map(|line| {
+                let (name, hex) = line.split_once(' ').unwrap();
+                let bytes = (0..hex.len())
+                    .step_by(2)
+                    .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+                    .collect();
+                (name, bytes)
+            })
+            .collect();
+    fn message<T: Readable>(bytes: &[u8]) -> T {
+        T::read(&mut ddk_messages::lightning::io::Cursor::new(
+            bytes.to_vec(),
+        ))
+        .unwrap()
+    }
+    let transaction = |name: &str| bitcoin::consensus::deserialize(&fields[name]).unwrap();
+    PreRc4Contract {
+        offer: message(&fields["offer"]),
+        accept: message(&fields["accept"]),
+        sign: message(&fields["sign"]),
+        offerer_key: SecretKey::from_slice(&fields["offerer_funding_secret_key"]).unwrap(),
+        accepter_key: SecretKey::from_slice(&fields["accepter_funding_secret_key"]).unwrap(),
+        funding_transaction: transaction("funding_transaction"),
+        refund_signed_by_accepter: transaction("refund_signed_by_accepter"),
+        cet_up_signed_by_offerer: transaction("cet_up_signed_by_offerer"),
+    }
+}
+
+#[test]
+fn a_pre_rc4_single_funded_contract_rebuilds_differently_under_the_current_rule() {
+    let contract = pre_rc4_single_funded_contract();
+    let current = create_dlc_transactions(&contract.offer, &contract.accept).unwrap();
+    assert_ne!(
+        current.fund.compute_txid(),
+        contract.funding_transaction.compute_txid()
+    );
+}
+
+#[test]
+fn a_pre_rc4_single_funded_contract_rebuilds_from_its_sign_message() {
+    let contract = pre_rc4_single_funded_contract();
+    let transactions =
+        create_signed_dlc_transactions(&contract.offer, &contract.accept, &contract.sign).unwrap();
+    assert_eq!(
+        transactions.fund.compute_txid(),
+        contract.funding_transaction.compute_txid()
+    );
+    assert_eq!(
+        transactions.refund.compute_txid(),
+        contract.refund_signed_by_accepter.compute_txid()
+    );
+}
+
+#[test]
+fn a_pre_rc4_single_funded_contract_settles_with_the_same_transactions() {
+    let contract = pre_rc4_single_funded_contract();
+    let (offer, accept, sign) = (&contract.offer, &contract.accept, &contract.sign);
+
+    let refund = sign_refund(offer, accept, sign, &contract.accepter_key).unwrap();
+    assert_eq!(refund, contract.refund_signed_by_accepter);
+    let attestations = vec![(0, oracle_attestation(vec!["up".to_string()]))];
+    let cet = sign_cet(offer, accept, sign, &contract.offerer_key, &attestations).unwrap();
+    assert_eq!(cet, contract.cet_up_signed_by_offerer);
+
+    let refund = sign_refund(offer, accept, sign, &contract.offerer_key).unwrap();
+    assert_eq!(
+        refund.compute_txid(),
+        contract.refund_signed_by_accepter.compute_txid()
+    );
+    let cet = sign_cet(offer, accept, sign, &contract.accepter_key, &attestations).unwrap();
+    assert_eq!(
+        cet.compute_txid(),
+        contract.cet_up_signed_by_offerer.compute_txid()
+    );
+}
+
+#[test]
+fn a_pre_rc4_single_funded_contract_can_be_spliced() {
+    let contract = pre_rc4_single_funded_contract();
+    let input = create_dlc_splice_input(
+        &contract.offer,
+        &contract.accept,
+        &contract.sign,
+        Party::Offer,
+        Some(900),
+        DLC_INPUT_MAX_WITNESS_LEN,
+    )
+    .unwrap();
+    let prev_tx: Transaction = bitcoin::consensus::deserialize(&input.prev_tx).unwrap();
+    assert_eq!(
+        prev_tx.compute_txid(),
+        contract.funding_transaction.compute_txid()
+    );
+    assert_eq!(
+        input.dlc_input.unwrap().contract_id,
+        contract.sign.contract_id
+    );
+}
+
+#[test]
+fn a_sign_message_that_matches_neither_rule_is_rejected() {
+    let contract = pre_rc4_single_funded_contract();
+    let mut sign = contract.sign.clone();
+    sign.contract_id[0] ^= 1;
+    assert!(matches!(
+        create_signed_dlc_transactions(&contract.offer, &contract.accept, &sign),
+        Err(ContractError::InvalidSign(_))
+    ));
+    assert!(matches!(
+        sign_refund(
+            &contract.offer,
+            &contract.accept,
+            &sign,
+            &contract.accepter_key
+        ),
+        Err(ContractError::InvalidSign(_))
+    ));
 }

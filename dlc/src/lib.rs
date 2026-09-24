@@ -125,6 +125,17 @@ pub struct EnumerationPayout {
     pub payout: Payout,
 }
 
+/// How CET fees are split between the parties.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum FeeRule {
+    /// A party that funds the whole contract also pays the CET fee for the
+    /// counterparty's payout output.
+    #[default]
+    CounterpartyPayout,
+    /// Each party pays the CET fee for its own payout output only.
+    OwnPayoutOnly,
+}
+
 /// Contains the necessary transactions for establishing a DLC
 #[derive(Clone)]
 #[cfg_attr(feature = "use-serde", derive(Serialize, Deserialize))]
@@ -493,6 +504,34 @@ pub fn create_spliced_dlc_transactions(
     fund_output_serial_id: u64,
     contract_flags: u8,
 ) -> Result<DlcTransactions, Error> {
+    create_spliced_dlc_transactions_with_fee_rule(
+        offer_params,
+        accept_params,
+        payouts,
+        refund_lock_time,
+        fee_rate_per_vb,
+        fund_lock_time,
+        cet_lock_time,
+        fund_output_serial_id,
+        contract_flags,
+        FeeRule::default(),
+    )
+}
+
+/// [`create_spliced_dlc_transactions`] under an explicit [`FeeRule`].
+#[allow(clippy::too_many_arguments)]
+pub fn create_spliced_dlc_transactions_with_fee_rule(
+    offer_params: &PartyParams,
+    accept_params: &PartyParams,
+    payouts: &[Payout],
+    refund_lock_time: u32,
+    fee_rate_per_vb: u64,
+    fund_lock_time: u32,
+    cet_lock_time: u32,
+    fund_output_serial_id: u64,
+    contract_flags: u8,
+    fee_rule: FeeRule,
+) -> Result<DlcTransactions, Error> {
     // Create enhanced party parameters that include DLC inputs as regular inputs
     let mut enhanced_offer_params = offer_params.clone();
     let mut enhanced_accept_params = accept_params.clone();
@@ -527,7 +566,7 @@ pub fn create_spliced_dlc_transactions(
     enhanced_offer_params.dlc_inputs.clear();
     enhanced_accept_params.dlc_inputs.clear();
 
-    create_dlc_transactions(
+    create_dlc_transactions_with_fee_rule(
         &enhanced_offer_params,
         &enhanced_accept_params,
         payouts,
@@ -537,6 +576,7 @@ pub fn create_spliced_dlc_transactions(
         cet_lock_time,
         fund_output_serial_id,
         contract_flags,
+        fee_rule,
     )
 }
 
@@ -553,13 +593,42 @@ pub fn create_dlc_transactions(
     fund_output_serial_id: u64,
     contract_flags: u8,
 ) -> Result<DlcTransactions, Error> {
-    let (fund_tx, funding_witness_script) = create_fund_transaction_with_fees(
+    create_dlc_transactions_with_fee_rule(
+        offer_params,
+        accept_params,
+        payouts,
+        refund_lock_time,
+        fee_rate_per_vb,
+        fund_lock_time,
+        cet_lock_time,
+        fund_output_serial_id,
+        contract_flags,
+        FeeRule::default(),
+    )
+}
+
+/// [`create_dlc_transactions`] under an explicit [`FeeRule`].
+#[allow(clippy::too_many_arguments)]
+pub fn create_dlc_transactions_with_fee_rule(
+    offer_params: &PartyParams,
+    accept_params: &PartyParams,
+    payouts: &[Payout],
+    refund_lock_time: u32,
+    fee_rate_per_vb: u64,
+    fund_lock_time: u32,
+    cet_lock_time: u32,
+    fund_output_serial_id: u64,
+    contract_flags: u8,
+    fee_rule: FeeRule,
+) -> Result<DlcTransactions, Error> {
+    let (fund_tx, funding_witness_script) = create_fund_transaction_with_fees_and_rule(
         offer_params,
         accept_params,
         fee_rate_per_vb,
         fund_lock_time,
         fund_output_serial_id,
         Amount::ZERO,
+        fee_rule,
     )?;
     let fund_outpoint = OutPoint {
         txid: fund_tx.compute_txid(),
@@ -596,21 +665,46 @@ pub fn create_fund_transaction_with_fees(
     fund_output_serial_id: u64,
     extra_fee: Amount,
 ) -> Result<(Transaction, ScriptBuf), Error> {
+    create_fund_transaction_with_fees_and_rule(
+        offer_params,
+        accept_params,
+        fee_rate_per_vb,
+        fund_lock_time,
+        fund_output_serial_id,
+        extra_fee,
+        FeeRule::default(),
+    )
+}
+
+/// [`create_fund_transaction_with_fees`] under an explicit [`FeeRule`].
+pub fn create_fund_transaction_with_fees_and_rule(
+    offer_params: &PartyParams,
+    accept_params: &PartyParams,
+    fee_rate_per_vb: u64,
+    fund_lock_time: u32,
+    fund_output_serial_id: u64,
+    extra_fee: Amount,
+    fee_rule: FeeRule,
+) -> Result<(Transaction, ScriptBuf), Error> {
     let total_collateral = checked_add!(offer_params.collateral, accept_params.collateral)?;
 
+    let counterparty_payout = |script_pubkey| match fee_rule {
+        FeeRule::CounterpartyPayout => Some(script_pubkey),
+        FeeRule::OwnPayoutOnly => None,
+    };
     let (offer_change_output, offer_fund_fee, offer_cet_fee) = offer_params
         .get_change_output_and_fees_with_counterparty(
             total_collateral,
             fee_rate_per_vb,
             extra_fee,
-            Some(&accept_params.payout_script_pubkey),
+            counterparty_payout(accept_params.payout_script_pubkey.as_script()),
         )?;
     let (accept_change_output, accept_fund_fee, accept_cet_fee) = accept_params
         .get_change_output_and_fees_with_counterparty(
             total_collateral,
             fee_rate_per_vb,
             extra_fee,
-            Some(&offer_params.payout_script_pubkey),
+            counterparty_payout(offer_params.payout_script_pubkey.as_script()),
         )?;
 
     let fund_output_value = checked_add!(offer_params.input_amount, accept_params.input_amount)?
@@ -1764,6 +1858,94 @@ mod tests {
                 fee_rate
             );
         }
+    }
+
+    fn single_and_dual_funded_params() -> [(PartyParams, PartyParams); 2] {
+        let (single_offer, _) =
+            get_party_params(Amount::from_sat(150_000_000), Amount::ONE_BTC, None);
+        let (single_accept, _) = get_party_params(Amount::ZERO, Amount::ZERO, Some(2));
+        let (dual_offer, _) =
+            get_party_params(Amount::from_sat(150_000_000), Amount::ONE_BTC, None);
+        let (dual_accept, _) =
+            get_party_params(Amount::from_sat(150_000_000), Amount::ONE_BTC, Some(2));
+        [(single_offer, single_accept), (dual_offer, dual_accept)]
+    }
+
+    fn build_with_rule(
+        offer_params: &PartyParams,
+        accept_params: &PartyParams,
+        fee_rule: FeeRule,
+    ) -> DlcTransactions {
+        let total = offer_params.collateral + accept_params.collateral;
+        let payouts = vec![
+            Payout {
+                offer: total,
+                accept: Amount::ZERO,
+            },
+            Payout {
+                offer: Amount::ZERO,
+                accept: total,
+            },
+        ];
+        create_dlc_transactions_with_fee_rule(
+            offer_params,
+            accept_params,
+            &payouts,
+            100,
+            4,
+            0,
+            10,
+            0,
+            0,
+            fee_rule,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn default_fee_rule_is_the_counterparty_payout_rule() {
+        let [(offer_params, accept_params), _] = single_and_dual_funded_params();
+        let default = build_with_rule(&offer_params, &accept_params, FeeRule::default());
+        let payouts = vec![
+            Payout {
+                offer: Amount::ONE_BTC,
+                accept: Amount::ZERO,
+            },
+            Payout {
+                offer: Amount::ZERO,
+                accept: Amount::ONE_BTC,
+            },
+        ];
+        let plain =
+            create_dlc_transactions(&offer_params, &accept_params, &payouts, 100, 4, 0, 10, 0, 0)
+                .unwrap();
+        assert_eq!(FeeRule::default(), FeeRule::CounterpartyPayout);
+        assert_eq!(default.fund, plain.fund);
+    }
+
+    #[test]
+    fn own_payout_only_rule_moves_only_a_single_funded_fund_output() {
+        let [(single_offer, single_accept), (dual_offer, dual_accept)] =
+            single_and_dual_funded_params();
+
+        let current = build_with_rule(&single_offer, &single_accept, FeeRule::CounterpartyPayout);
+        let legacy = build_with_rule(&single_offer, &single_accept, FeeRule::OwnPayoutOnly);
+        let counterparty_fee = current.get_fund_output().value - legacy.get_fund_output().value;
+        let own_weight = CET_BASE_WEIGHT + single_offer.payout_script_pubkey.len() * 4;
+        let expected =
+            util::weight_to_fee(own_weight + single_accept.payout_script_pubkey.len() * 4, 4)
+                .unwrap()
+                - util::weight_to_fee(own_weight, 4).unwrap();
+        assert_eq!(counterparty_fee, expected);
+        assert!(counterparty_fee > Amount::ZERO);
+        assert_ne!(current.fund.compute_txid(), legacy.fund.compute_txid());
+        let total_out = |tx: &Transaction| tx.output.iter().map(|o| o.value).sum::<Amount>();
+        assert_eq!(total_out(&current.fund), total_out(&legacy.fund));
+
+        let current = build_with_rule(&dual_offer, &dual_accept, FeeRule::CounterpartyPayout);
+        let legacy = build_with_rule(&dual_offer, &dual_accept, FeeRule::OwnPayoutOnly);
+        assert_eq!(current.fund, legacy.fund);
+        assert_eq!(current.refund, legacy.refund);
     }
 
     #[test]
