@@ -112,6 +112,51 @@ async fn enum_single_oracle_close() {
     .await;
 }
 
+/// An oracle that attests before its event matures (a loan repaid or liquidated
+/// early) settles a contract whose CET locktime is the offer's creation time:
+/// the CET confirms weeks before maturity.
+#[tokio::test]
+#[ignore]
+async fn enum_close_before_maturity() {
+    let label = "enum_close_before_maturity";
+    // The offer is created now, before any block of this chain is mined, so the
+    // chain's median time passes the CET locktime.
+    let created_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as u32;
+    let ctx = ChainContext::new(label).await;
+    let temporary_contract_id = temporary_contract_id(label);
+    let oracles = TestOracles::enums_maturing_at(1, 1, label, created_at + 30 * 86_400).await;
+
+    let contract = fund_contract(
+        &ctx,
+        ContractSetup::new(
+            enum_contract_info(&oracles, TOTAL_COLLATERAL),
+            OFFER_COLLATERAL,
+            temporary_contract_id,
+            TestParty::new(
+                &ctx,
+                PartySpec::new(Party::Offer, 1, 1),
+                temporary_contract_id,
+            )
+            .await,
+            TestParty::new(
+                &ctx,
+                PartySpec::new(Party::Accept, 2, 2),
+                temporary_contract_id,
+            )
+            .await,
+        )
+        .with_cet_locktime(created_at),
+    )
+    .await;
+
+    let attestations = oracles.attest_enum(SETTLEMENT_OUTCOME).await;
+    let cet = close_with_cet(&ctx, &contract, Party::Offer, &attestations).await;
+    assert_eq!(cet.lock_time.to_consensus_u32(), created_at);
+}
+
 #[tokio::test]
 #[ignore]
 async fn enum_single_oracle_close_by_accept_party() {

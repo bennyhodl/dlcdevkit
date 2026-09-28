@@ -401,16 +401,17 @@ impl OfferDlc {
             }
         }
 
-        // The CET locktime is pinned to the closest maturity date: a lower value
-        // produces CETs spendable before the event matures, a higher value delays
-        // execution past it.
+        // The oracle attestation, not the locktime, gates a CET, so the CET
+        // locktime may precede the closest maturity date: an application whose
+        // oracle attests before maturity (an early close) needs CETs it can
+        // broadcast then. A higher value would delay execution past maturity.
         let closest_maturity_date = self.contract_info.get_closest_maturity_date();
-        let valid_dates = self.cet_locktime == closest_maturity_date
+        let valid_dates = self.cet_locktime <= closest_maturity_date
             && closest_maturity_date + min_timeout_interval <= self.refund_locktime
             && self.refund_locktime <= closest_maturity_date + max_timeout_interval;
         if !valid_dates {
             return Err(Error::InvalidArgument(
-                "CET locktime must equal the closest maturity date and the refund locktime must be within the timeout interval".to_string(),
+                "CET locktime must not be after the closest maturity date and the refund locktime must be within the timeout interval".to_string(),
             ));
         }
 
@@ -1047,6 +1048,24 @@ mod tests {
     }
 
     #[test]
+    fn offer_with_cet_locktime_before_maturity_passes_validation() {
+        let input = include_str!("./test_inputs/offer_msg.json");
+        let offer: OfferDlc = serde_json::from_str(input).unwrap();
+
+        let mut early_cet_locktime = offer.clone();
+        early_cet_locktime.cet_locktime -= 3;
+
+        let mut zero_cet_locktime = offer;
+        zero_cet_locktime.cet_locktime = 0;
+
+        for valid in &[early_cet_locktime, zero_cet_locktime] {
+            valid
+                .validate(SECP256K1, 86400 * 7, 86400 * 14, FIXTURE_NOW)
+                .expect("a CET locktime before maturity to pass validation");
+        }
+    }
+
+    #[test]
     fn valid_offer_message_passes_with_dlc_input() {
         let input = include_str!("./test_inputs/offer_msg_with_dlc_input.json");
         let valid_offer: OfferDlc = serde_json::from_str(input).unwrap();
@@ -1067,25 +1086,13 @@ mod tests {
         let mut invalid_maturity = offer.clone();
         invalid_maturity.cet_locktime += 3;
 
-        let mut premature_cet_locktime = offer.clone();
-        premature_cet_locktime.cet_locktime -= 3;
-
-        let mut zero_cet_locktime = offer.clone();
-        zero_cet_locktime.cet_locktime = 0;
-
         let mut too_short_timeout = offer.clone();
         too_short_timeout.refund_locktime -= 100;
 
         let mut too_long_timeout = offer;
         too_long_timeout.refund_locktime -= 100;
 
-        for invalid in &[
-            invalid_maturity,
-            premature_cet_locktime,
-            zero_cet_locktime,
-            too_short_timeout,
-            too_long_timeout,
-        ] {
+        for invalid in &[invalid_maturity, too_short_timeout, too_long_timeout] {
             invalid
                 .validate(SECP256K1, 86400 * 7, 86400 * 14, FIXTURE_NOW)
                 .expect_err("Should not pass validation of invalid offer message.");

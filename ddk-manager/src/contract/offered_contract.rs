@@ -125,7 +125,8 @@ impl OfferedContract {
         }
 
         let latest_maturity = crate::utils::get_latest_maturity_date(&oracle_announcements)?;
-        let cet_locktime = crate::utils::get_closest_maturity_date(&oracle_announcements)?;
+        let cet_locktime =
+            crate::utils::get_closest_maturity_date(oracle_announcements.iter().flatten())?;
 
         let fund_output_serial_id = get_new_serial_id();
         let contract_info = contract
