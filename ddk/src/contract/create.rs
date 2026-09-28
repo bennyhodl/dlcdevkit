@@ -28,6 +28,12 @@ pub fn create_offer(params: CreateOfferParams) -> Result<OfferDlc, ContractError
         contract_flags,
     } = params;
 
+    let cet_locktime = cet_locktime.unwrap_or_else(|| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock is before the unix epoch")
+            .as_secs() as u32
+    });
     validate_offer_funding_inputs(&party.funding_inputs)?;
     ddk_dlc::util::validate_fee_rate(fee_rate_per_vb)
         .map_err(|e| ContractError::InvalidOffer(format!("invalid fee rate: {e}")))?;
@@ -73,6 +79,9 @@ pub fn create_offer(params: CreateOfferParams) -> Result<OfferDlc, ContractError
             "offer collateral exceeds total collateral".to_string(),
         ));
     }
+    offer
+        .validate_cet_locktime()
+        .map_err(|e| ContractError::InvalidOffer(e.to_string()))?;
     // Catch malformed payout or oracle data before the offer leaves this party.
     let execution_infos = ddk_manager::contract::execution_contract_infos(&offer.contract_info)?;
     if execution_infos.is_empty() {

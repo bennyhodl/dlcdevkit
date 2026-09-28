@@ -30,7 +30,7 @@ use crate::{
     },
     conversion_utils::get_tx_input_infos,
     error::Error,
-    Blockchain, ChannelId, ContractSigner, ContractSignerProvider, Wallet,
+    Blockchain, ChannelId, ContractSigner, ContractSignerProvider, Time, Wallet,
 };
 
 /// Creates an [`OfferedContract`] and [`OfferDlc`] message from the provided
@@ -39,6 +39,7 @@ use crate::{
 pub async fn offer_contract<
     W: Deref,
     B: Deref,
+    T: Deref,
     X: ContractSigner,
     SP: Deref,
     C: Signing,
@@ -52,12 +53,14 @@ pub async fn offer_contract<
     counter_party: &PublicKey,
     wallet: &W,
     blockchain: &B,
+    time: &T,
     signer_provider: &SP,
     logger: &L,
 ) -> Result<(OfferedContract, OfferDlc), Error>
 where
     W::Target: Wallet,
     B::Target: Blockchain,
+    T::Target: Time,
     SP::Target: ContractSignerProvider<Signer = X>,
     L::Target: Logger,
 {
@@ -110,11 +113,13 @@ where
         &funding_inputs_info,
         counter_party,
         refund_delay,
+        time.unix_time_now() as u32,
         keys_id,
         chain_hash,
     )?;
 
     let offer_msg = OfferDlc::from(&offered_contract);
+    offer_msg.validate_cet_locktime()?;
 
     Ok((offered_contract, offer_msg))
 }

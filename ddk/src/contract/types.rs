@@ -58,8 +58,10 @@ pub struct CreateOfferParams {
     pub fund_output_serial_id: Option<u64>,
     /// The fee rate, in satoshis per virtual byte, for the funding transaction and CETs.
     pub fee_rate_per_vb: u64,
-    /// The earliest time CETs can be broadcast.
-    pub cet_locktime: u32,
+    /// The earliest time CETs can be broadcast; must not be after the closest
+    /// oracle event maturity. The time of creation when `None`, so the CETs
+    /// settle the contract as soon as the oracles attest.
+    pub cet_locktime: Option<u32>,
     /// The time after which the refund transaction can be broadcast.
     pub refund_locktime: u32,
     /// Contract feature flags. Use `0` unless a protocol extension requires otherwise.

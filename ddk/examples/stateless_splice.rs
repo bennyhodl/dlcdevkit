@@ -155,7 +155,7 @@ async fn main() {
         ),
         fund_output_serial_id: None,
         fee_rate_per_vb: 2,
-        cet_locktime: 500,
+        cet_locktime: Some(500),
         refund_locktime: 1_000,
         contract_flags: 0,
     })
@@ -242,7 +242,7 @@ async fn main() {
         ),
         fund_output_serial_id: None,
         fee_rate_per_vb: 2,
-        cet_locktime: 500,
+        cet_locktime: Some(500),
         refund_locktime: 1_000,
         contract_flags: 0,
     })

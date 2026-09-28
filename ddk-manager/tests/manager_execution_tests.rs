@@ -1454,6 +1454,10 @@ async fn manager_execution_test_inner(test_params: TestParams, path: TestPath, m
         .expect("Send offer error");
 
     write_message("offer_message", offer_msg.clone());
+    assert_eq!(
+        offer_msg.cet_locktime as u64, initial_time,
+        "the CET locktime must be the offer's creation time"
+    );
     let temporary_contract_id = offer_msg.temporary_contract_id;
     ctx.send(Party::Bob, Message::Offer(offer_msg)).await;
 
@@ -1592,14 +1596,13 @@ async fn close_path(
     contract_id: ContractId,
     manual_close: bool,
 ) {
+    // A manual close runs before the event matures, as it does when an oracle
+    // attests early: the CET locktime is the offer's creation time, so nothing
+    // waits for maturity.
     if !manual_close {
         test_utils::set_time(
             (EVENT_MATURITY as u64) + ddk_manager::manager::MATURITY_SKEW_SECS + 1,
         );
-    } else {
-        // Past maturity so the CET locktime is satisfied, but within the skew
-        // window so the automatic path does not close the contract first.
-        test_utils::set_time((EVENT_MATURITY as u64) + 1);
     }
 
     // Select the first one to close randomly
