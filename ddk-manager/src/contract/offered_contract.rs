@@ -99,9 +99,9 @@ impl OfferedContract {
     ///
     /// `oracle_announcements` holds one list per entry of
     /// `contract.contract_infos`, in the same order; any other shape is an
-    /// error. The CET locktime is pinned to the closest oracle event maturity
-    /// so that CETs are spendable exactly when the first event matures, never
-    /// before.
+    /// error. `cet_locktime` is normally the offer's creation time: the oracle
+    /// attestation, not the locktime, gates a CET, so a CET can close the
+    /// contract as soon as the oracle attests, even before the event matures.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: ContractId,
@@ -111,6 +111,7 @@ impl OfferedContract {
         funding_inputs: &[FundingInput],
         counter_party: &PublicKey,
         refund_delay: u32,
+        cet_locktime: u32,
         keys_id: KeysId,
         chain_hash: [u8; 32],
     ) -> Result<Self, Error> {
@@ -125,8 +126,6 @@ impl OfferedContract {
         }
 
         let latest_maturity = crate::utils::get_latest_maturity_date(&oracle_announcements)?;
-        let cet_locktime =
-            crate::utils::get_closest_maturity_date(oracle_announcements.iter().flatten())?;
 
         let fund_output_serial_id = get_new_serial_id();
         let contract_info = contract

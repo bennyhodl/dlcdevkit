@@ -253,6 +253,7 @@ where
             &counter_party,
             &self.wallet,
             &self.blockchain,
+            &self.time,
             &self.signer_provider,
             &self.logger,
         )
@@ -305,6 +306,7 @@ where
             &counter_party,
             &self.wallet,
             &self.blockchain,
+            &self.time,
             &self.signer_provider,
             &self.logger,
         )

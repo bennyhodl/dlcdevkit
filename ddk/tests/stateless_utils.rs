@@ -1030,7 +1030,9 @@ pub struct ContractSetup {
     pub offerer: TestParty,
     pub accepter: TestParty,
     pub splice: Option<SpliceSetup>,
-    /// The offer's CET locktime; the closest oracle event maturity when unset.
+    /// The CET locktime passed to `create_offer`: the closest oracle event
+    /// maturity unless a test sets it, since the fixture events matured long
+    /// ago. `None` lets `create_offer` use the time of creation.
     pub cet_locktime: Option<u32>,
 }
 
@@ -1043,13 +1045,13 @@ impl ContractSetup {
         accepter: TestParty,
     ) -> Self {
         Self {
+            cet_locktime: Some(contract_info.get_closest_maturity_date()),
             contract_info,
             offer_collateral,
             temporary_contract_id,
             offerer,
             accepter,
             splice: None,
-            cet_locktime: None,
         }
     }
 
@@ -1058,8 +1060,8 @@ impl ContractSetup {
         self
     }
 
-    pub fn with_cet_locktime(mut self, cet_locktime: u32) -> Self {
-        self.cet_locktime = Some(cet_locktime);
+    pub fn with_cet_locktime(mut self, cet_locktime: Option<u32>) -> Self {
+        self.cet_locktime = cet_locktime;
         self
     }
 }
@@ -1220,7 +1222,7 @@ pub async fn fund_contract(ctx: &ChainContext, setup: ContractSetup) -> FundedCo
         party: offerer.party_params(splice_inputs),
         fund_output_serial_id: None,
         fee_rate_per_vb: FEE_RATE_PER_VB,
-        cet_locktime: cet_locktime.unwrap_or(maturity),
+        cet_locktime,
         refund_locktime: maturity + REFUND_DELAY,
         contract_flags: 0,
     })

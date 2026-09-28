@@ -373,6 +373,24 @@ impl OfferDlc {
         }
     }
 
+    /// Returns an error when the CET locktime is after the closest oracle event
+    /// maturity.
+    ///
+    /// The oracle attestation, not the locktime, gates a CET, so the locktime
+    /// may be anything up to maturity: an offer created with its creation time
+    /// has CETs that settle as soon as the oracles attest, even early. A
+    /// locktime past maturity would delay settlement past it.
+    pub fn validate_cet_locktime(&self) -> Result<(), Error> {
+        let closest_maturity_date = self.contract_info.get_closest_maturity_date();
+        if self.cet_locktime > closest_maturity_date {
+            return Err(Error::InvalidArgument(format!(
+                "CET locktime {} is after the closest maturity date {closest_maturity_date}",
+                self.cet_locktime
+            )));
+        }
+        Ok(())
+    }
+
     /// Returns whether the message satisfies validity requirements.
     ///
     /// `now_unix` is the receiver's clock as a unix timestamp. An offer whose
@@ -401,17 +419,14 @@ impl OfferDlc {
             }
         }
 
-        // The oracle attestation, not the locktime, gates a CET, so the CET
-        // locktime may precede the closest maturity date: an application whose
-        // oracle attests before maturity (an early close) needs CETs it can
-        // broadcast then. A higher value would delay execution past maturity.
+        self.validate_cet_locktime()?;
+
         let closest_maturity_date = self.contract_info.get_closest_maturity_date();
-        let valid_dates = self.cet_locktime <= closest_maturity_date
-            && closest_maturity_date + min_timeout_interval <= self.refund_locktime
+        let valid_refund = closest_maturity_date + min_timeout_interval <= self.refund_locktime
             && self.refund_locktime <= closest_maturity_date + max_timeout_interval;
-        if !valid_dates {
+        if !valid_refund {
             return Err(Error::InvalidArgument(
-                "CET locktime must not be after the closest maturity date and the refund locktime must be within the timeout interval".to_string(),
+                "refund locktime must be within the timeout interval".to_string(),
             ));
         }
 

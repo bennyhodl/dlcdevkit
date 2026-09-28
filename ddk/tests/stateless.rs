@@ -361,7 +361,7 @@ fn offer_params(
         party: offerer.party_params(secp, funding_inputs),
         fund_output_serial_id: None,
         fee_rate_per_vb: 2,
-        cet_locktime: 750,
+        cet_locktime: Some(750),
         refund_locktime: 1_000,
         contract_flags: 0,
     }
@@ -548,6 +548,27 @@ fn numerical_lifecycle_with_xpriv_signing() {
     )
     .unwrap();
     complete_with_xpriv(&secp, &offerer, &accepter, &offer, &accept_result.accept);
+}
+
+#[test]
+fn an_offer_with_a_cet_locktime_after_maturity_is_not_created() {
+    let secp = Secp256k1::new();
+    let offerer = PartySetup::new(&secp, 1, NETWORK, Amount::from_sat(150_000), 1);
+    let mut params = offer_params(
+        &secp,
+        &offerer,
+        enum_contract_info(TOTAL_COLLATERAL),
+        Amount::from_sat(50_000),
+        NETWORK,
+        vec![offerer.funding_input.clone()],
+    );
+    let maturity = params.contract_info.get_closest_maturity_date();
+
+    params.cet_locktime = Some(maturity + 1);
+    create_offer(params.clone()).expect_err("a CET locktime after maturity");
+
+    params.cet_locktime = Some(maturity);
+    create_offer(params).expect("a CET locktime at maturity");
 }
 
 #[test]
