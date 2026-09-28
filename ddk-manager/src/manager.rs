@@ -329,13 +329,17 @@ where
             get_contract_in_state!(self, contract_id, Offered, None as Option<PublicKey>)?;
 
         // The offer was validated on receipt, but the oracle event may have
-        // matured while the offer waited for a decision. The CET locktime is
-        // pinned to the closest event maturity.
+        // matured while the offer waited for a decision.
+        let maturity = crate::utils::get_closest_maturity_date(
+            offered_contract
+                .contract_info
+                .iter()
+                .flat_map(|info| &info.oracle_announcements),
+        )?;
         let now = self.time.unix_time_now();
-        if u64::from(offered_contract.cet_locktime) <= now {
+        if u64::from(maturity) <= now {
             return Err(Error::InvalidParameters(format!(
-                "oracle event has already matured (maturity {}, time {now})",
-                offered_contract.cet_locktime
+                "oracle event has already matured (maturity {maturity}, time {now})"
             )));
         }
 

@@ -309,8 +309,19 @@ pub struct TestOracles {
 impl TestOracles {
     /// Creates `nb_oracles` oracles announcing the same enum event.
     pub async fn enums(nb_oracles: usize, threshold: u16, event_id: &str) -> Self {
+        Self::enums_maturing_at(nb_oracles, threshold, event_id, EVENT_MATURITY).await
+    }
+
+    /// Creates `nb_oracles` oracles announcing the same enum event, maturing at
+    /// the unix time `maturity`.
+    pub async fn enums_maturing_at(
+        nb_oracles: usize,
+        threshold: u16,
+        event_id: &str,
+        maturity: u32,
+    ) -> Self {
         let oracles = dlc::new_oracles(nb_oracles);
-        let announcements = dlc::announce_enum_event(&oracles, event_id, EVENT_MATURITY).await;
+        let announcements = dlc::announce_enum_event(&oracles, event_id, maturity).await;
         Self {
             oracles,
             announcements,
@@ -1019,6 +1030,8 @@ pub struct ContractSetup {
     pub offerer: TestParty,
     pub accepter: TestParty,
     pub splice: Option<SpliceSetup>,
+    /// The offer's CET locktime; the closest oracle event maturity when unset.
+    pub cet_locktime: Option<u32>,
 }
 
 impl ContractSetup {
@@ -1036,11 +1049,17 @@ impl ContractSetup {
             offerer,
             accepter,
             splice: None,
+            cet_locktime: None,
         }
     }
 
     pub fn with_splice(mut self, splice: SpliceSetup) -> Self {
         self.splice = Some(splice);
+        self
+    }
+
+    pub fn with_cet_locktime(mut self, cet_locktime: u32) -> Self {
+        self.cet_locktime = Some(cet_locktime);
         self
     }
 }
@@ -1176,7 +1195,9 @@ pub async fn fund_contract(ctx: &ChainContext, setup: ContractSetup) -> FundedCo
         offerer,
         accepter,
         splice,
+        cet_locktime,
     } = setup;
+    let maturity = contract_info.get_closest_maturity_date();
 
     let splice_inputs = splice
         .as_ref()
@@ -1199,8 +1220,8 @@ pub async fn fund_contract(ctx: &ChainContext, setup: ContractSetup) -> FundedCo
         party: offerer.party_params(splice_inputs),
         fund_output_serial_id: None,
         fee_rate_per_vb: FEE_RATE_PER_VB,
-        cet_locktime: EVENT_MATURITY,
-        refund_locktime: EVENT_MATURITY + REFUND_DELAY,
+        cet_locktime: cet_locktime.unwrap_or(maturity),
+        refund_locktime: maturity + REFUND_DELAY,
         contract_flags: 0,
     })
     .expect("could not create the offer");
@@ -1211,7 +1232,7 @@ pub async fn fund_contract(ctx: &ChainContext, setup: ContractSetup) -> FundedCo
             party: accepter.party_params(vec![]),
             min_timeout_interval: MIN_TIMEOUT_INTERVAL,
             max_timeout_interval: MAX_TIMEOUT_INTERVAL,
-            now_unix: u64::from(EVENT_MATURITY) - 1,
+            now_unix: u64::from(maturity) - 1,
         },
         &accepter.funding_secret_key,
     )

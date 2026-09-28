@@ -259,12 +259,11 @@ pub(crate) fn get_latest_maturity_date(
         })
 }
 
-pub(crate) fn get_closest_maturity_date(
-    announcements: &[Vec<OracleAnnouncement>],
+pub(crate) fn get_closest_maturity_date<'a>(
+    announcements: impl IntoIterator<Item = &'a OracleAnnouncement>,
 ) -> Result<u32, Error> {
     announcements
-        .iter()
-        .flatten()
+        .into_iter()
         .map(|x| x.oracle_event.event_maturity_epoch)
         .min()
         .ok_or_else(|| {
