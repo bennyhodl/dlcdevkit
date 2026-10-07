@@ -9,6 +9,7 @@ use bitcoin::{Script, Transaction};
 use ddk_dlc::{OracleInfo, Payout};
 use ddk_messages::oracle_msgs;
 use ddk_messages::oracle_msgs::{EventDescriptor, OracleAnnouncement, OracleAttestation};
+use ddk_messages::PayoutScriptOverrides;
 use ddk_trie::{DlcTrie, RangeInfo};
 use secp256k1_zkp::schnorr::Signature as SchnorrSignature;
 use secp256k1_zkp::{All, EcdsaAdaptorSignature, PublicKey, Secp256k1, SecretKey, Verification};
@@ -44,6 +45,47 @@ impl ContractInfo {
         match &self.contract_descriptor {
             ContractDescriptor::Enum(e) => Ok(e.get_payouts()),
             ContractDescriptor::Numerical(n) => n.get_payouts(total_collateral),
+        }
+    }
+
+    /// Rewrites the offerer's output on each CET whose enum outcome `overrides`
+    /// names, so that outcome pays the override script instead.
+    ///
+    /// `cets` is this contract info's CETs in payout order, as built by
+    /// `ddk_dlc::create_cets`. Call it before deriving or verifying adaptor
+    /// signatures, since those commit to the CET bytes. Outcomes the
+    /// descriptor does not have are skipped: a record may name outcomes that
+    /// belong to another contract info of the same offer. Numerical
+    /// descriptors have no outcome strings and are left untouched.
+    pub fn apply_payout_script_overrides(
+        &self,
+        overrides: &PayoutScriptOverrides,
+        offer_payout_spk: &Script,
+        cets: &mut [Transaction],
+    ) {
+        let ContractDescriptor::Enum(descriptor) = &self.contract_descriptor else {
+            return;
+        };
+        for (cet, outcome_payout) in cets.iter_mut().zip(&descriptor.outcome_payouts) {
+            let Some(script) = overrides.script_for(&outcome_payout.outcome) else {
+                continue;
+            };
+            // ponytail: the offerer's output is found by script, which is
+            // unambiguous because both parties' payout scripts differ. A
+            // dust-discarded offer output has nothing to rewrite.
+            for output in cet.output.iter_mut() {
+                if output.script_pubkey.as_script() == offer_payout_spk {
+                    output.script_pubkey = script.clone();
+                }
+            }
+        }
+    }
+
+    /// Returns whether `outcome` is one of this contract's enum outcomes.
+    pub fn has_enum_outcome(&self, outcome: &str) -> bool {
+        match &self.contract_descriptor {
+            ContractDescriptor::Enum(e) => e.outcome_payouts.iter().any(|p| p.outcome == outcome),
+            ContractDescriptor::Numerical(_) => false,
         }
     }
 

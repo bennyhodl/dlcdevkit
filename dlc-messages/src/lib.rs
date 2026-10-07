@@ -22,8 +22,8 @@ pub extern crate lightning;
 pub mod ser_macros;
 pub mod ser_impls;
 
-pub use ser_impls::{TlvRecord, TlvType};
 pub use payout_overrides::{PayoutScriptOverride, PayoutScriptOverrides};
+pub use ser_impls::{TlvRecord, TlvType};
 pub use tlv_stream::{TlvStream, TlvStreamRecord};
 
 #[cfg(any(test, feature = "use-serde"))]

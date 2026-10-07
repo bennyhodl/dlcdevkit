@@ -15,7 +15,7 @@ use bitcoin::Amount;
 use ddk_dlc::PartyParams;
 use ddk_messages::oracle_msgs::OracleAnnouncement;
 use ddk_messages::tlv_stream::TlvStream;
-use ddk_messages::{FundingInput, OfferDlc};
+use ddk_messages::{FundingInput, OfferDlc, PayoutScriptOverrides};
 use secp256k1_zkp::PublicKey;
 
 /// Contains information about a contract that was offered.
@@ -76,6 +76,27 @@ impl OfferedContract {
             crate::error::Error::InvalidParameters("Fee rate is too high".to_string())
         })?;
 
+        if let Some(overrides) = self.payout_script_overrides()? {
+            for o in &overrides.overrides {
+                if o.script_pubkey.is_empty() {
+                    return Err(crate::error::Error::InvalidParameters(format!(
+                        "Payout script override for outcome {} is empty",
+                        o.outcome
+                    )));
+                }
+                if !self
+                    .contract_info
+                    .iter()
+                    .any(|i| i.has_enum_outcome(&o.outcome))
+                {
+                    return Err(crate::error::Error::InvalidParameters(format!(
+                        "Payout script override names outcome {} which no enum descriptor has",
+                        o.outcome
+                    )));
+                }
+            }
+        }
+
         for info in &self.contract_info {
             info.validate()?;
             let payouts = match &info.contract_descriptor {
@@ -93,6 +114,20 @@ impl OfferedContract {
         }
 
         Ok(())
+    }
+
+    /// The payout script overrides carried on the offer, if any.
+    ///
+    /// Errors if the record is present but does not decode, since a peer that
+    /// sent it meant for it to apply.
+    pub fn payout_script_overrides(
+        &self,
+    ) -> Result<Option<PayoutScriptOverrides>, crate::error::Error> {
+        self.tlvs.get::<PayoutScriptOverrides>().map_err(|e| {
+            crate::error::Error::InvalidParameters(format!(
+                "Payout script overrides record does not decode: {e:?}"
+            ))
+        })
     }
 
     /// Creates a new [`OfferedContract`] from the given parameters.
