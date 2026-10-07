@@ -23,6 +23,7 @@ pub mod ser_macros;
 pub mod ser_impls;
 
 pub use ser_impls::{TlvRecord, TlvType};
+pub use payout_overrides::{PayoutScriptOverride, PayoutScriptOverrides};
 pub use tlv_stream::{TlvStream, TlvStreamRecord};
 
 #[cfg(any(test, feature = "use-serde"))]
@@ -34,6 +35,7 @@ extern crate serde_json;
 pub mod contract_msgs;
 pub mod message_handler;
 pub mod oracle_msgs;
+pub mod payout_overrides;
 pub mod segmentation;
 pub mod tlv_stream;
 pub mod types;
