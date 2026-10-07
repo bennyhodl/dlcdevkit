@@ -315,6 +315,29 @@ mod tests {
         assert_eq!(offer.chain_hash, LEGACY_CHAINHASH);
     }
 
+    /// A numerical contract has no outcome strings, so a record on one names
+    /// nothing and is rejected rather than silently ignored.
+    #[test]
+    fn payout_script_override_on_a_numerical_contract_is_rejected() {
+        use ddk_messages::{PayoutScriptOverride, PayoutScriptOverrides};
+
+        let mut offered = offered_contract(None);
+        assert!(offered.validate().is_ok());
+        offered.tlvs.set(&PayoutScriptOverrides {
+            overrides: vec![PayoutScriptOverride {
+                outcome: "liquidated-by-0x1111111111111111111111111111111111111111".to_string(),
+                script_pubkey: bitcoin::ScriptBuf::from_bytes(vec![0x00, 0x14, 0xaa]),
+            }],
+        });
+
+        match offered.validate() {
+            Err(crate::error::Error::InvalidParameters(m)) => {
+                assert!(m.contains("no enum descriptor"), "{m}")
+            }
+            other => panic!("expected InvalidParameters, got {other:?}"),
+        }
+    }
+
     #[test]
     fn legacy_chain_hash_is_regtest_genesis() {
         assert_eq!(LEGACY_CHAINHASH, chain_hash_from_network(Network::Regtest));
