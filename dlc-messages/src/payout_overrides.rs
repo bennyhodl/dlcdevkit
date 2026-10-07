@@ -74,6 +74,7 @@ impl PayoutScriptOverrides {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ser_impls::TlvRecord;
     use crate::tlv_stream::TlvStream;
     use lightning::io::Cursor;
     use lightning::util::ser::Writeable;
@@ -85,6 +86,19 @@ mod tests {
                 script_pubkey: ScriptBuf::from_bytes(vec![0x00, 0x14, 0xaa, 0xbb]),
             }],
         }
+    }
+
+    /// The bytes node-dlc writes for `record()`. Pinned on both sides so a
+    /// change to either encoder fails here rather than at signature
+    /// verification.
+    #[test]
+    fn encodes_to_the_same_bytes_as_node_dlc() {
+        let outcome = "liquidated-by-0x1111111111111111111111111111111111111111";
+        let mut wire = vec![0xfd, 0xfd, 0xed, 0x40, 0x01, 0x38];
+        wire.extend_from_slice(outcome.as_bytes());
+        wire.extend_from_slice(&[0x00, 0x04, 0x00, 0x14, 0xaa, 0xbb]);
+
+        assert_eq!(record().to_tlv_bytes(), wire);
     }
 
     #[test]
