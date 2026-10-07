@@ -173,7 +173,7 @@ where
     let has_dlc_inputs = !accept_params.dlc_inputs.is_empty()
         || !offered_contract.offer_params.dlc_inputs.is_empty();
 
-    let dlc_transactions = if has_dlc_inputs {
+    let mut dlc_transactions = if has_dlc_inputs {
         log_debug!(
             logger,
             "Creating spliced DLC transactions. num_dlc_inputs={}",
@@ -204,6 +204,15 @@ where
             offered_contract.contract_flags,
         )?
     };
+
+    let payout_overrides = offered_contract.payout_script_overrides()?;
+    if let Some(overrides) = &payout_overrides {
+        offered_contract.contract_info[0].apply_payout_script_overrides(
+            overrides,
+            &offered_contract.offer_params.payout_script_pubkey,
+            &mut dlc_transactions.cets,
+        );
+    }
 
     log_info!(
         logger,
@@ -281,10 +290,11 @@ pub(crate) fn accept_contract_internal(
 
     let mut cets = cets.clone();
 
+    let payout_overrides = offered_contract.payout_script_overrides()?;
     for contract_info in offered_contract.contract_info.iter().skip(1) {
         let payouts = contract_info.get_payouts(total_collateral)?;
 
-        let tmp_cets = ddk_dlc::create_cets(
+        let mut tmp_cets = ddk_dlc::create_cets(
             &cet_input,
             &offered_contract.offer_params.payout_script_pubkey,
             offered_contract.offer_params.payout_serial_id,
@@ -293,6 +303,13 @@ pub(crate) fn accept_contract_internal(
             &payouts,
             0,
         );
+        if let Some(overrides) = &payout_overrides {
+            contract_info.apply_payout_script_overrides(
+                overrides,
+                &offered_contract.offer_params.payout_script_pubkey,
+                &mut tmp_cets,
+            );
+        }
 
         let (adaptor_info, adaptor_sig) = contract_info.get_adaptor_info(
             secp,
@@ -408,7 +425,7 @@ where
     let has_dlc_inputs =
         !accept_dlc_inputs.is_empty() || !offered_contract.offer_params.dlc_inputs.is_empty();
 
-    let dlc_transactions = if has_dlc_inputs {
+    let mut dlc_transactions = if has_dlc_inputs {
         log_debug!(
             logger,
             "Creating spliced DLC transactions. num_dlc_inputs={}",
@@ -439,6 +456,15 @@ where
             offered_contract.contract_flags,
         )?
     };
+
+    let payout_overrides = offered_contract.payout_script_overrides()?;
+    if let Some(overrides) = &payout_overrides {
+        offered_contract.contract_info[0].apply_payout_script_overrides(
+            overrides,
+            &offered_contract.offer_params.payout_script_pubkey,
+            &mut dlc_transactions.cets,
+        );
+    }
 
     log_info!(
         logger,
@@ -627,10 +653,11 @@ where
 
     let total_collateral = offered_contract.offer_params.collateral + accept_params.collateral;
 
+    let payout_overrides = offered_contract.payout_script_overrides()?;
     for contract_info in offered_contract.contract_info.iter().skip(1) {
         let payouts = contract_info.get_payouts(total_collateral)?;
 
-        let tmp_cets = ddk_dlc::create_cets(
+        let mut tmp_cets = ddk_dlc::create_cets(
             &cet_input,
             &offered_contract.offer_params.payout_script_pubkey,
             offered_contract.offer_params.payout_serial_id,
@@ -639,6 +666,13 @@ where
             &payouts,
             0,
         );
+        if let Some(overrides) = &payout_overrides {
+            contract_info.apply_payout_script_overrides(
+                overrides,
+                &offered_contract.offer_params.payout_script_pubkey,
+                &mut tmp_cets,
+            );
+        }
 
         let (adaptor_info, tmp_adaptor_index) = contract_info.verify_and_get_adaptor_info(
             secp,

@@ -10,7 +10,8 @@ use ddk_dlc::secp256k1_zkp::{All, EcdsaAdaptorSignature, PublicKey, Secp256k1, S
 use ddk_dlc::{DlcTransactions, FeeRule, PartyParams as DlcPartyParams, TxInputInfo};
 use ddk_manager::contract::contract_info::ContractInfo as ExecutionContractInfo;
 use ddk_messages::{
-    AcceptDlc, CetAdaptorSignatures, FundingInput, FundingSignatures, OfferDlc, SignDlc,
+    AcceptDlc, CetAdaptorSignatures, FundingInput, FundingSignatures, OfferDlc,
+    PayoutScriptOverrides, SignDlc,
 };
 
 use super::error::ContractError;
@@ -138,6 +139,7 @@ fn build_context_with_fee_rule(
     for info in &execution_infos {
         info.validate()?;
     }
+    let payout_overrides = payout_script_overrides(offer, &execution_infos)?;
 
     let payouts = execution_infos[0].get_payouts(total_collateral)?;
     // A splice input carries a `dlc_input`; when present the funding transaction
@@ -172,6 +174,13 @@ fn build_context_with_fee_rule(
             fee_rule,
         )?
     };
+    if let Some(overrides) = &payout_overrides {
+        execution_infos[0].apply_payout_script_overrides(
+            overrides,
+            &offer_params.payout_script_pubkey,
+            &mut transactions.cets,
+        );
+    }
     let mut cet_ranges = Vec::with_capacity(execution_infos.len());
     cet_ranges.push(0..transactions.cets.len());
     let cet_input = transactions
@@ -183,7 +192,7 @@ fn build_context_with_fee_rule(
 
     for info in execution_infos.iter().skip(1) {
         let start = transactions.cets.len();
-        transactions.cets.extend(ddk_dlc::create_cets(
+        let mut cets = ddk_dlc::create_cets(
             &cet_input,
             &offer_params.payout_script_pubkey,
             offer_params.payout_serial_id,
@@ -191,7 +200,15 @@ fn build_context_with_fee_rule(
             accept_params.payout_serial_id,
             &info.get_payouts(total_collateral)?,
             0,
-        ));
+        );
+        if let Some(overrides) = &payout_overrides {
+            info.apply_payout_script_overrides(
+                overrides,
+                &offer_params.payout_script_pubkey,
+                &mut cets,
+            );
+        }
+        transactions.cets.extend(cets);
         cet_ranges.push(start..transactions.cets.len());
     }
 
@@ -200,6 +217,37 @@ fn build_context_with_fee_rule(
         cet_ranges,
         transactions,
     })
+}
+
+/// The payout script overrides on the offer, checked against the execution
+/// infos the same way `OfferedContract::validate` checks them in the manager.
+fn payout_script_overrides(
+    offer: &OfferDlc,
+    execution_infos: &[ExecutionContractInfo],
+) -> Result<Option<PayoutScriptOverrides>, ContractError> {
+    let overrides = offer.tlvs.get::<PayoutScriptOverrides>().map_err(|e| {
+        ContractError::InvalidOffer(format!("payout script overrides do not decode: {e:?}"))
+    })?;
+    if let Some(overrides) = &overrides {
+        for o in &overrides.overrides {
+            if o.script_pubkey.is_empty() {
+                return Err(ContractError::InvalidOffer(format!(
+                    "payout script override for outcome {} is empty",
+                    o.outcome
+                )));
+            }
+            if !execution_infos
+                .iter()
+                .any(|i| i.has_enum_outcome(&o.outcome))
+            {
+                return Err(ContractError::InvalidOffer(format!(
+                    "payout script override names outcome {} which no enum descriptor has",
+                    o.outcome
+                )));
+            }
+        }
+    }
+    Ok(overrides)
 }
 
 pub(crate) fn dlc_party_params(
