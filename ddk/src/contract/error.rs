@@ -78,3 +78,14 @@ impl From<ddk_manager::error::Error> for ContractError {
         ContractError::Dlc(error.to_string())
     }
 }
+
+impl From<ddk_manager::contract::transactions::BuildError> for ContractError {
+    fn from(error: ddk_manager::contract::transactions::BuildError) -> Self {
+        use ddk_manager::contract::transactions::BuildError;
+        match error {
+            BuildError::Offer(message) => ContractError::InvalidOffer(message),
+            BuildError::Accept(message) => ContractError::InvalidAccept(message),
+            BuildError::Construction(error) => error.into(),
+        }
+    }
+}

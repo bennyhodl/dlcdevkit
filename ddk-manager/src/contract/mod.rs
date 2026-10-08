@@ -25,6 +25,7 @@ pub mod numerical_descriptor;
 pub mod offered_contract;
 pub mod ser;
 pub mod signed_contract;
+pub mod transactions;
 pub(crate) mod utils;
 
 /// The genesis block hash identifying `network`, in the byte order DLC
