@@ -400,6 +400,7 @@ fn enum_contract_between(
             min_timeout_interval: MIN_TIMEOUT,
             max_timeout_interval: MAX_TIMEOUT,
             now_unix: NOW_UNIX,
+            payout_script_overrides: None,
         },
         &accepter.funding_secret_key,
     )
@@ -437,7 +438,14 @@ fn fund_with_xpriv(
         &offerer.derivations(),
     )
     .unwrap();
-    let sign_result = sign_accept(offer, accept, &offerer.funding_secret_key, &offer_psbt).unwrap();
+    let sign_result = sign_accept(
+        offer,
+        accept,
+        &offerer.funding_secret_key,
+        &offer_psbt,
+        None,
+    )
+    .unwrap();
 
     let mut accept_psbt = create_funding_psbt(offer, accept).unwrap();
     signing::sign_funding_psbt_with_xpriv(
@@ -449,7 +457,7 @@ fn fund_with_xpriv(
     )
     .unwrap();
     let funding_transaction =
-        finalize_sign(offer, accept, &sign_result.sign, &accept_psbt).unwrap();
+        finalize_sign(offer, accept, &sign_result.sign, &accept_psbt, None).unwrap();
 
     assert_funding_transaction_complete(&funding_transaction, offer, accept);
     (sign_result.sign, funding_transaction)
@@ -462,7 +470,7 @@ fn assert_funding_transaction_complete(
     offer: &OfferDlc,
     accept: &AcceptDlc,
 ) {
-    let transactions = create_dlc_transactions(offer, accept).unwrap();
+    let transactions = create_dlc_transactions(offer, accept, None).unwrap();
     assert_eq!(
         funding_transaction.compute_txid(),
         transactions.fund.compute_txid()
@@ -543,6 +551,7 @@ fn numerical_lifecycle_with_xpriv_signing() {
             min_timeout_interval: MIN_TIMEOUT,
             max_timeout_interval: MAX_TIMEOUT,
             now_unix: NOW_UNIX,
+            payout_script_overrides: None,
         },
         &accepter.funding_secret_key,
     )
@@ -598,8 +607,14 @@ fn descriptor_signing_completes_the_lifecycle() {
         }],
     )
     .unwrap();
-    let sign_result =
-        sign_accept(&offer, &accept, &offerer.funding_secret_key, &offer_psbt).unwrap();
+    let sign_result = sign_accept(
+        &offer,
+        &accept,
+        &offerer.funding_secret_key,
+        &offer_psbt,
+        None,
+    )
+    .unwrap();
 
     let mut accept_psbt = create_funding_psbt(&offer, &accept).unwrap();
     signing::sign_funding_psbt_with_xpriv(
@@ -611,7 +626,7 @@ fn descriptor_signing_completes_the_lifecycle() {
     )
     .unwrap();
     let funding_transaction =
-        finalize_sign(&offer, &accept, &sign_result.sign, &accept_psbt).unwrap();
+        finalize_sign(&offer, &accept, &sign_result.sign, &accept_psbt, None).unwrap();
     assert_funding_transaction_complete(&funding_transaction, &offer, &accept);
 }
 
@@ -720,6 +735,7 @@ async fn wallet_interface_signs_the_funding_psbt() {
             min_timeout_interval: MIN_TIMEOUT,
             max_timeout_interval: MAX_TIMEOUT,
             now_unix: NOW_UNIX,
+            payout_script_overrides: None,
         },
         &accepter.funding_secret_key,
     )
@@ -736,8 +752,14 @@ async fn wallet_interface_signs_the_funding_psbt() {
     )
     .await
     .unwrap();
-    let sign_result =
-        sign_accept(&offer, &accept, &offerer.funding_secret_key, &offer_psbt).unwrap();
+    let sign_result = sign_accept(
+        &offer,
+        &accept,
+        &offerer.funding_secret_key,
+        &offer_psbt,
+        None,
+    )
+    .unwrap();
 
     let mut accept_psbt = create_funding_psbt(&offer, &accept).unwrap();
     signing::sign_funding_psbt_with_wallet(
@@ -750,7 +772,7 @@ async fn wallet_interface_signs_the_funding_psbt() {
     .await
     .unwrap();
     let funding_transaction =
-        finalize_sign(&offer, &accept, &sign_result.sign, &accept_psbt).unwrap();
+        finalize_sign(&offer, &accept, &sign_result.sign, &accept_psbt, None).unwrap();
     assert_funding_transaction_complete(&funding_transaction, &offer, &accept);
 }
 
@@ -768,8 +790,14 @@ fn externally_finalized_psbt_completes_the_lifecycle() {
         &offerer.derivations(),
     )
     .unwrap();
-    let sign_result =
-        sign_accept(&offer, &accept, &offerer.funding_secret_key, &offer_psbt).unwrap();
+    let sign_result = sign_accept(
+        &offer,
+        &accept,
+        &offerer.funding_secret_key,
+        &offer_psbt,
+        None,
+    )
+    .unwrap();
 
     // The accept party hands the PSBT to an "external wallet": the PSBT is
     // serialized, signed and finalized with plain rust-bitcoin, and returned.
@@ -783,7 +811,8 @@ fn externally_finalized_psbt_completes_the_lifecycle() {
     );
     let returned = Psbt::deserialize(&externally_signed).unwrap();
 
-    let funding_transaction = finalize_sign(&offer, &accept, &sign_result.sign, &returned).unwrap();
+    let funding_transaction =
+        finalize_sign(&offer, &accept, &sign_result.sign, &returned, None).unwrap();
     assert_funding_transaction_complete(&funding_transaction, &offer, &accept);
 }
 
@@ -853,6 +882,7 @@ fn single_funded_contract_with_no_accept_inputs() {
             min_timeout_interval: MIN_TIMEOUT,
             max_timeout_interval: MAX_TIMEOUT,
             now_unix: NOW_UNIX,
+            payout_script_overrides: None,
         },
         &accepter.funding_secret_key,
     )
@@ -870,13 +900,19 @@ fn single_funded_contract_with_no_accept_inputs() {
         &offerer.derivations(),
     )
     .unwrap();
-    let sign_result =
-        sign_accept(&offer, &accept, &offerer.funding_secret_key, &offer_psbt).unwrap();
+    let sign_result = sign_accept(
+        &offer,
+        &accept,
+        &offerer.funding_secret_key,
+        &offer_psbt,
+        None,
+    )
+    .unwrap();
 
     // No accept-side inputs to sign: the unsigned PSBT is sufficient.
     let unsigned_psbt = create_funding_psbt(&offer, &accept).unwrap();
     let funding_transaction =
-        finalize_sign(&offer, &accept, &sign_result.sign, &unsigned_psbt).unwrap();
+        finalize_sign(&offer, &accept, &sign_result.sign, &unsigned_psbt, None).unwrap();
     assert_eq!(funding_transaction.input.len(), 1);
     assert_funding_transaction_complete(&funding_transaction, &offer, &accept);
 }
@@ -917,6 +953,7 @@ fn shuffled_serial_ids_map_witnesses_to_the_right_inputs() {
             min_timeout_interval: MIN_TIMEOUT,
             max_timeout_interval: MAX_TIMEOUT,
             now_unix: NOW_UNIX,
+            payout_script_overrides: None,
         },
         &accepter.funding_secret_key,
     )
@@ -941,8 +978,14 @@ fn shuffled_serial_ids_map_witnesses_to_the_right_inputs() {
         ],
     )
     .unwrap();
-    let sign_result =
-        sign_accept(&offer, &accept, &offerer.funding_secret_key, &offer_psbt).unwrap();
+    let sign_result = sign_accept(
+        &offer,
+        &accept,
+        &offerer.funding_secret_key,
+        &offer_psbt,
+        None,
+    )
+    .unwrap();
 
     let mut accept_psbt = create_funding_psbt(&offer, &accept).unwrap();
     signing::sign_funding_psbt_with_xpriv(
@@ -954,7 +997,7 @@ fn shuffled_serial_ids_map_witnesses_to_the_right_inputs() {
     )
     .unwrap();
     let funding_transaction =
-        finalize_sign(&offer, &accept, &sign_result.sign, &accept_psbt).unwrap();
+        finalize_sign(&offer, &accept, &sign_result.sign, &accept_psbt, None).unwrap();
     assert_eq!(funding_transaction.input.len(), 3);
     assert_funding_transaction_complete(&funding_transaction, &offer, &accept);
 }
@@ -964,7 +1007,8 @@ fn mutated_psbt_transactions_are_rejected() {
     let secp = Secp256k1::new();
     let (offerer, _, offer, accept) = enum_contract(&secp, NETWORK);
 
-    let sign_with = |psbt: &Psbt| sign_accept(&offer, &accept, &offerer.funding_secret_key, psbt);
+    let sign_with =
+        |psbt: &Psbt| sign_accept(&offer, &accept, &offerer.funding_secret_key, psbt, None);
     let signed_psbt = {
         let mut psbt = create_funding_psbt(&offer, &accept).unwrap();
         signing::sign_funding_psbt_with_xpriv(
@@ -1032,7 +1076,13 @@ fn missing_finalized_witness_is_rejected() {
 
     let unsigned_psbt = create_funding_psbt(&offer, &accept).unwrap();
     assert!(matches!(
-        sign_accept(&offer, &accept, &offerer.funding_secret_key, &unsigned_psbt),
+        sign_accept(
+            &offer,
+            &accept,
+            &offerer.funding_secret_key,
+            &unsigned_psbt,
+            None
+        ),
         Err(ContractError::MissingFinalizedInput { .. })
     ));
 
@@ -1047,11 +1097,17 @@ fn missing_finalized_witness_is_rejected() {
         &offerer.derivations(),
     )
     .unwrap();
-    let sign_result =
-        sign_accept(&offer, &accept, &offerer.funding_secret_key, &offer_psbt).unwrap();
+    let sign_result = sign_accept(
+        &offer,
+        &accept,
+        &offerer.funding_secret_key,
+        &offer_psbt,
+        None,
+    )
+    .unwrap();
     let _ = accepter;
     assert!(matches!(
-        finalize_sign(&offer, &accept, &sign_result.sign, &unsigned_psbt),
+        finalize_sign(&offer, &accept, &sign_result.sign, &unsigned_psbt, None),
         Err(ContractError::MissingFinalizedInput { .. })
     ));
 }
@@ -1075,7 +1131,7 @@ fn invalid_counterparty_adaptor_signatures_are_rejected() {
     )
     .unwrap();
     assert!(matches!(
-        sign_accept(&offer, &accept, &offerer.funding_secret_key, &psbt),
+        sign_accept(&offer, &accept, &offerer.funding_secret_key, &psbt, None),
         Err(ContractError::InvalidAccept(_))
     ));
 }
@@ -1094,8 +1150,14 @@ fn incorrect_contract_id_is_rejected() {
         &offerer.derivations(),
     )
     .unwrap();
-    let mut sign_result =
-        sign_accept(&offer, &accept, &offerer.funding_secret_key, &offer_psbt).unwrap();
+    let mut sign_result = sign_accept(
+        &offer,
+        &accept,
+        &offerer.funding_secret_key,
+        &offer_psbt,
+        None,
+    )
+    .unwrap();
     sign_result.sign.contract_id[0] ^= 0xff;
 
     let mut accept_psbt = create_funding_psbt(&offer, &accept).unwrap();
@@ -1108,7 +1170,7 @@ fn incorrect_contract_id_is_rejected() {
     )
     .unwrap();
     assert!(matches!(
-        finalize_sign(&offer, &accept, &sign_result.sign, &accept_psbt),
+        finalize_sign(&offer, &accept, &sign_result.sign, &accept_psbt, None),
         Err(ContractError::InvalidSign(_))
     ));
 }
@@ -1134,6 +1196,7 @@ fn accept_result_psbt_matches_create_funding_psbt() {
             min_timeout_interval: MIN_TIMEOUT,
             max_timeout_interval: MAX_TIMEOUT,
             now_unix: NOW_UNIX,
+            payout_script_overrides: None,
         },
         &accepter.funding_secret_key,
     )
@@ -1142,7 +1205,7 @@ fn accept_result_psbt_matches_create_funding_psbt() {
     assert_eq!(accept_result.funding_psbt.serialize(), rebuilt.serialize());
     assert_eq!(
         accept_result.transactions.fund.compute_txid(),
-        create_dlc_transactions(&offer, &accept_result.accept)
+        create_dlc_transactions(&offer, &accept_result.accept, None)
             .unwrap()
             .fund
             .compute_txid()
@@ -1193,7 +1256,7 @@ fn assert_spends_funding_output(
     accept: &AcceptDlc,
     funding_transaction: &Transaction,
 ) {
-    let transactions = create_dlc_transactions(offer, accept).unwrap();
+    let transactions = create_dlc_transactions(offer, accept, None).unwrap();
     assert_eq!(settlement.input.len(), 1);
     assert_eq!(
         settlement.input[0].previous_output,
@@ -1226,6 +1289,7 @@ fn either_party_can_settle_with_a_cet() {
         &sign,
         &offerer.funding_secret_key,
         &attestations,
+        None,
     )
     .unwrap();
     assert_spends_funding_output(&cet, &offer, &accept, &funding_transaction);
@@ -1241,6 +1305,7 @@ fn either_party_can_settle_with_a_cet() {
         &sign,
         &accepter.funding_secret_key,
         &attestations,
+        None,
     )
     .unwrap();
     assert_spends_funding_output(&counterpart, &offer, &accept, &funding_transaction);
@@ -1260,6 +1325,7 @@ fn the_attested_outcome_selects_the_cet() {
         &sign,
         &accepter.funding_secret_key,
         &[(0, oracle_attestation(vec!["down".to_string()]))],
+        None,
     )
     .unwrap();
     assert_eq!(cet.output.len(), 1);
@@ -1287,6 +1353,7 @@ fn numerical_contracts_settle_with_a_cet() {
             min_timeout_interval: MIN_TIMEOUT,
             max_timeout_interval: MAX_TIMEOUT,
             now_unix: NOW_UNIX,
+            payout_script_overrides: None,
         },
         &accepter.funding_secret_key,
     )
@@ -1302,6 +1369,7 @@ fn numerical_contracts_settle_with_a_cet() {
         &sign,
         &offerer.funding_secret_key,
         &[(0, oracle_attestation(digit_outcomes(500, 10)))],
+        None,
     )
     .unwrap();
     assert_spends_funding_output(&cet, &offer, &accept, &funding_transaction);
@@ -1312,7 +1380,7 @@ fn either_party_can_settle_with_the_refund() {
     let secp = Secp256k1::new();
     let (offerer, accepter, offer, accept) = enum_contract(&secp, NETWORK);
     let (sign, funding_transaction) = fund_with_xpriv(&secp, &offerer, &accepter, &offer, &accept);
-    let transactions = create_dlc_transactions(&offer, &accept).unwrap();
+    let transactions = create_dlc_transactions(&offer, &accept, None).unwrap();
 
     for funding_secret_key in [offerer.funding_secret_key, accepter.funding_secret_key] {
         let refund = sign_refund(&offer, &accept, &sign, &funding_secret_key).unwrap();
@@ -1349,6 +1417,7 @@ fn settling_with_a_foreign_key_is_rejected() {
             &sign,
             &stranger,
             &[(0, oracle_attestation(vec!["up".to_string()]))],
+            None,
         ),
         Err(ContractError::Key(_))
     ));
@@ -1371,6 +1440,7 @@ fn an_unknown_outcome_has_no_cet() {
             &sign,
             &offerer.funding_secret_key,
             &[(0, oracle_attestation(vec!["sideways".to_string()]))],
+            None,
         ),
         Err(ContractError::NoMatchingOutcome)
     ));
@@ -1405,6 +1475,7 @@ fn a_forged_attestation_is_rejected() {
             &sign,
             &offerer.funding_secret_key,
             &[(0, forged)],
+            None,
         ),
         Err(ContractError::InvalidAttestation(_))
     ));
@@ -1427,6 +1498,7 @@ fn an_out_of_range_oracle_index_is_rejected() {
         &sign,
         &offerer.funding_secret_key,
         &[(4, oracle_attestation(vec!["up".to_string()]))],
+        None,
     )
     .unwrap_err();
     assert!(
@@ -1451,6 +1523,7 @@ fn a_duplicated_oracle_attestation_is_rejected() {
         &sign,
         &offerer.funding_secret_key,
         &[(0, attestation.clone()), (0, attestation)],
+        None,
     )
     .unwrap_err();
     assert!(
@@ -1473,6 +1546,7 @@ fn settling_with_a_mismatched_sign_message_is_rejected() {
             &sign,
             &offerer.funding_secret_key,
             &[(0, oracle_attestation(vec!["up".to_string()]))],
+            None,
         ),
         Err(ContractError::InvalidSign(_))
     ));
@@ -1580,7 +1654,7 @@ fn prepare_splice(splice_in: bool) -> PreparedSplice {
     let (offerer_a, accepter_a, offer_a, accept_a) = enum_contract(&secp, NETWORK);
     let (sign_a, funding_tx_a) =
         fund_with_xpriv(&secp, &offerer_a, &accepter_a, &offer_a, &accept_a);
-    let transactions_a = create_dlc_transactions(&offer_a, &accept_a).unwrap();
+    let transactions_a = create_dlc_transactions(&offer_a, &accept_a, None).unwrap();
     let fund_value_a = transactions_a.get_fund_output().value;
     let fund_outpoint_a = OutPoint {
         txid: funding_tx_a.compute_txid(),
@@ -1628,6 +1702,7 @@ fn prepare_splice(splice_in: bool) -> PreparedSplice {
             min_timeout_interval: MIN_TIMEOUT,
             max_timeout_interval: MAX_TIMEOUT,
             now_unix: NOW_UNIX,
+            payout_script_overrides: None,
         },
         &accepter_b.funding_secret_key,
     )
@@ -1657,12 +1732,15 @@ fn prepare_splice(splice_in: bool) -> PreparedSplice {
         &offerer_b.funding_secret_key,
         &offer_psbt,
         std::slice::from_ref(&offer_splice_key),
+        None,
     )
     .unwrap()
     .sign;
 
     let accept_psbt = create_funding_psbt(&offer_b, &accept_b).unwrap();
-    let unsigned_fund_b = create_dlc_transactions(&offer_b, &accept_b).unwrap().fund;
+    let unsigned_fund_b = create_dlc_transactions(&offer_b, &accept_b, None)
+        .unwrap()
+        .fund;
 
     PreparedSplice {
         offer_b,
@@ -1695,6 +1773,7 @@ fn complete_splice(splice_in: bool) -> (Transaction, PreparedSplice) {
         &prepared.sign,
         &prepared.accept_psbt,
         std::slice::from_ref(&accept_splice_key),
+        None,
     )
     .unwrap();
     (funding_tx_b, prepared)
@@ -1755,7 +1834,7 @@ fn assert_splice_input_signed(funding_tx_b: &Transaction, prepared: &PreparedSpl
 fn splice_in_completes_the_lifecycle() {
     let (funding_tx_b, prepared) = complete_splice(true);
     assert_splice_input_signed(&funding_tx_b, &prepared);
-    let fund_value_b = create_dlc_transactions(&prepared.offer_b, &prepared.accept_b)
+    let fund_value_b = create_dlc_transactions(&prepared.offer_b, &prepared.accept_b, None)
         .unwrap()
         .get_fund_output()
         .value;
@@ -1769,7 +1848,7 @@ fn splice_in_completes_the_lifecycle() {
 fn splice_out_completes_the_lifecycle() {
     let (funding_tx_b, prepared) = complete_splice(false);
     assert_splice_input_signed(&funding_tx_b, &prepared);
-    let fund_value_b = create_dlc_transactions(&prepared.offer_b, &prepared.accept_b)
+    let fund_value_b = create_dlc_transactions(&prepared.offer_b, &prepared.accept_b, None)
         .unwrap()
         .get_fund_output()
         .value;
@@ -1794,6 +1873,7 @@ fn finalize_sign_spliced_rejects_a_wrong_prior_key() {
             &prepared.sign,
             &prepared.accept_psbt,
             std::slice::from_ref(&wrong_key),
+            None,
         ),
         Err(ContractError::InvalidFundingInput(_))
     ));
@@ -1819,6 +1899,7 @@ fn sign_accept_spliced_rejects_the_counterparty_prior_key() {
             &prepared.offerer_b_funding_secret_key,
             &prepared.offer_psbt,
             std::slice::from_ref(&counterparty_key),
+            None,
         ),
         Err(ContractError::InvalidFundingInput(_))
     ));
@@ -1840,6 +1921,7 @@ fn finalize_sign_spliced_rejects_the_counterparty_prior_key() {
             &prepared.sign,
             &prepared.accept_psbt,
             std::slice::from_ref(&counterparty_key),
+            None,
         ),
         Err(ContractError::InvalidFundingInput(_))
     ));
@@ -1888,6 +1970,7 @@ fn finalize_sign_spliced_rejects_a_tampered_offer_half() {
             &tampered,
             &prepared.accept_psbt,
             std::slice::from_ref(&accept_splice_key),
+            None,
         ),
         Err(ContractError::InvalidSign(_))
     ));
@@ -2020,15 +2103,21 @@ fn bip49_bdk_wallets_sign_both_sides_of_the_funding_psbt() {
         .unwrap();
     assert!(!finalized, "the accepter's input is still unsigned");
     assert_bdk_signed_own_inputs(&offer_psbt, &offer_wallet);
-    let sign_result =
-        sign_accept(&offer, &accept, &offerer.funding_secret_key, &offer_psbt).unwrap();
+    let sign_result = sign_accept(
+        &offer,
+        &accept,
+        &offerer.funding_secret_key,
+        &offer_psbt,
+        None,
+    )
+    .unwrap();
 
     let mut accept_psbt = create_funding_psbt(&offer, &accept).unwrap();
     let finalized = accept_wallet.sign(&mut accept_psbt, sign_options).unwrap();
     assert!(!finalized, "the offerer's input is still unsigned");
     assert_bdk_signed_own_inputs(&accept_psbt, &accept_wallet);
     let funding_transaction =
-        finalize_sign(&offer, &accept, &sign_result.sign, &accept_psbt).unwrap();
+        finalize_sign(&offer, &accept, &sign_result.sign, &accept_psbt, None).unwrap();
 
     assert_funding_transaction_complete(&funding_transaction, &offer, &accept);
     assert_all_p2sh(&funding_transaction, &offer, &accept);
@@ -2057,8 +2146,14 @@ fn bip49_descriptors_sign_both_sides_of_the_funding_psbt() {
         }],
     )
     .unwrap();
-    let sign_result =
-        sign_accept(&offer, &accept, &offerer.funding_secret_key, &offer_psbt).unwrap();
+    let sign_result = sign_accept(
+        &offer,
+        &accept,
+        &offerer.funding_secret_key,
+        &offer_psbt,
+        None,
+    )
+    .unwrap();
 
     let accept_descriptor = format!("sh(wpkh({}/49h/1h/0h/0/*))", accepter.xpriv);
     let mut accept_psbt = create_funding_psbt(&offer, &accept).unwrap();
@@ -2074,7 +2169,7 @@ fn bip49_descriptors_sign_both_sides_of_the_funding_psbt() {
     )
     .unwrap();
     let funding_transaction =
-        finalize_sign(&offer, &accept, &sign_result.sign, &accept_psbt).unwrap();
+        finalize_sign(&offer, &accept, &sign_result.sign, &accept_psbt, None).unwrap();
 
     assert_funding_transaction_complete(&funding_transaction, &offer, &accept);
     assert_all_p2sh(&funding_transaction, &offer, &accept);
@@ -2101,7 +2196,7 @@ fn truncated_counterparty_adaptor_signatures_are_rejected() {
     )
     .unwrap();
 
-    let error = sign_accept(&offer, &accept, &offerer.funding_secret_key, &psbt)
+    let error = sign_accept(&offer, &accept, &offerer.funding_secret_key, &psbt, None)
         .err()
         .expect("a truncated adaptor signature list is an invalid accept");
     match error {
@@ -2160,7 +2255,7 @@ fn pre_rc4_single_funded_contract() -> PreRc4Contract {
 #[test]
 fn a_pre_rc4_single_funded_contract_rebuilds_differently_under_the_current_rule() {
     let contract = pre_rc4_single_funded_contract();
-    let current = create_dlc_transactions(&contract.offer, &contract.accept).unwrap();
+    let current = create_dlc_transactions(&contract.offer, &contract.accept, None).unwrap();
     assert_ne!(
         current.fund.compute_txid(),
         contract.funding_transaction.compute_txid()
@@ -2171,7 +2266,8 @@ fn a_pre_rc4_single_funded_contract_rebuilds_differently_under_the_current_rule(
 fn a_pre_rc4_single_funded_contract_rebuilds_from_its_sign_message() {
     let contract = pre_rc4_single_funded_contract();
     let transactions =
-        create_signed_dlc_transactions(&contract.offer, &contract.accept, &contract.sign).unwrap();
+        create_signed_dlc_transactions(&contract.offer, &contract.accept, &contract.sign, None)
+            .unwrap();
     assert_eq!(
         transactions.fund.compute_txid(),
         contract.funding_transaction.compute_txid()
@@ -2190,7 +2286,15 @@ fn a_pre_rc4_single_funded_contract_settles_with_the_same_transactions() {
     let refund = sign_refund(offer, accept, sign, &contract.accepter_key).unwrap();
     assert_eq!(refund, contract.refund_signed_by_accepter);
     let attestations = vec![(0, oracle_attestation(vec!["up".to_string()]))];
-    let cet = sign_cet(offer, accept, sign, &contract.offerer_key, &attestations).unwrap();
+    let cet = sign_cet(
+        offer,
+        accept,
+        sign,
+        &contract.offerer_key,
+        &attestations,
+        None,
+    )
+    .unwrap();
     assert_eq!(cet, contract.cet_up_signed_by_offerer);
 
     let refund = sign_refund(offer, accept, sign, &contract.offerer_key).unwrap();
@@ -2198,7 +2302,15 @@ fn a_pre_rc4_single_funded_contract_settles_with_the_same_transactions() {
         refund.compute_txid(),
         contract.refund_signed_by_accepter.compute_txid()
     );
-    let cet = sign_cet(offer, accept, sign, &contract.accepter_key, &attestations).unwrap();
+    let cet = sign_cet(
+        offer,
+        accept,
+        sign,
+        &contract.accepter_key,
+        &attestations,
+        None,
+    )
+    .unwrap();
     assert_eq!(
         cet.compute_txid(),
         contract.cet_up_signed_by_offerer.compute_txid()
@@ -2234,7 +2346,7 @@ fn a_sign_message_that_matches_neither_rule_is_rejected() {
     let mut sign = contract.sign.clone();
     sign.contract_id[0] ^= 1;
     assert!(matches!(
-        create_signed_dlc_transactions(&contract.offer, &contract.accept, &sign),
+        create_signed_dlc_transactions(&contract.offer, &contract.accept, &sign, None),
         Err(ContractError::InvalidSign(_))
     ));
     assert!(matches!(

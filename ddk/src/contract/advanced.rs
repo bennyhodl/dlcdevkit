@@ -17,7 +17,7 @@ use ddk_messages::{
 use super::context::{self, context_from_messages};
 use super::error::ContractError;
 use super::psbt;
-use super::types::{DlcInputSigningKey, Party, SignResult};
+use super::types::{DlcInputSigningKey, Party, PayoutScriptOverrides, SignResult};
 
 /// Converts a Bitcoin witness into a wire funding signature.
 pub fn funding_signature_from_witness(witness: Witness) -> FundingSignature {
@@ -61,9 +61,10 @@ pub fn create_cet_adaptor_signatures(
     offer: &OfferDlc,
     accept: &AcceptDlc,
     funding_secret_key: &SecretKey,
+    payout_script_overrides: Option<&PayoutScriptOverrides>,
 ) -> Result<Vec<EcdsaAdaptorSignature>, ContractError> {
     let secp = Secp256k1::new();
-    let context = context_from_messages(offer, accept)?;
+    let context = context_from_messages(offer, accept, payout_script_overrides)?;
     context::create_adaptor_signatures(
         &secp,
         &context,
@@ -81,9 +82,10 @@ pub fn verify_cet_adaptor_signatures(
     party: Party,
     refund_signature: &ddk_dlc::secp256k1_zkp::ecdsa::Signature,
     adaptor_signatures: &CetAdaptorSignatures,
+    payout_script_overrides: Option<&PayoutScriptOverrides>,
 ) -> Result<(), ContractError> {
     let secp = Secp256k1::new();
-    let context = context_from_messages(offer, accept)?;
+    let context = context_from_messages(offer, accept, payout_script_overrides)?;
     let (funding_pubkey, error): (_, fn(String) -> ContractError) = match party {
         Party::Offer => (offer.funding_pubkey, ContractError::InvalidSign),
         Party::Accept => (accept.funding_pubkey, ContractError::InvalidAccept),
@@ -118,7 +120,7 @@ pub fn compute_contract_id(
     offer: &OfferDlc,
     accept: &AcceptDlc,
 ) -> Result<[u8; 32], ContractError> {
-    let context = context_from_messages(offer, accept)?;
+    let context = context_from_messages(offer, accept, None)?;
     Ok(context::contract_id_from_transactions(
         &context.transactions,
         &offer.temporary_contract_id,
@@ -135,8 +137,15 @@ pub fn sign_accept_with_funding_signatures(
     accept: &AcceptDlc,
     funding_secret_key: &SecretKey,
     funding_signatures: FundingSignatures,
+    payout_script_overrides: Option<&PayoutScriptOverrides>,
 ) -> Result<SignResult, ContractError> {
-    super::sign::sign_accept_internal(offer, accept, funding_secret_key, funding_signatures)
+    super::sign::sign_accept_internal(
+        offer,
+        accept,
+        funding_secret_key,
+        funding_signatures,
+        payout_script_overrides,
+    )
 }
 
 /// Completes the funding transaction from externally produced accept-side witnesses.
@@ -150,8 +159,16 @@ pub fn finalize_sign_with_funding_signatures(
     accept: &AcceptDlc,
     sign: &SignDlc,
     funding_signatures: FundingSignatures,
+    payout_script_overrides: Option<&PayoutScriptOverrides>,
 ) -> Result<Transaction, ContractError> {
-    super::finalize::finalize_sign_internal(offer, accept, sign, funding_signatures, &[])
+    super::finalize::finalize_sign_internal(
+        offer,
+        accept,
+        sign,
+        funding_signatures,
+        &[],
+        payout_script_overrides,
+    )
 }
 
 /// Splice-aware variant of [`finalize_sign_with_funding_signatures`].
@@ -166,6 +183,14 @@ pub fn finalize_sign_spliced_with_funding_signatures(
     sign: &SignDlc,
     funding_signatures: FundingSignatures,
     dlc_input_keys: &[DlcInputSigningKey],
+    payout_script_overrides: Option<&PayoutScriptOverrides>,
 ) -> Result<Transaction, ContractError> {
-    super::finalize::finalize_sign_internal(offer, accept, sign, funding_signatures, dlc_input_keys)
+    super::finalize::finalize_sign_internal(
+        offer,
+        accept,
+        sign,
+        funding_signatures,
+        dlc_input_keys,
+        payout_script_overrides,
+    )
 }

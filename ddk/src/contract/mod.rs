@@ -164,7 +164,8 @@ pub use sign::{sign_accept, sign_accept_spliced};
 pub use splice::{create_dlc_splice_input, DLC_INPUT_MAX_WITNESS_LEN};
 pub use types::{
     chain_hash_from_network, funding_input, AcceptOfferParams, AcceptResult, CreateOfferParams,
-    DescriptorInput, DlcInputSigningKey, InputDerivation, Party, PartyParams, SignResult,
+    DescriptorInput, DlcInputSigningKey, InputDerivation, Party, PartyParams,
+    PayoutScriptOverrides, SignResult,
 };
 
 /// The current DLC protocol version used by DDK.

@@ -2,6 +2,8 @@
 
 use bitcoin::key::rand::{thread_rng, Rng};
 use bitcoin::psbt::Psbt;
+use std::collections::HashMap;
+
 use bitcoin::{Amount, Network, ScriptBuf, Transaction};
 use ddk_dlc::secp256k1_zkp::{PublicKey, SecretKey};
 use ddk_dlc::DlcTransactions;
@@ -68,6 +70,22 @@ pub struct CreateOfferParams {
     pub contract_flags: u8,
 }
 
+/// Per-outcome payout scripts, keyed by enum outcome string.
+///
+/// A CET pays the offering and accepting parties and nobody else. For an
+/// outcome named here, the output that would have paid the accepting party's
+/// `payout_spk` pays the given script instead. Amounts are untouched, so an
+/// outcome that pays the whole collateral to a third party is written with
+/// `offer = 0, accept = total` in the contract descriptor.
+///
+/// Both parties must pass the same overrides to every operation on a
+/// contract, since adaptor signatures commit to the CET bytes. How the
+/// overrides travel between the parties, for example as an application TLV
+/// record on the offer, is up to the application; DDK never reads them from
+/// a message. Every outcome named must belong to an enumerated descriptor of
+/// the offer, and every script must be non-empty.
+pub type PayoutScriptOverrides = HashMap<String, ScriptBuf>;
+
 /// Parameters for [`accept_offer`](super::accept_offer).
 #[derive(Clone, Debug)]
 pub struct AcceptOfferParams {
@@ -87,6 +105,8 @@ pub struct AcceptOfferParams {
     /// An offer whose closest oracle event matured at or before this time is
     /// rejected, because the offering party may already know the outcome.
     pub now_unix: u64,
+    /// Per-outcome payout scripts; see [`PayoutScriptOverrides`].
+    pub payout_script_overrides: Option<PayoutScriptOverrides>,
 }
 
 /// The result of [`accept_offer`](super::accept_offer).

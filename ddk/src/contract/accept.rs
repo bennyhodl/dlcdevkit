@@ -11,7 +11,7 @@ use super::context::{
 use super::create::validate_offer;
 use super::error::ContractError;
 use super::psbt::build_funding_psbt;
-use super::types::{random_serial_id, AcceptOfferParams, AcceptResult};
+use super::types::{random_serial_id, AcceptOfferParams, AcceptResult, PayoutScriptOverrides};
 
 /// Validates an offer and creates the accepting party's wire message.
 ///
@@ -33,6 +33,7 @@ pub fn accept_offer(
         min_timeout_interval,
         max_timeout_interval,
         now_unix,
+        payout_script_overrides,
     } = params;
 
     validate_offer(offer, min_timeout_interval, max_timeout_interval, now_unix)?;
@@ -62,7 +63,7 @@ pub fn accept_offer(
         accept_collateral,
         &party.funding_inputs,
     )?;
-    let context = build_context(offer, &accept_params)?;
+    let context = build_context(offer, &accept_params, payout_script_overrides.as_ref())?;
     let adaptor_signatures = create_adaptor_signatures(
         &secp,
         &context,
@@ -104,8 +105,9 @@ pub fn accept_offer(
 pub fn create_dlc_transactions(
     offer: &OfferDlc,
     accept: &AcceptDlc,
+    payout_script_overrides: Option<&PayoutScriptOverrides>,
 ) -> Result<DlcTransactions, ContractError> {
-    Ok(context_from_messages(offer, accept)?.transactions)
+    Ok(context_from_messages(offer, accept, payout_script_overrides)?.transactions)
 }
 
 /// Rebuilds a signed contract's transactions under the [`ddk_dlc::FeeRule`]
@@ -117,6 +119,7 @@ pub fn create_signed_dlc_transactions(
     offer: &OfferDlc,
     accept: &AcceptDlc,
     sign: &SignDlc,
+    payout_script_overrides: Option<&PayoutScriptOverrides>,
 ) -> Result<DlcTransactions, ContractError> {
-    Ok(signed_context(offer, accept, sign)?.transactions)
+    Ok(signed_context(offer, accept, sign, payout_script_overrides)?.transactions)
 }

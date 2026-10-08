@@ -51,7 +51,8 @@ pub fn create_dlc_splice_input(
             "DLC input max witness length must be greater than 108".to_string(),
         ));
     }
-    let transactions = create_signed_dlc_transactions(prev_offer, prev_accept, prev_sign)?;
+    // Only the funding output is used, so payout overrides do not matter here.
+    let transactions = create_signed_dlc_transactions(prev_offer, prev_accept, prev_sign, None)?;
     let fund_vout = transactions.get_fund_output_index() as u32;
     let contract_id = prev_sign.contract_id;
     let (local_fund_pubkey, remote_fund_pubkey) = match local_party {

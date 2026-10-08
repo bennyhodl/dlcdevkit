@@ -25,7 +25,7 @@ use super::types::Party;
 /// `SIGHASH_ALL` sighash type. Input order follows ascending funding input
 /// serial ids, matching the funding transaction.
 pub fn create_funding_psbt(offer: &OfferDlc, accept: &AcceptDlc) -> Result<Psbt, ContractError> {
-    let transactions = context_from_messages(offer, accept)?.transactions;
+    let transactions = context_from_messages(offer, accept, None)?.transactions;
     build_funding_psbt(offer, accept, transactions.fund)
 }
 
@@ -138,7 +138,7 @@ pub(crate) fn ensure_matching_psbt(
     accept: &AcceptDlc,
     psbt: &Psbt,
 ) -> Result<(), ContractError> {
-    let transactions = context_from_messages(offer, accept)?.transactions;
+    let transactions = context_from_messages(offer, accept, None)?.transactions;
     ensure_psbt_matches_funding_transaction(psbt, &transactions.fund)
 }
 

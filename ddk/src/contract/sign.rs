@@ -13,7 +13,7 @@ use super::context::{
 };
 use super::error::ContractError;
 use super::psbt::{ensure_psbt_matches_funding_transaction, funding_signature_from_witness};
-use super::types::{DlcInputSigningKey, SignResult};
+use super::types::{DlcInputSigningKey, PayoutScriptOverrides, SignResult};
 
 /// Verifies the accept message and creates the offering party's sign message.
 ///
@@ -29,8 +29,16 @@ pub fn sign_accept(
     accept: &AcceptDlc,
     funding_secret_key: &SecretKey,
     signed_funding_psbt: &Psbt,
+    payout_script_overrides: Option<&PayoutScriptOverrides>,
 ) -> Result<SignResult, ContractError> {
-    sign_accept_spliced(offer, accept, funding_secret_key, signed_funding_psbt, &[])
+    sign_accept_spliced(
+        offer,
+        accept,
+        funding_secret_key,
+        signed_funding_psbt,
+        &[],
+        payout_script_overrides,
+    )
 }
 
 /// Verifies the accept message and creates the offering party's sign message,
@@ -48,8 +56,9 @@ pub fn sign_accept_spliced(
     funding_secret_key: &SecretKey,
     signed_funding_psbt: &Psbt,
     dlc_input_keys: &[DlcInputSigningKey],
+    payout_script_overrides: Option<&PayoutScriptOverrides>,
 ) -> Result<SignResult, ContractError> {
-    let context = context_from_messages(offer, accept)?;
+    let context = context_from_messages(offer, accept, payout_script_overrides)?;
     ensure_psbt_matches_funding_transaction(signed_funding_psbt, &context.transactions.fund)?;
     let secp = Secp256k1::new();
     let funding_signatures = build_offer_funding_signatures(
@@ -132,8 +141,9 @@ pub(crate) fn sign_accept_internal(
     accept: &AcceptDlc,
     funding_secret_key: &SecretKey,
     funding_signatures: FundingSignatures,
+    payout_script_overrides: Option<&PayoutScriptOverrides>,
 ) -> Result<SignResult, ContractError> {
-    let context = context_from_messages(offer, accept)?;
+    let context = context_from_messages(offer, accept, payout_script_overrides)?;
     sign_with_context(
         offer,
         accept,

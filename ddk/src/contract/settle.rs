@@ -20,7 +20,7 @@ use ddk_messages::{AcceptDlc, OfferDlc, SignDlc};
 
 use super::context::signed_context;
 use super::error::ContractError;
-use super::types::Party;
+use super::types::{Party, PayoutScriptOverrides};
 
 /// Signs the CET matching a set of oracle attestations.
 ///
@@ -53,9 +53,10 @@ pub fn sign_cet(
     sign: &SignDlc,
     funding_secret_key: &SecretKey,
     attestations: &[(usize, OracleAttestation)],
+    payout_script_overrides: Option<&PayoutScriptOverrides>,
 ) -> Result<Transaction, ContractError> {
     let secp = Secp256k1::new();
-    let context = signed_context(offer, accept, sign)?;
+    let context = signed_context(offer, accept, sign, payout_script_overrides)?;
     let party = settling_party(&secp, offer, accept, funding_secret_key)?;
     let (counterparty_pubkey, adaptor_signatures) =
         counterparty_adaptor_signatures(offer, accept, sign, party);
@@ -133,7 +134,8 @@ pub fn sign_refund(
     funding_secret_key: &SecretKey,
 ) -> Result<Transaction, ContractError> {
     let secp = Secp256k1::new();
-    let context = signed_context(offer, accept, sign)?;
+    // The refund transaction has no CET, so payout overrides do not apply.
+    let context = signed_context(offer, accept, sign, None)?;
     let party = settling_party(&secp, offer, accept, funding_secret_key)?;
     let (counterparty_pubkey, counterparty_signature): (PublicKey, Signature) = match party {
         Party::Offer => (accept.funding_pubkey, accept.refund_signature),

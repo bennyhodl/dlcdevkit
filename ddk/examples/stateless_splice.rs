@@ -172,6 +172,7 @@ async fn main() {
             min_timeout_interval: 100,
             max_timeout_interval: 500,
             now_unix: util::NOW_UNIX,
+            payout_script_overrides: None,
         },
         &accepter_keys.funding_secret_key(temp_id_a).unwrap(),
     )
@@ -193,6 +194,7 @@ async fn main() {
         &accept_a,
         &offerer_keys.funding_secret_key(temp_id_a).unwrap(),
         &offer_a_psbt,
+        None,
     )
     .expect("sign A");
 
@@ -207,7 +209,7 @@ async fn main() {
     .await
     .expect("accept A wallet signing");
     let funding_tx_a =
-        finalize_sign(&offer_a, &accept_a, &sign_a.sign, &accept_a_psbt).expect("finalize A");
+        finalize_sign(&offer_a, &accept_a, &sign_a.sign, &accept_a_psbt, None).expect("finalize A");
 
     // ----- Contract B: splice A's funding output into a new contract. -----
     let splice_serial = 900;
@@ -259,6 +261,7 @@ async fn main() {
             min_timeout_interval: 100,
             max_timeout_interval: 500,
             now_unix: util::NOW_UNIX,
+            payout_script_overrides: None,
         },
         &accepter_keys.funding_secret_key(temp_id_b).unwrap(),
     )
@@ -288,6 +291,7 @@ async fn main() {
         &offerer_keys.funding_secret_key(temp_id_b).unwrap(),
         &offer_b_psbt,
         std::slice::from_ref(&offer_prior_key),
+        None,
     )
     .expect("sign B");
 
@@ -303,6 +307,7 @@ async fn main() {
         &sign_b.sign,
         &accept_b_psbt,
         std::slice::from_ref(&accept_prior_key),
+        None,
     )
     .expect("finalize B");
 

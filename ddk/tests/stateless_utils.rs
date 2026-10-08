@@ -1235,6 +1235,7 @@ pub async fn fund_contract(ctx: &ChainContext, setup: ContractSetup) -> FundedCo
             min_timeout_interval: MIN_TIMEOUT_INTERVAL,
             max_timeout_interval: MAX_TIMEOUT_INTERVAL,
             now_unix: u64::from(maturity) - 1,
+            payout_script_overrides: None,
         },
         &accepter.funding_secret_key,
     )
@@ -1253,6 +1254,7 @@ pub async fn fund_contract(ctx: &ChainContext, setup: ContractSetup) -> FundedCo
         &offerer.funding_secret_key,
         &offer_psbt,
         &offer_dlc_keys,
+        None,
     )
     .expect("could not create the sign message")
     .sign;
@@ -1264,10 +1266,10 @@ pub async fn fund_contract(ctx: &ChainContext, setup: ContractSetup) -> FundedCo
         .await
         .expect("the accepting party could not sign the funding PSBT");
     let funding_transaction =
-        finalize_sign_spliced(&offer, &accept, &sign, &accept_psbt, &accept_dlc_keys)
+        finalize_sign_spliced(&offer, &accept, &sign, &accept_psbt, &accept_dlc_keys, None)
             .expect("could not finalize the funding transaction");
 
-    let transactions = create_dlc_transactions(&offer, &accept).unwrap();
+    let transactions = create_dlc_transactions(&offer, &accept, None).unwrap();
     assert_eq!(
         funding_transaction.compute_txid(),
         transactions.fund.compute_txid(),
@@ -1312,6 +1314,7 @@ pub async fn close_with_cet(
         &contract.sign,
         &contract.party(closer).funding_secret_key,
         attestations,
+        None,
     )
     .expect("could not sign the CET");
     assert!(

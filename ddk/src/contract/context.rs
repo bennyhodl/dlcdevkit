@@ -9,12 +9,13 @@ use bitcoin::{Amount, ScriptBuf, Transaction, Witness};
 use ddk_dlc::secp256k1_zkp::{All, EcdsaAdaptorSignature, PublicKey, Secp256k1, SecretKey};
 use ddk_dlc::{DlcTransactions, FeeRule, PartyParams as DlcPartyParams, TxInputInfo};
 use ddk_manager::contract::contract_info::ContractInfo as ExecutionContractInfo;
+use ddk_manager::contract::ContractDescriptor;
 use ddk_messages::{
     AcceptDlc, CetAdaptorSignatures, FundingInput, FundingSignatures, OfferDlc, SignDlc,
 };
 
 use super::error::ContractError;
-use super::types::Party;
+use super::types::{Party, PayoutScriptOverrides};
 use super::PROTOCOL_VERSION;
 
 /// Contract data rebuilt from the offer and accept messages.
@@ -28,8 +29,9 @@ pub(crate) struct ContractContext {
 pub(crate) fn context_from_messages(
     offer: &OfferDlc,
     accept: &AcceptDlc,
+    overrides: Option<&PayoutScriptOverrides>,
 ) -> Result<ContractContext, ContractError> {
-    context_from_messages_with_fee_rule(offer, accept, FeeRule::default())
+    context_from_messages_with_fee_rule(offer, accept, overrides, FeeRule::default())
 }
 
 /// Rebuilds a signed contract under the [`FeeRule`] whose funding transaction
@@ -49,9 +51,10 @@ pub(crate) fn signed_context(
     offer: &OfferDlc,
     accept: &AcceptDlc,
     sign: &SignDlc,
+    overrides: Option<&PayoutScriptOverrides>,
 ) -> Result<ContractContext, ContractError> {
     let rebuild = |rule| {
-        let context = context_from_messages_with_fee_rule(offer, accept, rule)?;
+        let context = context_from_messages_with_fee_rule(offer, accept, overrides, rule)?;
         ensure_sign_message(offer, sign, &context)?;
         Ok(context)
     };
@@ -64,6 +67,7 @@ pub(crate) fn signed_context(
 fn context_from_messages_with_fee_rule(
     offer: &OfferDlc,
     accept: &AcceptDlc,
+    overrides: Option<&PayoutScriptOverrides>,
     fee_rule: FeeRule,
 ) -> Result<ContractContext, ContractError> {
     ensure_protocol_version(offer.protocol_version, ContractError::InvalidOffer)?;
@@ -96,7 +100,7 @@ fn context_from_messages_with_fee_rule(
         accept.accept_collateral,
         &accept.funding_inputs,
     )?;
-    build_context_with_fee_rule(offer, &accept_params, fee_rule)
+    build_context_with_fee_rule(offer, &accept_params, overrides, fee_rule)
 }
 
 /// Rebuilds the contract transactions from an offer and the accepting party's
@@ -105,13 +109,15 @@ fn context_from_messages_with_fee_rule(
 pub(crate) fn build_context(
     offer: &OfferDlc,
     accept_params: &DlcPartyParams,
+    overrides: Option<&PayoutScriptOverrides>,
 ) -> Result<ContractContext, ContractError> {
-    build_context_with_fee_rule(offer, accept_params, FeeRule::default())
+    build_context_with_fee_rule(offer, accept_params, overrides, FeeRule::default())
 }
 
 fn build_context_with_fee_rule(
     offer: &OfferDlc,
     accept_params: &DlcPartyParams,
+    overrides: Option<&PayoutScriptOverrides>,
     fee_rule: FeeRule,
 ) -> Result<ContractContext, ContractError> {
     let total_collateral = offer.get_total_collateral();
@@ -194,12 +200,71 @@ fn build_context_with_fee_rule(
         ));
         cet_ranges.push(start..transactions.cets.len());
     }
+    if let Some(overrides) = overrides {
+        apply_payout_script_overrides(
+            overrides,
+            &execution_infos,
+            &cet_ranges,
+            &accept_params.payout_script_pubkey,
+            &mut transactions.cets,
+        )?;
+    }
 
     Ok(ContractContext {
         execution_infos,
         cet_ranges,
         transactions,
     })
+}
+
+/// Rewrites the accepting party's output on each CET whose enum outcome
+/// `overrides` names. Runs after every CET is built and before anything is
+/// signed or verified, since adaptor signatures commit to the CET bytes.
+fn apply_payout_script_overrides(
+    overrides: &PayoutScriptOverrides,
+    execution_infos: &[ExecutionContractInfo],
+    cet_ranges: &[std::ops::Range<usize>],
+    accept_payout_spk: &ScriptBuf,
+    cets: &mut [Transaction],
+) -> Result<(), ContractError> {
+    for (outcome, script) in overrides {
+        if script.is_empty() {
+            return Err(ContractError::InvalidOffer(format!(
+                "payout script override for outcome \"{outcome}\" is empty"
+            )));
+        }
+        let known = execution_infos.iter().any(|info| {
+            matches!(&info.contract_descriptor, ContractDescriptor::Enum(d)
+                if d.outcome_payouts.iter().any(|p| p.outcome == *outcome))
+        });
+        if !known {
+            return Err(ContractError::InvalidOffer(format!(
+                "payout script override names outcome \"{outcome}\" the contract does not have"
+            )));
+        }
+    }
+    for (info, range) in execution_infos.iter().zip(cet_ranges) {
+        let ContractDescriptor::Enum(descriptor) = &info.contract_descriptor else {
+            continue;
+        };
+        for (cet, outcome_payout) in cets[range.clone()]
+            .iter_mut()
+            .zip(&descriptor.outcome_payouts)
+        {
+            let Some(script) = overrides.get(&outcome_payout.outcome) else {
+                continue;
+            };
+            // ponytail: the accepting party's output is found by script, which is
+            // unambiguous because both parties' payout scripts differ. A
+            // dust-discarded accept output has nothing to rewrite.
+            for output in cet.output.iter_mut() {
+                if output.script_pubkey == *accept_payout_spk {
+                    output.script_pubkey = script.clone();
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn dlc_party_params(
@@ -637,8 +702,9 @@ mod tests {
             offer.offer_collateral + fund_fee + cet_fee;
         input.prev_tx = bitcoin::consensus::serialize(&previous);
         let legacy =
-            context_from_messages_with_fee_rule(&offer, &accept, FeeRule::OwnPayoutOnly).unwrap();
-        assert!(context_from_messages(&offer, &accept).is_err());
+            context_from_messages_with_fee_rule(&offer, &accept, None, FeeRule::OwnPayoutOnly)
+                .unwrap();
+        assert!(context_from_messages(&offer, &accept, None).is_err());
 
         let secp = Secp256k1::new();
         sign.contract_id =
@@ -652,10 +718,10 @@ mod tests {
         );
         assert!(!refund.input[0].witness.is_empty());
         let rebuilt =
-            crate::contract::create_signed_dlc_transactions(&offer, &accept, &sign).unwrap();
+            crate::contract::create_signed_dlc_transactions(&offer, &accept, &sign, None).unwrap();
         assert_eq!(rebuilt.fund, legacy.transactions.fund);
 
         sign.contract_id[0] ^= 1;
-        assert!(signed_context(&offer, &accept, &sign).is_err());
+        assert!(signed_context(&offer, &accept, &sign, None).is_err());
     }
 }

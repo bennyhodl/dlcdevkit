@@ -17,6 +17,7 @@ use ddk_messages::oracle_msgs::{
 };
 use ddk_messages::{AcceptDlc, CetAdaptorSignatures, DlcInput, FundingInput, OfferDlc};
 
+use super::advanced::{create_cet_adaptor_signatures, verify_cet_adaptor_signatures};
 use super::context::{ensure_no_dlc_inputs, funding_input_index, validate_offer_funding_inputs};
 use super::psbt::finalize_segwit_input;
 use super::types::{funding_input, network_from_chain_hash, random_serial_id};
@@ -291,4 +292,105 @@ fn finalize_rejects_unsupported_script_types() {
         finalize_segwit_input(&mut psbt, 0),
         Err(ContractError::UnsupportedScriptType { input_index: 0 })
     ));
+}
+
+fn overrides_for(outcome: &str, script: ScriptBuf) -> PayoutScriptOverrides {
+    PayoutScriptOverrides::from([(outcome.to_string(), script)])
+}
+
+/// Messages whose accepting party pays somewhere other than the offering
+/// party, as any real contract does, since the override finds the accepting
+/// party's output by script.
+fn messages_with_distinct_payout_scripts() -> (OfferDlc, AcceptDlc) {
+    let (offer, mut accept) = messages_with_serial_ids(&[1, 2, 3, 4, 5, 6], &[7, 8, 9, 10, 11, 12]);
+    accept.payout_spk = ScriptBuf::new_p2wpkh(&bitcoin::WPubkeyHash::from_byte_array([8; 20]));
+    (offer, accept)
+}
+
+#[test]
+fn payout_script_override_pays_the_named_outcome_to_the_override_script() {
+    let (offer, accept) = messages_with_distinct_payout_scripts();
+    let liquidator = ScriptBuf::new_p2wpkh(&bitcoin::WPubkeyHash::from_byte_array([9; 20]));
+    let overrides = overrides_for("down", liquidator.clone());
+
+    let transactions = create_dlc_transactions(&offer, &accept, Some(&overrides)).unwrap();
+
+    // "down" pays the whole collateral to the accepting party in the
+    // descriptor, so the CET has one output and it now pays the liquidator.
+    let down = &transactions.cets[1];
+    assert_eq!(down.output.len(), 1);
+    assert_eq!(down.output[0].script_pubkey, liquidator);
+    assert_eq!(down.output[0].value, Amount::from_sat(100_000));
+    // "up" is not named and still pays the offering party.
+    let up = &transactions.cets[0];
+    assert_eq!(up.output.len(), 1);
+    assert_eq!(up.output[0].script_pubkey, offer.payout_spk);
+
+    let plain = create_dlc_transactions(&offer, &accept, None).unwrap();
+    assert_eq!(plain.cets[1].output[0].script_pubkey, accept.payout_spk);
+    assert_eq!(plain.fund, transactions.fund);
+    assert_eq!(plain.refund, transactions.refund);
+}
+
+#[test]
+fn payout_script_override_for_an_unknown_outcome_is_rejected() {
+    let (offer, accept) = messages_with_distinct_payout_scripts();
+    let overrides = overrides_for(
+        "sideways",
+        ScriptBuf::new_p2wpkh(&bitcoin::WPubkeyHash::from_byte_array([9; 20])),
+    );
+
+    match create_dlc_transactions(&offer, &accept, Some(&overrides)) {
+        Err(ContractError::InvalidOffer(m)) => assert!(m.contains("sideways"), "{m}"),
+        Err(e) => panic!("wrong error: {e}"),
+        Ok(_) => panic!("override for an unknown outcome should be rejected"),
+    }
+}
+
+#[test]
+fn payout_script_override_with_an_empty_script_is_rejected() {
+    let (offer, accept) = messages_with_distinct_payout_scripts();
+    let overrides = overrides_for("down", ScriptBuf::new());
+
+    match create_dlc_transactions(&offer, &accept, Some(&overrides)) {
+        Err(ContractError::InvalidOffer(m)) => assert!(m.contains("empty"), "{m}"),
+        Err(e) => panic!("wrong error: {e}"),
+        Ok(_) => panic!("empty override script should be rejected"),
+    }
+}
+
+#[test]
+fn adaptor_signatures_commit_to_the_payout_script_override() {
+    let (offer, mut accept) = messages_with_distinct_payout_scripts();
+    let overrides = overrides_for(
+        "down",
+        ScriptBuf::new_p2wpkh(&bitcoin::WPubkeyHash::from_byte_array([9; 20])),
+    );
+    // The fixture's accept funding pubkey is the public key of this secret.
+    let accept_key = SecretKey::from_slice(&[1; 32]).unwrap();
+    let secp = Secp256k1::new();
+
+    let context = context::context_from_messages(&offer, &accept, Some(&overrides))
+        .unwrap_or_else(|e| panic!("context should build: {e}"));
+    accept.refund_signature =
+        context::create_refund_signature(&secp, &context, &accept_key).unwrap();
+    let signatures =
+        create_cet_adaptor_signatures(&offer, &accept, &accept_key, Some(&overrides)).unwrap();
+    accept.cet_adaptor_signatures = CetAdaptorSignatures::from(signatures.as_slice());
+
+    let verify = |overrides: Option<&PayoutScriptOverrides>| {
+        verify_cet_adaptor_signatures(
+            &offer,
+            &accept,
+            Party::Accept,
+            &accept.refund_signature,
+            &accept.cet_adaptor_signatures,
+            overrides,
+        )
+    };
+    verify(Some(&overrides)).unwrap_or_else(|e| panic!("signatures should verify: {e}"));
+    assert!(
+        verify(None).is_err(),
+        "signatures over the overridden CETs must not verify against the plain ones"
+    );
 }

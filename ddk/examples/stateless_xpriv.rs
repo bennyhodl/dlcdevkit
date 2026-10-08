@@ -44,6 +44,7 @@ fn main() {
             min_timeout_interval: 100,
             max_timeout_interval: 500,
             now_unix: util::NOW_UNIX,
+            payout_script_overrides: None,
         },
         &accepter.funding_secret_key,
     )
@@ -60,8 +61,14 @@ fn main() {
         &offerer.derivations(),
     )
     .expect("offer xpriv signing");
-    let sign_result =
-        sign_accept(&offer, &accept, &offerer.funding_secret_key, &offer_psbt).expect("sign");
+    let sign_result = sign_accept(
+        &offer,
+        &accept,
+        &offerer.funding_secret_key,
+        &offer_psbt,
+        None,
+    )
+    .expect("sign");
 
     // Accept party: sign its funding input and complete the funding transaction.
     let mut accept_psbt = create_funding_psbt(&offer, &accept).expect("funding psbt");
@@ -74,7 +81,7 @@ fn main() {
     )
     .expect("accept xpriv signing");
     let funding_transaction =
-        finalize_sign(&offer, &accept, &sign_result.sign, &accept_psbt).expect("finalize");
+        finalize_sign(&offer, &accept, &sign_result.sign, &accept_psbt, None).expect("finalize");
 
     // Broadcasting stays with the caller, e.g. `chain.send_transaction(&funding_transaction)`.
     println!(

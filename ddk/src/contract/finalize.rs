@@ -12,7 +12,7 @@ use super::context::{
 };
 use super::error::ContractError;
 use super::psbt::{ensure_psbt_matches_funding_transaction, extract_funding_signatures};
-use super::types::{DlcInputSigningKey, Party};
+use super::types::{DlcInputSigningKey, Party, PayoutScriptOverrides};
 
 /// Verifies the sign message and completes the funding transaction.
 ///
@@ -27,8 +27,16 @@ pub fn finalize_sign(
     accept: &AcceptDlc,
     sign: &SignDlc,
     signed_funding_psbt: &Psbt,
+    payout_script_overrides: Option<&PayoutScriptOverrides>,
 ) -> Result<Transaction, ContractError> {
-    finalize_sign_spliced(offer, accept, sign, signed_funding_psbt, &[])
+    finalize_sign_spliced(
+        offer,
+        accept,
+        sign,
+        signed_funding_psbt,
+        &[],
+        payout_script_overrides,
+    )
 }
 
 /// Verifies the sign message and completes the funding transaction, including
@@ -46,8 +54,9 @@ pub fn finalize_sign_spliced(
     sign: &SignDlc,
     signed_funding_psbt: &Psbt,
     dlc_input_keys: &[DlcInputSigningKey],
+    payout_script_overrides: Option<&PayoutScriptOverrides>,
 ) -> Result<Transaction, ContractError> {
-    let context = context_from_messages(offer, accept)?;
+    let context = context_from_messages(offer, accept, payout_script_overrides)?;
     ensure_psbt_matches_funding_transaction(signed_funding_psbt, &context.transactions.fund)?;
     let funding_signatures =
         extract_funding_signatures(offer, accept, Party::Accept, signed_funding_psbt)?;
@@ -68,8 +77,9 @@ pub(crate) fn finalize_sign_internal(
     sign: &SignDlc,
     funding_signatures: FundingSignatures,
     dlc_input_keys: &[DlcInputSigningKey],
+    payout_script_overrides: Option<&PayoutScriptOverrides>,
 ) -> Result<Transaction, ContractError> {
-    let context = context_from_messages(offer, accept)?;
+    let context = context_from_messages(offer, accept, payout_script_overrides)?;
     finalize_with_context(
         offer,
         accept,
