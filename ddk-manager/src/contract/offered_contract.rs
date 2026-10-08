@@ -7,6 +7,7 @@ use crate::dlc_input::get_dlc_inputs_from_funding_inputs;
 use crate::error::Error;
 use crate::utils::get_new_serial_id;
 
+use super::cet_records::validate_cet_records;
 use super::contract_info::ContractInfo;
 use super::contract_input::ContractInput;
 use super::ContractDescriptor;
@@ -91,6 +92,7 @@ impl OfferedContract {
                 ));
             }
         }
+        validate_cet_records(&self.contract_info, self.total_collateral, &self.tlvs)?;
 
         Ok(())
     }
@@ -283,6 +285,24 @@ mod tests {
     #[test]
     fn legacy_chain_hash_is_regtest_genesis() {
         assert_eq!(LEGACY_CHAINHASH, chain_hash_from_network(Network::Regtest));
+    }
+
+    /// A record the contract cannot carry is rejected with the offer, before
+    /// an accept exists to build the CETs with.
+    #[test]
+    fn an_enum_outcome_override_on_a_numerical_contract_is_rejected() {
+        use ddk_messages::{OverrideOutcome, PayoutScriptOverride, PayoutScriptOverrides};
+        let mut offered = offered_contract(None);
+        assert!(offered.validate().is_ok());
+        offered.tlvs.set(&PayoutScriptOverrides {
+            overrides: vec![PayoutScriptOverride {
+                outcome: OverrideOutcome::Enum {
+                    outcome: "liquidated".to_string(),
+                },
+                script_pubkey: bitcoin::ScriptBuf::from_bytes(vec![0x00, 0x14, 0xaa, 0xbb]),
+            }],
+        });
+        assert!(offered.validate().is_err());
     }
 
     #[test]

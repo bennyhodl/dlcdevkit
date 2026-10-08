@@ -1,6 +1,7 @@
 //! Offer creation and validation.
 
 use ddk_dlc::secp256k1_zkp::Secp256k1;
+use ddk_manager::contract::cet_records::validate_cet_records;
 use ddk_messages::OfferDlc;
 
 use super::context::{ensure_protocol_version, validate_offer_funding_inputs};
@@ -125,5 +126,9 @@ pub fn validate_offer(
             now_unix,
         )
         .map_err(|e| ContractError::InvalidOffer(e.to_string()))?;
+    // A CET record the contract cannot carry is as much a reason to reject the
+    // offer as a malformed descriptor, and is checked before any accept exists.
+    let execution_infos = ddk_manager::contract::execution_contract_infos(&offer.contract_info)?;
+    validate_cet_records(&execution_infos, offer.get_total_collateral(), &offer.tlvs)?;
     Ok(())
 }

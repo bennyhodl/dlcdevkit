@@ -18,6 +18,7 @@ use std::fmt::Write;
 use self::utils::unordered_equal;
 
 pub mod accepted_contract;
+pub mod cet_records;
 pub mod contract_info;
 pub mod contract_input;
 pub mod enum_descriptor;

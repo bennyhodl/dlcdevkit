@@ -135,6 +135,7 @@ fn build_context_with_fee_rule(
         &offer_params,
         accept_params,
         &execution_infos,
+        &offer.tlvs,
         &offer.into(),
         fee_rule,
     )?;

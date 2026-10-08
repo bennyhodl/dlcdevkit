@@ -18,6 +18,16 @@
 //! How the record changes the CETs, and what it is checked against, is the
 //! `ddk-manager` CET record built on it; this module is only the wire form.
 //!
+//! ## Fees and dust
+//!
+//! An override script may be longer than the accepter's payout script, a taproot
+//! address in place of P2WPKH for instance. The funding transaction reserves the CET
+//! fee for the accepter's output at the longest of the accepter's payout script and
+//! every override script, paid by whoever pays for that output, so node-dlc has to
+//! price it the same way or the two build different funding transactions. An
+//! override must not cover a CET that pays the accepter under the 1000-sat dust
+//! limit: that CET has no accepter output to redirect.
+//!
 //! ## Accepting an offer that carries one
 //!
 //! The record redirects what the accepter is paid, and it comes from the offerer. A

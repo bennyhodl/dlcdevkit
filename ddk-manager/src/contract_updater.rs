@@ -196,6 +196,7 @@ where
         &offered_contract.offer_params,
         &accept_params,
         &offered_contract.contract_info,
+        &offered_contract.tlvs,
         &offered_contract.into(),
         FeeRule::default(),
     )?;
@@ -352,6 +353,7 @@ where
         &offered_contract.offer_params,
         &accept_params,
         &offered_contract.contract_info,
+        &offered_contract.tlvs,
         &offered_contract.into(),
         FeeRule::default(),
     )?;
