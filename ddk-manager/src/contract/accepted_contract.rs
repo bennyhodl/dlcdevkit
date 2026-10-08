@@ -1,7 +1,9 @@
 //! # AcceptedContract
 
 use super::offered_contract::OfferedContract;
+use super::utils::cet_ranges;
 use super::AdaptorInfo;
+use crate::error::Error;
 use bitcoin::{Amount, SignedAmount, Transaction};
 use ddk_dlc::{DlcTransactions, PartyParams};
 use ddk_messages::tlv_stream::TlvStream;
@@ -36,6 +38,25 @@ pub struct AcceptedContract {
 }
 
 impl AcceptedContract {
+    /// Where the CETs and the adaptor signatures of the contract info at
+    /// `index` start in `dlc_transactions.cets` and in the contract's adaptor
+    /// signature list. Both hold every contract info's entries one after
+    /// another, and a contract info's own indexes count from its start.
+    pub(crate) fn execution_offsets(&self, index: usize) -> Result<(usize, usize), Error> {
+        let offered = &self.offered_contract;
+        let cet_start = cet_ranges(&offered.contract_info, offered.total_collateral)?[index].start;
+        let adaptor_start = offered
+            .contract_info
+            .iter()
+            .zip(&self.adaptor_infos)
+            .take(index)
+            .map(|(contract_info, adaptor_info)| {
+                contract_info.adaptor_signature_count(adaptor_info)
+            })
+            .sum();
+        Ok((cet_start, adaptor_start))
+    }
+
     /// Returns the contract id for the contract computed as specified here:
     /// <https://github.com/discreetlogcontracts/dlcspecs/blob/master/Protocol.md#requirements-2>
     pub fn get_contract_id(&self) -> [u8; 32] {

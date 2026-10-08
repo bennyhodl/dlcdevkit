@@ -9,6 +9,7 @@ use bitcoin::{Script, Transaction};
 use ddk_dlc::{OracleInfo, Payout};
 use ddk_messages::oracle_msgs;
 use ddk_messages::oracle_msgs::{EventDescriptor, OracleAnnouncement, OracleAttestation};
+use ddk_trie::combination_iterator::CombinationIterator;
 use ddk_trie::{DlcTrie, RangeInfo};
 use secp256k1_zkp::schnorr::Signature as SchnorrSignature;
 use secp256k1_zkp::{All, EcdsaAdaptorSignature, PublicKey, Secp256k1, SecretKey, Verification};
@@ -22,7 +23,7 @@ pub(super) type OracleIndexAndPrefixLength = Vec<(usize, usize)>;
 pub type RangeInfoAndOracleSignatures = (RangeInfo, Vec<Vec<SchnorrSignature>>);
 
 /// Contains information about the contract conditions and oracles used.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(
     feature = "use-serde",
     derive(serde::Serialize, serde::Deserialize),
@@ -44,6 +45,23 @@ impl ContractInfo {
         match &self.contract_descriptor {
             ContractDescriptor::Enum(e) => Ok(e.get_payouts()),
             ContractDescriptor::Numerical(n) => n.get_payouts(total_collateral),
+        }
+    }
+
+    /// How many adaptor signatures this contract info takes in a contract's
+    /// signature list, which holds every info's signatures one after another.
+    pub(crate) fn adaptor_signature_count(&self, adaptor_info: &AdaptorInfo) -> usize {
+        match adaptor_info {
+            AdaptorInfo::Enum => match &self.contract_descriptor {
+                ContractDescriptor::Enum(e) => {
+                    e.outcome_payouts.len()
+                        * CombinationIterator::new(self.oracle_announcements.len(), self.threshold)
+                            .count()
+                }
+                _ => unreachable!(),
+            },
+            AdaptorInfo::Numerical(trie) => trie.iter().count(),
+            AdaptorInfo::NumericalWithDifference(trie) => trie.iter().count(),
         }
     }
 

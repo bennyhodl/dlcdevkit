@@ -449,7 +449,7 @@ pub enum AdaptorInfo {
 }
 
 /// The descriptor of a contract.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(
     feature = "use-serde",
     derive(Serialize, Deserialize),

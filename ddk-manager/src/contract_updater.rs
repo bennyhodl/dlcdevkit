@@ -622,6 +622,10 @@ where
         )?;
 
     let mut adaptor_infos = vec![adaptor_info];
+    // Each contract info signs and verifies against its own CETs: its CET
+    // indexes count from the start of its slice.
+    let mut cet_ranges = Vec::with_capacity(offered_contract.contract_info.len());
+    cet_ranges.push(0..cets.len());
 
     let cet_input = cets[0].input[0].clone();
 
@@ -653,17 +657,20 @@ where
 
         adaptor_index = tmp_adaptor_index;
 
+        let start = cets.len();
         cets.extend(tmp_cets);
+        cet_ranges.push(start..cets.len());
 
         adaptor_infos.push(adaptor_info);
     }
 
     let mut own_signatures: Vec<EcdsaAdaptorSignature> = Vec::new();
 
-    for (contract_info, adaptor_info) in offered_contract
+    for ((contract_info, adaptor_info), cet_range) in offered_contract
         .contract_info
         .iter()
         .zip(adaptor_infos.iter())
+        .zip(&cet_ranges)
     {
         let sigs = contract_info.get_adaptor_signatures(
             secp,
@@ -671,7 +678,7 @@ where
             &signer,
             input_script_pubkey,
             input_value,
-            &cets,
+            &cets[cet_range.clone()],
         )?;
         own_signatures.extend(sigs);
     }
@@ -902,18 +909,23 @@ where
             .to_string(),
     );
     let mut adaptor_sig_start = 0;
+    let cet_ranges = crate::contract::utils::cet_ranges(
+        &offered_contract.contract_info,
+        offered_contract.total_collateral,
+    )?;
 
-    for (adaptor_info, contract_info) in accepted_contract
+    for ((adaptor_info, contract_info), cet_range) in accepted_contract
         .adaptor_infos
         .iter()
         .zip(offered_contract.contract_info.iter())
+        .zip(&cet_ranges)
     {
         adaptor_sig_start = contract_info.verify_adaptor_info(
             secp,
             &counter_adaptor_pk,
             input_script_pubkey,
             input_value,
-            &accepted_contract.dlc_transactions.cets,
+            &accepted_contract.dlc_transactions.cets[cet_range.clone()],
             cet_adaptor_signatures,
             adaptor_sig_start,
             adaptor_info,
@@ -1114,10 +1126,24 @@ where
             .first()
             .map_or("", |(_, attestation)| attestation.event_id.as_str()),
     );
-    let (range_info, sigs) =
-        crate::utils::get_range_info_and_oracle_sigs(contract_info, adaptor_info, attestations)?;
-    let mut cet = contract.accepted_contract.dlc_transactions.cets[range_info.cet_index].clone();
     let offered_contract = &contract.accepted_contract.offered_contract;
+    // The range info indexes the CETs and adaptor signatures of this contract
+    // info alone; a contract with several holds them one after another.
+    let index = offered_contract
+        .contract_info
+        .iter()
+        .position(|info| info == contract_info)
+        .ok_or_else(|| {
+            Error::InvalidParameters("Contract info does not belong to this contract".to_string())
+        })?;
+    let (cet_start, adaptor_start) = contract.accepted_contract.execution_offsets(index)?;
+    let (range_info, sigs) = contract_info
+        .get_range_info_and_oracle_signatures(adaptor_info, attestations, adaptor_start)?
+        .ok_or_else(|| {
+            Error::InvalidState("Could not find closing info for given outcomes".to_string())
+        })?;
+    let mut cet =
+        contract.accepted_contract.dlc_transactions.cets[cet_start + range_info.cet_index].clone();
 
     let (adaptor_sigs, other_pubkey) = if offered_contract.is_offer_party {
         (

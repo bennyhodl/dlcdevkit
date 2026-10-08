@@ -14,6 +14,7 @@ use test_utils::*;
 
 use ddk_manager::contract::{
     numerical_descriptor::DifferenceParams, signed_contract::SignedContract, Contract,
+    PreClosedContract,
 };
 use ddk_manager::manager::Manager;
 use ddk_manager::{
@@ -186,6 +187,8 @@ async fn numerical_common_diff_nb_digits(
 #[derive(Eq, PartialEq, Clone, Debug)]
 enum TestPath {
     Close,
+    /// Close with the given party settling first.
+    CloseBy(Party),
     Refund,
     ManualRefund,
     CooperativeClose,
@@ -734,6 +737,45 @@ async fn single_funded_dlc_test() {
         false,
     )
     .await;
+}
+
+/// Settles a disjoint contract on its second contract info from both sides.
+///
+/// Each party settles with the other's adaptor signatures, so each side has to
+/// find the second info's CETs and signatures past the first info's on its own.
+async fn second_contract_info_common(numerical_second: bool, manual_close: bool) {
+    for closer in [Party::Bob, Party::Alice] {
+        manager_execution_test(
+            get_second_contract_info_test_params(numerical_second).await,
+            TestPath::CloseBy(closer),
+            manual_close,
+        )
+        .await;
+    }
+}
+
+#[tokio::test]
+#[ignore]
+async fn second_enum_contract_info_test() {
+    second_contract_info_common(false, false).await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn second_enum_contract_info_manual_test() {
+    second_contract_info_common(false, true).await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn second_numerical_contract_info_test() {
+    second_contract_info_common(true, false).await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn second_numerical_contract_info_manual_test() {
+    second_contract_info_common(true, true).await;
 }
 
 // ---------------------------------------------------------------------------
@@ -1502,7 +1544,18 @@ async fn manager_execution_test_inner(test_params: TestParams, path: TestPath, m
         }
         TestPath::Close => {
             fund_contract(&mut ctx, contract_id, accept_msg).await;
-            close_path(&mut ctx, &test_params, contract_id, manual_close).await
+            close_path(
+                &mut ctx,
+                &test_params,
+                contract_id,
+                random_party(),
+                manual_close,
+            )
+            .await
+        }
+        TestPath::CloseBy(closer) => {
+            fund_contract(&mut ctx, contract_id, accept_msg).await;
+            close_path(&mut ctx, &test_params, contract_id, *closer, manual_close).await
         }
         TestPath::Refund | TestPath::ManualRefund => {
             fund_contract(&mut ctx, contract_id, accept_msg).await;
@@ -1589,11 +1642,13 @@ async fn bad_sign_path(
     assert_contract_state!(ctx.alice, contract_id, FailedSign);
 }
 
-/// Settles a confirmed contract with a CET built from oracle attestations.
+/// Settles a confirmed contract with a CET built from oracle attestations,
+/// `first` settling and the other party picking the close up from it.
 async fn close_path(
     ctx: &mut TestContext,
     test_params: &TestParams,
     contract_id: ContractId,
+    first: Party,
     manual_close: bool,
 ) {
     // A manual close runs before the event matures, as it does when an oracle
@@ -1605,8 +1660,6 @@ async fn close_path(
         );
     }
 
-    // Select the first one to close randomly
-    let first = random_party();
     let second = first.other();
 
     let case = thread_rng().next_u64() % 3;
@@ -1637,6 +1690,7 @@ async fn close_path(
         let Contract::PreClosed(contract) = contract else {
             panic!("Invalid contract state {:?}", contract);
         };
+        assert_cet_belongs_to_attested_contract_info(&contract);
 
         let second_contract = ctx.contract(second, &contract_id).await;
         let Contract::Confirmed(signed) = second_contract else {
@@ -1654,6 +1708,10 @@ async fn close_path(
     } else {
         ctx.sync_wallets().await;
         periodic_check!(ctx.manager(first), contract_id, PreClosed);
+        let Contract::PreClosed(contract) = ctx.contract(first, &contract_id).await else {
+            unreachable!("the state was just asserted");
+        };
+        assert_cet_belongs_to_attested_contract_info(&contract);
     }
 
     // mine blocks for the CET to be confirmed
@@ -1671,6 +1729,45 @@ async fn close_path(
         periodic_check!(ctx.manager(first), contract_id, PreClosed);
         periodic_check!(ctx.manager(second), contract_id, PreClosed);
     }
+}
+
+/// The broadcast CET must be one of the CETs of the contract info whose oracle
+/// attested. Every contract info indexes its CETs from zero, so a contract with
+/// several can otherwise settle with another info's CET at the same index.
+fn assert_cet_belongs_to_attested_contract_info(contract: &PreClosedContract) {
+    let accepted = &contract.signed_contract.accepted_contract;
+    let offered = &accepted.offered_contract;
+    let attesting_oracle = contract
+        .attestations
+        .as_ref()
+        .and_then(|attestations| attestations.first())
+        .expect("a pre-closed contract keeps the attestations it closed with")
+        .oracle_public_key;
+    let signed_txid = contract.signed_cet.compute_txid();
+
+    let mut start = 0;
+    for contract_info in &offered.contract_info {
+        let end = start
+            + contract_info
+                .get_payouts(offered.total_collateral)
+                .unwrap()
+                .len();
+        if contract_info
+            .oracle_announcements
+            .iter()
+            .any(|announcement| announcement.oracle_public_key == attesting_oracle)
+        {
+            assert!(
+                accepted.dlc_transactions.cets[start..end]
+                    .iter()
+                    .any(|cet| cet.compute_txid() == signed_txid),
+                "the broadcast CET is not one of the attested contract info's"
+            );
+            return;
+        }
+        start = end;
+    }
+    panic!("no contract info has the attesting oracle");
 }
 
 /// A manual close must refuse attestation sets that do not bind one to one to
