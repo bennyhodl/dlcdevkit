@@ -209,7 +209,7 @@ where
     if let Some(overrides) = &payout_overrides {
         offered_contract.contract_info[0].apply_payout_script_overrides(
             overrides,
-            &offered_contract.offer_params.payout_script_pubkey,
+            &accept_params.payout_script_pubkey,
             &mut dlc_transactions.cets,
         );
     }
@@ -306,7 +306,7 @@ pub(crate) fn accept_contract_internal(
         if let Some(overrides) = &payout_overrides {
             contract_info.apply_payout_script_overrides(
                 overrides,
-                &offered_contract.offer_params.payout_script_pubkey,
+                &accept_params.payout_script_pubkey,
                 &mut tmp_cets,
             );
         }
@@ -461,7 +461,7 @@ where
     if let Some(overrides) = &payout_overrides {
         offered_contract.contract_info[0].apply_payout_script_overrides(
             overrides,
-            &offered_contract.offer_params.payout_script_pubkey,
+            &accept_params.payout_script_pubkey,
             &mut dlc_transactions.cets,
         );
     }
@@ -669,7 +669,7 @@ where
         if let Some(overrides) = &payout_overrides {
             contract_info.apply_payout_script_overrides(
                 overrides,
-                &offered_contract.offer_params.payout_script_pubkey,
+                &accept_params.payout_script_pubkey,
                 &mut tmp_cets,
             );
         }

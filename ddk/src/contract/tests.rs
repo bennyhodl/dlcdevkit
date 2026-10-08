@@ -299,13 +299,13 @@ fn payout_script_override_pays_the_named_outcome_to_the_override_script() {
 
     let (mut offer, mut accept) =
         messages_with_serial_ids(&[1, 2, 3, 4, 5, 6], &[7, 8, 9, 10, 11, 12]);
-    // The rewrite finds the offerer's output by script, so the accepter must
-    // pay somewhere else, as any real contract does.
+    // The rewrite finds the accepter's output by script, so the accepter must
+    // pay somewhere other than the offerer, as any real contract does.
     accept.payout_spk = ScriptBuf::new_p2wpkh(&bitcoin::WPubkeyHash::from_byte_array([8; 20]));
     let liquidator = ScriptBuf::new_p2wpkh(&bitcoin::WPubkeyHash::from_byte_array([9; 20]));
     offer.tlvs.set(&PayoutScriptOverrides {
         overrides: vec![PayoutScriptOverride {
-            outcome: "up".to_string(),
+            outcome: "down".to_string(),
             script_pubkey: liquidator.clone(),
         }],
     });
@@ -313,16 +313,16 @@ fn payout_script_override_pays_the_named_outcome_to_the_override_script() {
     let context = context::context_from_messages(&offer, &accept)
         .unwrap_or_else(|e| panic!("context should build: {e}"));
 
-    // "up" pays the whole collateral to the offerer in the descriptor, so the
+    // "down" pays the whole collateral to the accepter in the descriptor, so the
     // CET has one output and it now pays the liquidator.
-    let up = &context.transactions.cets[0];
-    assert_eq!(up.output.len(), 1);
-    assert_eq!(up.output[0].script_pubkey, liquidator);
-    assert_eq!(up.output[0].value, Amount::from_sat(100_000));
-    // "down" is not named and still pays the accepter.
     let down = &context.transactions.cets[1];
     assert_eq!(down.output.len(), 1);
-    assert_eq!(down.output[0].script_pubkey, accept.payout_spk);
+    assert_eq!(down.output[0].script_pubkey, liquidator);
+    assert_eq!(down.output[0].value, Amount::from_sat(100_000));
+    // "up" is not named and still pays the offerer.
+    let up = &context.transactions.cets[0];
+    assert_eq!(up.output.len(), 1);
+    assert_eq!(up.output[0].script_pubkey, offer.payout_spk);
 }
 
 #[test]

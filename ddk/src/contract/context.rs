@@ -177,7 +177,7 @@ fn build_context_with_fee_rule(
     if let Some(overrides) = &payout_overrides {
         execution_infos[0].apply_payout_script_overrides(
             overrides,
-            &offer_params.payout_script_pubkey,
+            &accept_params.payout_script_pubkey,
             &mut transactions.cets,
         );
     }
@@ -204,7 +204,7 @@ fn build_context_with_fee_rule(
         if let Some(overrides) = &payout_overrides {
             info.apply_payout_script_overrides(
                 overrides,
-                &offer_params.payout_script_pubkey,
+                &accept_params.payout_script_pubkey,
                 &mut cets,
             );
         }

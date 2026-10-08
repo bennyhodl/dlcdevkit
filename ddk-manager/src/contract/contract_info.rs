@@ -48,7 +48,7 @@ impl ContractInfo {
         }
     }
 
-    /// Rewrites the offerer's output on each CET whose enum outcome `overrides`
+    /// Rewrites the accepter's output on each CET whose enum outcome `overrides`
     /// names, so that outcome pays the override script instead.
     ///
     /// `cets` is this contract info's CETs in payout order, as built by
@@ -60,7 +60,7 @@ impl ContractInfo {
     pub fn apply_payout_script_overrides(
         &self,
         overrides: &PayoutScriptOverrides,
-        offer_payout_spk: &Script,
+        accept_payout_spk: &Script,
         cets: &mut [Transaction],
     ) {
         let ContractDescriptor::Enum(descriptor) = &self.contract_descriptor else {
@@ -70,11 +70,11 @@ impl ContractInfo {
             let Some(script) = overrides.script_for(&outcome_payout.outcome) else {
                 continue;
             };
-            // ponytail: the offerer's output is found by script, which is
+            // ponytail: the accepter's output is found by script, which is
             // unambiguous because both parties' payout scripts differ. A
-            // dust-discarded offer output has nothing to rewrite.
+            // dust-discarded accept output has nothing to rewrite.
             for output in cet.output.iter_mut() {
-                if output.script_pubkey.as_script() == offer_payout_spk {
+                if output.script_pubkey.as_script() == accept_payout_spk {
                     output.script_pubkey = script.clone();
                 }
             }

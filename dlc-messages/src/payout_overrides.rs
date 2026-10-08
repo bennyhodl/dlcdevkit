@@ -7,11 +7,12 @@
 //! build the same CET bytes or the adaptor signatures do not verify.
 //!
 //! [`PayoutScriptOverrides`] names the enum outcomes whose CET pays somewhere other
-//! than the offerer. For each named outcome, the output that would have paid the
-//! offerer's `payout_spk` pays `script_pubkey` instead. Amounts are untouched, so an
+//! than the accepter. For each named outcome, the output that would have paid the
+//! accepter's `payout_spk` pays `script_pubkey` instead. Amounts are untouched, so an
 //! outcome that should pay the whole collateral to the third party is written with
-//! `offer = total, accept = 0` in the contract descriptor, as it would be for the
-//! offerer.
+//! `offer = 0, accept = total` in the contract descriptor, as it would be for the
+//! accepter. In a loan the accepter is the lender, and a liquidator is paid in the
+//! lender's place, so the lender's own liquidation outcome needs no override.
 //!
 //! ## Type range
 //!
@@ -37,7 +38,7 @@ pub struct PayoutScriptOverride {
     /// The outcome string exactly as it appears in the enum descriptor and the oracle
     /// announcement, for example `liquidated-by-0x…`.
     pub outcome: String,
-    /// The script the offerer's output pays for this outcome.
+    /// The script the accepter's output pays for this outcome.
     pub script_pubkey: ScriptBuf,
 }
 
