@@ -267,6 +267,15 @@ pub async fn get_enum_oracles(nb_oracles: usize, threshold: usize) -> Vec<Memory
     oracles
 }
 
+/// Params for a single oracle enum contract whose oracle attests `outcome`,
+/// for a test that has to settle on one particular CET.
+pub async fn get_enum_test_params_attesting(outcome: &str) -> TestParams {
+    let oracles = dlc::new_oracles(1);
+    announce_enum_event(&oracles, EVENT_ID, EVENT_MATURITY).await;
+    dlc::sign_enum_event(&oracles, EVENT_ID, &[0], outcome).await;
+    get_enum_test_params(1, 1, Some(oracles)).await
+}
+
 pub async fn get_enum_test_params(
     nb_oracles: usize,
     threshold: usize,

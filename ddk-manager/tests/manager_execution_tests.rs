@@ -193,9 +193,10 @@ enum TestPath {
     Close,
     /// Close with the given party settling first.
     CloseBy(Party),
-    /// Close a contract whose offer carries a payout script override for the
-    /// outcomes that pay the accepting party.
-    PayoutOverrideClose,
+    /// Close, with the given party settling first, a contract whose offer
+    /// carries a payout script override for the outcomes that pay the
+    /// accepting party.
+    PayoutOverrideCloseBy(Party),
     Refund,
     ManualRefund,
     CooperativeClose,
@@ -752,8 +753,7 @@ fn third_party_script() -> bitcoin::ScriptBuf {
 }
 
 /// Overrides for the outcomes of [`get_enum_contract_descriptor`] that pay the
-/// accepting party, so the attested outcome either pays the offering party as
-/// before or pays the third party in the accepting party's place.
+/// accepting party, so each of them pays the third party in its place.
 fn payout_overrides() -> PayoutScriptOverrides {
     PayoutScriptOverrides {
         overrides: enum_outcomes()
@@ -768,8 +768,9 @@ fn payout_overrides() -> PayoutScriptOverrides {
     }
 }
 
-/// The CET a contract carrying [`payout_overrides`] settled with never pays
-/// the accepting party.
+/// The CET a contract carrying [`payout_overrides`] settled with on an
+/// overridden outcome pays the whole collateral to the third party; the CET's
+/// fee came out of the funding output.
 async fn assert_cet_pays_the_override(ctx: &TestContext, closer: Party, contract_id: ContractId) {
     let (signed, cet) = match ctx.contract(closer, &contract_id).await {
         Contract::PreClosed(contract) => (contract.signed_contract, contract.signed_cet),
@@ -781,39 +782,41 @@ async fn assert_cet_pays_the_override(ctx: &TestContext, closer: Party, contract
         ),
         other => panic!("Unexpected contract state {:?}", other),
     };
-    let offer_spk = &signed
-        .accepted_contract
-        .offered_contract
-        .offer_params
-        .payout_script_pubkey;
-    let accept_spk = &signed.accepted_contract.accept_params.payout_script_pubkey;
-    assert_ne!(offer_spk, accept_spk);
-    for output in &cet.output {
-        assert_ne!(output.script_pubkey, *accept_spk);
-        assert!(output.script_pubkey == *offer_spk || output.script_pubkey == third_party_script());
+    let total_collateral = signed.accepted_contract.offered_contract.total_collateral;
+    assert_eq!(cet.output.len(), 1, "the offering party's payout is zero");
+    assert_eq!(cet.output[0].script_pubkey, third_party_script());
+    assert_eq!(cet.output[0].value, total_collateral);
+}
+
+/// Settles an overridden outcome from both sides, so each party has to build
+/// the overridden CET the other signed.
+async fn payout_override_common(manual_close: bool) {
+    // "b" pays the accepting party the whole collateral.
+    let overridden = &enum_outcomes()[1];
+    assert!(payout_overrides().overrides.iter().any(|o| o.outcome
+        == OverrideOutcome::Enum {
+            outcome: overridden.clone()
+        }));
+    for closer in [Party::Bob, Party::Alice] {
+        manager_execution_test(
+            get_enum_test_params_attesting(overridden).await,
+            TestPath::PayoutOverrideCloseBy(closer),
+            manual_close,
+        )
+        .await;
     }
 }
 
 #[tokio::test]
 #[ignore]
 async fn enum_payout_override_test() {
-    manager_execution_test(
-        get_enum_test_params(1, 1, None).await,
-        TestPath::PayoutOverrideClose,
-        false,
-    )
-    .await;
+    payout_override_common(false).await;
 }
 
 #[tokio::test]
 #[ignore]
 async fn enum_payout_override_manual_test() {
-    manager_execution_test(
-        get_enum_test_params(1, 1, None).await,
-        TestPath::PayoutOverrideClose,
-        true,
-    )
-    .await;
+    payout_override_common(true).await;
 }
 
 /// Settles a disjoint contract on its second contract info from both sides.
@@ -1573,7 +1576,7 @@ async fn manager_execution_test_inner(test_params: TestParams, path: TestPath, m
         .send_offer(&test_params.contract_input, counter_party())
         .await
         .expect("Send offer error");
-    if path == TestPath::PayoutOverrideClose {
+    if matches!(path, TestPath::PayoutOverrideCloseBy(_)) {
         // A record goes on the message after the offer is created, and the
         // stored contract learns of it through `commit_offer` before it is
         // sent, so the offering party builds the same CETs as its peer.
@@ -1648,11 +1651,10 @@ async fn manager_execution_test_inner(test_params: TestParams, path: TestPath, m
             fund_contract(&mut ctx, contract_id, accept_msg).await;
             close_path(&mut ctx, &test_params, contract_id, *closer, manual_close).await
         }
-        TestPath::PayoutOverrideClose => {
+        TestPath::PayoutOverrideCloseBy(closer) => {
             fund_contract(&mut ctx, contract_id, accept_msg).await;
-            let closer = random_party();
-            close_path(&mut ctx, &test_params, contract_id, closer, manual_close).await;
-            assert_cet_pays_the_override(&ctx, closer, contract_id).await;
+            close_path(&mut ctx, &test_params, contract_id, *closer, manual_close).await;
+            assert_cet_pays_the_override(&ctx, *closer, contract_id).await;
         }
         TestPath::Refund | TestPath::ManualRefund => {
             fund_contract(&mut ctx, contract_id, accept_msg).await;
