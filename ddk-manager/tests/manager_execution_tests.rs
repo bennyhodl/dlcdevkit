@@ -2,6 +2,7 @@
 #[allow(dead_code)]
 mod test_utils;
 
+use bitcoin::hashes::Hash;
 use bitcoin::Amount;
 use bitcoincore_rpc::Client;
 use ddk::chain::EsploraClient;
@@ -21,7 +22,10 @@ use ddk_manager::{
     Blockchain, CachedContractSignerProvider, ContractId, Oracle, SimpleSigner, Storage,
 };
 use ddk_messages::oracle_msgs::OracleAttestation;
-use ddk_messages::{AcceptDlc, OfferDlc, SignDlc};
+use ddk_messages::payout_overrides::PAYOUT_SCRIPT_OVERRIDES_TYPE;
+use ddk_messages::{
+    AcceptDlc, OfferDlc, OverrideOutcome, PayoutScriptOverride, PayoutScriptOverrides, SignDlc,
+};
 use ddk_messages::{CetAdaptorSignatures, Message};
 use lightning::ln::wire::Type;
 use lightning::util::ser::Writeable;
@@ -189,6 +193,9 @@ enum TestPath {
     Close,
     /// Close with the given party settling first.
     CloseBy(Party),
+    /// Close a contract whose offer carries a payout script override for the
+    /// outcomes that pay the accepting party.
+    PayoutOverrideClose,
     Refund,
     ManualRefund,
     CooperativeClose,
@@ -735,6 +742,76 @@ async fn single_funded_dlc_test() {
         get_single_funded_test_params(1, 1).await,
         TestPath::Close,
         false,
+    )
+    .await;
+}
+
+/// The script the payout override pays, belonging to neither party.
+fn third_party_script() -> bitcoin::ScriptBuf {
+    bitcoin::ScriptBuf::new_p2wpkh(&bitcoin::WPubkeyHash::from_byte_array([0x42; 20]))
+}
+
+/// Overrides for the outcomes of [`get_enum_contract_descriptor`] that pay the
+/// accepting party, so the attested outcome either pays the offering party as
+/// before or pays the third party in the accepting party's place.
+fn payout_overrides() -> PayoutScriptOverrides {
+    PayoutScriptOverrides {
+        overrides: enum_outcomes()
+            .into_iter()
+            .skip(1)
+            .step_by(2)
+            .map(|outcome| PayoutScriptOverride {
+                outcome: OverrideOutcome::Enum { outcome },
+                script_pubkey: third_party_script(),
+            })
+            .collect(),
+    }
+}
+
+/// The CET a contract carrying [`payout_overrides`] settled with never pays
+/// the accepting party.
+async fn assert_cet_pays_the_override(ctx: &TestContext, closer: Party, contract_id: ContractId) {
+    let (signed, cet) = match ctx.contract(closer, &contract_id).await {
+        Contract::PreClosed(contract) => (contract.signed_contract, contract.signed_cet),
+        Contract::Closed(contract) => (
+            contract.signed_contract,
+            contract
+                .signed_cet
+                .expect("a closed contract keeps its CET"),
+        ),
+        other => panic!("Unexpected contract state {:?}", other),
+    };
+    let offer_spk = &signed
+        .accepted_contract
+        .offered_contract
+        .offer_params
+        .payout_script_pubkey;
+    let accept_spk = &signed.accepted_contract.accept_params.payout_script_pubkey;
+    assert_ne!(offer_spk, accept_spk);
+    for output in &cet.output {
+        assert_ne!(output.script_pubkey, *accept_spk);
+        assert!(output.script_pubkey == *offer_spk || output.script_pubkey == third_party_script());
+    }
+}
+
+#[tokio::test]
+#[ignore]
+async fn enum_payout_override_test() {
+    manager_execution_test(
+        get_enum_test_params(1, 1, None).await,
+        TestPath::PayoutOverrideClose,
+        false,
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn enum_payout_override_manual_test() {
+    manager_execution_test(
+        get_enum_test_params(1, 1, None).await,
+        TestPath::PayoutOverrideClose,
+        true,
     )
     .await;
 }
@@ -1399,7 +1476,8 @@ async fn manager_execution_test_inner(test_params: TestParams, path: TestPath, m
             Some(close_approver.clone()),
         )
         .await
-        .unwrap(),
+        .unwrap()
+        .with_allowed_offer_tlv_types(&[PAYOUT_SCRIPT_OVERRIDES_TYPE]),
     ));
 
     let alice_manager_loop = Arc::clone(&alice_manager);
@@ -1416,7 +1494,8 @@ async fn manager_execution_test_inner(test_params: TestParams, path: TestPath, m
             Some(close_approver.clone()),
         )
         .await
-        .unwrap(),
+        .unwrap()
+        .with_allowed_offer_tlv_types(&[PAYOUT_SCRIPT_OVERRIDES_TYPE]),
     ));
 
     let bob_manager_loop = Arc::clone(&bob_manager);
@@ -1487,13 +1566,25 @@ async fn manager_execution_test_inner(test_params: TestParams, path: TestPath, m
         sync_receive,
     };
 
-    let offer_msg = ctx
+    let mut offer_msg = ctx
         .bob
         .lock()
         .await
         .send_offer(&test_params.contract_input, counter_party())
         .await
         .expect("Send offer error");
+    if path == TestPath::PayoutOverrideClose {
+        // A record goes on the message after the offer is created, and the
+        // stored contract learns of it through `commit_offer` before it is
+        // sent, so the offering party builds the same CETs as its peer.
+        offer_msg.tlvs.set(&payout_overrides());
+        ctx.bob
+            .lock()
+            .await
+            .commit_offer(&offer_msg)
+            .await
+            .expect("Commit offer error");
+    }
 
     write_message("offer_message", offer_msg.clone());
     assert_eq!(
@@ -1556,6 +1647,12 @@ async fn manager_execution_test_inner(test_params: TestParams, path: TestPath, m
         TestPath::CloseBy(closer) => {
             fund_contract(&mut ctx, contract_id, accept_msg).await;
             close_path(&mut ctx, &test_params, contract_id, *closer, manual_close).await
+        }
+        TestPath::PayoutOverrideClose => {
+            fund_contract(&mut ctx, contract_id, accept_msg).await;
+            let closer = random_party();
+            close_path(&mut ctx, &test_params, contract_id, closer, manual_close).await;
+            assert_cet_pays_the_override(&ctx, closer, contract_id).await;
         }
         TestPath::Refund | TestPath::ManualRefund => {
             fund_contract(&mut ctx, contract_id, accept_msg).await;

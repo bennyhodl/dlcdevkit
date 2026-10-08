@@ -4,15 +4,18 @@
 //! both parties' parameters, the contract infos and the offer's terms. Every
 //! path that needs them builds them here: accepting an offer, signing an
 //! accept, and the stateless `ddk::contract` module. One builder is what lets
-//! the two parties agree on the bytes they sign.
+//! the two parties agree on the bytes they sign, and what lets a record on the
+//! offer that shapes the CETs ([`cet_records`](super::cet_records)) apply once,
+//! for everyone.
 
 use std::fmt;
 use std::ops::Range;
 
 use bitcoin::Amount;
 use ddk_dlc::{DlcTransactions, FeeRule, PartyParams};
-use ddk_messages::OfferDlc;
+use ddk_messages::{OfferDlc, TlvStream};
 
+use super::cet_records::{cet_records, CetContext};
 use super::contract_info::ContractInfo;
 use super::offered_contract::OfferedContract;
 use crate::error::Error;
@@ -82,10 +85,11 @@ pub struct ContractTransactions {
 #[derive(Debug)]
 pub enum BuildError {
     /// The offer cannot produce a contract on its own: it has no contract info
-    /// or no CET.
+    /// or no CET, or a CET record on it cannot apply to it.
     Offer(String),
     /// The accepting party's parameters do not fit the offer: the collaterals
-    /// do not add up to the offer's total.
+    /// do not add up to the offer's total, or a CET record cannot apply with
+    /// them.
     Accept(String),
     /// Payout generation or transaction construction failed.
     Construction(Error),
@@ -135,7 +139,8 @@ impl From<BuildError> for Error {
 }
 
 /// Builds a contract's transactions from both parties' parameters, the
-/// contract infos and the offer's terms.
+/// contract infos and the offer's terms, and applies the CET records on the
+/// offer to the CETs.
 ///
 /// The first contract info's payouts give the funding, CET and refund
 /// transactions; every further contract info adds its CETs after them. The
@@ -146,6 +151,7 @@ pub fn build_contract_transactions(
     offer: &PartyParams,
     accept: &PartyParams,
     contract_infos: &[ContractInfo],
+    offer_tlvs: &TlvStream,
     terms: &ContractTerms,
     fee_rule: FeeRule,
 ) -> Result<ContractTransactions, BuildError> {
@@ -159,6 +165,11 @@ pub fn build_contract_transactions(
             "offer and accept collateral do not equal total collateral".to_string(),
         ));
     }
+    let records = cet_records(offer_tlvs)?;
+    for record in &records {
+        record.validate(contract_infos, terms.total_collateral)?;
+    }
+
     let payouts = contract_infos[0].get_payouts(terms.total_collateral)?;
     // A splice input carries a `dlc_input`; when present the funding
     // transaction spends the previous contract's 2-of-2 output and must be
@@ -217,6 +228,17 @@ pub fn build_contract_transactions(
             0,
         ));
         cet_ranges.push(start..transactions.cets.len());
+    }
+
+    let context = CetContext {
+        offer,
+        accept,
+        contract_infos,
+        cet_ranges: &cet_ranges,
+        terms,
+    };
+    for record in &records {
+        record.apply(&context, &mut transactions.cets)?;
     }
 
     Ok(ContractTransactions {
