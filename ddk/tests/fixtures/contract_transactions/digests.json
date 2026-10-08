@@ -1,0 +1,38 @@
+{
+  "disjoint_enum_numerical": {
+    "cet_count": 13,
+    "cets_sha256": "c360116b2da9337ce5a6a5e44841bde10727f3df1306a8573a8933872db11743",
+    "fund_txid": "2fe5da12c3e50fd4697d57e213429382bb8b1699268ea7b367f83e17c2647208",
+    "refund_txid": "4315f0f55ddf36d1b1adad734045fa3c1873cd16762a85db3e689e4f1771644f"
+  },
+  "enum_dual_funded": {
+    "cet_count": 2,
+    "cets_sha256": "d236421d5a0d03ee242727e9abb4661bf58e267c258b303bb3464ee22d3ada54",
+    "fund_txid": "2fe5da12c3e50fd4697d57e213429382bb8b1699268ea7b367f83e17c2647208",
+    "refund_txid": "4315f0f55ddf36d1b1adad734045fa3c1873cd16762a85db3e689e4f1771644f"
+  },
+  "enum_refund_to_accepter": {
+    "cet_count": 2,
+    "cets_sha256": "d621ff5b4a50a06b2bc6c5c6898edeb66949de64d5ff45cc81591243a8c05854",
+    "fund_txid": "47e62564b2203e730d7bb58b8389b162e41de7c988bad4990d0b894591b0d2e2",
+    "refund_txid": "7523bb043cf8349924ebbb9e18c59ab6e9169f71cd18a88880986390962dd02d"
+  },
+  "enum_single_funded": {
+    "cet_count": 2,
+    "cets_sha256": "1f4cc560a25b0d462fbd111f507f733f39be8106aee449ba7a7f794d001c8006",
+    "fund_txid": "84fbe91f34101f6b0f1168671a1de5d987b0811fa6bc2c3203c6d4d05ff8145f",
+    "refund_txid": "0e6bb96156e0ea9de89041d83bad9cab527caf064689f83c89faa9e651ad8ffc"
+  },
+  "enum_spliced_in": {
+    "cet_count": 2,
+    "cets_sha256": "68d3cdaf774a5691d40ddd7bfdb0eb48396fe37308ba8100810f765a53faec81",
+    "fund_txid": "e4d403ea562cfaa6ea0d9e77752d79939fdc5b5a8e2fb4f4f1750ae0e12f316a",
+    "refund_txid": "7bb5a602dafdc944f0d40cf983cf89e21b0fafe469edb082d35e71193305ff0e"
+  },
+  "numerical_dual_funded": {
+    "cet_count": 11,
+    "cets_sha256": "e051189a9035bb73b780c031186a2eeba3afc96b8d9bfb1e0ecdbccc9421a40b",
+    "fund_txid": "2fe5da12c3e50fd4697d57e213429382bb8b1699268ea7b367f83e17c2647208",
+    "refund_txid": "4315f0f55ddf36d1b1adad734045fa3c1873cd16762a85db3e689e4f1771644f"
+  }
+}

@@ -21,7 +21,7 @@ use ddk::contract::{
 };
 use ddk_dlc::secp256k1_zkp::{All, Keypair, PublicKey, Secp256k1, SecretKey, XOnlyPublicKey};
 use ddk_messages::contract_msgs::{
-    ContractDescriptor, ContractInfo, ContractInfoInner, ContractOutcome,
+    ContractDescriptor, ContractInfo, ContractInfoInner, ContractOutcome, DisjointContractInfo,
     EnumeratedContractDescriptor, NumericOutcomeContractDescriptor, SingleContractInfo,
 };
 use ddk_messages::oracle_msgs::{
@@ -297,6 +297,16 @@ fn enum_contract_info(total_collateral: Amount) -> ContractInfo {
 }
 
 fn numerical_contract_info(offer_collateral: Amount, accept_collateral: Amount) -> ContractInfo {
+    numerical_contract_info_rounded(offer_collateral, accept_collateral, 1)
+}
+
+/// A numerical contract whose payouts round to `rounding_mod` sats: a coarser
+/// rounding gives fewer distinct payouts, so fewer CETs.
+fn numerical_contract_info_rounded(
+    offer_collateral: Amount,
+    accept_collateral: Amount,
+    rounding_mod: u64,
+) -> ContractInfo {
     let nb_digits = 10u16;
     let max_value = (1u64 << nb_digits) - 1;
     let payout_function = ddk_payouts::generate_payout_curve(
@@ -313,7 +323,7 @@ fn numerical_contract_info(offer_collateral: Amount, accept_collateral: Amount) 
         rounding_intervals: ddk_manager::payout_curve::RoundingIntervals {
             intervals: vec![ddk_manager::payout_curve::RoundingInterval {
                 begin_interval: 0,
-                rounding_mod: 1,
+                rounding_mod,
             }],
         },
         difference_params: None,
@@ -2246,4 +2256,153 @@ fn a_sign_message_that_matches_neither_rule_is_rejected() {
         ),
         Err(ContractError::InvalidSign(_))
     ));
+}
+
+/// The contract shapes whose transactions are pinned in
+/// `fixtures/contract_transactions/`: one offer/accept pair per shape the
+/// transaction builder has to keep producing byte for byte.
+///
+/// Serial ids and temporary contract ids are random, so this list only feeds
+/// the generator; the test replays the pinned messages.
+fn transaction_fixture_contracts() -> Vec<(&'static str, OfferDlc, AcceptDlc)> {
+    let secp = Secp256k1::new();
+    let accept = |offer: &OfferDlc, accepter: &PartySetup, funding_inputs: Vec<FundingInput>| {
+        accept_offer(
+            offer,
+            AcceptOfferParams {
+                party: accepter.party_params(&secp, funding_inputs),
+                min_timeout_interval: MIN_TIMEOUT,
+                max_timeout_interval: MAX_TIMEOUT,
+                now_unix: NOW_UNIX,
+            },
+            &accepter.funding_secret_key,
+        )
+        .unwrap()
+        .accept
+    };
+    let half = Amount::from_sat(50_000);
+    let offerer = PartySetup::new(&secp, 1, NETWORK, Amount::from_sat(150_000), 1);
+    let accepter = PartySetup::new(&secp, 2, NETWORK, Amount::from_sat(150_000), 2);
+    let dual_funded = |contract_info: ContractInfo, contract_flags: u8| {
+        let mut params = offer_params(
+            &secp,
+            &offerer,
+            contract_info,
+            half,
+            NETWORK,
+            vec![offerer.funding_input.clone()],
+        );
+        params.contract_flags = contract_flags;
+        let offer = create_offer(params).unwrap();
+        let accept = accept(&offer, &accepter, vec![accepter.funding_input.clone()]);
+        (offer, accept)
+    };
+
+    // Rounded to 10,000 sats, the numerical curve has a handful of CETs rather
+    // than hundreds, which keeps the pinned accept messages small.
+    let numerical = || numerical_contract_info_rounded(half, half, 10_000);
+
+    let mut contracts = Vec::new();
+    let (offer, accept_msg) = dual_funded(enum_contract_info(TOTAL_COLLATERAL), 0);
+    contracts.push(("enum_dual_funded", offer, accept_msg));
+    let (offer, accept_msg) = dual_funded(numerical(), 0);
+    contracts.push(("numerical_dual_funded", offer, accept_msg));
+    let (offer, accept_msg) = dual_funded(enum_contract_info(TOTAL_COLLATERAL), 1);
+    contracts.push(("enum_refund_to_accepter", offer, accept_msg));
+
+    // A disjoint contract: the CETs of every contract info after the first
+    // are built separately from the first info's transactions.
+    let ContractInfo::SingleContractInfo(enum_info) = enum_contract_info(TOTAL_COLLATERAL) else {
+        unreachable!()
+    };
+    let ContractInfo::SingleContractInfo(numerical_info) = numerical() else {
+        unreachable!()
+    };
+    let disjoint = ContractInfo::DisjointContractInfo(DisjointContractInfo {
+        total_collateral: TOTAL_COLLATERAL,
+        contract_infos: vec![enum_info.contract_info, numerical_info.contract_info],
+    });
+    let (offer, accept_msg) = dual_funded(disjoint, 0);
+    contracts.push(("disjoint_enum_numerical", offer, accept_msg));
+
+    // Single funded: the accepting party contributes no inputs, so the fee
+    // rule decides what the offering party's input has to cover.
+    let offerer = PartySetup::new(&secp, 31, NETWORK, Amount::from_sat(250_000), 1);
+    let accepter = PartySetup::new(&secp, 32, NETWORK, Amount::from_sat(150_000), 2);
+    let offer = create_offer(offer_params(
+        &secp,
+        &offerer,
+        enum_contract_info(TOTAL_COLLATERAL),
+        TOTAL_COLLATERAL,
+        NETWORK,
+        vec![offerer.funding_input.clone()],
+    ))
+    .unwrap();
+    let accept_msg = accept(&offer, &accepter, vec![]);
+    contracts.push(("enum_single_funded", offer, accept_msg));
+
+    // Spliced: the offer spends a previous contract's funding output.
+    let prepared = prepare_splice(true);
+    contracts.push(("enum_spliced_in", prepared.offer_b, prepared.accept_b));
+    contracts
+}
+
+/// Summarizes a contract's unsigned transactions. A txid covers every byte of
+/// an unsigned transaction, so equal digests mean equal transactions.
+fn transaction_digest(transactions: &ddk_dlc::DlcTransactions) -> serde_json::Value {
+    use bitcoin::hashes::{sha256, Hash};
+    let mut cet_bytes = Vec::new();
+    for cet in &transactions.cets {
+        cet_bytes.extend(bitcoin::consensus::serialize(cet));
+    }
+    serde_json::json!({
+        "fund_txid": transactions.fund.compute_txid().to_string(),
+        "refund_txid": transactions.refund.compute_txid().to_string(),
+        "cet_count": transactions.cets.len(),
+        "cets_sha256": sha256::Hash::hash(&cet_bytes).to_string(),
+    })
+}
+
+/// The transactions `ddk::contract` built for every contract shape before the
+/// builder moved into `ddk-manager`, replayed from the pinned messages.
+///
+/// Each shape is a wire-encoded offer and accept, `<shape>.offer.bin` and
+/// `<shape>.accept.bin`, and its entry in `digests.json`. A stored or signed
+/// contract is settled by rebuilding exactly these transactions, so a change
+/// to any digest is a change for every existing contract of that shape. Set
+/// `GENERATE_CONTRACT_TRANSACTION_FIXTURES` to rewrite the fixtures from the
+/// current builder.
+#[test]
+fn contract_transactions_match_the_pinned_fixtures() {
+    use ddk_messages::lightning::util::ser::{Readable, Writeable};
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/contract_transactions");
+    let digests_path = dir.join("digests.json");
+    if std::env::var_os("GENERATE_CONTRACT_TRANSACTION_FIXTURES").is_some() {
+        let mut digests = serde_json::Map::new();
+        for (name, offer, accept) in transaction_fixture_contracts() {
+            std::fs::write(dir.join(format!("{name}.offer.bin")), offer.encode()).unwrap();
+            std::fs::write(dir.join(format!("{name}.accept.bin")), accept.encode()).unwrap();
+            let transactions = create_dlc_transactions(&offer, &accept).unwrap();
+            digests.insert(name.to_string(), transaction_digest(&transactions));
+        }
+        let json = serde_json::to_string_pretty(&digests).unwrap();
+        std::fs::write(&digests_path, json + "\n").unwrap();
+        return;
+    }
+
+    let digests: serde_json::Map<String, serde_json::Value> =
+        serde_json::from_slice(&std::fs::read(&digests_path).unwrap()).unwrap();
+    assert!(!digests.is_empty());
+    for (name, expected) in &digests {
+        let message = |kind: &str| std::fs::read(dir.join(format!("{name}.{kind}.bin"))).unwrap();
+        let offer = OfferDlc::read(&mut message("offer").as_slice()).unwrap();
+        let accept = AcceptDlc::read(&mut message("accept").as_slice()).unwrap();
+        let transactions = create_dlc_transactions(&offer, &accept).unwrap();
+        assert_eq!(
+            &transaction_digest(&transactions),
+            expected,
+            "{name}: transactions changed"
+        );
+    }
 }
