@@ -2833,3 +2833,14 @@ fn an_accept_whose_collateral_does_not_complete_the_total_is_rejected() {
         Err(ContractError::InvalidAccept(_))
     ));
 }
+
+#[test]
+fn an_accept_whose_collateral_overflows_the_total_is_rejected() {
+    let secp = Secp256k1::new();
+    let (_, _, offer, mut accept) = enum_contract(&secp, NETWORK);
+    accept.accept_collateral = Amount::MAX;
+    assert!(matches!(
+        create_dlc_transactions(&offer, &accept),
+        Err(ContractError::InvalidAccept(_))
+    ));
+}

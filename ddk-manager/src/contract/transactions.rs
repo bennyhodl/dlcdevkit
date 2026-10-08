@@ -160,7 +160,9 @@ pub fn build_contract_transactions(
             "contract does not contain execution information".to_string(),
         ));
     }
-    if offer.collateral + accept.collateral != terms.total_collateral {
+    // Checked: the accepting party picks its collateral, and a sum past
+    // `u64::MAX` must be an invalid accept rather than a panic.
+    if offer.collateral.checked_add(accept.collateral) != Some(terms.total_collateral) {
         return Err(BuildError::Accept(
             "offer and accept collateral do not equal total collateral".to_string(),
         ));
