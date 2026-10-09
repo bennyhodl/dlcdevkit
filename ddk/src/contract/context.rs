@@ -9,6 +9,7 @@ use bitcoin::{Amount, ScriptBuf, Transaction, Witness};
 use ddk_dlc::secp256k1_zkp::{All, EcdsaAdaptorSignature, PublicKey, Secp256k1, SecretKey};
 use ddk_dlc::{DlcTransactions, FeeRule, PartyParams as DlcPartyParams, TxInputInfo};
 use ddk_manager::contract::contract_info::ContractInfo as ExecutionContractInfo;
+use ddk_manager::contract::transactions::{build_contract_transactions, ContractTransactions};
 use ddk_messages::{
     AcceptDlc, CetAdaptorSignatures, FundingInput, FundingSignatures, OfferDlc, SignDlc,
 };
@@ -114,12 +115,6 @@ fn build_context_with_fee_rule(
     accept_params: &DlcPartyParams,
     fee_rule: FeeRule,
 ) -> Result<ContractContext, ContractError> {
-    let total_collateral = offer.get_total_collateral();
-    if offer.offer_collateral + accept_params.collateral != total_collateral {
-        return Err(ContractError::InvalidAccept(
-            "offer and accept collateral do not equal total collateral".to_string(),
-        ));
-    }
     let offer_params = dlc_party_params(
         offer.funding_pubkey,
         offer.payout_spk.clone(),
@@ -130,71 +125,20 @@ fn build_context_with_fee_rule(
         &offer.funding_inputs,
     )?;
     let execution_infos = ddk_manager::contract::execution_contract_infos(&offer.contract_info)?;
-    if execution_infos.is_empty() {
-        return Err(ContractError::InvalidOffer(
-            "contract does not contain execution information".to_string(),
-        ));
-    }
     for info in &execution_infos {
         info.validate()?;
     }
-
-    let payouts = execution_infos[0].get_payouts(total_collateral)?;
-    // A splice input carries a `dlc_input`; when present the funding transaction
-    // spends the previous contract's 2-of-2 output and must be built through the
-    // spliced constructor. Only the offer side may contribute DLC inputs.
-    let has_dlc_inputs =
-        !offer_params.dlc_inputs.is_empty() || !accept_params.dlc_inputs.is_empty();
-    let mut transactions = if has_dlc_inputs {
-        ddk_dlc::create_spliced_dlc_transactions_with_fee_rule(
-            &offer_params,
-            accept_params,
-            &payouts,
-            offer.refund_locktime,
-            offer.fee_rate_per_vb,
-            0,
-            offer.cet_locktime,
-            offer.fund_output_serial_id,
-            offer.contract_flags,
-            fee_rule,
-        )?
-    } else {
-        ddk_dlc::create_dlc_transactions_with_fee_rule(
-            &offer_params,
-            accept_params,
-            &payouts,
-            offer.refund_locktime,
-            offer.fee_rate_per_vb,
-            0,
-            offer.cet_locktime,
-            offer.fund_output_serial_id,
-            offer.contract_flags,
-            fee_rule,
-        )?
-    };
-    let mut cet_ranges = Vec::with_capacity(execution_infos.len());
-    cet_ranges.push(0..transactions.cets.len());
-    let cet_input = transactions
-        .cets
-        .first()
-        .ok_or_else(|| ContractError::InvalidOffer("contract has no CETs".to_string()))?
-        .input[0]
-        .clone();
-
-    for info in execution_infos.iter().skip(1) {
-        let start = transactions.cets.len();
-        transactions.cets.extend(ddk_dlc::create_cets(
-            &cet_input,
-            &offer_params.payout_script_pubkey,
-            offer_params.payout_serial_id,
-            &accept_params.payout_script_pubkey,
-            accept_params.payout_serial_id,
-            &info.get_payouts(total_collateral)?,
-            0,
-        ));
-        cet_ranges.push(start..transactions.cets.len());
-    }
-
+    let ContractTransactions {
+        transactions,
+        cet_ranges,
+    } = build_contract_transactions(
+        &offer_params,
+        accept_params,
+        &execution_infos,
+        &offer.tlvs,
+        &offer.into(),
+        fee_rule,
+    )?;
     Ok(ContractContext {
         execution_infos,
         cet_ranges,

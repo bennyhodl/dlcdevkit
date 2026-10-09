@@ -2,6 +2,7 @@
 #[allow(dead_code)]
 mod test_utils;
 
+use bitcoin::hashes::Hash;
 use bitcoin::Amount;
 use bitcoincore_rpc::Client;
 use ddk::chain::EsploraClient;
@@ -14,13 +15,17 @@ use test_utils::*;
 
 use ddk_manager::contract::{
     numerical_descriptor::DifferenceParams, signed_contract::SignedContract, Contract,
+    PreClosedContract,
 };
 use ddk_manager::manager::Manager;
 use ddk_manager::{
     Blockchain, CachedContractSignerProvider, ContractId, Oracle, SimpleSigner, Storage,
 };
 use ddk_messages::oracle_msgs::OracleAttestation;
-use ddk_messages::{AcceptDlc, OfferDlc, SignDlc};
+use ddk_messages::payout_overrides::PAYOUT_SCRIPT_OVERRIDES_TYPE;
+use ddk_messages::{
+    AcceptDlc, OfferDlc, OverrideOutcome, PayoutScriptOverride, PayoutScriptOverrides, SignDlc,
+};
 use ddk_messages::{CetAdaptorSignatures, Message};
 use lightning::ln::wire::Type;
 use lightning::util::ser::Writeable;
@@ -186,6 +191,12 @@ async fn numerical_common_diff_nb_digits(
 #[derive(Eq, PartialEq, Clone, Debug)]
 enum TestPath {
     Close,
+    /// Close with the given party settling first.
+    CloseBy(Party),
+    /// Close, with the given party settling first, a contract whose offer
+    /// carries a payout script override for the outcomes that pay the
+    /// accepting party.
+    PayoutOverrideCloseBy(Party),
     Refund,
     ManualRefund,
     CooperativeClose,
@@ -734,6 +745,117 @@ async fn single_funded_dlc_test() {
         false,
     )
     .await;
+}
+
+/// The script the payout override pays, belonging to neither party.
+fn third_party_script() -> bitcoin::ScriptBuf {
+    bitcoin::ScriptBuf::new_p2wpkh(&bitcoin::WPubkeyHash::from_byte_array([0x42; 20]))
+}
+
+/// Overrides for the outcomes of [`get_enum_contract_descriptor`] that pay the
+/// accepting party, so each of them pays the third party in its place.
+fn payout_overrides() -> PayoutScriptOverrides {
+    PayoutScriptOverrides {
+        overrides: enum_outcomes()
+            .into_iter()
+            .skip(1)
+            .step_by(2)
+            .map(|outcome| PayoutScriptOverride {
+                outcome: OverrideOutcome::Enum { outcome },
+                script_pubkey: third_party_script(),
+            })
+            .collect(),
+    }
+}
+
+/// The CET a contract carrying [`payout_overrides`] settled with on an
+/// overridden outcome pays the whole collateral to the third party; the CET's
+/// fee came out of the funding output.
+async fn assert_cet_pays_the_override(ctx: &TestContext, closer: Party, contract_id: ContractId) {
+    let (signed, cet) = match ctx.contract(closer, &contract_id).await {
+        Contract::PreClosed(contract) => (contract.signed_contract, contract.signed_cet),
+        Contract::Closed(contract) => (
+            contract.signed_contract,
+            contract
+                .signed_cet
+                .expect("a closed contract keeps its CET"),
+        ),
+        other => panic!("Unexpected contract state {:?}", other),
+    };
+    let total_collateral = signed.accepted_contract.offered_contract.total_collateral;
+    assert_eq!(cet.output.len(), 1, "the offering party's payout is zero");
+    assert_eq!(cet.output[0].script_pubkey, third_party_script());
+    assert_eq!(cet.output[0].value, total_collateral);
+}
+
+/// Settles an overridden outcome from both sides, so each party has to build
+/// the overridden CET the other signed.
+async fn payout_override_common(manual_close: bool) {
+    // "b" pays the accepting party the whole collateral.
+    let overridden = &enum_outcomes()[1];
+    assert!(payout_overrides().overrides.iter().any(|o| o.outcome
+        == OverrideOutcome::Enum {
+            outcome: overridden.clone()
+        }));
+    for closer in [Party::Bob, Party::Alice] {
+        manager_execution_test(
+            get_enum_test_params_attesting(overridden).await,
+            TestPath::PayoutOverrideCloseBy(closer),
+            manual_close,
+        )
+        .await;
+    }
+}
+
+#[tokio::test]
+#[ignore]
+async fn enum_payout_override_test() {
+    payout_override_common(false).await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn enum_payout_override_manual_test() {
+    payout_override_common(true).await;
+}
+
+/// Settles a disjoint contract on its second contract info from both sides.
+///
+/// Each party settles with the other's adaptor signatures, so each side has to
+/// find the second info's CETs and signatures past the first info's on its own.
+async fn second_contract_info_common(numerical_second: bool, manual_close: bool) {
+    for closer in [Party::Bob, Party::Alice] {
+        manager_execution_test(
+            get_second_contract_info_test_params(numerical_second).await,
+            TestPath::CloseBy(closer),
+            manual_close,
+        )
+        .await;
+    }
+}
+
+#[tokio::test]
+#[ignore]
+async fn second_enum_contract_info_test() {
+    second_contract_info_common(false, false).await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn second_enum_contract_info_manual_test() {
+    second_contract_info_common(false, true).await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn second_numerical_contract_info_test() {
+    second_contract_info_common(true, false).await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn second_numerical_contract_info_manual_test() {
+    second_contract_info_common(true, true).await;
 }
 
 // ---------------------------------------------------------------------------
@@ -1357,7 +1479,8 @@ async fn manager_execution_test_inner(test_params: TestParams, path: TestPath, m
             Some(close_approver.clone()),
         )
         .await
-        .unwrap(),
+        .unwrap()
+        .with_allowed_offer_tlv_types(&[PAYOUT_SCRIPT_OVERRIDES_TYPE]),
     ));
 
     let alice_manager_loop = Arc::clone(&alice_manager);
@@ -1374,7 +1497,8 @@ async fn manager_execution_test_inner(test_params: TestParams, path: TestPath, m
             Some(close_approver.clone()),
         )
         .await
-        .unwrap(),
+        .unwrap()
+        .with_allowed_offer_tlv_types(&[PAYOUT_SCRIPT_OVERRIDES_TYPE]),
     ));
 
     let bob_manager_loop = Arc::clone(&bob_manager);
@@ -1445,13 +1569,25 @@ async fn manager_execution_test_inner(test_params: TestParams, path: TestPath, m
         sync_receive,
     };
 
-    let offer_msg = ctx
+    let mut offer_msg = ctx
         .bob
         .lock()
         .await
         .send_offer(&test_params.contract_input, counter_party())
         .await
         .expect("Send offer error");
+    if matches!(path, TestPath::PayoutOverrideCloseBy(_)) {
+        // A record goes on the message after the offer is created, and the
+        // stored contract learns of it through `commit_offer` before it is
+        // sent, so the offering party builds the same CETs as its peer.
+        offer_msg.tlvs.set(&payout_overrides());
+        ctx.bob
+            .lock()
+            .await
+            .commit_offer(&offer_msg)
+            .await
+            .expect("Commit offer error");
+    }
 
     write_message("offer_message", offer_msg.clone());
     assert_eq!(
@@ -1502,7 +1638,23 @@ async fn manager_execution_test_inner(test_params: TestParams, path: TestPath, m
         }
         TestPath::Close => {
             fund_contract(&mut ctx, contract_id, accept_msg).await;
-            close_path(&mut ctx, &test_params, contract_id, manual_close).await
+            close_path(
+                &mut ctx,
+                &test_params,
+                contract_id,
+                random_party(),
+                manual_close,
+            )
+            .await
+        }
+        TestPath::CloseBy(closer) => {
+            fund_contract(&mut ctx, contract_id, accept_msg).await;
+            close_path(&mut ctx, &test_params, contract_id, *closer, manual_close).await
+        }
+        TestPath::PayoutOverrideCloseBy(closer) => {
+            fund_contract(&mut ctx, contract_id, accept_msg).await;
+            close_path(&mut ctx, &test_params, contract_id, *closer, manual_close).await;
+            assert_cet_pays_the_override(&ctx, *closer, contract_id).await;
         }
         TestPath::Refund | TestPath::ManualRefund => {
             fund_contract(&mut ctx, contract_id, accept_msg).await;
@@ -1589,11 +1741,13 @@ async fn bad_sign_path(
     assert_contract_state!(ctx.alice, contract_id, FailedSign);
 }
 
-/// Settles a confirmed contract with a CET built from oracle attestations.
+/// Settles a confirmed contract with a CET built from oracle attestations,
+/// `first` settling and the other party picking the close up from it.
 async fn close_path(
     ctx: &mut TestContext,
     test_params: &TestParams,
     contract_id: ContractId,
+    first: Party,
     manual_close: bool,
 ) {
     // A manual close runs before the event matures, as it does when an oracle
@@ -1605,8 +1759,6 @@ async fn close_path(
         );
     }
 
-    // Select the first one to close randomly
-    let first = random_party();
     let second = first.other();
 
     let case = thread_rng().next_u64() % 3;
@@ -1637,6 +1789,7 @@ async fn close_path(
         let Contract::PreClosed(contract) = contract else {
             panic!("Invalid contract state {:?}", contract);
         };
+        assert_cet_belongs_to_attested_contract_info(&contract);
 
         let second_contract = ctx.contract(second, &contract_id).await;
         let Contract::Confirmed(signed) = second_contract else {
@@ -1654,6 +1807,10 @@ async fn close_path(
     } else {
         ctx.sync_wallets().await;
         periodic_check!(ctx.manager(first), contract_id, PreClosed);
+        let Contract::PreClosed(contract) = ctx.contract(first, &contract_id).await else {
+            unreachable!("the state was just asserted");
+        };
+        assert_cet_belongs_to_attested_contract_info(&contract);
     }
 
     // mine blocks for the CET to be confirmed
@@ -1671,6 +1828,45 @@ async fn close_path(
         periodic_check!(ctx.manager(first), contract_id, PreClosed);
         periodic_check!(ctx.manager(second), contract_id, PreClosed);
     }
+}
+
+/// The broadcast CET must be one of the CETs of the contract info whose oracle
+/// attested. Every contract info indexes its CETs from zero, so a contract with
+/// several can otherwise settle with another info's CET at the same index.
+fn assert_cet_belongs_to_attested_contract_info(contract: &PreClosedContract) {
+    let accepted = &contract.signed_contract.accepted_contract;
+    let offered = &accepted.offered_contract;
+    let attesting_oracle = contract
+        .attestations
+        .as_ref()
+        .and_then(|attestations| attestations.first())
+        .expect("a pre-closed contract keeps the attestations it closed with")
+        .oracle_public_key;
+    let signed_txid = contract.signed_cet.compute_txid();
+
+    let mut start = 0;
+    for contract_info in &offered.contract_info {
+        let end = start
+            + contract_info
+                .get_payouts(offered.total_collateral)
+                .unwrap()
+                .len();
+        if contract_info
+            .oracle_announcements
+            .iter()
+            .any(|announcement| announcement.oracle_public_key == attesting_oracle)
+        {
+            assert!(
+                accepted.dlc_transactions.cets[start..end]
+                    .iter()
+                    .any(|cet| cet.compute_txid() == signed_txid),
+                "the broadcast CET is not one of the attested contract info's"
+            );
+            return;
+        }
+        start = end;
+    }
+    panic!("no contract info has the attesting oracle");
 }
 
 /// A manual close must refuse attestation sets that do not bind one to one to

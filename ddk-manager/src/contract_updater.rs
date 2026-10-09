@@ -8,7 +8,7 @@ use bitcoin::script::PushBytesBuf;
 use bitcoin::Amount;
 use bitcoin::{consensus::Decodable, Script, ScriptBuf, Transaction, Witness};
 use ddk_dlc::dlc_input::DlcInputInfo;
-use ddk_dlc::{DlcTransactions, PartyParams};
+use ddk_dlc::{DlcTransactions, FeeRule, PartyParams};
 use ddk_messages::{
     oracle_msgs::{OracleAnnouncement, OracleAttestation},
     AcceptDlc, FundingSignature, FundingSignatures, OfferDlc, SignDlc, WitnessElement,
@@ -24,9 +24,13 @@ use crate::dlc_input::{get_dlc_inputs_from_funding_inputs, get_signature_for_dlc
 use crate::Storage;
 use crate::{
     contract::{
-        accepted_contract::AcceptedContract, contract_info::ContractInfo,
-        contract_input::ContractInput, offered_contract::OfferedContract,
-        signed_contract::SignedContract, AdaptorInfo,
+        accepted_contract::AcceptedContract,
+        contract_info::ContractInfo,
+        contract_input::ContractInput,
+        offered_contract::OfferedContract,
+        signed_contract::SignedContract,
+        transactions::{build_contract_transactions, ContractTransactions},
+        AdaptorInfo,
     },
     conversion_utils::get_tx_input_infos,
     error::Error,
@@ -124,6 +128,25 @@ where
     Ok((offered_contract, offer_msg))
 }
 
+fn log_created_transactions<L: Deref>(
+    logger: &L,
+    offered_contract: &OfferedContract,
+    transactions: &DlcTransactions,
+) where
+    L::Target: Logger,
+{
+    log_info!(
+        logger,
+        "Created DLC transactions. temp_id={} fund_txid={} funding_witness_script={} fund_output_value={} refund_txid={} num_cets={}",
+        offered_contract.id.to_lower_hex_string(),
+        transactions.fund.compute_txid().to_string(),
+        transactions.funding_witness_script.to_string(),
+        transactions.get_fund_output().value.to_sat(),
+        transactions.refund.compute_txid().to_string(),
+        transactions.cets.len()
+    );
+}
+
 /// Creates an [`AcceptedContract`] and produces
 /// the accepting party's cet adaptor signatures.
 pub async fn accept_contract<W: Deref, X: ContractSigner, SP: Deref, B: Deref, L: Deref>(
@@ -169,54 +192,21 @@ where
         accept_params.collateral.to_sat(),
     );
 
-    // Check BOTH parties for DLC inputs - either party having DLC inputs means we need splicing
-    let has_dlc_inputs = !accept_params.dlc_inputs.is_empty()
-        || !offered_contract.offer_params.dlc_inputs.is_empty();
-
-    let dlc_transactions = if has_dlc_inputs {
-        log_debug!(
-            logger,
-            "Creating spliced DLC transactions. num_dlc_inputs={}",
-            accept_params.dlc_inputs.len() + offered_contract.offer_params.dlc_inputs.len()
-        );
-        ddk_dlc::create_spliced_dlc_transactions(
-            &offered_contract.offer_params,
-            &accept_params,
-            &offered_contract.contract_info[0].get_payouts(total_collateral)?,
-            offered_contract.refund_locktime,
-            offered_contract.fee_rate_per_vb,
-            0,
-            offered_contract.cet_locktime,
-            offered_contract.fund_output_serial_id,
-            offered_contract.contract_flags,
-        )?
-    } else {
-        log_debug!(logger, "Creating DLC transactions without splicing.");
-        ddk_dlc::create_dlc_transactions(
-            &offered_contract.offer_params,
-            &accept_params,
-            &offered_contract.contract_info[0].get_payouts(total_collateral)?,
-            offered_contract.refund_locktime,
-            offered_contract.fee_rate_per_vb,
-            0,
-            offered_contract.cet_locktime,
-            offered_contract.fund_output_serial_id,
-            offered_contract.contract_flags,
-        )?
-    };
-
-    log_info!(
+    let contract_transactions = build_contract_transactions(
+        &offered_contract.offer_params,
+        &accept_params,
+        &offered_contract.contract_info,
+        &offered_contract.tlvs,
+        &offered_contract.into(),
+        FeeRule::default(),
+    )?;
+    log_created_transactions(
         logger,
-        "Created DLC transactions. temp_id={} fund_txid={} funding_witness_script={} fund_output_value={} refund_txid={} num_cets={}",
-        offered_contract.id.to_lower_hex_string(),
-        dlc_transactions.fund.compute_txid().to_string(),
-        dlc_transactions.funding_witness_script.to_string(),
-        dlc_transactions.get_fund_output().value.to_sat(),
-        dlc_transactions.refund.compute_txid().to_string(),
-        dlc_transactions.cets.len()
+        offered_contract,
+        &contract_transactions.transactions,
     );
 
-    let fund_output_value = dlc_transactions.get_fund_output().value;
+    let fund_output_value = contract_transactions.transactions.get_fund_output().value;
 
     let (accepted_contract, adaptor_sigs) = accept_contract_internal(
         secp,
@@ -226,7 +216,7 @@ where
         &signer.get_secret_key()?,
         fund_output_value,
         None,
-        &dlc_transactions,
+        &contract_transactions,
     )?;
 
     log_info!(
@@ -250,82 +240,39 @@ pub(crate) fn accept_contract_internal(
     adaptor_secret_key: &SecretKey,
     input_value: Amount,
     input_script_pubkey: Option<&Script>,
-    dlc_transactions: &DlcTransactions,
+    contract_transactions: &ContractTransactions,
 ) -> Result<(AcceptedContract, Vec<EcdsaAdaptorSignature>), crate::Error> {
-    let total_collateral = offered_contract.total_collateral;
-
+    let ContractTransactions {
+        transactions,
+        cet_ranges,
+    } = contract_transactions;
     let input_script_pubkey =
-        input_script_pubkey.unwrap_or_else(|| &dlc_transactions.funding_witness_script);
+        input_script_pubkey.unwrap_or_else(|| &transactions.funding_witness_script);
 
-    let cet_input = dlc_transactions.cets[0].input[0].clone();
-
-    let (adaptor_info, adaptor_sig) = offered_contract.contract_info[0].get_adaptor_info(
-        secp,
-        offered_contract.total_collateral,
-        adaptor_secret_key,
-        input_script_pubkey,
-        input_value,
-        &dlc_transactions.cets,
-        0,
-    )?;
-    let mut adaptor_infos = vec![adaptor_info];
-    let mut adaptor_sigs = adaptor_sig;
-
-    let DlcTransactions {
-        fund,
-        cets,
-        refund,
-        funding_witness_script,
-        pending_close_txs: _,
-    } = dlc_transactions;
-
-    let mut cets = cets.clone();
-
-    for contract_info in offered_contract.contract_info.iter().skip(1) {
-        let payouts = contract_info.get_payouts(total_collateral)?;
-
-        let tmp_cets = ddk_dlc::create_cets(
-            &cet_input,
-            &offered_contract.offer_params.payout_script_pubkey,
-            offered_contract.offer_params.payout_serial_id,
-            &accept_params.payout_script_pubkey,
-            accept_params.payout_serial_id,
-            &payouts,
-            0,
-        );
-
-        let (adaptor_info, adaptor_sig) = contract_info.get_adaptor_info(
+    let mut adaptor_infos = Vec::with_capacity(cet_ranges.len());
+    let mut adaptor_sigs = Vec::new();
+    for (contract_info, cet_range) in offered_contract.contract_info.iter().zip(cet_ranges) {
+        let (adaptor_info, info_sigs) = contract_info.get_adaptor_info(
             secp,
             offered_contract.total_collateral,
             adaptor_secret_key,
             input_script_pubkey,
             input_value,
-            &tmp_cets,
+            &transactions.cets[cet_range.clone()],
             adaptor_sigs.len(),
         )?;
-
-        cets.extend(tmp_cets);
-
         adaptor_infos.push(adaptor_info);
-        adaptor_sigs.extend(adaptor_sig);
+        adaptor_sigs.extend(info_sigs);
     }
 
     let refund_signature = ddk_dlc::util::get_raw_sig_for_tx_input(
         secp,
-        refund,
+        &transactions.refund,
         0,
         input_script_pubkey,
         input_value,
         adaptor_secret_key,
     )?;
-
-    let dlc_transactions = DlcTransactions {
-        fund: fund.clone(),
-        cets,
-        refund: refund.clone(),
-        funding_witness_script: funding_witness_script.clone(),
-        pending_close_txs: vec![],
-    };
 
     let accepted_contract = AcceptedContract {
         offered_contract: offered_contract.clone(),
@@ -333,7 +280,7 @@ pub(crate) fn accept_contract_internal(
         adaptor_signatures: adaptor_sigs.clone(),
         accept_params: accept_params.clone(),
         funding_inputs: funding_inputs.to_vec(),
-        dlc_transactions,
+        dlc_transactions: transactions.clone(),
         accept_refund_signature: refund_signature,
         // The accept message clones this stream, so the two start out equal.
         // Records the application adds to the message land here through
@@ -402,56 +349,21 @@ where
         .map(|x| x.signature)
         .collect::<Vec<_>>();
 
-    let total_collateral = offered_contract.total_collateral;
-
-    // Check BOTH parties for DLC inputs - either party having DLC inputs means we need splicing
-    let has_dlc_inputs =
-        !accept_dlc_inputs.is_empty() || !offered_contract.offer_params.dlc_inputs.is_empty();
-
-    let dlc_transactions = if has_dlc_inputs {
-        log_debug!(
-            logger,
-            "Creating spliced DLC transactions. num_dlc_inputs={}",
-            accept_dlc_inputs.len() + offered_contract.offer_params.dlc_inputs.len()
-        );
-        ddk_dlc::create_spliced_dlc_transactions(
-            &offered_contract.offer_params,
-            &accept_params,
-            &offered_contract.contract_info[0].get_payouts(total_collateral)?,
-            offered_contract.refund_locktime,
-            offered_contract.fee_rate_per_vb,
-            0,
-            offered_contract.cet_locktime,
-            offered_contract.fund_output_serial_id,
-            offered_contract.contract_flags,
-        )?
-    } else {
-        log_debug!(logger, "Creating DLC transactions without splicing.");
-        ddk_dlc::create_dlc_transactions(
-            &offered_contract.offer_params,
-            &accept_params,
-            &offered_contract.contract_info[0].get_payouts(total_collateral)?,
-            offered_contract.refund_locktime,
-            offered_contract.fee_rate_per_vb,
-            0,
-            offered_contract.cet_locktime,
-            offered_contract.fund_output_serial_id,
-            offered_contract.contract_flags,
-        )?
-    };
-
-    log_info!(
+    let contract_transactions = build_contract_transactions(
+        &offered_contract.offer_params,
+        &accept_params,
+        &offered_contract.contract_info,
+        &offered_contract.tlvs,
+        &offered_contract.into(),
+        FeeRule::default(),
+    )?;
+    log_created_transactions(
         logger,
-        "Created DLC transactions. temp_id={} fund_txid={} funding_witness_script={} fund_output_value={} refund_txid={} num_cets={}",
-        offered_contract.id.to_lower_hex_string(),
-        dlc_transactions.fund.compute_txid().to_string(),
-        dlc_transactions.funding_witness_script.to_string(),
-        dlc_transactions.get_fund_output().value.to_sat(),
-        dlc_transactions.refund.compute_txid().to_string(),
-        dlc_transactions.cets.len()
+        offered_contract,
+        &contract_transactions.transactions,
     );
 
-    let fund_output_value = dlc_transactions.get_fund_output().value;
+    let fund_output_value = contract_transactions.transactions.get_fund_output().value;
 
     let signer = signer_provider.derive_contract_signer(offered_contract.keys_id)?;
 
@@ -467,7 +379,7 @@ where
         &signer,
         None,
         None,
-        &dlc_transactions,
+        &contract_transactions,
         None,
         storage,
         signer_provider,
@@ -565,7 +477,7 @@ pub(crate) async fn verify_accepted_and_sign_contract_internal<
     signer: &X,
     input_script_pubkey: Option<&Script>,
     counter_adaptor_pk: Option<PublicKey>,
-    dlc_transactions: &DlcTransactions,
+    contract_transactions: &ContractTransactions,
     channel_id: Option<ChannelId>,
     storage: &S,
     signer_provider: &SP,
@@ -577,17 +489,20 @@ where
     SP::Target: ContractSignerProvider<Signer = X>,
     L::Target: Logger,
 {
+    let ContractTransactions {
+        transactions,
+        cet_ranges,
+    } = contract_transactions;
     let DlcTransactions {
         fund,
         cets,
         refund,
         funding_witness_script,
         pending_close_txs: _,
-    } = dlc_transactions;
+    } = transactions;
 
     let mut fund_psbt = Psbt::from_unsigned_tx(unsigned_funding_transaction(fund))
         .map_err(|_| Error::InvalidState("Tried to create PSBT from signed tx".to_string()))?;
-    let mut cets = cets.clone();
 
     let input_script_pubkey = input_script_pubkey.unwrap_or_else(|| funding_witness_script);
     let counter_adaptor_pk = counter_adaptor_pk.unwrap_or(accept_params.fund_pubkey);
@@ -609,61 +524,32 @@ where
         refund.compute_txid().to_string(),
     );
 
-    let (adaptor_info, mut adaptor_index) = offered_contract.contract_info[0]
-        .verify_and_get_adaptor_info(
+    // Each contract info is verified and signed against its own CETs: its
+    // CET indexes count from the start of its range.
+    let mut adaptor_infos = Vec::with_capacity(cet_ranges.len());
+    let mut adaptor_index = 0;
+    for (contract_info, cet_range) in offered_contract.contract_info.iter().zip(cet_ranges) {
+        let (adaptor_info, next_adaptor_index) = contract_info.verify_and_get_adaptor_info(
             secp,
             offered_contract.total_collateral,
             &counter_adaptor_pk,
             input_script_pubkey,
             input_value,
-            &cets,
-            cet_adaptor_signatures,
-            0,
-        )?;
-
-    let mut adaptor_infos = vec![adaptor_info];
-
-    let cet_input = cets[0].input[0].clone();
-
-    let total_collateral = offered_contract.offer_params.collateral + accept_params.collateral;
-
-    for contract_info in offered_contract.contract_info.iter().skip(1) {
-        let payouts = contract_info.get_payouts(total_collateral)?;
-
-        let tmp_cets = ddk_dlc::create_cets(
-            &cet_input,
-            &offered_contract.offer_params.payout_script_pubkey,
-            offered_contract.offer_params.payout_serial_id,
-            &accept_params.payout_script_pubkey,
-            accept_params.payout_serial_id,
-            &payouts,
-            0,
-        );
-
-        let (adaptor_info, tmp_adaptor_index) = contract_info.verify_and_get_adaptor_info(
-            secp,
-            offered_contract.total_collateral,
-            &accept_params.fund_pubkey,
-            funding_witness_script,
-            input_value,
-            &tmp_cets,
+            &cets[cet_range.clone()],
             cet_adaptor_signatures,
             adaptor_index,
         )?;
-
-        adaptor_index = tmp_adaptor_index;
-
-        cets.extend(tmp_cets);
-
+        adaptor_index = next_adaptor_index;
         adaptor_infos.push(adaptor_info);
     }
 
     let mut own_signatures: Vec<EcdsaAdaptorSignature> = Vec::new();
 
-    for (contract_info, adaptor_info) in offered_contract
+    for ((contract_info, adaptor_info), cet_range) in offered_contract
         .contract_info
         .iter()
         .zip(adaptor_infos.iter())
+        .zip(cet_ranges)
     {
         let sigs = contract_info.get_adaptor_signatures(
             secp,
@@ -671,7 +557,7 @@ where
             &signer,
             input_script_pubkey,
             input_value,
-            &cets,
+            &cets[cet_range.clone()],
         )?;
         own_signatures.extend(sigs);
     }
@@ -777,14 +663,6 @@ where
         &signer.get_secret_key()?,
     )?;
 
-    let dlc_transactions = DlcTransactions {
-        fund: fund.clone(),
-        cets,
-        refund: refund.clone(),
-        funding_witness_script: funding_witness_script.clone(),
-        pending_close_txs: vec![],
-    };
-
     let accepted_contract = AcceptedContract {
         offered_contract: offered_contract.clone(),
         accept_params: accept_params.clone(),
@@ -792,7 +670,7 @@ where
         adaptor_infos,
         adaptor_signatures: cet_adaptor_signatures.to_vec(),
         accept_refund_signature: *refund_signature,
-        dlc_transactions,
+        dlc_transactions: transactions.clone(),
         tlvs: Default::default(),
     };
 
@@ -902,18 +780,23 @@ where
             .to_string(),
     );
     let mut adaptor_sig_start = 0;
+    let cet_ranges = crate::contract::utils::cet_ranges(
+        &offered_contract.contract_info,
+        offered_contract.total_collateral,
+    )?;
 
-    for (adaptor_info, contract_info) in accepted_contract
+    for ((adaptor_info, contract_info), cet_range) in accepted_contract
         .adaptor_infos
         .iter()
         .zip(offered_contract.contract_info.iter())
+        .zip(&cet_ranges)
     {
         adaptor_sig_start = contract_info.verify_adaptor_info(
             secp,
             &counter_adaptor_pk,
             input_script_pubkey,
             input_value,
-            &accepted_contract.dlc_transactions.cets,
+            &accepted_contract.dlc_transactions.cets[cet_range.clone()],
             cet_adaptor_signatures,
             adaptor_sig_start,
             adaptor_info,
@@ -1114,10 +997,24 @@ where
             .first()
             .map_or("", |(_, attestation)| attestation.event_id.as_str()),
     );
-    let (range_info, sigs) =
-        crate::utils::get_range_info_and_oracle_sigs(contract_info, adaptor_info, attestations)?;
-    let mut cet = contract.accepted_contract.dlc_transactions.cets[range_info.cet_index].clone();
     let offered_contract = &contract.accepted_contract.offered_contract;
+    // The range info indexes the CETs and adaptor signatures of this contract
+    // info alone; a contract with several holds them one after another.
+    let index = offered_contract
+        .contract_info
+        .iter()
+        .position(|info| info == contract_info)
+        .ok_or_else(|| {
+            Error::InvalidParameters("Contract info does not belong to this contract".to_string())
+        })?;
+    let (cet_start, adaptor_start) = contract.accepted_contract.execution_offsets(index)?;
+    let (range_info, sigs) = contract_info
+        .get_range_info_and_oracle_signatures(adaptor_info, attestations, adaptor_start)?
+        .ok_or_else(|| {
+            Error::InvalidState("Could not find closing info for given outcomes".to_string())
+        })?;
+    let mut cet =
+        contract.accepted_contract.dlc_transactions.cets[cet_start + range_info.cet_index].clone();
 
     let (adaptor_sigs, other_pubkey) = if offered_contract.is_offer_party {
         (

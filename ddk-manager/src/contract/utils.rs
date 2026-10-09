@@ -1,5 +1,31 @@
 use std::collections::HashMap;
 use std::hash::Hash;
+use std::ops::Range;
+
+use bitcoin::Amount;
+
+use super::contract_info::ContractInfo;
+use crate::error::Error;
+
+/// Where each contract info's CETs sit in a contract's CET list.
+///
+/// The list holds one CET per payout of every contract info, in offer order,
+/// and a contract info's own CET indexes count from the start of its slice.
+/// Nothing stores these ranges: they follow from the payouts, so contracts
+/// stored before this existed need no migration.
+pub(crate) fn cet_ranges(
+    contract_infos: &[ContractInfo],
+    total_collateral: Amount,
+) -> Result<Vec<Range<usize>>, Error> {
+    let mut ranges = Vec::with_capacity(contract_infos.len());
+    let mut start = 0;
+    for contract_info in contract_infos {
+        let end = start + contract_info.get_payouts(total_collateral)?.len();
+        ranges.push(start..end);
+        start = end;
+    }
+    Ok(ranges)
+}
 
 pub(crate) fn get_majority_combination(
     outcomes: &[(usize, &Vec<String>)],

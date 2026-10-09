@@ -16,12 +16,12 @@ use ddk::contract::{
     accept_offer, chain_hash_from_network, create_dlc_splice_input, create_dlc_transactions,
     create_funding_psbt, create_offer, create_signed_dlc_transactions, finalize_sign,
     finalize_sign_spliced, funding_input, sign_accept, sign_accept_spliced, sign_cet, sign_refund,
-    signing, AcceptOfferParams, ContractError, CreateOfferParams, DescriptorInput,
+    signing, validate_offer, AcceptOfferParams, ContractError, CreateOfferParams, DescriptorInput,
     DlcInputSigningKey, InputDerivation, Party, PartyParams, DLC_INPUT_MAX_WITNESS_LEN,
 };
 use ddk_dlc::secp256k1_zkp::{All, Keypair, PublicKey, Secp256k1, SecretKey, XOnlyPublicKey};
 use ddk_messages::contract_msgs::{
-    ContractDescriptor, ContractInfo, ContractInfoInner, ContractOutcome,
+    ContractDescriptor, ContractInfo, ContractInfoInner, ContractOutcome, DisjointContractInfo,
     EnumeratedContractDescriptor, NumericOutcomeContractDescriptor, SingleContractInfo,
 };
 use ddk_messages::oracle_msgs::{
@@ -29,7 +29,10 @@ use ddk_messages::oracle_msgs::{
     EnumEventDescriptor, EventDescriptor, OracleAnnouncement, OracleAttestation, OracleEvent,
     OracleInfo, SingleOracleInfo,
 };
-use ddk_messages::{AcceptDlc, FundingInput, OfferDlc, SignDlc, WitnessElement};
+use ddk_messages::{
+    AcceptDlc, FundingInput, OfferDlc, OverrideOutcome, PayoutScriptOverride,
+    PayoutScriptOverrides, SignDlc, WitnessElement,
+};
 use std::str::FromStr;
 
 const NETWORK: Network = Network::Regtest;
@@ -265,7 +268,15 @@ fn oracle_announcement(
     }
 }
 
+/// An enum contract that pays the whole collateral to the offering party on
+/// "up" and to the accepting party on "down".
 fn enum_contract_info(total_collateral: Amount) -> ContractInfo {
+    enum_contract_info_paying(total_collateral, total_collateral)
+}
+
+/// An enum contract paying `up_offer_payout` of `total_collateral` to the
+/// offering party on "up", and nothing on "down".
+fn enum_contract_info_paying(total_collateral: Amount, up_offer_payout: Amount) -> ContractInfo {
     let announcement = oracle_announcement(
         EventDescriptor::EnumEvent(EnumEventDescriptor {
             outcomes: vec!["up".to_string(), "down".to_string()],
@@ -280,7 +291,7 @@ fn enum_contract_info(total_collateral: Amount) -> ContractInfo {
                     payouts: vec![
                         ContractOutcome {
                             outcome: "up".to_string(),
-                            offer_payout: total_collateral,
+                            offer_payout: up_offer_payout,
                         },
                         ContractOutcome {
                             outcome: "down".to_string(),
@@ -297,6 +308,16 @@ fn enum_contract_info(total_collateral: Amount) -> ContractInfo {
 }
 
 fn numerical_contract_info(offer_collateral: Amount, accept_collateral: Amount) -> ContractInfo {
+    numerical_contract_info_rounded(offer_collateral, accept_collateral, 1)
+}
+
+/// A numerical contract whose payouts round to `rounding_mod` sats: a coarser
+/// rounding gives fewer distinct payouts, so fewer CETs.
+fn numerical_contract_info_rounded(
+    offer_collateral: Amount,
+    accept_collateral: Amount,
+    rounding_mod: u64,
+) -> ContractInfo {
     let nb_digits = 10u16;
     let max_value = (1u64 << nb_digits) - 1;
     let payout_function = ddk_payouts::generate_payout_curve(
@@ -313,7 +334,7 @@ fn numerical_contract_info(offer_collateral: Amount, accept_collateral: Amount) 
         rounding_intervals: ddk_manager::payout_curve::RoundingIntervals {
             intervals: vec![ddk_manager::payout_curve::RoundingInterval {
                 begin_interval: 0,
-                rounding_mod: 1,
+                rounding_mod,
             }],
         },
         difference_params: None,
@@ -2245,5 +2266,581 @@ fn a_sign_message_that_matches_neither_rule_is_rejected() {
             &contract.accepter_key
         ),
         Err(ContractError::InvalidSign(_))
+    ));
+}
+
+/// The contract shapes whose transactions are pinned in
+/// `fixtures/contract_transactions/`: one offer/accept pair per shape the
+/// transaction builder has to keep producing byte for byte.
+///
+/// Serial ids and temporary contract ids are random, so this list only feeds
+/// the generator; the test replays the pinned messages.
+fn transaction_fixture_contracts() -> Vec<(&'static str, OfferDlc, AcceptDlc)> {
+    let secp = Secp256k1::new();
+    let accept = |offer: &OfferDlc, accepter: &PartySetup, funding_inputs: Vec<FundingInput>| {
+        accept_offer(
+            offer,
+            AcceptOfferParams {
+                party: accepter.party_params(&secp, funding_inputs),
+                min_timeout_interval: MIN_TIMEOUT,
+                max_timeout_interval: MAX_TIMEOUT,
+                now_unix: NOW_UNIX,
+            },
+            &accepter.funding_secret_key,
+        )
+        .unwrap()
+        .accept
+    };
+    let half = Amount::from_sat(50_000);
+    let offerer = PartySetup::new(&secp, 1, NETWORK, Amount::from_sat(150_000), 1);
+    let accepter = PartySetup::new(&secp, 2, NETWORK, Amount::from_sat(150_000), 2);
+    let dual_funded = |contract_info: ContractInfo, contract_flags: u8| {
+        let mut params = offer_params(
+            &secp,
+            &offerer,
+            contract_info,
+            half,
+            NETWORK,
+            vec![offerer.funding_input.clone()],
+        );
+        params.contract_flags = contract_flags;
+        let offer = create_offer(params).unwrap();
+        let accept = accept(&offer, &accepter, vec![accepter.funding_input.clone()]);
+        (offer, accept)
+    };
+
+    // Rounded to 10,000 sats, the numerical curve has a handful of CETs rather
+    // than hundreds, which keeps the pinned accept messages small.
+    let numerical = || numerical_contract_info_rounded(half, half, 10_000);
+
+    let mut contracts = Vec::new();
+    let (offer, accept_msg) = dual_funded(enum_contract_info(TOTAL_COLLATERAL), 0);
+    contracts.push(("enum_dual_funded", offer, accept_msg));
+    let (offer, accept_msg) = dual_funded(numerical(), 0);
+    contracts.push(("numerical_dual_funded", offer, accept_msg));
+    let (offer, accept_msg) = dual_funded(enum_contract_info(TOTAL_COLLATERAL), 1);
+    contracts.push(("enum_refund_to_accepter", offer, accept_msg));
+
+    // A disjoint contract: the CETs of every contract info after the first
+    // are built separately from the first info's transactions.
+    let ContractInfo::SingleContractInfo(enum_info) = enum_contract_info(TOTAL_COLLATERAL) else {
+        unreachable!()
+    };
+    let ContractInfo::SingleContractInfo(numerical_info) = numerical() else {
+        unreachable!()
+    };
+    let disjoint = ContractInfo::DisjointContractInfo(DisjointContractInfo {
+        total_collateral: TOTAL_COLLATERAL,
+        contract_infos: vec![enum_info.contract_info, numerical_info.contract_info],
+    });
+    let (offer, accept_msg) = dual_funded(disjoint, 0);
+    contracts.push(("disjoint_enum_numerical", offer, accept_msg));
+
+    // Single funded: the accepting party contributes no inputs, so the fee
+    // rule decides what the offering party's input has to cover.
+    let offerer = PartySetup::new(&secp, 31, NETWORK, Amount::from_sat(250_000), 1);
+    let accepter = PartySetup::new(&secp, 32, NETWORK, Amount::from_sat(150_000), 2);
+    let offer = create_offer(offer_params(
+        &secp,
+        &offerer,
+        enum_contract_info(TOTAL_COLLATERAL),
+        TOTAL_COLLATERAL,
+        NETWORK,
+        vec![offerer.funding_input.clone()],
+    ))
+    .unwrap();
+    let accept_msg = accept(&offer, &accepter, vec![]);
+    contracts.push(("enum_single_funded", offer, accept_msg));
+
+    // Spliced: the offer spends a previous contract's funding output.
+    let prepared = prepare_splice(true);
+    contracts.push(("enum_spliced_in", prepared.offer_b, prepared.accept_b));
+    contracts
+}
+
+/// Summarizes a contract's unsigned transactions. A txid covers every byte of
+/// an unsigned transaction, so equal digests mean equal transactions.
+fn transaction_digest(transactions: &ddk_dlc::DlcTransactions) -> serde_json::Value {
+    use bitcoin::hashes::{sha256, Hash};
+    let mut cet_bytes = Vec::new();
+    for cet in &transactions.cets {
+        cet_bytes.extend(bitcoin::consensus::serialize(cet));
+    }
+    serde_json::json!({
+        "fund_txid": transactions.fund.compute_txid().to_string(),
+        "refund_txid": transactions.refund.compute_txid().to_string(),
+        "cet_count": transactions.cets.len(),
+        "cets_sha256": sha256::Hash::hash(&cet_bytes).to_string(),
+    })
+}
+
+/// The transactions `ddk::contract` built for every contract shape before the
+/// builder moved into `ddk-manager`, replayed from the pinned messages.
+///
+/// Each shape is a wire-encoded offer and accept, `<shape>.offer.bin` and
+/// `<shape>.accept.bin`, and its entry in `digests.json`. A stored or signed
+/// contract is settled by rebuilding exactly these transactions, so a change
+/// to any digest is a change for every existing contract of that shape. Set
+/// `GENERATE_CONTRACT_TRANSACTION_FIXTURES` to rewrite the fixtures from the
+/// current builder.
+#[test]
+fn contract_transactions_match_the_pinned_fixtures() {
+    use ddk_messages::lightning::util::ser::{Readable, Writeable};
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/contract_transactions");
+    let digests_path = dir.join("digests.json");
+    if std::env::var_os("GENERATE_CONTRACT_TRANSACTION_FIXTURES").is_some() {
+        let mut digests = serde_json::Map::new();
+        for (name, offer, accept) in transaction_fixture_contracts() {
+            std::fs::write(dir.join(format!("{name}.offer.bin")), offer.encode()).unwrap();
+            std::fs::write(dir.join(format!("{name}.accept.bin")), accept.encode()).unwrap();
+            let transactions = create_dlc_transactions(&offer, &accept).unwrap();
+            digests.insert(name.to_string(), transaction_digest(&transactions));
+        }
+        let json = serde_json::to_string_pretty(&digests).unwrap();
+        std::fs::write(&digests_path, json + "\n").unwrap();
+        return;
+    }
+
+    let digests: serde_json::Map<String, serde_json::Value> =
+        serde_json::from_slice(&std::fs::read(&digests_path).unwrap()).unwrap();
+    assert!(!digests.is_empty());
+    for (name, expected) in &digests {
+        let message = |kind: &str| std::fs::read(dir.join(format!("{name}.{kind}.bin"))).unwrap();
+        let offer = OfferDlc::read(&mut message("offer").as_slice()).unwrap();
+        let accept = AcceptDlc::read(&mut message("accept").as_slice()).unwrap();
+        let transactions = create_dlc_transactions(&offer, &accept).unwrap();
+        assert_eq!(
+            &transaction_digest(&transactions),
+            expected,
+            "{name}: transactions changed"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Payout script overrides
+//
+// A record on the offer that makes the CETs of named outcomes, an enum
+// outcome or a range of numeric values, pay a script in the accepting party's
+// place. Both parties read it from the same
+// offer, so the adaptor signatures of a contract that carries one verify only
+// if both apply it.
+
+/// A 22-byte P2WPKH script that belongs to neither party.
+fn third_party_script() -> ScriptBuf {
+    ScriptBuf::new_p2wpkh(&bitcoin::WPubkeyHash::from_byte_array([0x42; 20]))
+}
+
+fn payout_overrides(overrides: &[(OverrideOutcome, ScriptBuf)]) -> PayoutScriptOverrides {
+    PayoutScriptOverrides {
+        overrides: overrides
+            .iter()
+            .map(|(outcome, script_pubkey)| PayoutScriptOverride {
+                outcome: outcome.clone(),
+                script_pubkey: script_pubkey.clone(),
+            })
+            .collect(),
+    }
+}
+
+/// An enum outcome.
+fn outcome(outcome: &str) -> OverrideOutcome {
+    OverrideOutcome::Enum {
+        outcome: outcome.to_string(),
+    }
+}
+
+/// The numeric values from `start` to `end`, both included.
+fn values(start: u64, end: u64) -> OverrideOutcome {
+    OverrideOutcome::Numeric { start, end }
+}
+
+/// The values each CET of a single numerical contract info covers, in CET
+/// order, with what it pays.
+fn range_payouts(contract_info: &ContractInfo) -> Vec<ddk_dlc::RangePayout> {
+    let execution_infos = ddk_manager::contract::execution_contract_infos(contract_info).unwrap();
+    let ddk_manager::contract::ContractDescriptor::Numerical(descriptor) =
+        &execution_infos[0].contract_descriptor
+    else {
+        panic!("not a numerical contract info");
+    };
+    descriptor
+        .get_range_payouts(contract_info.get_total_collateral())
+        .unwrap()
+}
+
+/// The CET range of `ranges` that covers `value`.
+fn range_covering(ranges: &[ddk_dlc::RangePayout], value: u64) -> ddk_dlc::RangePayout {
+    let value = value as usize;
+    ranges
+        .iter()
+        .find(|range| range.start <= value && value < range.start + range.count)
+        .expect("a CET covering the value")
+        .clone()
+}
+
+/// An offer carrying `overrides`, over `contract_info`.
+fn offer_with_overrides(
+    secp: &Secp256k1<All>,
+    offerer: &PartySetup,
+    contract_info: ContractInfo,
+    offer_collateral: Amount,
+    overrides: &PayoutScriptOverrides,
+) -> OfferDlc {
+    let mut offer = create_offer(offer_params(
+        secp,
+        offerer,
+        contract_info,
+        offer_collateral,
+        NETWORK,
+        vec![offerer.funding_input.clone()],
+    ))
+    .unwrap();
+    offer.tlvs.set(overrides);
+    offer
+}
+
+fn accept_with_params(
+    offer: &OfferDlc,
+    accepter: &PartySetup,
+    party: PartyParams,
+) -> Result<AcceptDlc, ContractError> {
+    accept_offer(
+        offer,
+        AcceptOfferParams {
+            party,
+            min_timeout_interval: MIN_TIMEOUT,
+            max_timeout_interval: MAX_TIMEOUT,
+            now_unix: NOW_UNIX,
+        },
+        &accepter.funding_secret_key,
+    )
+    .map(|result| result.accept)
+}
+
+fn validate(offer: &OfferDlc) -> Result<(), ContractError> {
+    validate_offer(offer, MIN_TIMEOUT, MAX_TIMEOUT, NOW_UNIX)
+}
+
+fn output_value(transaction: &Transaction, script_pubkey: &ScriptBuf) -> Option<Amount> {
+    transaction
+        .output
+        .iter()
+        .find(|output| output.script_pubkey == *script_pubkey)
+        .map(|output| output.value)
+}
+
+#[test]
+fn a_payout_script_override_pays_the_named_outcome_to_the_script() {
+    let secp = Secp256k1::new();
+    let offerer = PartySetup::new(&secp, 71, NETWORK, Amount::from_sat(150_000), 1);
+    let accepter = PartySetup::new(&secp, 72, NETWORK, Amount::from_sat(150_000), 2);
+    let overrides = payout_overrides(&[(outcome("down"), third_party_script())]);
+    let offer = offer_with_overrides(
+        &secp,
+        &offerer,
+        enum_contract_info(TOTAL_COLLATERAL),
+        Amount::from_sat(50_000),
+        &overrides,
+    );
+    assert!(validate(&offer).is_ok());
+    let accept = accept_with_params(
+        &offer,
+        &accepter,
+        accepter.party_params(&secp, vec![accepter.funding_input.clone()]),
+    )
+    .unwrap();
+    // Each side verifies the other's adaptor signatures over the CETs it
+    // built itself, so funding succeeds only if both applied the record.
+    let (sign, funding_transaction) = fund_with_xpriv(&secp, &offerer, &accepter, &offer, &accept);
+
+    for key in [&offerer.funding_secret_key, &accepter.funding_secret_key] {
+        let down = sign_cet(
+            &offer,
+            &accept,
+            &sign,
+            key,
+            &[(0, oracle_attestation(vec!["down".to_string()]))],
+        )
+        .unwrap();
+        assert_spends_funding_output(&down, &offer, &accept, &funding_transaction);
+        assert_eq!(
+            output_value(&down, &third_party_script()),
+            Some(TOTAL_COLLATERAL)
+        );
+        assert_eq!(output_value(&down, &accept.payout_spk), None);
+
+        let up = sign_cet(
+            &offer,
+            &accept,
+            &sign,
+            key,
+            &[(0, oracle_attestation(vec!["up".to_string()]))],
+        )
+        .unwrap();
+        assert_spends_funding_output(&up, &offer, &accept, &funding_transaction);
+        assert_eq!(output_value(&up, &offer.payout_spk), Some(TOTAL_COLLATERAL));
+        assert_eq!(output_value(&up, &third_party_script()), None);
+    }
+}
+
+/// Both parties may pay out to the same script. The record replaces the
+/// accepting party's output, not whichever output happens to pay that script.
+#[test]
+fn a_payout_script_override_replaces_only_the_accepting_partys_output() {
+    let secp = Secp256k1::new();
+    let offerer = PartySetup::new(&secp, 73, NETWORK, Amount::from_sat(150_000), 1);
+    let accepter = PartySetup::new(&secp, 74, NETWORK, Amount::from_sat(150_000), 2);
+    let overrides = payout_overrides(&[(outcome("up"), third_party_script())]);
+    let offer = offer_with_overrides(
+        &secp,
+        &offerer,
+        enum_contract_info_paying(TOTAL_COLLATERAL, Amount::from_sat(60_000)),
+        Amount::from_sat(50_000),
+        &overrides,
+    );
+    let mut party = accepter.party_params(&secp, vec![accepter.funding_input.clone()]);
+    party.payout_spk = offer.payout_spk.clone();
+    let accept = accept_with_params(&offer, &accepter, party).unwrap();
+    assert_eq!(accept.payout_spk, offer.payout_spk);
+
+    let (sign, funding_transaction) = fund_with_xpriv(&secp, &offerer, &accepter, &offer, &accept);
+    let up = sign_cet(
+        &offer,
+        &accept,
+        &sign,
+        &accepter.funding_secret_key,
+        &[(0, oracle_attestation(vec!["up".to_string()]))],
+    )
+    .unwrap();
+    assert_spends_funding_output(&up, &offer, &accept, &funding_transaction);
+    assert_eq!(up.output.len(), 2);
+    assert_eq!(
+        output_value(&up, &offer.payout_spk),
+        Some(Amount::from_sat(60_000))
+    );
+    assert_eq!(
+        output_value(&up, &third_party_script()),
+        Some(Amount::from_sat(40_000))
+    );
+}
+
+#[test]
+fn a_payout_script_override_the_contract_cannot_carry_is_an_invalid_offer() {
+    let secp = Secp256k1::new();
+    let offerer = PartySetup::new(&secp, 75, NETWORK, Amount::from_sat(150_000), 1);
+    let half = Amount::from_sat(50_000);
+    let invalid_offers = [
+        (
+            "an outcome no enum descriptor has",
+            enum_contract_info(TOTAL_COLLATERAL),
+            payout_overrides(&[(outcome("sideways"), third_party_script())]),
+        ),
+        (
+            "an empty script",
+            enum_contract_info(TOTAL_COLLATERAL),
+            payout_overrides(&[(outcome("down"), ScriptBuf::new())]),
+        ),
+        (
+            "the same outcome twice",
+            enum_contract_info(TOTAL_COLLATERAL),
+            payout_overrides(&[
+                (outcome("down"), third_party_script()),
+                (outcome("down"), offerer.payout_spk.clone()),
+            ]),
+        ),
+        (
+            "an enum outcome on a numerical contract",
+            numerical_contract_info(half, half),
+            payout_overrides(&[(outcome("down"), third_party_script())]),
+        ),
+        (
+            "numeric values on an enum contract",
+            enum_contract_info(TOTAL_COLLATERAL),
+            payout_overrides(&[(values(0, 1), third_party_script())]),
+        ),
+        (
+            "numeric values past every CET",
+            numerical_contract_info(half, half),
+            payout_overrides(&[(values(5_000, 6_000), third_party_script())]),
+        ),
+        (
+            "numeric values starting after they end",
+            numerical_contract_info(half, half),
+            payout_overrides(&[(values(500, 400), third_party_script())]),
+        ),
+        (
+            "numeric values covering part of a CET",
+            numerical_contract_info(half, half),
+            {
+                // A CET over several values, overridden for its first value
+                // only: its other values would pay the accepting party.
+                let ranges = range_payouts(&numerical_contract_info(half, half));
+                let wide = ranges
+                    .iter()
+                    .find(|range| range.count > 1)
+                    .expect("a CET covering more than one value");
+                let first = wide.start as u64;
+                payout_overrides(&[(values(first, first), third_party_script())])
+            },
+        ),
+        (
+            "two numeric ranges covering the same CET",
+            numerical_contract_info(half, half),
+            {
+                let at = range_covering(&range_payouts(&numerical_contract_info(half, half)), 500);
+                let (first, last) = (at.start as u64, (at.start + at.count - 1) as u64);
+                payout_overrides(&[
+                    (values(first, last), third_party_script()),
+                    (values(first, last), offerer.payout_spk.clone()),
+                ])
+            },
+        ),
+    ];
+    for (reason, contract_info, overrides) in invalid_offers {
+        let offer = offer_with_overrides(&secp, &offerer, contract_info, half, &overrides);
+        assert!(
+            matches!(validate(&offer), Err(ContractError::InvalidOffer(_))),
+            "{reason}"
+        );
+    }
+}
+
+/// A numeric range overrides every CET whose values it covers, and no other.
+#[test]
+fn a_numeric_payout_script_override_pays_the_covered_values_to_the_script() {
+    let secp = Secp256k1::new();
+    let offerer = PartySetup::new(&secp, 79, NETWORK, Amount::from_sat(150_000), 1);
+    let accepter = PartySetup::new(&secp, 80, NETWORK, Amount::from_sat(150_000), 2);
+    let half = Amount::from_sat(50_000);
+    let contract_info = numerical_contract_info(half, half);
+    let ranges = range_payouts(&contract_info);
+    let covered = range_covering(&ranges, 500);
+    let uncovered = range_covering(&ranges, 300);
+    assert!(covered.payout.accept > Amount::ZERO && uncovered.payout.accept > Amount::ZERO);
+    let overrides = payout_overrides(&[(
+        values(
+            covered.start as u64,
+            (covered.start + covered.count - 1) as u64,
+        ),
+        third_party_script(),
+    )]);
+    let offer = offer_with_overrides(&secp, &offerer, contract_info, half, &overrides);
+    assert!(validate(&offer).is_ok());
+    let accept = accept_with_params(
+        &offer,
+        &accepter,
+        accepter.party_params(&secp, vec![accepter.funding_input.clone()]),
+    )
+    .unwrap();
+    // Each side verifies the other's adaptor signatures over the CETs it
+    // built itself, so funding succeeds only if both applied the record.
+    let (sign, funding_transaction) = fund_with_xpriv(&secp, &offerer, &accepter, &offer, &accept);
+
+    for key in [&offerer.funding_secret_key, &accepter.funding_secret_key] {
+        let settle = |value: u64| {
+            sign_cet(
+                &offer,
+                &accept,
+                &sign,
+                key,
+                &[(0, oracle_attestation(digit_outcomes(value, 10)))],
+            )
+            .unwrap()
+        };
+
+        let overridden = settle(500);
+        assert_spends_funding_output(&overridden, &offer, &accept, &funding_transaction);
+        assert_eq!(
+            output_value(&overridden, &third_party_script()),
+            Some(covered.payout.accept)
+        );
+        assert_eq!(output_value(&overridden, &accept.payout_spk), None);
+        assert_eq!(
+            output_value(&overridden, &offer.payout_spk),
+            Some(covered.payout.offer)
+        );
+
+        let untouched = settle(300);
+        assert_spends_funding_output(&untouched, &offer, &accept, &funding_transaction);
+        assert_eq!(
+            output_value(&untouched, &accept.payout_spk),
+            Some(uncovered.payout.accept)
+        );
+        assert_eq!(output_value(&untouched, &third_party_script()), None);
+    }
+}
+
+/// This crate reads the first record of a type and node-dlc the last, so an
+/// offer with two of them could not mean the same contract to both peers.
+#[test]
+fn an_offer_with_two_payout_script_override_records_is_invalid() {
+    use ddk_messages::lightning::io::Cursor;
+    use ddk_messages::lightning::util::ser::Writeable;
+    let secp = Secp256k1::new();
+    let offerer = PartySetup::new(&secp, 76, NETWORK, Amount::from_sat(150_000), 1);
+    let mut offer = offer_with_overrides(
+        &secp,
+        &offerer,
+        enum_contract_info(TOTAL_COLLATERAL),
+        Amount::from_sat(50_000),
+        &payout_overrides(&[(outcome("down"), third_party_script())]),
+    );
+    assert!(validate(&offer).is_ok());
+    let mut twice = offer.tlvs.encode();
+    twice.extend(offer.tlvs.encode());
+    offer.tlvs = ddk_messages::TlvStream::read_to_end(&mut Cursor::new(twice)).unwrap();
+    assert!(matches!(
+        validate(&offer),
+        Err(ContractError::InvalidOffer(_))
+    ));
+}
+
+/// The funding transaction reserves the CET fee from the accepting party's
+/// own payout script, so a longer override would underpay the fee rate.
+#[test]
+fn a_payout_script_override_longer_than_the_accept_script_is_an_invalid_accept() {
+    let secp = Secp256k1::new();
+    let offerer = PartySetup::new(&secp, 77, NETWORK, Amount::from_sat(150_000), 1);
+    let accepter = PartySetup::new(&secp, 78, NETWORK, Amount::from_sat(150_000), 2);
+    let p2wsh = ScriptBuf::new_p2wsh(&bitcoin::WScriptHash::from_byte_array([0x42; 32]));
+    let offer = offer_with_overrides(
+        &secp,
+        &offerer,
+        enum_contract_info(TOTAL_COLLATERAL),
+        Amount::from_sat(50_000),
+        &payout_overrides(&[(outcome("down"), p2wsh)]),
+    );
+    // Nothing about the offer alone is wrong: it is the 22-byte P2WPKH payout
+    // script this accepting party brings that the 34-byte override exceeds.
+    assert!(validate(&offer).is_ok());
+    let result = accept_with_params(
+        &offer,
+        &accepter,
+        accepter.party_params(&secp, vec![accepter.funding_input.clone()]),
+    );
+    assert!(matches!(result, Err(ContractError::InvalidAccept(_))));
+}
+
+#[test]
+fn an_accept_whose_collateral_does_not_complete_the_total_is_rejected() {
+    let secp = Secp256k1::new();
+    let (_, _, offer, mut accept) = enum_contract(&secp, NETWORK);
+    accept.accept_collateral += Amount::ONE_SAT;
+    assert!(matches!(
+        create_dlc_transactions(&offer, &accept),
+        Err(ContractError::InvalidAccept(_))
+    ));
+}
+
+#[test]
+fn an_accept_whose_collateral_overflows_the_total_is_rejected() {
+    let secp = Secp256k1::new();
+    let (_, _, offer, mut accept) = enum_contract(&secp, NETWORK);
+    accept.accept_collateral = Amount::MAX;
+    assert!(matches!(
+        create_dlc_transactions(&offer, &accept),
+        Err(ContractError::InvalidAccept(_))
     ));
 }

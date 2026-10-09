@@ -116,7 +116,7 @@ pub struct RangePayout {
 }
 
 /// Representation of a payout for an enumeration outcome.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "use-serde", derive(Serialize, Deserialize))]
 pub struct EnumerationPayout {
     /// The outcome value (prior to hashing)

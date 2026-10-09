@@ -175,6 +175,35 @@ pub fn get_enum_contract_descriptor() -> ContractDescriptor {
     dlc::enum_descriptor(TOTAL_COLLATERAL)
 }
 
+/// An enum descriptor over [`enum_outcomes`] that pays `offer_share` of
+/// [`TOTAL_COLLATERAL`] to the offering party on even outcomes and to the
+/// accepting party on odd ones. No CET of it equals a CET of
+/// [`get_enum_contract_descriptor`], so a contract holding both can tell
+/// whose CET was signed.
+pub fn get_enum_contract_descriptor_paying(offer_share: Amount) -> ContractDescriptor {
+    let outcome_payouts = enum_outcomes()
+        .into_iter()
+        .enumerate()
+        .map(|(index, outcome)| {
+            let offer = if index % 2 == 0 {
+                offer_share
+            } else {
+                TOTAL_COLLATERAL - offer_share
+            };
+            ddk_dlc::EnumerationPayout {
+                outcome,
+                payout: ddk_dlc::Payout {
+                    offer,
+                    accept: TOTAL_COLLATERAL - offer,
+                },
+            }
+        })
+        .collect();
+    ContractDescriptor::Enum(ddk_manager::contract::enum_descriptor::EnumDescriptor {
+        outcome_payouts,
+    })
+}
+
 pub async fn generate_blocks(nb_blocks: u32, electrs: Arc<EsploraClient>, sink: Arc<Client>) {
     let prev_blockchain_height = electrs.async_client.get_height().await.unwrap();
     let sink_address = sink
@@ -236,6 +265,15 @@ pub async fn get_enum_oracles(nb_oracles: usize, threshold: usize) -> Vec<Memory
     announce_enum_event(&oracles, EVENT_ID, EVENT_MATURITY).await;
     attest_enum_event(&oracles, EVENT_ID, threshold).await;
     oracles
+}
+
+/// Params for a single oracle enum contract whose oracle attests `outcome`,
+/// for a test that has to settle on one particular CET.
+pub async fn get_enum_test_params_attesting(outcome: &str) -> TestParams {
+    let oracles = dlc::new_oracles(1);
+    announce_enum_event(&oracles, EVENT_ID, EVENT_MATURITY).await;
+    dlc::sign_enum_event(&oracles, EVENT_ID, &[0], outcome).await;
+    get_enum_test_params(1, 1, Some(oracles)).await
 }
 
 pub async fn get_enum_test_params(
@@ -599,6 +637,46 @@ pub async fn get_numerical_test_params(
     TestParams {
         contract_input: contract_input(&[leg]),
         oracles,
+    }
+}
+
+/// A disjoint contract that can only settle on its second contract info: the
+/// first info's oracle announces its event and never attests it. The CETs and
+/// adaptor signatures of the second info sit after the first info's, so
+/// settling it means selecting them at the right offset on both sides.
+pub async fn get_second_contract_info_test_params(numerical_second: bool) -> TestParams {
+    let first_oracles = get_enum_oracles(1, 0).await;
+    let first_leg = ContractLeg::new(
+        get_enum_contract_descriptor(),
+        announcements(&first_oracles, EVENT_ID).await,
+        1,
+    );
+    let (second_leg, second_oracles) = if numerical_second {
+        let oracle_numeric_infos = get_same_num_digits_oracle_numeric_infos(1);
+        let oracles = get_digit_decomposition_oracles(&oracle_numeric_infos, 1, false, false).await;
+        let leg = ContractLeg::new(
+            get_numerical_contract_descriptor(
+                oracle_numeric_infos.clone(),
+                get_polynomial_payout_curve_pieces(oracle_numeric_infos.get_min_nb_digits()),
+                None,
+            ),
+            announcements(&oracles, EVENT_ID).await,
+            1,
+        );
+        (leg, oracles)
+    } else {
+        let oracles = get_enum_oracles(1, 1).await;
+        let leg = ContractLeg::new(
+            get_enum_contract_descriptor_paying(Amount::from_sat(OFFER_COLLATERAL / 3)),
+            announcements(&oracles, EVENT_ID).await,
+            1,
+        );
+        (leg, oracles)
+    };
+
+    TestParams {
+        contract_input: contract_input(&[first_leg, second_leg]),
+        oracles: first_oracles.into_iter().chain(second_oracles).collect(),
     }
 }
 

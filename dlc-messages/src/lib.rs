@@ -22,6 +22,7 @@ pub extern crate lightning;
 pub mod ser_macros;
 pub mod ser_impls;
 
+pub use payout_overrides::{OverrideOutcome, PayoutScriptOverride, PayoutScriptOverrides};
 pub use ser_impls::{TlvRecord, TlvType};
 pub use tlv_stream::{TlvStream, TlvStreamRecord};
 
@@ -34,6 +35,7 @@ extern crate serde_json;
 pub mod contract_msgs;
 pub mod message_handler;
 pub mod oracle_msgs;
+pub mod payout_overrides;
 pub mod segmentation;
 pub mod tlv_stream;
 pub mod types;
