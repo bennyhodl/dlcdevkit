@@ -82,6 +82,17 @@
 //! signatures. External signers can fund with any script type they can
 //! finalize themselves.
 //!
+//! # Funding requirements
+//!
+//! Each party's funding inputs must hold its collateral plus its share of the
+//! funding and CET fees. [`funding_requirements`](crate::contract::funding_requirements)
+//! prices the offering party's share from the offer and the accepting party's
+//! payout script, with the same formula the transactions are built with, so
+//! coin selection can be exact. A party whose inputs fall short makes
+//! [`accept_offer`](crate::contract::accept_offer) fail with
+//! [`ContractError::InsufficientFunds`](crate::contract::ContractError::InsufficientFunds),
+//! which carries the amount required and the amount the inputs hold.
+//!
 //! # Splicing
 //!
 //! A new contract can spend a previous contract's 2-of-2 funding output as an
@@ -154,7 +165,8 @@ mod types;
 mod tests;
 
 pub use accept::{accept_offer, create_dlc_transactions, create_signed_dlc_transactions};
-pub use create::{create_offer, validate_offer};
+pub use create::{create_offer, funding_requirements, validate_offer};
+pub use ddk_dlc::FundingRequirements;
 pub use error::ContractError;
 pub use finalize::{finalize_sign, finalize_sign_spliced};
 pub use keys::{ContractKeyProvider, KeyScheme};

@@ -15,9 +15,10 @@ use bitcoin::{Amount, Network, OutPoint, ScriptBuf, Sequence, Transaction, TxIn,
 use ddk::contract::{
     accept_offer, chain_hash_from_network, create_dlc_splice_input, create_dlc_transactions,
     create_funding_psbt, create_offer, create_signed_dlc_transactions, finalize_sign,
-    finalize_sign_spliced, funding_input, sign_accept, sign_accept_spliced, sign_cet, sign_refund,
-    signing, AcceptOfferParams, ContractError, CreateOfferParams, DescriptorInput,
-    DlcInputSigningKey, InputDerivation, Party, PartyParams, DLC_INPUT_MAX_WITNESS_LEN,
+    finalize_sign_spliced, funding_input, funding_requirements, sign_accept, sign_accept_spliced,
+    sign_cet, sign_refund, signing, AcceptOfferParams, ContractError, CreateOfferParams,
+    DescriptorInput, DlcInputSigningKey, InputDerivation, Party, PartyParams,
+    DLC_INPUT_MAX_WITNESS_LEN,
 };
 use ddk_dlc::secp256k1_zkp::{All, Keypair, PublicKey, Secp256k1, SecretKey, XOnlyPublicKey};
 use ddk_messages::contract_msgs::{
@@ -1776,6 +1777,177 @@ fn splice_out_completes_the_lifecycle() {
     assert!(
         fund_value_b < prepared.fund_value_a,
         "splice-out must decrease the funded amount"
+    );
+}
+
+/// Funds the single-funded offer that `offer_with_coin` builds with one wallet
+/// coin on top of inputs worth `other_inputs_value`. A coin bringing the inputs
+/// to exactly [`funding_requirements`] is accepted with no change left over;
+/// one sat less fails with the requirement and what the inputs hold, so the
+/// requirement is neither under nor over the real one.
+fn assert_funding_requirement_is_exact(
+    secp: &Secp256k1<All>,
+    accepter: &PartySetup,
+    other_inputs_value: Amount,
+    offer_with_coin: impl Fn(Amount) -> OfferDlc,
+) {
+    let accept = |offer: &OfferDlc| {
+        accept_offer(
+            offer,
+            AcceptOfferParams {
+                party: accepter.party_params(secp, vec![]),
+                min_timeout_interval: MIN_TIMEOUT,
+                max_timeout_interval: MAX_TIMEOUT,
+                now_unix: NOW_UNIX,
+            },
+            &accepter.funding_secret_key,
+        )
+    };
+    // The requirement depends on the coins' weights, not their values, so an
+    // offer over a one-sat coin prices the real one.
+    let required = funding_requirements(&offer_with_coin(Amount::ONE_SAT), &accepter.payout_spk)
+        .unwrap()
+        .required;
+    let exact_coin = required - other_inputs_value;
+
+    let exact = accept(&offer_with_coin(exact_coin)).unwrap();
+    assert_eq!(
+        exact.transactions.fund.output.len(),
+        1,
+        "no change is left over"
+    );
+
+    let short = accept(&offer_with_coin(exact_coin - Amount::ONE_SAT));
+    assert!(
+        matches!(
+            short,
+            Err(ContractError::InsufficientFunds { required: r, available })
+                if r == required && available == required - Amount::ONE_SAT
+        ),
+        "expected the shortfall, got {:?}",
+        short.err()
+    );
+}
+
+#[test]
+fn an_offer_funded_with_exactly_its_requirement_is_accepted() {
+    let secp = Secp256k1::new();
+    let accepter = PartySetup::new(&secp, 34, NETWORK, Amount::from_sat(150_000), 2);
+    assert_funding_requirement_is_exact(&secp, &accepter, Amount::ZERO, |coin_value| {
+        let offerer = PartySetup::new(&secp, 33, NETWORK, coin_value, 1);
+        create_offer(offer_params(
+            &secp,
+            &offerer,
+            enum_contract_info(TOTAL_COLLATERAL),
+            TOTAL_COLLATERAL,
+            NETWORK,
+            vec![offerer.funding_input.clone()],
+        ))
+        .unwrap()
+    });
+}
+
+/// A splice input spending the funding output of a freshly signed contract,
+/// and that output's value.
+fn funded_splice_input(secp: &Secp256k1<All>) -> (FundingInput, Amount) {
+    let (offerer, accepter, offer, accept) = enum_contract(secp, NETWORK);
+    let (sign, _) = fund_with_xpriv(secp, &offerer, &accepter, &offer, &accept);
+    let value = create_dlc_transactions(&offer, &accept)
+        .unwrap()
+        .get_fund_output()
+        .value;
+    let input = create_dlc_splice_input(
+        &offer,
+        &accept,
+        &sign,
+        Party::Offer,
+        Some(900),
+        DLC_INPUT_MAX_WITNESS_LEN,
+    )
+    .unwrap();
+    (input, value)
+}
+
+#[test]
+fn a_splice_offer_funded_with_exactly_its_requirement_is_accepted() {
+    let secp = Secp256k1::new();
+    let (splice_input, splice_value) = funded_splice_input(&secp);
+    let collateral = splice_value + Amount::from_sat(40_000);
+
+    let accepter = PartySetup::new(&secp, 6, NETWORK, Amount::from_sat(200_000), 11);
+    assert_funding_requirement_is_exact(&secp, &accepter, splice_value, |coin_value| {
+        let offerer = PartySetup::new(&secp, 5, NETWORK, coin_value, 10);
+        create_offer(offer_params(
+            &secp,
+            &offerer,
+            enum_contract_info(collateral),
+            collateral,
+            NETWORK,
+            vec![splice_input.clone(), offerer.funding_input.clone()],
+        ))
+        .unwrap()
+    });
+}
+
+/// The spliced constructor leaves out an ordinary input whose witness is
+/// larger than a P2WPKH witness, and the requirement does too: an offer one
+/// sat short of it is refused with exactly that requirement.
+#[test]
+fn a_splice_offer_is_priced_as_the_spliced_constructor_funds_it() {
+    let secp = Secp256k1::new();
+    let (splice_input, splice_value) = funded_splice_input(&secp);
+    let collateral = splice_value + Amount::from_sat(40_000);
+    let wide_value = Amount::from_sat(30_000);
+    let wide_script = ScriptBuf::new_p2wsh(&bitcoin::WScriptHash::from_byte_array([3; 32]));
+    let wide_input = funding_input(
+        &previous_transaction(wide_value, wide_script),
+        0,
+        Some(12),
+        u32::MAX,
+        200,
+        ScriptBuf::new(),
+    )
+    .unwrap();
+
+    let accepter = PartySetup::new(&secp, 6, NETWORK, Amount::from_sat(200_000), 11);
+    let offer_with_coin = |coin_value| {
+        let offerer = PartySetup::new(&secp, 5, NETWORK, coin_value, 10);
+        create_offer(offer_params(
+            &secp,
+            &offerer,
+            enum_contract_info(collateral),
+            collateral,
+            NETWORK,
+            vec![
+                splice_input.clone(),
+                wide_input.clone(),
+                offerer.funding_input.clone(),
+            ],
+        ))
+        .unwrap()
+    };
+    let required = funding_requirements(&offer_with_coin(Amount::ONE_SAT), &accepter.payout_spk)
+        .unwrap()
+        .required;
+    let one_sat_short = required - Amount::ONE_SAT;
+    let short = accept_offer(
+        &offer_with_coin(one_sat_short - splice_value - wide_value),
+        AcceptOfferParams {
+            party: accepter.party_params(&secp, vec![]),
+            min_timeout_interval: MIN_TIMEOUT,
+            max_timeout_interval: MAX_TIMEOUT,
+            now_unix: NOW_UNIX,
+        },
+        &accepter.funding_secret_key,
+    );
+    assert!(
+        matches!(
+            short,
+            Err(ContractError::InsufficientFunds { required: r, available })
+                if r == required && available == one_sat_short
+        ),
+        "expected the shortfall, got {:?}",
+        short.err()
     );
 }
 

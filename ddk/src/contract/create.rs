@@ -1,9 +1,11 @@
 //! Offer creation and validation.
 
+use bitcoin::{Amount, Script};
 use ddk_dlc::secp256k1_zkp::Secp256k1;
+use ddk_dlc::{FeeRule, FundingRequirements};
 use ddk_messages::OfferDlc;
 
-use super::context::{ensure_protocol_version, validate_offer_funding_inputs};
+use super::context::{dlc_party_params, ensure_protocol_version, validate_offer_funding_inputs};
 use super::error::ContractError;
 use super::types::{random_serial_id, random_temporary_contract_id, CreateOfferParams};
 use super::PROTOCOL_VERSION;
@@ -94,6 +96,48 @@ pub fn create_offer(params: CreateOfferParams) -> Result<OfferDlc, ContractError
     }
 
     Ok(offer)
+}
+
+/// What the offering party's funding inputs must hold for `offer` to be
+/// accepted by a party paid at `accept_payout_spk`.
+///
+/// `create_offer` cannot check this, because the fees depend on the accepting
+/// party's payout script, which only the accept message carries. The result is
+/// what [`accept_offer`](super::accept_offer) requires of the offer, so a coin
+/// selector can be exact without building a transaction: it depends on the
+/// offer's inputs and scripts, never on the values of its inputs. Price a
+/// candidate set of coins, and add coins until their total reaches
+/// [`FundingRequirements::required`].
+///
+/// An accepting party can use the same call to check that an offer is funded
+/// before it selects its own coins.
+pub fn funding_requirements(
+    offer: &OfferDlc,
+    accept_payout_spk: &Script,
+) -> Result<FundingRequirements, ContractError> {
+    let params = dlc_party_params(
+        offer.funding_pubkey,
+        offer.payout_spk.clone(),
+        offer.payout_serial_id,
+        offer.change_spk.clone(),
+        offer.change_serial_id,
+        offer.offer_collateral,
+        &offer.funding_inputs,
+    )?;
+    // An offer with a splice input is built by the spliced constructor, which
+    // lays out its inputs this way.
+    let params = if params.dlc_inputs.is_empty() {
+        params
+    } else {
+        params.spliced()
+    };
+    Ok(params.funding_requirements(
+        offer.get_total_collateral(),
+        offer.fee_rate_per_vb,
+        Amount::ZERO,
+        accept_payout_spk,
+        FeeRule::default(),
+    )?)
 }
 
 /// Validates an incoming offer's structure, oracle announcements, and timeout policy.
