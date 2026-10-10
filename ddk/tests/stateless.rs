@@ -4,20 +4,27 @@
 //! party data, and PSBTs — no storage backend, contract manager, or
 //! blockchain client is constructed anywhere in this file.
 
+mod external_signer;
+
 use bdk_wallet::template::Bip49;
 use bdk_wallet::{KeychainKind, SignOptions, Wallet};
 use bitcoin::absolute::LockTime;
 use bitcoin::bip32::{DerivationPath, Xpriv};
 use bitcoin::hashes::Hash;
 use bitcoin::psbt::Psbt;
+use bitcoin::sighash::EcdsaSighashType;
 use bitcoin::transaction::Version;
 use bitcoin::{Amount, Network, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Witness};
+use ddk::contract::external::{
+    self, ContractSignatures, ContractSigningRequest, FundingSigningRequest,
+};
 use ddk::contract::{
-    accept_offer, chain_hash_from_network, create_dlc_splice_input, create_dlc_transactions,
-    create_funding_psbt, create_offer, create_signed_dlc_transactions, finalize_sign,
-    finalize_sign_spliced, funding_input, sign_accept, sign_accept_spliced, sign_cet, sign_refund,
-    signing, AcceptOfferParams, ContractError, CreateOfferParams, DescriptorInput,
-    DlcInputSigningKey, InputDerivation, Party, PartyParams, DLC_INPUT_MAX_WITNESS_LEN,
+    accept_offer, advanced, chain_hash_from_network, create_dlc_splice_input,
+    create_dlc_transactions, create_funding_psbt, create_offer, create_signed_dlc_transactions,
+    finalize_sign, finalize_sign_spliced, funding_input, sign_accept, sign_accept_spliced,
+    sign_cet, sign_refund, signing, AcceptOfferParams, ContractError, CreateOfferParams,
+    DescriptorInput, DlcInputSigningKey, InputDerivation, Party, PartyParams,
+    DLC_INPUT_MAX_WITNESS_LEN,
 };
 use ddk_dlc::secp256k1_zkp::{All, Keypair, PublicKey, Secp256k1, SecretKey, XOnlyPublicKey};
 use ddk_messages::contract_msgs::{
@@ -1700,18 +1707,25 @@ fn complete_splice(splice_in: bool) -> (Transaction, PreparedSplice) {
     (funding_tx_b, prepared)
 }
 
-/// Asserts the completed funding transaction spends contract A's funding output
-/// with a valid, combined 2-of-2 witness.
-fn assert_splice_input_signed(funding_tx_b: &Transaction, prepared: &PreparedSplice) {
+/// Asserts the completed funding transaction spends the output `splice_input`
+/// names, contract A's funding output, with a valid, combined 2-of-2 witness.
+fn assert_splice_input_signed(
+    funding_tx_b: &Transaction,
+    unsigned_fund_b: &Transaction,
+    splice_input: &FundingInput,
+) {
+    let previous_transaction: Transaction =
+        bitcoin::consensus::deserialize(&splice_input.prev_tx).unwrap();
+    let fund_outpoint_a = OutPoint {
+        txid: previous_transaction.compute_txid(),
+        vout: splice_input.prev_tx_vout,
+    };
     let input_index = funding_tx_b
         .input
         .iter()
-        .position(|tx_in| tx_in.previous_output == prepared.fund_outpoint_a)
+        .position(|tx_in| tx_in.previous_output == fund_outpoint_a)
         .expect("splice funding transaction must spend contract A's funding output");
-    assert_eq!(
-        funding_tx_b.compute_txid(),
-        prepared.unsigned_fund_b.compute_txid()
-    );
+    assert_eq!(funding_tx_b.compute_txid(), unsigned_fund_b.compute_txid());
 
     let witness: Vec<Vec<u8>> = funding_tx_b.input[input_index]
         .witness
@@ -1721,7 +1735,7 @@ fn assert_splice_input_signed(funding_tx_b: &Transaction, prepared: &PreparedSpl
     assert_eq!(witness.len(), 4, "expected a 2-of-2 witness");
     assert!(witness[0].is_empty(), "multisig witness must start empty");
 
-    let dlc_input_info: ddk_dlc::dlc_input::DlcInputInfo = (&prepared.splice_input).into();
+    let dlc_input_info: ddk_dlc::dlc_input::DlcInputInfo = splice_input.into();
     let expected_script = ddk_dlc::make_funding_redeemscript(
         &dlc_input_info.local_fund_pubkey,
         &dlc_input_info.remote_fund_pubkey,
@@ -1738,7 +1752,7 @@ fn assert_splice_input_signed(funding_tx_b: &Transaction, prepared: &PreparedSpl
             [&witness[1], &witness[2]].into_iter().any(|signature| {
                 ddk_dlc::dlc_input::verify_dlc_funding_input_signature(
                     &secp,
-                    &prepared.unsigned_fund_b,
+                    unsigned_fund_b,
                     input_index,
                     &dlc_input_info,
                     signature.clone(),
@@ -1754,7 +1768,11 @@ fn assert_splice_input_signed(funding_tx_b: &Transaction, prepared: &PreparedSpl
 #[test]
 fn splice_in_completes_the_lifecycle() {
     let (funding_tx_b, prepared) = complete_splice(true);
-    assert_splice_input_signed(&funding_tx_b, &prepared);
+    assert_splice_input_signed(
+        &funding_tx_b,
+        &prepared.unsigned_fund_b,
+        &prepared.splice_input,
+    );
     let fund_value_b = create_dlc_transactions(&prepared.offer_b, &prepared.accept_b)
         .unwrap()
         .get_fund_output()
@@ -1768,7 +1786,11 @@ fn splice_in_completes_the_lifecycle() {
 #[test]
 fn splice_out_completes_the_lifecycle() {
     let (funding_tx_b, prepared) = complete_splice(false);
-    assert_splice_input_signed(&funding_tx_b, &prepared);
+    assert_splice_input_signed(
+        &funding_tx_b,
+        &prepared.unsigned_fund_b,
+        &prepared.splice_input,
+    );
     let fund_value_b = create_dlc_transactions(&prepared.offer_b, &prepared.accept_b)
         .unwrap()
         .get_fund_output()
@@ -2246,4 +2268,317 @@ fn a_sign_message_that_matches_neither_rule_is_rejected() {
         ),
         Err(ContractError::InvalidSign(_))
     ));
+}
+
+// --- External signers ------------------------------------------------------
+//
+// A vault, an HSM or a hardware wallet holds a party's keys outside the
+// process. These tests run contracts through `ddk::contract::external` with
+// every key in an `ExternalSigner`; the code that runs the protocol never
+// holds one.
+
+/// One party's keys, apart from the code that runs the protocol: its contract
+/// funding key, the wallet key of its funding input, and its funding key of a
+/// contract it splices.
+struct ExternalSigner {
+    funding_secret_key: SecretKey,
+    xpriv: Xpriv,
+    derivation_path: DerivationPath,
+    prior_funding_secret_key: Option<SecretKey>,
+}
+
+impl ExternalSigner {
+    fn new(party: &PartySetup) -> Self {
+        Self {
+            funding_secret_key: party.funding_secret_key,
+            xpriv: party.xpriv,
+            derivation_path: party.derivation_path.clone(),
+            prior_funding_secret_key: None,
+        }
+    }
+
+    fn splicing(mut self, prior_funding_secret_key: SecretKey) -> Self {
+        self.prior_funding_secret_key = Some(prior_funding_secret_key);
+        self
+    }
+
+    fn sign_contract(&self, request: &ContractSigningRequest) -> ContractSignatures {
+        external_signer::sign_contract(request, &self.funding_secret_key)
+    }
+
+    /// Signs and finalizes the party's wallet input as a wallet outside DDK
+    /// does, then leaves its half of each splice input.
+    fn sign_funding(&self, request: &FundingSigningRequest) -> Psbt {
+        let secp = Secp256k1::new();
+        let signed = external_wallet_sign(
+            request.psbt.serialize(),
+            &self.xpriv,
+            &self.derivation_path,
+            &secp,
+        );
+        let mut psbt = Psbt::deserialize(&signed).unwrap();
+        if let Some(prior_funding_secret_key) = &self.prior_funding_secret_key {
+            external_signer::sign_splice_inputs(request, prior_funding_secret_key, &mut psbt);
+        }
+        psbt
+    }
+}
+
+/// An offer between two parties whose keys are held by external signers, and
+/// the accepting party's parameters for it.
+struct ExternalContract {
+    offer: OfferDlc,
+    accept_params: AcceptOfferParams,
+    offerer: ExternalSigner,
+    accepter: ExternalSigner,
+}
+
+/// A dual-funded enum contract, offered.
+fn externally_signed_offer(secp: &Secp256k1<All>) -> ExternalContract {
+    let offerer = PartySetup::new(secp, 71, NETWORK, Amount::from_sat(150_000), 1);
+    let accepter = PartySetup::new(secp, 72, NETWORK, Amount::from_sat(150_000), 2);
+    ExternalContract {
+        offer: create_offer(offer_params(
+            secp,
+            &offerer,
+            enum_contract_info(TOTAL_COLLATERAL),
+            Amount::from_sat(50_000),
+            NETWORK,
+            vec![offerer.funding_input.clone()],
+        ))
+        .unwrap(),
+        accept_params: AcceptOfferParams {
+            party: accepter.party_params(secp, vec![accepter.funding_input.clone()]),
+            min_timeout_interval: MIN_TIMEOUT,
+            max_timeout_interval: MAX_TIMEOUT,
+            now_unix: NOW_UNIX,
+        },
+        offerer: ExternalSigner::new(&offerer),
+        accepter: ExternalSigner::new(&accepter),
+    }
+}
+
+/// A funded contract A, and an offer of contract B that splices A's funding
+/// output and adds a wallet input of the offering party. Each signer holds its
+/// party's keys of both contracts. Also returns the splice input and A's
+/// temporary id.
+fn externally_signed_splice_offer(
+    secp: &Secp256k1<All>,
+) -> (ExternalContract, FundingInput, [u8; 32]) {
+    let (offerer_a, accepter_a, offer_a, accept_a) = enum_contract(secp, NETWORK);
+    let (sign_a, _) = fund_with_xpriv(secp, &offerer_a, &accepter_a, &offer_a, &accept_a);
+    let fund_value_a = create_dlc_transactions(&offer_a, &accept_a)
+        .unwrap()
+        .get_fund_output()
+        .value;
+    let splice_input = create_dlc_splice_input(
+        &offer_a,
+        &accept_a,
+        &sign_a,
+        Party::Offer,
+        Some(900),
+        DLC_INPUT_MAX_WITNESS_LEN,
+    )
+    .unwrap();
+
+    let offerer_b = PartySetup::new(secp, 75, NETWORK, Amount::from_sat(200_000), 10);
+    let accepter_b = PartySetup::new(secp, 76, NETWORK, Amount::from_sat(200_000), 11);
+    let collateral = fund_value_a + Amount::from_sat(40_000);
+    let contract = ExternalContract {
+        offer: create_offer(offer_params(
+            secp,
+            &offerer_b,
+            enum_contract_info(collateral),
+            collateral,
+            NETWORK,
+            vec![splice_input.clone(), offerer_b.funding_input.clone()],
+        ))
+        .unwrap(),
+        accept_params: AcceptOfferParams {
+            party: accepter_b.party_params(secp, vec![]),
+            min_timeout_interval: MIN_TIMEOUT,
+            max_timeout_interval: MAX_TIMEOUT,
+            now_unix: NOW_UNIX,
+        },
+        offerer: ExternalSigner::new(&offerer_b).splicing(offerer_a.funding_secret_key),
+        accepter: ExternalSigner::new(&accepter_b).splicing(accepter_a.funding_secret_key),
+    };
+    (contract, splice_input, offer_a.temporary_contract_id)
+}
+
+/// The accept message, made by the accepting party's signer, and what the
+/// offering party is then asked to sign.
+fn sign_request_for(contract: &ExternalContract) -> (AcceptDlc, external::SignRequest) {
+    let request =
+        external::accept_request(&contract.offer, contract.accept_params.clone()).unwrap();
+    let signatures = contract.accepter.sign_contract(request.contract());
+    let accept = external::complete_accept(request, signatures)
+        .unwrap()
+        .accept;
+    let request = external::sign_request(&contract.offer, &accept).unwrap();
+    (accept, request)
+}
+
+/// Runs `contract` from its offer to a complete funding transaction, every
+/// signature made by the two external signers.
+fn fund_with_external_signers(contract: &ExternalContract) -> (AcceptDlc, SignDlc, Transaction) {
+    let (accept, request) = sign_request_for(contract);
+    let signatures = contract.offerer.sign_contract(request.contract());
+    let funding_psbt = contract.offerer.sign_funding(request.funding());
+    let sign = external::complete_sign(request, signatures, &funding_psbt)
+        .unwrap()
+        .sign;
+
+    let request = external::finalize_request(&contract.offer, &accept, &sign).unwrap();
+    let funding_psbt = contract.accepter.sign_funding(request.funding());
+    let funding_transaction = external::complete_finalize(request, &funding_psbt).unwrap();
+    (accept, sign, funding_transaction)
+}
+
+#[test]
+fn external_signers_fund_a_contract_that_settles() {
+    let secp = Secp256k1::new();
+    let contract = externally_signed_offer(&secp);
+
+    // The adaptor points a signer is asked for are the offer's, whoever asks.
+    let request =
+        external::accept_request(&contract.offer, contract.accept_params.clone()).unwrap();
+    assert_eq!(
+        request.contract().adaptor_points,
+        advanced::cet_adaptor_points(&contract.offer).unwrap()
+    );
+
+    let (accept, sign, funding_transaction) = fund_with_external_signers(&contract);
+    assert_funding_transaction_complete(&funding_transaction, &contract.offer, &accept);
+
+    // Settlement verifies both parties' signatures from the messages, so a
+    // contract the signers made settles like any other.
+    let cet = sign_cet(
+        &contract.offer,
+        &accept,
+        &sign,
+        &contract.offerer.funding_secret_key,
+        &[(0, oracle_attestation(vec!["up".to_string()]))],
+    )
+    .unwrap();
+    assert_spends_funding_output(&cet, &contract.offer, &accept, &funding_transaction);
+    let refund = sign_refund(
+        &contract.offer,
+        &accept,
+        &sign,
+        &contract.accepter.funding_secret_key,
+    )
+    .unwrap();
+    assert_spends_funding_output(&refund, &contract.offer, &accept, &funding_transaction);
+}
+
+#[test]
+fn external_signers_splice_a_contract() {
+    let secp = Secp256k1::new();
+    let (contract, splice_input, temporary_contract_id_a) = externally_signed_splice_offer(&secp);
+    let (accept, sign, funding_transaction) = fund_with_external_signers(&contract);
+
+    let transactions = create_dlc_transactions(&contract.offer, &accept).unwrap();
+    assert_splice_input_signed(&funding_transaction, &transactions.fund, &splice_input);
+    // A signer that derives a key per contract finds its key of contract A
+    // from the request alone.
+    let request = external::sign_request(&contract.offer, &accept).unwrap();
+    assert_eq!(
+        request.funding().splice_inputs[0].temporary_contract_id,
+        temporary_contract_id_a
+    );
+
+    sign_cet(
+        &contract.offer,
+        &accept,
+        &sign,
+        &contract.accepter.funding_secret_key,
+        &[(0, oracle_attestation(vec!["down".to_string()]))],
+    )
+    .unwrap();
+}
+
+#[test]
+fn completion_rejects_a_changed_funding_transaction() {
+    let secp = Secp256k1::new();
+    let contract = externally_signed_offer(&secp);
+    let (_, request) = sign_request_for(&contract);
+    let signatures = contract.offerer.sign_contract(request.contract());
+    let mut funding_psbt = contract.offerer.sign_funding(request.funding());
+    funding_psbt.unsigned_tx.output[0].value += Amount::from_sat(1);
+    assert!(matches!(
+        external::complete_sign(request, signatures, &funding_psbt),
+        Err(ContractError::PsbtMismatch(_))
+    ));
+}
+
+#[test]
+fn completion_rejects_signatures_by_the_wrong_key() {
+    let secp = Secp256k1::new();
+    let foreign_key = SecretKey::from_slice(&[99; 32]).unwrap();
+
+    // The refund and CETs, signed with a key that is not the contract's.
+    let contract = externally_signed_offer(&secp);
+    let request =
+        external::accept_request(&contract.offer, contract.accept_params.clone()).unwrap();
+    let signatures = external_signer::sign_contract(request.contract(), &foreign_key);
+    assert!(matches!(
+        external::complete_accept(request, signatures),
+        Err(ContractError::InvalidSignature(_))
+    ));
+
+    // A splice half, signed with a key that is not the previous contract's.
+    let (mut contract, _, _) = externally_signed_splice_offer(&secp);
+    contract.offerer.prior_funding_secret_key = Some(foreign_key);
+    let (_, request) = sign_request_for(&contract);
+    let signatures = contract.offerer.sign_contract(request.contract());
+    let funding_psbt = contract.offerer.sign_funding(request.funding());
+    assert!(matches!(
+        external::complete_sign(request, signatures, &funding_psbt),
+        Err(ContractError::InvalidSignature(_))
+    ));
+}
+
+#[test]
+fn completion_rejects_a_sighash_other_than_all() {
+    let secp = Secp256k1::new();
+
+    let contract = externally_signed_offer(&secp);
+    let request =
+        external::accept_request(&contract.offer, contract.accept_params.clone()).unwrap();
+    let mut signatures = contract.accepter.sign_contract(request.contract());
+    signatures.refund_signature.sighash_type = EcdsaSighashType::SinglePlusAnyoneCanPay;
+    assert!(matches!(
+        external::complete_accept(request, signatures),
+        Err(ContractError::InvalidSignature(_))
+    ));
+
+    let (contract, _, _) = externally_signed_splice_offer(&secp);
+    let (_, request) = sign_request_for(&contract);
+    let signatures = contract.offerer.sign_contract(request.contract());
+    let mut funding_psbt = contract.offerer.sign_funding(request.funding());
+    let splice_index = request.funding().splice_inputs[0].input_index;
+    for signature in funding_psbt.inputs[splice_index].partial_sigs.values_mut() {
+        signature.sighash_type = EcdsaSighashType::NonePlusAnyoneCanPay;
+    }
+    assert!(matches!(
+        external::complete_sign(request, signatures, &funding_psbt),
+        Err(ContractError::InvalidSignature(_))
+    ));
+}
+
+#[test]
+fn completion_rejects_a_wrong_number_of_adaptor_signatures() {
+    let secp = Secp256k1::new();
+    let contract = externally_signed_offer(&secp);
+    let request =
+        external::accept_request(&contract.offer, contract.accept_params.clone()).unwrap();
+    let mut signatures = contract.accepter.sign_contract(request.contract());
+    signatures.cet_adaptor_signatures.pop();
+    match external::complete_accept(request, signatures) {
+        Err(ContractError::InvalidSignature(message)) => {
+            assert!(message.contains("adaptor signatures"), "{message}");
+        }
+        other => panic!("expected an invalid signature error, got {:?}", other.err()),
+    }
 }

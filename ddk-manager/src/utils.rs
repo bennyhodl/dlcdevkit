@@ -1,7 +1,7 @@
 //! #Utils
 use std::ops::Deref;
 
-use bitcoin::{consensus::Encodable, Amount, ScriptBuf, Txid};
+use bitcoin::{consensus::Encodable, Amount, ScriptBuf};
 use ddk_dlc::{dlc_input::DlcInputInfo, util::get_common_fee, PartyParams, TxInputInfo};
 use ddk_messages::{
     oracle_msgs::{OracleAnnouncement, OracleAttestation},
@@ -71,20 +71,6 @@ pub(crate) fn get_new_temporary_id() -> [u8; 32] {
     use rand_chacha::rand_core::SeedableRng;
     let mut res = [0u8; 32];
     rand_chacha::ChaCha8Rng::from_seed([0u8; 32]).fill_bytes(&mut res);
-    res
-}
-
-pub(crate) fn compute_id(
-    fund_tx_id: Txid,
-    fund_output_index: u16,
-    temporary_id: &[u8; 32],
-) -> [u8; 32] {
-    let mut res = [0; 32];
-    for i in 0..32 {
-        res[i] = fund_tx_id[31 - i] ^ temporary_id[i];
-    }
-    res[30] ^= ((fund_output_index >> 8) & 0xff) as u8;
-    res[31] ^= (fund_output_index & 0xff) as u8;
     res
 }
 
@@ -372,7 +358,10 @@ mod tests {
         let expected_id =
             str_to_hex("81db60dcbef10a2d0cb92cb78400a96ee6a9b6da785d0230bdabf1e18a2d6ffb");
 
-        let id = compute_id(transaction.compute_txid(), output_index, &temporary_id);
+        let id = crate::contract::contract_id_from_outpoint(
+            bitcoin::OutPoint::new(transaction.compute_txid(), output_index),
+            &temporary_id,
+        );
 
         assert_eq!(expected_id, id);
     }

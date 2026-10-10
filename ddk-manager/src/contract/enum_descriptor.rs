@@ -204,6 +204,25 @@ impl EnumDescriptor {
         Ok((AdaptorInfo::Enum, adaptor_sigs))
     }
 
+    /// Returns, in adaptor signature order, the index of the CET each adaptor
+    /// signature signs and the adaptor point it is encrypted to: per outcome,
+    /// one for each combination of `threshold` oracles.
+    pub fn get_adaptor_points<C: Verification>(
+        &self,
+        secp: &Secp256k1<C>,
+        oracle_infos: &[OracleInfo],
+        threshold: usize,
+    ) -> Result<Vec<(usize, PublicKey)>, ddk_dlc::Error> {
+        let mut points = Vec::new();
+        let mut callback =
+            |adaptor_point: &PublicKey, cet_index: usize| -> Result<(), ddk_dlc::Error> {
+                points.push((cet_index, *adaptor_point));
+                Ok(())
+            };
+        self.iter_outcomes(secp, oracle_infos, threshold, &mut callback)?;
+        Ok(points)
+    }
+
     /// Generate the set of adaptor signatures.
     #[allow(clippy::too_many_arguments)]
     pub fn get_adaptor_signatures(

@@ -39,9 +39,11 @@ impl AcceptedContract {
     /// Returns the contract id for the contract computed as specified here:
     /// <https://github.com/discreetlogcontracts/dlcspecs/blob/master/Protocol.md#requirements-2>
     pub fn get_contract_id(&self) -> [u8; 32] {
-        crate::utils::compute_id(
-            self.dlc_transactions.fund.compute_txid(),
-            self.dlc_transactions.get_fund_output_index() as u16,
+        super::contract_id_from_outpoint(
+            bitcoin::OutPoint::new(
+                self.dlc_transactions.fund.compute_txid(),
+                self.dlc_transactions.get_fund_output_index() as u32,
+            ),
             &self.offered_contract.id,
         )
     }

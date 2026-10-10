@@ -45,8 +45,9 @@
 //!
 //! Funding inputs are regular wallet UTXOs, and wallets speak PSBT. The
 //! funding PSBT built by [`create_funding_psbt`](crate::contract::create_funding_psbt) carries everything a signer
-//! needs (`witness_utxo`, `non_witness_utxo`, redeem scripts, sighash type)
-//! and never contains private key material. [`sign_accept`](crate::contract::sign_accept) and
+//! needs (`witness_utxo`, `non_witness_utxo`, redeem scripts, sighash type,
+//! and the 2-of-2 `witness_script` of a splice input) and never contains
+//! private key material. [`sign_accept`](crate::contract::sign_accept) and
 //! [`finalize_sign`](crate::contract::finalize_sign) verify that a returned PSBT spends exactly the funding
 //! transaction rebuilt from the messages — input count, outpoints, outputs,
 //! locktime, and sequences — before extracting witnesses, so a signer cannot
@@ -73,6 +74,17 @@
 //! the input keys (PSBT exchange) while the application holds the DLC funding
 //! key.
 //!
+//! # Keys outside the process
+//!
+//! The lifecycle functions above take the DLC funding key as an argument. A
+//! vault, an HSM, a browser extension or a hardware signer that keeps it, and
+//! the input keys, elsewhere drives the same lifecycle through
+//! [`external`](crate::contract::external): each step is split into a request
+//! saying exactly what to sign, as PSBTs and adaptor points, and a completion
+//! that verifies what the signer returns before building the message. The
+//! key-in-process functions are those same two halves with the signing done in
+//! between, so both kinds of signer go through one code path.
+//!
 //! # Script support
 //!
 //! Built-in signers support native P2WPKH and P2SH-P2WPKH funding inputs;
@@ -94,7 +106,11 @@
 //! supplied to [`sign_accept_spliced`](crate::contract::sign_accept_spliced)
 //! (offering party) and
 //! [`finalize_sign_spliced`](crate::contract::finalize_sign_spliced) (accepting
-//! party) as [`DlcInputSigningKey`](crate::contract::DlcInputSigningKey) values.
+//! party) as [`DlcInputSigningKey`](crate::contract::DlcInputSigningKey) values,
+//! which [`ContractKeyProvider::dlc_input_signing_key`](crate::contract::ContractKeyProvider::dlc_input_signing_key)
+//! recovers from the splice input alone. A signer that keeps that key
+//! elsewhere leaves its half as a partial signature on the input in the
+//! funding PSBT instead.
 //!
 //! # Settlement
 //!
@@ -136,6 +152,7 @@
 //! live in [`advanced`](crate::contract::advanced).
 
 pub mod advanced;
+pub mod external;
 pub mod signing;
 
 mod accept;
@@ -163,8 +180,9 @@ pub use settle::{sign_cet, sign_refund};
 pub use sign::{sign_accept, sign_accept_spliced};
 pub use splice::{create_dlc_splice_input, DLC_INPUT_MAX_WITNESS_LEN};
 pub use types::{
-    chain_hash_from_network, funding_input, AcceptOfferParams, AcceptResult, CreateOfferParams,
-    DescriptorInput, DlcInputSigningKey, InputDerivation, Party, PartyParams, SignResult,
+    chain_hash_from_network, funding_input, network_from_chain_hash, AcceptOfferParams,
+    AcceptResult, CreateOfferParams, DescriptorInput, DlcInputSigningKey, InputDerivation, Party,
+    PartyParams, SignResult,
 };
 
 /// The current DLC protocol version used by DDK.

@@ -145,6 +145,32 @@ pub trait DlcTrie<'a, TrieIterator: Iterator<Item = TrieIterInfo>> {
         )
     }
 
+    /// Generate the trie and return what each adaptor signature is made over:
+    /// the index of the CET it signs and the adaptor point it is encrypted
+    /// to, in adaptor signature order.
+    ///
+    /// This is the input to [`DlcTrie::generate_sign`] without the signing, for
+    /// a signer that holds the funding key outside the process.
+    fn generate_adaptor_points(
+        &'a mut self,
+        outcomes: &[RangePayout],
+        precomputed_points: &[Vec<Vec<PublicKey>>],
+    ) -> Result<Vec<(usize, PublicKey)>, Error> {
+        let mut trie_info = self.generate(0, outcomes)?;
+        trie_info.sort_by_key(|info| info.value.adaptor_index);
+        trie_info
+            .iter()
+            .map(|info| {
+                let adaptor_point = utils::get_adaptor_point_for_indexed_paths(
+                    &info.indexes,
+                    &info.paths,
+                    precomputed_points,
+                )?;
+                Ok((info.value.cet_index, adaptor_point))
+            })
+            .collect()
+    }
+
     /// Generate the trie while creating the set of adaptor signatures.
     #[allow(clippy::too_many_arguments)]
     fn generate_sign(

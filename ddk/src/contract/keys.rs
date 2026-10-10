@@ -41,7 +41,8 @@
 //! This is the mechanism the stateless splice API needs. To spend a previous
 //! contract's funding output the caller must supply that contract's funding
 //! secret key ([`DlcInputSigningKey`]); [`ContractKeyProvider::dlc_input_signing_key`]
-//! re-derives it from the previous contract's temporary id.
+//! re-derives it from the splice input, which gives back the previous
+//! contract's temporary id.
 //!
 //! [`ContractKeyProvider`] is the standalone form of the derivation implemented
 //! by [`crate::wallet::DlcDevKitWallet`], which delegates to it — so keys are
@@ -59,7 +60,10 @@ use bitcoin::Network;
 use ddk_manager::SimpleSigner;
 use zeroize::Zeroize;
 
+use ddk_messages::FundingInput;
+
 use super::error::ContractError;
+use super::splice::prior_temporary_contract_id;
 use super::types::DlcInputSigningKey;
 
 /// Range of child numbers per hierarchical level. `3400^3 ≈ 39.3` billion paths
@@ -330,25 +334,46 @@ impl ContractKeyProvider {
             .public_key(&self.secp))
     }
 
-    /// Re-derives the previous contract's funding secret key and wraps it as a
-    /// [`DlcInputSigningKey`] for the splice input identified by `input_serial_id`.
+    /// Re-derives this party's funding secret key of the contract a splice
+    /// input spends, and wraps it as a [`DlcInputSigningKey`] for that input.
     /// Pass the result to [`sign_accept_spliced`](super::sign_accept_spliced) or
     /// [`finalize_sign_spliced`](super::finalize_sign_spliced).
     ///
-    /// `prior_funding_pubkey` is this party's funding public key from the
-    /// previous contract's offer or accept message. It selects the scheme the
-    /// previous contract was made under, so contracts funded before
-    /// `2.0.0-rc.3` splice correctly. The call fails if no scheme reproduces it.
+    /// The input is enough: it names the previous contract by contract id and
+    /// carries its funding transaction, which together give back the previous
+    /// temporary id
+    /// ([`temporary_contract_id_from_outpoint`](super::advanced::temporary_contract_id_from_outpoint)),
+    /// and it carries both of that contract's funding public keys. The key
+    /// returned is the one of the two this provider derives, under whichever
+    /// scheme the previous contract was made with, so contracts funded before
+    /// `2.0.0-rc.3` splice correctly. The call fails if `splice_input` is not a
+    /// splice input or the provider derives neither key.
     pub fn dlc_input_signing_key(
         &self,
-        prior_temporary_contract_id: [u8; 32],
-        prior_funding_pubkey: &PublicKey,
-        input_serial_id: u64,
+        splice_input: &FundingInput,
     ) -> Result<DlcInputSigningKey, ContractError> {
+        let dlc_input = splice_input.dlc_input.as_ref().ok_or_else(|| {
+            ContractError::InvalidFundingInput(format!(
+                "funding input serial id {} is not a splice input",
+                splice_input.input_serial_id
+            ))
+        })?;
+        let prior_temporary_contract_id = prior_temporary_contract_id(splice_input, dlc_input)?;
+        let prior_funding_secret_key = [dlc_input.local_fund_pubkey, dlc_input.remote_fund_pubkey]
+            .iter()
+            .find_map(|funding_pubkey| {
+                self.funding_secret_key_for_pubkey(prior_temporary_contract_id, funding_pubkey)
+                    .ok()
+            })
+            .ok_or_else(|| {
+                ContractError::Key(format!(
+                    "no key scheme derives either funding pubkey of splice input serial id {}",
+                    splice_input.input_serial_id
+                ))
+            })?;
         Ok(DlcInputSigningKey {
-            input_serial_id,
-            prior_funding_secret_key: self
-                .funding_secret_key_for_pubkey(prior_temporary_contract_id, prior_funding_pubkey)?,
+            input_serial_id: splice_input.input_serial_id,
+            prior_funding_secret_key,
         })
     }
 
@@ -638,26 +663,63 @@ mod tests {
         ));
     }
 
+    /// A splice input spending the 2-of-2 of a contract negotiated under
+    /// `TEMP_A`. Like a real one, it names the contract only by contract id.
+    fn splice_input(local: PublicKey, remote: PublicKey, input_serial_id: u64) -> FundingInput {
+        use bitcoin::{
+            transaction::Version, Amount, OutPoint, ScriptBuf, Transaction, TxIn, TxOut,
+        };
+        let funding_transaction = Transaction {
+            version: Version::TWO,
+            lock_time: bitcoin::absolute::LockTime::ZERO,
+            input: vec![TxIn::default()],
+            output: vec![TxOut {
+                value: Amount::from_sat(100_000),
+                script_pubkey: ddk_dlc::make_funding_redeemscript(&local, &remote).to_p2wsh(),
+            }],
+        };
+        let contract_id = ddk_manager::contract::contract_id_from_outpoint(
+            OutPoint::new(funding_transaction.compute_txid(), 0),
+            &TEMP_A,
+        );
+        FundingInput {
+            input_serial_id,
+            prev_tx: bitcoin::consensus::serialize(&funding_transaction),
+            prev_tx_vout: 0,
+            sequence: u32::MAX,
+            max_witness_len: super::super::DLC_INPUT_MAX_WITNESS_LEN,
+            redeem_script: ScriptBuf::new(),
+            dlc_input: Some(ddk_messages::DlcInput {
+                local_fund_pubkey: local,
+                remote_fund_pubkey: remote,
+                contract_id,
+            }),
+        }
+    }
+
     #[test]
     fn dlc_input_signing_key_recovers_the_prior_key_under_either_scheme() {
         let keys = provider();
+        let stranger = keys.funding_pubkey(TEMP_B).unwrap();
         let v1 = keys
-            .dlc_input_signing_key(TEMP_A, &pk(V1_FUNDING_PK), 900)
+            .dlc_input_signing_key(&splice_input(pk(V1_FUNDING_PK), stranger, 900))
             .unwrap();
         assert_eq!(v1.input_serial_id, 900);
         assert_eq!(
             v1.prior_funding_secret_key,
             keys.funding_secret_key(TEMP_A).unwrap()
         );
+        // This party's key may be either one of the 2-of-2: the input orders
+        // them by who offers the splice, not by who holds them.
         let v0 = keys
-            .dlc_input_signing_key(TEMP_A, &pk(V0_FUNDING_PK), 901)
+            .dlc_input_signing_key(&splice_input(stranger, pk(V0_FUNDING_PK), 901))
             .unwrap();
         assert_eq!(
             v0.prior_funding_secret_key.public_key(&keys.secp),
             pk(V0_FUNDING_PK)
         );
         assert!(keys
-            .dlc_input_signing_key(TEMP_A, &keys.funding_pubkey(TEMP_B).unwrap(), 902)
+            .dlc_input_signing_key(&splice_input(stranger, stranger, 902))
             .is_err());
     }
 

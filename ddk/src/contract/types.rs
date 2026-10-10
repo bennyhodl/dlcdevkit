@@ -1,5 +1,6 @@
 //! Parameter and result types for the stateless contract API.
 
+use bitcoin::constants::ChainHash;
 use bitcoin::key::rand::{thread_rng, Rng};
 use bitcoin::psbt::Psbt;
 use bitcoin::{Amount, Network, ScriptBuf, Transaction};
@@ -202,15 +203,13 @@ pub fn chain_hash_from_network(network: Network) -> [u8; 32] {
     ddk_manager::contract::chain_hash_from_network(network)
 }
 
-pub(crate) fn network_from_chain_hash(chain_hash: [u8; 32]) -> Option<Network> {
-    [
-        Network::Bitcoin,
-        Network::Testnet,
-        Network::Signet,
-        Network::Regtest,
-    ]
-    .into_iter()
-    .find(|network| chain_hash_from_network(*network) == chain_hash)
+/// Returns the network an offer's `chain_hash` names, the inverse of
+/// [`chain_hash_from_network`], or `None` for a chain no [`Network`] is.
+///
+/// A signer checks it before signing, so that keys for one network never sign
+/// a contract on another.
+pub fn network_from_chain_hash(chain_hash: [u8; 32]) -> Option<Network> {
+    Network::from_chain_hash(ChainHash::from(chain_hash))
 }
 
 pub(crate) fn random_serial_id() -> u64 {
