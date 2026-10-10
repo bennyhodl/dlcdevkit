@@ -6,15 +6,18 @@ use ddk_dlc::dlc_input::DlcInputInfo;
 use ddk_dlc::secp256k1_zkp::{PublicKey, Secp256k1};
 use ddk_messages::{AcceptDlc, FundingSignatures, OfferDlc, SignDlc};
 
-use super::context::{
-    apply_funding_signatures, context_from_messages, ensure_sign_message, funding_input_index,
-    verify_counterparty_signatures, ContractContext,
-};
+use super::context::{apply_funding_signatures, funding_input_index, splice_half};
 use super::error::ContractError;
 use super::psbt::{ensure_psbt_matches_funding_transaction, extract_funding_signatures};
 use super::types::{DlcInputSigningKey, Party};
+use super::verify::{verify_signed_contract, VerifiedContract};
 
 /// Verifies the sign message and completes the funding transaction.
+///
+/// The three messages are checked with
+/// [`verify_signed_contract`](super::verify_signed_contract) first, so a sign
+/// message with a bad signature or funding witness is rejected before any
+/// transaction is returned.
 ///
 /// `signed_funding_psbt` must contain finalized witnesses for every
 /// accept-side funding input; for single-funded contracts with no accept-side
@@ -47,16 +50,16 @@ pub fn finalize_sign_spliced(
     signed_funding_psbt: &Psbt,
     dlc_input_keys: &[DlcInputSigningKey],
 ) -> Result<Transaction, ContractError> {
-    let context = context_from_messages(offer, accept)?;
-    ensure_psbt_matches_funding_transaction(signed_funding_psbt, &context.transactions.fund)?;
+    let contract = verify_signed_contract(offer, accept, sign)?;
+    ensure_psbt_matches_funding_transaction(signed_funding_psbt, &contract.transactions().fund)?;
     let funding_signatures =
         extract_funding_signatures(offer, accept, Party::Accept, signed_funding_psbt)?;
-    finalize_with_context(
+    complete_funding_transaction(
         offer,
         accept,
         sign,
+        &contract,
         funding_signatures,
-        context,
         dlc_input_keys,
     )
 }
@@ -69,23 +72,26 @@ pub(crate) fn finalize_sign_internal(
     funding_signatures: FundingSignatures,
     dlc_input_keys: &[DlcInputSigningKey],
 ) -> Result<Transaction, ContractError> {
-    let context = context_from_messages(offer, accept)?;
-    finalize_with_context(
+    let contract = verify_signed_contract(offer, accept, sign)?;
+    complete_funding_transaction(
         offer,
         accept,
         sign,
+        &contract,
         funding_signatures,
-        context,
         dlc_input_keys,
     )
 }
 
-fn finalize_with_context(
+/// Adds both parties' funding witnesses to the verified contract's funding
+/// transaction: the offering party's from the sign message, this party's from
+/// `funding_signatures`, and the combined 2-of-2 witness of each splice input.
+fn complete_funding_transaction(
     offer: &OfferDlc,
     accept: &AcceptDlc,
     sign: &SignDlc,
+    contract: &VerifiedContract,
     funding_signatures: FundingSignatures,
-    context: ContractContext,
     dlc_input_keys: &[DlcInputSigningKey],
 ) -> Result<Transaction, ContractError> {
     if funding_signatures.funding_signatures.len() != accept.funding_inputs.len() {
@@ -95,31 +101,7 @@ fn finalize_with_context(
             funding_signatures.funding_signatures.len()
         )));
     }
-    ensure_sign_message(offer, sign, &context)?;
-    if sign.funding_signatures.funding_signatures.len() != offer.funding_inputs.len() {
-        return Err(ContractError::InvalidSign(format!(
-            "sign message carries {} funding signatures but the offer has {} funding inputs",
-            sign.funding_signatures.funding_signatures.len(),
-            offer.funding_inputs.len()
-        )));
-    }
-
-    let secp = Secp256k1::new();
-    verify_counterparty_signatures(
-        &secp,
-        &context,
-        offer.get_total_collateral(),
-        offer.funding_pubkey,
-        &sign.refund_signature,
-        &sign.cet_adaptor_signatures,
-        ContractError::InvalidSign,
-    )?;
-
-    // Splice inputs' 2-of-2 signatures are computed over the unsigned funding
-    // transaction (the SegWit sighash does not commit to other inputs' witnesses),
-    // matching what the offering party signed.
-    let unsigned_funding_transaction = context.transactions.fund.clone();
-    let mut funding_transaction = context.transactions.fund;
+    let mut funding_transaction = contract.transactions().fund.clone();
     apply_funding_signatures(
         &mut funding_transaction,
         offer,
@@ -136,19 +118,22 @@ fn finalize_with_context(
     )?;
     complete_dlc_input_witnesses(
         &mut funding_transaction,
-        &unsigned_funding_transaction,
+        &contract.transactions().fund,
         offer,
         accept,
         sign,
         dlc_input_keys,
     )?;
-
     Ok(funding_transaction)
 }
 
-/// Verifies the offering party's DLC-input half signatures and combines them
-/// with this (accepting) party's half to complete each splice input's 2-of-2
-/// witness on the funding transaction.
+/// Combines the offering party's DLC-input half signatures, already verified
+/// by [`verify_signed_contract`], with this (accepting) party's half to
+/// complete each splice input's 2-of-2 witness on the funding transaction.
+///
+/// This party's half is computed over the unsigned funding transaction (the
+/// SegWit sighash does not commit to other inputs' witnesses), matching what
+/// the offering party signed.
 fn complete_dlc_input_witnesses(
     funding_transaction: &mut Transaction,
     unsigned_funding_transaction: &Transaction,
@@ -168,31 +153,6 @@ fn complete_dlc_input_witnesses(
         };
         let input_index = funding_input_index(offer, accept, input.input_serial_id)?;
         let dlc_input_info: DlcInputInfo = input.into();
-        let offer_half = offer_signature
-            .witness_elements
-            .first()
-            .ok_or_else(|| {
-                ContractError::InvalidSign(format!(
-                    "DLC input serial id {} funding signature is empty",
-                    input.input_serial_id
-                ))
-            })?
-            .witness
-            .clone();
-        ddk_dlc::dlc_input::verify_dlc_funding_input_signature(
-            &secp,
-            unsigned_funding_transaction,
-            input_index,
-            &dlc_input_info,
-            offer_half.clone(),
-            &dlc_input.local_fund_pubkey,
-        )
-        .map_err(|e| {
-            ContractError::InvalidSign(format!(
-                "invalid DLC input signature for serial id {}: {e}",
-                input.input_serial_id
-            ))
-        })?;
         let signing_key = dlc_input_keys
             .iter()
             .find(|key| key.input_serial_id == input.input_serial_id)
@@ -221,10 +181,10 @@ fn complete_dlc_input_witnesses(
             ddk_dlc::dlc_input::combine_dlc_input_signatures(
                 &dlc_input_info,
                 &accept_half,
-                &offer_half,
+                splice_half(input.input_serial_id, dlc_input, offer_signature)?,
                 &dlc_input.remote_fund_pubkey,
                 &dlc_input.local_fund_pubkey,
-            );
+            )?;
     }
     Ok(())
 }

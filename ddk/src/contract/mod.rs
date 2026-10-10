@@ -82,6 +82,30 @@
 //! signatures. External signers can fund with any script type they can
 //! finalize themselves.
 //!
+//! The accepting party verifies the offering party's funding witnesses (see
+//! below) for native P2WPKH, P2SH-P2WPKH and Taproot key-path spends, which
+//! must sign with `SIGHASH_ALL`. A witness for any other script type cannot be
+//! checked: it does not fail verification, and is not treated as verified
+//! either. Its input is listed in
+//! [`VerifiedContract::unverified_funding_inputs`](crate::contract::VerifiedContract::unverified_funding_inputs),
+//! [`finalize_sign`](crate::contract::finalize_sign) proceeds, and the chain is
+//! the final check of that witness.
+//!
+//! # Verifying a signed contract
+//!
+//! [`verify_signed_contract`](crate::contract::verify_signed_contract) checks
+//! that the three messages describe one contract and that every signature they
+//! carry is valid: both parties' refund and CET adaptor signatures, the
+//! offering party's funding witnesses, and its halves of any splice inputs. It
+//! returns a [`VerifiedContract`](crate::contract::VerifiedContract) holding
+//! the contract id, the transactions, and the offer funding inputs whose
+//! script type could not be checked. [`finalize_sign`](crate::contract::finalize_sign)
+//! runs it before completing the funding transaction; call it directly to check
+//! messages received or restored from elsewhere, and require
+//! `unverified_funding_inputs()` to be empty if every signature must be known
+//! valid. The accepting party's funding witnesses are not part of the
+//! messages, so no one can verify them from the messages alone.
+//!
 //! # Splicing
 //!
 //! A new contract can spend a previous contract's 2-of-2 funding output as an
@@ -149,6 +173,7 @@ mod settle;
 mod sign;
 mod splice;
 mod types;
+mod verify;
 
 #[cfg(test)]
 mod tests;
@@ -166,6 +191,7 @@ pub use types::{
     chain_hash_from_network, funding_input, AcceptOfferParams, AcceptResult, CreateOfferParams,
     DescriptorInput, DlcInputSigningKey, InputDerivation, Party, PartyParams, SignResult,
 };
+pub use verify::{verify_signed_contract, VerifiedContract};
 
 /// The current DLC protocol version used by DDK.
 pub const PROTOCOL_VERSION: u32 = 1;

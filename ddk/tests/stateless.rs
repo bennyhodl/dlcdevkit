@@ -10,16 +10,20 @@ use bitcoin::absolute::LockTime;
 use bitcoin::bip32::{DerivationPath, Xpriv};
 use bitcoin::hashes::Hash;
 use bitcoin::psbt::Psbt;
+use bitcoin::sighash::{EcdsaSighashType, SighashCache};
 use bitcoin::transaction::Version;
 use bitcoin::{Amount, Network, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Witness};
 use ddk::contract::{
-    accept_offer, chain_hash_from_network, create_dlc_splice_input, create_dlc_transactions,
-    create_funding_psbt, create_offer, create_signed_dlc_transactions, finalize_sign,
-    finalize_sign_spliced, funding_input, sign_accept, sign_accept_spliced, sign_cet, sign_refund,
-    signing, AcceptOfferParams, ContractError, CreateOfferParams, DescriptorInput,
-    DlcInputSigningKey, InputDerivation, Party, PartyParams, DLC_INPUT_MAX_WITNESS_LEN,
+    accept_offer, advanced, chain_hash_from_network, create_dlc_splice_input,
+    create_dlc_transactions, create_funding_psbt, create_offer, create_signed_dlc_transactions,
+    finalize_sign, finalize_sign_spliced, funding_input, sign_accept, sign_accept_spliced,
+    sign_cet, sign_refund, signing, verify_signed_contract, AcceptOfferParams, ContractError,
+    CreateOfferParams, DescriptorInput, DlcInputSigningKey, InputDerivation, Party, PartyParams,
+    DLC_INPUT_MAX_WITNESS_LEN,
 };
-use ddk_dlc::secp256k1_zkp::{All, Keypair, PublicKey, Secp256k1, SecretKey, XOnlyPublicKey};
+use ddk_dlc::secp256k1_zkp::{
+    All, Keypair, Message, PublicKey, Secp256k1, SecretKey, XOnlyPublicKey,
+};
 use ddk_messages::contract_msgs::{
     ContractDescriptor, ContractInfo, ContractInfoInner, ContractOutcome,
     EnumeratedContractDescriptor, NumericOutcomeContractDescriptor, SingleContractInfo,
@@ -2244,6 +2248,329 @@ fn a_sign_message_that_matches_neither_rule_is_rejected() {
             &sign,
             &contract.accepter_key
         ),
+        Err(ContractError::InvalidSign(_))
+    ));
+}
+
+/// A dual-funded enum contract, signed by both parties through the PSBT
+/// lifecycle. Each party funds one P2WPKH UTXO worth 150,000 sats.
+fn signed_enum_contract() -> (PartySetup, PartySetup, OfferDlc, AcceptDlc, SignDlc) {
+    let secp = Secp256k1::new();
+    let (offerer, accepter, offer, accept) = enum_contract(&secp, NETWORK);
+    let (sign, _) = fund_with_xpriv(&secp, &offerer, &accepter, &offer, &accept);
+    (offerer, accepter, offer, accept, sign)
+}
+
+/// The index in the funding transaction of the offering party's only input.
+fn offer_input_index(offer: &OfferDlc, accept: &AcceptDlc) -> usize {
+    let previous: Transaction =
+        bitcoin::consensus::deserialize(&offer.funding_inputs[0].prev_tx).unwrap();
+    create_dlc_transactions(offer, accept)
+        .unwrap()
+        .fund
+        .input
+        .iter()
+        .position(|input| input.previous_output.txid == previous.compute_txid())
+        .unwrap()
+}
+
+#[test]
+fn a_signed_contract_verifies_from_its_three_messages() {
+    let secp = Secp256k1::new();
+    let (offerer, accepter, offer, accept) = enum_contract(&secp, NETWORK);
+    let (sign, funding_transaction) = fund_with_xpriv(&secp, &offerer, &accepter, &offer, &accept);
+
+    let contract = verify_signed_contract(&offer, &accept, &sign).unwrap();
+    assert_eq!(contract.contract_id(), sign.contract_id);
+    assert!(contract.unverified_funding_inputs().is_empty());
+    assert_eq!(
+        contract.transactions().fund.compute_txid(),
+        funding_transaction.compute_txid()
+    );
+}
+
+#[test]
+fn a_pre_rc4_single_funded_contract_verifies() {
+    let contract = pre_rc4_single_funded_contract();
+    let verified =
+        verify_signed_contract(&contract.offer, &contract.accept, &contract.sign).unwrap();
+    assert_eq!(
+        verified.transactions().fund.compute_txid(),
+        contract.funding_transaction.compute_txid()
+    );
+}
+
+#[test]
+fn a_tampered_offer_funding_witness_is_rejected() {
+    let (_, _, offer, accept, mut sign) = signed_enum_contract();
+    // Flip a bit of the signature's R value: still a well-formed signature,
+    // no longer one over the funding transaction.
+    sign.funding_signatures.funding_signatures[0].witness_elements[0].witness[10] ^= 1;
+    assert!(matches!(
+        verify_signed_contract(&offer, &accept, &sign),
+        Err(ContractError::InvalidSign(_))
+    ));
+}
+
+#[test]
+fn an_offer_funding_witness_from_a_key_that_does_not_own_the_coin_is_rejected() {
+    let (_, _, offer, accept, mut sign) = signed_enum_contract();
+    let funding_transaction = create_dlc_transactions(&offer, &accept).unwrap().fund;
+    // A valid signature over the funding transaction, by someone else's key.
+    sign.funding_signatures.funding_signatures[0] = advanced::sign_p2wpkh_funding_input(
+        &funding_transaction,
+        offer_input_index(&offer, &accept),
+        Amount::from_sat(150_000),
+        &SecretKey::from_slice(&[77; 32]).unwrap(),
+    )
+    .unwrap();
+    assert!(matches!(
+        verify_signed_contract(&offer, &accept, &sign),
+        Err(ContractError::InvalidSign(_))
+    ));
+}
+
+#[test]
+fn an_offer_funding_witness_that_does_not_sign_all_is_rejected() {
+    let secp = Secp256k1::new();
+    let (offerer, _, offer, accept, mut sign) = signed_enum_contract();
+    let funding_transaction = create_dlc_transactions(&offer, &accept).unwrap().fund;
+    // The owner's SIGHASH_NONE signature is valid on chain, but it commits to
+    // no outputs, so the coin could be spent into any transaction.
+    let wallet_key = offerer
+        .xpriv
+        .derive_priv(&secp, &offerer.derivation_path)
+        .unwrap()
+        .private_key;
+    let public_key = bitcoin::PublicKey::new(wallet_key.public_key(&secp));
+    let sighash = SighashCache::new(&funding_transaction)
+        .p2wpkh_signature_hash(
+            offer_input_index(&offer, &accept),
+            &ScriptBuf::new_p2wpkh(&public_key.wpubkey_hash().unwrap()),
+            Amount::from_sat(150_000),
+            EcdsaSighashType::None,
+        )
+        .unwrap();
+    let signature = bitcoin::ecdsa::Signature {
+        signature: secp.sign_ecdsa(&Message::from_digest(sighash.to_byte_array()), &wallet_key),
+        sighash_type: EcdsaSighashType::None,
+    };
+    sign.funding_signatures.funding_signatures[0] =
+        advanced::funding_signature_from_witness(Witness::from_slice(&[
+            signature.to_vec(),
+            public_key.to_bytes(),
+        ]));
+    assert!(matches!(
+        verify_signed_contract(&offer, &accept, &sign),
+        Err(ContractError::InvalidSign(_))
+    ));
+}
+
+#[test]
+fn a_tampered_refund_signature_is_rejected() {
+    let (_, _, offer, accept, sign) = signed_enum_contract();
+    // Each forged refund signature is valid, but by the other party's key.
+    let mut forged_sign = sign.clone();
+    forged_sign.refund_signature = accept.refund_signature;
+    assert!(matches!(
+        verify_signed_contract(&offer, &accept, &forged_sign),
+        Err(ContractError::InvalidSign(_))
+    ));
+    let mut forged_accept = accept.clone();
+    forged_accept.refund_signature = sign.refund_signature;
+    assert!(matches!(
+        verify_signed_contract(&offer, &forged_accept, &sign),
+        Err(ContractError::InvalidAccept(_))
+    ));
+}
+
+#[test]
+fn a_tampered_adaptor_signature_is_rejected() {
+    let (_, _, offer, accept, sign) = signed_enum_contract();
+    // Swapped adaptor signatures are each valid, but for another outcome's CET.
+    let mut forged_sign = sign.clone();
+    forged_sign
+        .cet_adaptor_signatures
+        .ecdsa_adaptor_signatures
+        .swap(0, 1);
+    assert!(matches!(
+        verify_signed_contract(&offer, &accept, &forged_sign),
+        Err(ContractError::InvalidSign(_))
+    ));
+    let mut forged_accept = accept.clone();
+    forged_accept
+        .cet_adaptor_signatures
+        .ecdsa_adaptor_signatures
+        .swap(0, 1);
+    assert!(matches!(
+        verify_signed_contract(&offer, &forged_accept, &sign),
+        Err(ContractError::InvalidAccept(_))
+    ));
+}
+
+#[test]
+fn a_spliced_contract_verifies_and_rejects_a_tampered_half() {
+    let prepared = prepare_splice(true);
+    let (offer, accept) = (&prepared.offer_b, &prepared.accept_b);
+    verify_signed_contract(offer, accept, &prepared.sign).unwrap();
+
+    // The half's sighash byte no longer says SIGHASH_ALL. The signature still
+    // verifies against the SIGHASH_ALL digest, so only the encoding check
+    // catches it before it goes into a witness that fails on chain.
+    let position = offer
+        .funding_inputs
+        .iter()
+        .position(|input| input.dlc_input.is_some())
+        .unwrap();
+    let mut tampered = prepared.sign.clone();
+    let half = &mut tampered.funding_signatures.funding_signatures[position].witness_elements[0];
+    *half.witness.last_mut().unwrap() = EcdsaSighashType::None as u8;
+    assert!(matches!(
+        verify_signed_contract(offer, accept, &tampered),
+        Err(ContractError::InvalidSign(_))
+    ));
+}
+
+#[test]
+fn a_splice_half_may_carry_its_key_but_nothing_else() {
+    let prepared = prepare_splice(true);
+    let (offer, accept) = (&prepared.offer_b, &prepared.accept_b);
+    let position = offer
+        .funding_inputs
+        .iter()
+        .position(|input| input.dlc_input.is_some())
+        .unwrap();
+    let offer_key = prepared
+        .splice_input
+        .dlc_input
+        .as_ref()
+        .unwrap()
+        .local_fund_pubkey;
+    let with_trailing = |element: Vec<u8>| {
+        let mut sign = prepared.sign.clone();
+        sign.funding_signatures.funding_signatures[position]
+            .witness_elements
+            .push(WitnessElement { witness: element });
+        sign
+    };
+
+    // The half followed by the key that verified it is the shape some
+    // wallets send; only the half goes on chain.
+    let with_key = with_trailing(offer_key.serialize().to_vec());
+    verify_signed_contract(offer, accept, &with_key).unwrap();
+    let accept_splice_key = DlcInputSigningKey {
+        input_serial_id: prepared.splice_serial,
+        prior_funding_secret_key: prepared.prior_accept_key,
+    };
+    let funding_tx_b = finalize_sign_spliced(
+        offer,
+        accept,
+        &with_key,
+        &prepared.accept_psbt,
+        std::slice::from_ref(&accept_splice_key),
+    )
+    .unwrap();
+    assert_splice_input_signed(&funding_tx_b, &prepared);
+
+    // Any other trailing data is rejected, not dropped.
+    let other_key = PublicKey::from_secret_key(&Secp256k1::new(), &prepared.prior_accept_key);
+    for element in [other_key.serialize().to_vec(), vec![0]] {
+        assert!(matches!(
+            verify_signed_contract(offer, accept, &with_trailing(element)),
+            Err(ContractError::InvalidSign(_))
+        ));
+    }
+}
+
+#[test]
+fn an_offer_funded_from_a_script_ddk_cannot_check_finalizes_unverified() {
+    use bitcoin::opcodes::all::OP_CHECKSIG;
+
+    let secp = Secp256k1::new();
+    let offerer = PartySetup::new(&secp, 61, NETWORK, Amount::from_sat(150_000), 1);
+    let accepter = PartySetup::new(&secp, 62, NETWORK, Amount::from_sat(150_000), 2);
+    // The offering party funds from a P2WSH coin that an external signer
+    // spends with `<signature> <pubkey OP_CHECKSIG>`.
+    let wallet_key = SecretKey::from_slice(&[63; 32]).unwrap();
+    let witness_script = bitcoin::script::Builder::new()
+        .push_slice(wallet_key.public_key(&secp).serialize())
+        .push_opcode(OP_CHECKSIG)
+        .into_script();
+    let coin_value = Amount::from_sat(150_000);
+    let previous = previous_transaction(
+        coin_value,
+        ScriptBuf::new_p2wsh(&witness_script.wscript_hash()),
+    );
+    let p2wsh_input =
+        funding_input(&previous, 0, Some(1), u32::MAX, 110, ScriptBuf::new()).unwrap();
+    let offer = create_offer(offer_params(
+        &secp,
+        &offerer,
+        enum_contract_info(TOTAL_COLLATERAL),
+        Amount::from_sat(50_000),
+        NETWORK,
+        vec![p2wsh_input],
+    ))
+    .unwrap();
+    let accept = accept_offer(
+        &offer,
+        AcceptOfferParams {
+            party: accepter.party_params(&secp, vec![accepter.funding_input.clone()]),
+            min_timeout_interval: MIN_TIMEOUT,
+            max_timeout_interval: MAX_TIMEOUT,
+            now_unix: NOW_UNIX,
+        },
+        &accepter.funding_secret_key,
+    )
+    .unwrap()
+    .accept;
+
+    let mut offer_psbt = create_funding_psbt(&offer, &accept).unwrap();
+    let index = offer_input_index(&offer, &accept);
+    let sighash = SighashCache::new(&offer_psbt.unsigned_tx)
+        .p2wsh_signature_hash(index, &witness_script, coin_value, EcdsaSighashType::All)
+        .unwrap();
+    let signature = bitcoin::ecdsa::Signature::sighash_all(
+        secp.sign_ecdsa(&Message::from_digest(sighash.to_byte_array()), &wallet_key),
+    );
+    let witness = Witness::from_slice(&[signature.to_vec(), witness_script.to_bytes()]);
+    offer_psbt.inputs[index].final_script_witness = Some(witness.clone());
+    let sign = sign_accept(&offer, &accept, &offerer.funding_secret_key, &offer_psbt)
+        .unwrap()
+        .sign;
+
+    let contract = verify_signed_contract(&offer, &accept, &sign).unwrap();
+    assert_eq!(contract.unverified_funding_inputs(), &[1]);
+
+    let mut accept_psbt = create_funding_psbt(&offer, &accept).unwrap();
+    signing::sign_funding_psbt_with_xpriv(
+        &offer,
+        &accept,
+        &mut accept_psbt,
+        &accepter.xpriv,
+        &accepter.derivations(),
+    )
+    .unwrap();
+    let funding_transaction = finalize_sign(&offer, &accept, &sign, &accept_psbt).unwrap();
+    assert_eq!(funding_transaction.input[index].witness, witness);
+}
+
+#[test]
+fn finalize_sign_rejects_a_sign_message_with_a_bad_funding_witness() {
+    let (_, accepter, offer, accept, mut sign) = signed_enum_contract();
+    sign.funding_signatures.funding_signatures[0].witness_elements[0].witness[10] ^= 1;
+
+    let mut accept_psbt = create_funding_psbt(&offer, &accept).unwrap();
+    signing::sign_funding_psbt_with_xpriv(
+        &offer,
+        &accept,
+        &mut accept_psbt,
+        &accepter.xpriv,
+        &accepter.derivations(),
+    )
+    .unwrap();
+    assert!(matches!(
+        finalize_sign(&offer, &accept, &sign, &accept_psbt),
         Err(ContractError::InvalidSign(_))
     ));
 }

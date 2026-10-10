@@ -75,6 +75,18 @@ pub fn create_cet_adaptor_signatures(
 /// Verifies one party's refund and CET adaptor signatures.
 ///
 /// `party` names the party that produced the signatures.
+///
+/// This checks signatures for a contract being negotiated, before its sign
+/// message exists, so the transactions are rebuilt under the current
+/// [`ddk_dlc::FeeRule`] like every new contract. A contract signed under an
+/// earlier rule (see
+/// [`create_signed_dlc_transactions`](super::create_signed_dlc_transactions))
+/// fails here even though its signatures are valid; verify a signed contract
+/// with [`verify_signed_contract`](super::verify_signed_contract), which
+/// selects the rule from the sign message's contract id. Without a sign
+/// message there is no contract id to select by, and accepting signatures
+/// under whichever rule they happen to verify would approve them for
+/// transactions the new contract will not use.
 pub fn verify_cet_adaptor_signatures(
     offer: &OfferDlc,
     accept: &AcceptDlc,
@@ -88,7 +100,7 @@ pub fn verify_cet_adaptor_signatures(
         Party::Offer => (offer.funding_pubkey, ContractError::InvalidSign),
         Party::Accept => (accept.funding_pubkey, ContractError::InvalidAccept),
     };
-    context::verify_counterparty_signatures(
+    context::verify_party_signatures(
         &secp,
         &context,
         offer.get_total_collateral(),

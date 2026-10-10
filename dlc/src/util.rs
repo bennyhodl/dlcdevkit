@@ -173,37 +173,62 @@ pub fn sign_multi_sig_input<C: Signing>(
     input_value: Amount,
     input_index: usize,
 ) -> Result<(), Error> {
-    let own_sig = get_sig_for_tx_input(
+    let own_sig = get_raw_sig_for_tx_input(
         secp,
         transaction,
         input_index,
         script_pubkey,
         input_value,
-        EcdsaSighashType::All,
         sk,
     )?;
-
-    let own_pk = &PublicKey::from_secret_key(secp, sk);
-
-    let other_finalized_sig = finalize_sig(other_sig, EcdsaSighashType::All);
-
-    transaction.input[input_index].witness = if own_pk < other_pk {
-        Witness::from_slice(&[
-            Vec::new(),
-            own_sig,
-            other_finalized_sig,
-            script_pubkey.to_bytes(),
-        ])
-    } else {
-        Witness::from_slice(&[
-            Vec::new(),
-            other_finalized_sig,
-            own_sig,
-            script_pubkey.to_bytes(),
-        ])
-    };
-
+    let own_pk = PublicKey::from_secret_key(secp, sk);
+    transaction.input[input_index].witness =
+        multisig_witness(script_pubkey, (own_pk, own_sig), (*other_pk, *other_sig));
     Ok(())
+}
+
+/// Builds the witness that spends a 2-of-2 multisig output, such as a DLC
+/// funding output, from both parties' signatures.
+///
+/// `OP_CHECKMULTISIG` expects the signatures in the order of the keys in
+/// `script`, and [`make_funding_redeemscript`](crate::make_funding_redeemscript)
+/// orders the keys ascending, so the signatures are placed by ascending public
+/// key whichever order the two pairs are passed in. Every DLC spend of a
+/// funding output commits to the whole transaction, so both signatures are
+/// encoded with `SIGHASH_ALL`.
+pub fn multisig_witness(
+    script: &Script,
+    a: (PublicKey, Signature),
+    b: (PublicKey, Signature),
+) -> Witness {
+    let ((_, first), (_, second)) = if a.0 <= b.0 { (a, b) } else { (b, a) };
+    Witness::from_slice(&[
+        Vec::new(),
+        finalize_sig(&first, EcdsaSighashType::All),
+        finalize_sig(&second, EcdsaSighashType::All),
+        script.to_bytes(),
+    ])
+}
+
+/// Parses a signature witness element, a DER signature followed by its
+/// sighash byte, and requires that byte to be `SIGHASH_ALL`.
+///
+/// DDK checks signatures against the `SIGHASH_ALL` digest. An element with any
+/// other sighash byte would pass that check here and then fail on chain, or
+/// commit to less than the whole transaction.
+pub(crate) fn sighash_all_signature(element: &[u8]) -> Result<Signature, Error> {
+    let signature = bitcoin::ecdsa::Signature::from_slice(element).map_err(|e| {
+        Error::InvalidArgument(format!(
+            "not a DER signature followed by a sighash byte: {e}"
+        ))
+    })?;
+    if signature.sighash_type != EcdsaSighashType::All {
+        return Err(Error::InvalidArgument(format!(
+            "signature uses {}, SIGHASH_ALL is required",
+            signature.sighash_type
+        )));
+    }
+    Ok(signature.signature)
 }
 
 /// Transforms a redeem script for a p2sh-p2w* output to a script signature.
@@ -274,6 +299,27 @@ mod tests {
     use super::*;
     use bitcoin::hashes::Hash;
     use bitcoin::WPubkeyHash;
+
+    #[test]
+    fn multisig_witness_orders_signatures_by_public_key() {
+        let secp = Secp256k1::new();
+        let [a, b] = [1u8, 2].map(|byte| {
+            let secret_key = SecretKey::from_slice(&[byte; 32]).unwrap();
+            (
+                PublicKey::from_secret_key(&secp, &secret_key),
+                secp.sign_ecdsa(&Message::from_digest([7; 32]), &secret_key),
+            )
+        });
+        let script = crate::make_funding_redeemscript(&a.0, &b.0);
+
+        let witness = multisig_witness(&script, a, b);
+        assert_eq!(witness, multisig_witness(&script, b, a));
+        let lower = if a.0 < b.0 { a } else { b };
+        assert_eq!(
+            witness.nth(1).unwrap(),
+            finalize_sig(&lower.1, EcdsaSighashType::All).as_slice()
+        );
+    }
 
     #[test]
     fn empty_redeem_script_gives_an_empty_script_sig() {
