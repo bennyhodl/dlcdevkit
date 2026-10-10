@@ -19,6 +19,16 @@ pub enum Party {
     Accept,
 }
 
+impl Party {
+    /// The other side of the contract.
+    pub(crate) fn counterparty(self) -> Party {
+        match self {
+            Party::Offer => Party::Accept,
+            Party::Accept => Party::Offer,
+        }
+    }
+}
+
 /// One party's Bitcoin-level contract data.
 ///
 /// The funding public key is the DLC funding key used for the multisig funding
