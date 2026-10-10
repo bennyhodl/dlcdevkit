@@ -132,11 +132,18 @@
 //! [`crate::chain::EsploraClient`]). Persisting messages for later execution
 //! is likewise the caller's responsibility.
 //!
+//! Whether a contract is funded, confirmed, or closed is chain state, not
+//! message state. [`tracker::ContractUtxoTracker`](crate::contract::tracker::ContractUtxoTracker)
+//! follows each contract's 2-of-2 funding output over a `bdk_chain`
+//! transaction graph, so a wallet built on this module learns confirmation
+//! and the closing transaction from the chain.
+//!
 //! Lower-level operations (raw witnesses, adaptor signatures, contract ids)
 //! live in [`advanced`](crate::contract::advanced).
 
 pub mod advanced;
 pub mod signing;
+pub mod tracker;
 
 mod accept;
 mod context;
