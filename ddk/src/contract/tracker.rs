@@ -7,6 +7,13 @@
 //! Confirmation of the funding transaction and any spend of the funding
 //! output (CET, refund, or counterparty close) then come from the chain
 //! instead of collateral math.
+//!
+//! The tracker holds no chain client. The caller builds a sync request from
+//! [`ContractUtxoTracker::sync_spks`], [`ContractUtxoTracker::sync_outpoints`]
+//! and [`ContractUtxoTracker::expected_spk_txids`], runs it against its chain
+//! source, and hands the result to [`ContractUtxoTracker::apply_update`]. The
+//! manager's wallet does this on every sync; a stateless wallet built on
+//! [`crate::contract`] does the same with its own client.
 
 use bdk_chain::indexed_tx_graph::IndexedTxGraph;
 use bdk_chain::indexer::spk_txout::SpkTxOutIndex;
@@ -14,10 +21,11 @@ use bdk_chain::local_chain::LocalChain;
 use bdk_chain::{
     Balance, CanonicalizationParams, ChainPosition, ConfirmationBlockTime, Merge, TxUpdate,
 };
-use bitcoin::{OutPoint, ScriptBuf, Txid};
+use bitcoin::{OutPoint, ScriptBuf, Transaction, Txid};
 use ddk_manager::ContractId;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 /// A contract funding output with its chain state.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -35,8 +43,9 @@ pub struct ContractUtxo {
     pub spent_by: Option<Txid>,
 }
 
-/// The serde changeset of the tracker, persisted through the `Storage`
-/// trait next to the wallet changeset.
+/// The serde changeset of the tracker, persisted by the caller next to the
+/// wallet changeset (the manager's wallet does it through the `Storage`
+/// trait).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ChangeSet {
     /// Funding script registrations by contract. Serialized as a list of
@@ -153,6 +162,20 @@ impl ContractUtxoTracker {
             .collect()
     }
 
+    /// The transactions the chain is expected to still carry under each
+    /// funding script: the canonical ones the tracker has seen, outputs to
+    /// the script and spends of them alike. Pass them to
+    /// [`SyncRequestBuilder::expected_spk_txids`](bdk_chain::spk_client::SyncRequestBuilder::expected_spk_txids):
+    /// a sync that no longer finds one reports it evicted, so a replaced or
+    /// dropped CET, refund or funding transaction leaves the canonical view
+    /// instead of staying in it.
+    pub fn expected_spk_txids(&self, chain: &LocalChain) -> Vec<(ScriptBuf, Txid)> {
+        self.graph
+            .graph()
+            .list_expected_spk_txids(chain, chain.tip().block_id(), &self.graph.index, ..)
+            .collect()
+    }
+
     /// Applies a transaction update from a sync and stages the change.
     pub fn apply_update(&mut self, update: TxUpdate<ConfirmationBlockTime>) {
         let changeset = self.graph.apply_update(update);
@@ -196,7 +219,25 @@ impl ContractUtxoTracker {
             .collect()
     }
 
-    /// Takes the staged changeset for persistence, if any.
+    /// A transaction the tracker has seen, by id, witnesses included: a
+    /// funding transaction or a close the chain served.
+    pub fn transaction(&self, txid: &Txid) -> Option<Arc<Transaction>> {
+        self.graph.graph().get_tx(*txid)
+    }
+
+    /// The staged changeset, if any, without clearing it: a persister that
+    /// commits it together with other writes clears it with
+    /// [`Self::take_staged`] only once the commit is durable, so a failed
+    /// write loses nothing.
+    pub fn staged(&self) -> Option<&ChangeSet> {
+        if self.stage.is_empty() {
+            None
+        } else {
+            Some(&self.stage)
+        }
+    }
+
+    /// Takes the staged changeset for persistence, if any, and clears it.
     pub fn take_staged(&mut self) -> Option<ChangeSet> {
         if self.stage.is_empty() {
             None
@@ -300,7 +341,22 @@ mod tests {
         assert_eq!(utxos[0].contract_id, contract_id);
 
         // A spend of the funding output (a CET) is observed.
-        let cet = Transaction {
+        let cet = cet_tx(fund_txid);
+        let cet_txid = cet.compute_txid();
+        let mut update = TxUpdate::default();
+        update.txs.push(cet.into());
+        update.anchors.insert((anchor_at(&chain, 3), cet_txid));
+        tracker.apply_update(update);
+
+        let balance = tracker.balance(&chain);
+        assert_eq!(balance.confirmed, Amount::ZERO);
+        let utxos = tracker.utxos(&chain);
+        assert_eq!(utxos.len(), 1);
+        assert_eq!(utxos[0].spent_by, Some(cet_txid));
+    }
+
+    fn cet_tx(fund_txid: Txid) -> Transaction {
+        Transaction {
             version: Version::TWO,
             lock_time: LockTime::ZERO,
             input: vec![TxIn {
@@ -318,18 +374,90 @@ mod tests {
                     [0xEE; 32],
                 )),
             }],
-        };
+        }
+    }
+
+    #[test]
+    fn dropped_cet_is_evicted_by_a_sync_with_expected_txids() {
+        let chain = chain_with_blocks(2);
+        let spk = funding_spk();
+
+        let mut tracker = ContractUtxoTracker::new();
+        tracker.register([0x44; 32], spk.clone());
+        let fund = funding_tx(spk.clone());
+        let fund_txid = fund.compute_txid();
+        let cet = cet_tx(fund_txid);
         let cet_txid = cet.compute_txid();
         let mut update = TxUpdate::default();
+        update.txs.push(fund.into());
+        update.anchors.insert((anchor_at(&chain, 2), fund_txid));
         update.txs.push(cet.into());
-        update.anchors.insert((anchor_at(&chain, 3), cet_txid));
+        update.seen_ats.insert((cet_txid, 100));
+        tracker.apply_update(update);
+        assert_eq!(tracker.utxos(&chain)[0].spent_by, Some(cet_txid));
+        assert_eq!(tracker.balance(&chain).confirmed, Amount::ZERO);
+
+        // The sync expects both transactions under the funding script: the
+        // funding pays it and the CET spends from it.
+        let expected = tracker.expected_spk_txids(&chain);
+        assert!(expected.contains(&(spk.clone(), fund_txid)));
+        assert!(expected.contains(&(spk.clone(), cet_txid)));
+
+        // The CET left the mempool, so the chain source serves only the
+        // funding transaction. A sync stamps every expected txid it did not
+        // find as evicted, as the esplora client does.
+        let served = [fund_txid];
+        let mut update = TxUpdate::default();
+        update.evicted_ats.extend(
+            expected
+                .into_iter()
+                .filter(|(_, txid)| !served.contains(txid))
+                .map(|(_, txid)| (txid, 200)),
+        );
         tracker.apply_update(update);
 
-        let balance = tracker.balance(&chain);
-        assert_eq!(balance.confirmed, Amount::ZERO);
+        // The funding output is unspent again and back in the balance.
         let utxos = tracker.utxos(&chain);
         assert_eq!(utxos.len(), 1);
-        assert_eq!(utxos[0].spent_by, Some(cet_txid));
+        assert_eq!(utxos[0].spent_by, None);
+        assert_eq!(tracker.balance(&chain).confirmed, Amount::from_sat(200_000));
+        assert_eq!(tracker.expected_spk_txids(&chain), vec![(spk, fund_txid)]);
+        // The graph keeps the transaction; it is only no longer canonical.
+        assert!(tracker.transaction(&cet_txid).is_some());
+    }
+
+    #[test]
+    fn staged_changes_stay_until_taken() {
+        let chain = chain_with_blocks(2);
+        let contract_id = [0x55; 32];
+        let spk = funding_spk();
+
+        let mut tracker = ContractUtxoTracker::new();
+        assert!(tracker.staged().is_none());
+
+        tracker.register(contract_id, spk.clone());
+        let fund = funding_tx(spk);
+        let fund_txid = fund.compute_txid();
+        let mut update = TxUpdate::default();
+        update.txs.push(fund.into());
+        update.anchors.insert((anchor_at(&chain, 2), fund_txid));
+        tracker.apply_update(update);
+
+        // Reading the staged changes does not clear them: a persister whose
+        // write fails reads the same changes again on its next attempt.
+        let staged = tracker.staged().cloned().unwrap();
+        assert!(staged.spks.contains_key(&contract_id));
+        assert!(staged
+            .tx_graph
+            .txs
+            .iter()
+            .any(|tx| tx.compute_txid() == fund_txid));
+        assert_eq!(tracker.staged(), Some(&staged));
+
+        // Once the write is durable, taking clears them.
+        assert_eq!(tracker.take_staged(), Some(staged));
+        assert!(tracker.staged().is_none());
+        assert!(tracker.take_staged().is_none());
     }
 
     #[test]

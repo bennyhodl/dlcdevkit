@@ -214,8 +214,8 @@ pub trait Storage: ddk_manager::Storage + Send + Sync + std::fmt::Debug + 'stati
     /// storage and a chain sync on the next wallet sync.
     async fn initialize_contract_tracker(
         &self,
-    ) -> Result<wallet::contract_tracker::ChangeSet, WalletError> {
-        Ok(wallet::contract_tracker::ChangeSet::default())
+    ) -> Result<contract::tracker::ChangeSet, WalletError> {
+        Ok(contract::tracker::ChangeSet::default())
     }
 
     /// Persists contract UTXO tracker changes.
@@ -224,7 +224,7 @@ pub trait Storage: ddk_manager::Storage + Send + Sync + std::fmt::Debug + 'stati
     /// [`Storage::initialize_contract_tracker`].
     async fn persist_contract_tracker(
         &self,
-        _changeset: &wallet::contract_tracker::ChangeSet,
+        _changeset: &contract::tracker::ChangeSet,
     ) -> Result<(), WalletError> {
         Ok(())
     }
