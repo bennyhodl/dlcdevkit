@@ -129,15 +129,7 @@ fn build_context_with_fee_rule(
         offer.offer_collateral,
         &offer.funding_inputs,
     )?;
-    let execution_infos = ddk_manager::contract::execution_contract_infos(&offer.contract_info)?;
-    if execution_infos.is_empty() {
-        return Err(ContractError::InvalidOffer(
-            "contract does not contain execution information".to_string(),
-        ));
-    }
-    for info in &execution_infos {
-        info.validate()?;
-    }
+    let execution_infos = execution_infos(offer)?;
 
     let payouts = execution_infos[0].get_payouts(total_collateral)?;
     // A splice input carries a `dlc_input`; when present the funding transaction
@@ -434,6 +426,24 @@ pub(crate) fn party_funding_inputs<'a>(
         Party::Offer => &offer.funding_inputs,
         Party::Accept => &accept.funding_inputs,
     }
+}
+
+/// Converts an offer's contract info into the execution information that
+/// builds and signs its CETs, checking that each part's payouts cover every
+/// outcome its oracles can attest.
+pub(crate) fn execution_infos(
+    offer: &OfferDlc,
+) -> Result<Vec<ExecutionContractInfo>, ContractError> {
+    let execution_infos = ddk_manager::contract::execution_contract_infos(&offer.contract_info)?;
+    if execution_infos.is_empty() {
+        return Err(ContractError::InvalidOffer(
+            "contract does not contain execution information".to_string(),
+        ));
+    }
+    for info in &execution_infos {
+        info.validate()?;
+    }
+    Ok(execution_infos)
 }
 
 pub(crate) fn ensure_protocol_version(

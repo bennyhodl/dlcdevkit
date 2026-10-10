@@ -44,12 +44,8 @@ pub fn accept_offer(
             "funding secret key does not match the accept party funding public key".to_string(),
         ));
     }
-    let accept_collateral = offer
-        .get_total_collateral()
-        .checked_sub(offer.offer_collateral)
-        .ok_or_else(|| {
-            ContractError::InvalidOffer("offer collateral exceeds total collateral".to_string())
-        })?;
+    // `validate_offer` checked that the offer collateral fits the total.
+    let accept_collateral = offer.get_total_collateral() - offer.offer_collateral;
 
     let payout_serial_id = party.payout_serial_id.unwrap_or_else(random_serial_id);
     let change_serial_id = party.change_serial_id.unwrap_or_else(random_serial_id);
