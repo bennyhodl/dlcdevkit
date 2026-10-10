@@ -124,10 +124,7 @@ fn build_context_with_fee_rule(
         offer.offer_collateral,
         &offer.funding_inputs,
     )?;
-    let execution_infos = ddk_manager::contract::execution_contract_infos(&offer.contract_info)?;
-    for info in &execution_infos {
-        info.validate()?;
-    }
+    let execution_infos = execution_infos(offer)?;
     let ContractTransactions {
         transactions,
         cet_ranges,
@@ -378,6 +375,23 @@ pub(crate) fn party_funding_inputs<'a>(
         Party::Offer => &offer.funding_inputs,
         Party::Accept => &accept.funding_inputs,
     }
+}
+
+/// Converts an offer's contract info into the execution information that
+/// builds and signs its CETs, checking that each part's payouts cover every
+/// outcome its oracles can attest.
+///
+/// An empty contract info is left to its owners: `OfferDlc::validate_terms`
+/// refuses a disjoint contract with fewer than two parts, and
+/// `build_contract_transactions` refuses to build without one.
+pub(crate) fn execution_infos(
+    offer: &OfferDlc,
+) -> Result<Vec<ExecutionContractInfo>, ContractError> {
+    let execution_infos = ddk_manager::contract::execution_contract_infos(&offer.contract_info)?;
+    for info in &execution_infos {
+        info.validate()?;
+    }
+    Ok(execution_infos)
 }
 
 pub(crate) fn ensure_protocol_version(
