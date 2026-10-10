@@ -471,6 +471,7 @@ impl DlcDevKitWallet {
                             &mut wallet,
                             &blockchain,
                             &mut storage,
+                            &events_clone,
                             address,
                             spend,
                             fee_rate,
@@ -490,6 +491,7 @@ impl DlcDevKitWallet {
                             &mut wallet,
                             &blockchain,
                             &mut storage,
+                            &events_clone,
                             txid,
                             fee_rate,
                         )
@@ -1431,6 +1433,63 @@ mod tests {
         let rpc = env.rpc();
         assert!(rpc.get_mempool_entry(&replacement).is_ok());
         assert!(rpc.get_mempool_entry(&txid).is_err());
+    }
+
+    #[tokio::test]
+    async fn a_sent_transaction_keeps_its_coins_spent_through_an_immediate_sync() {
+        let wallet = create_wallet().await;
+        let address = wallet.new_external_address().await.unwrap().address;
+        fund_address(&address);
+        wallet.sync().await.unwrap();
+        let funding = wallet.list_utxos().await.unwrap();
+        assert_eq!(funding.len(), 1);
+        let funding = funding[0].outpoint;
+        let mut events = wallet.subscribe_events();
+
+        let dest = Address::from_str("bcrt1qt0yrvs7qx8guvpqsx8u9mypz6t4zr3pxthsjkm")
+            .unwrap()
+            .assume_checked();
+        let txid = wallet
+            .send_to_address(
+                dest,
+                Amount::from_btc(0.5).unwrap(),
+                FeeRate::from_sat_per_vb(1).unwrap(),
+            )
+            .await
+            .unwrap();
+        let unspent = || async {
+            wallet
+                .list_utxos()
+                .await
+                .unwrap()
+                .iter()
+                .any(|utxo| utxo.outpoint == funding)
+        };
+
+        // The send spends its coin at once, not when esplora indexes it.
+        assert!(!unspent().await);
+
+        // A sync right away can reach esplora before it indexed the
+        // transaction; the miss must not evict it and free the coin.
+        wallet.sync().await.unwrap();
+        assert!(!unspent().await);
+        assert!(wallet
+            .get_transactions()
+            .await
+            .unwrap()
+            .iter()
+            .any(|tx| tx.compute_txid() == txid));
+
+        // Subscribers hear of the send once: from the send itself, not
+        // again from the sync that finds it.
+        let mut unconfirmed = 0;
+        while let Ok(event) = events.try_recv() {
+            if matches!(event, super::WalletEvent::TxUnconfirmed { txid: event_txid, .. } if event_txid == txid)
+            {
+                unconfirmed += 1;
+            }
+        }
+        assert_eq!(unconfirmed, 1);
     }
 
     #[tokio::test]

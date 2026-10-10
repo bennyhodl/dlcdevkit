@@ -50,7 +50,7 @@ pub async fn sync(
         block_height,
         prev_tip.height()
     );
-    let sync_result = if prev_tip.height() == 0 {
+    let mut sync_result = if prev_tip.height() == 0 {
         log_debug!(logger, "Performing a full chain scan.");
         let mut spk_iters = wallet.all_unbounded_spk_iters();
         let external_spks = spk_iters
@@ -97,6 +97,9 @@ pub async fn sync(
             .map_err(|e| WalletError::Esplora(e.to_string()))?;
         Update::from(sync)
     };
+    // Esplora may not have indexed a transaction this node just broadcast;
+    // its absence is not an eviction yet.
+    blockchain.drop_lagging_evictions(&mut sync_result.tx_update);
     forward_events(events, wallet.apply_update_events(sync_result)?);
 
     // A lock on an outpoint that a confirmed transaction spent is dead
@@ -318,11 +321,13 @@ pub struct CoinControl {
 
 /// Builds, signs, and broadcasts a spend to `address`, then persists the
 /// wallet so the revealed change index survives a restart.
-#[tracing::instrument(skip(wallet, blockchain, storage))]
+#[tracing::instrument(skip(wallet, blockchain, storage, events))]
+#[allow(clippy::too_many_arguments)]
 pub async fn send(
     wallet: &mut PersistedWallet<WalletStorage>,
     blockchain: &EsploraClient,
     storage: &mut WalletStorage,
+    events: &broadcast::Sender<WalletEvent>,
     address: Address,
     spend: Spend,
     fee_rate: FeeRate,
@@ -350,41 +355,48 @@ pub async fn send(
         builder.exclude_below_confirmations(min_confirmations);
     }
     let psbt = builder.finish()?;
-    sign_and_broadcast(wallet, blockchain, storage, psbt).await
+    sign_and_broadcast(wallet, blockchain, storage, events, psbt).await
 }
 
 /// Builds, signs, and broadcasts an RBF replacement of `txid` at the
 /// higher `fee_rate`. RBF is on by default for wallet transactions.
-#[tracing::instrument(skip(wallet, blockchain, storage))]
+#[tracing::instrument(skip(wallet, blockchain, storage, events))]
 pub async fn bump_fee(
     wallet: &mut PersistedWallet<WalletStorage>,
     blockchain: &EsploraClient,
     storage: &mut WalletStorage,
+    events: &broadcast::Sender<WalletEvent>,
     txid: bitcoin::Txid,
     fee_rate: FeeRate,
 ) -> Result<bitcoin::Txid> {
     let mut builder = wallet.build_fee_bump(txid)?;
     builder.fee_rate(fee_rate);
     let psbt = builder.finish()?;
-    sign_and_broadcast(wallet, blockchain, storage, psbt).await
+    sign_and_broadcast(wallet, blockchain, storage, events, psbt).await
 }
 
-/// Signs a built PSBT, broadcasts the transaction, and persists the
-/// wallet so the revealed change index survives a restart.
+/// Signs a built PSBT, broadcasts the transaction, records it as an
+/// unconfirmed wallet transaction, and persists the wallet. Recording it
+/// spends its coins for every later selection at once, instead of after
+/// esplora indexes it, and persisting keeps them spent and the revealed
+/// change index across a restart. Recording emits the wallet events a
+/// sync finding the transaction would have, so subscribers hear of the
+/// send once.
 async fn sign_and_broadcast(
     wallet: &mut PersistedWallet<WalletStorage>,
     blockchain: &EsploraClient,
     storage: &mut WalletStorage,
+    events: &broadcast::Sender<WalletEvent>,
     mut psbt: bitcoin::Psbt,
 ) -> Result<bitcoin::Txid> {
     wallet.sign(&mut psbt, bdk_wallet::SignOptions::default())?;
     let tx = psbt.extract_tx().map_err(|_| WalletError::ExtractTx)?;
     let txid = tx.compute_txid();
-    blockchain
-        .async_client
+    let seen_at = blockchain
         .broadcast(&tx)
         .await
         .map_err(|e| WalletError::Esplora(e.to_string()))?;
+    forward_events(events, wallet.apply_unconfirmed_txs_events([(tx, seen_at)]));
     wallet
         .persist_async(storage)
         .await
