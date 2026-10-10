@@ -1218,10 +1218,16 @@ pub fn create_cet_adaptor_sigs_from_oracle_info(
 /// Sums the `s` values of the given oracle signatures into the secret that
 /// decrypts a CET adaptor signature.
 ///
+/// `signatures` holds one signature set per oracle of the outcome's oracle
+/// combination, each in nonce order, exactly as the adaptor point was built.
+/// Because both parties' adaptor signatures for a CET are encrypted to the
+/// same point, this one secret decrypts either of them, which is what lets a
+/// CET be completed from the messages alone.
+///
 /// Every `s` value must be a valid non-zero scalar and so must the running
 /// sum. A malformed signature is reported as an error, never unwrapped, since
 /// attestations can come from outside the process.
-fn signatures_to_secret(signatures: &[Vec<SchnorrSignature>]) -> Result<SecretKey, Error> {
+pub fn adaptor_secret(signatures: &[Vec<SchnorrSignature>]) -> Result<SecretKey, Error> {
     let s_values = signatures
         .iter()
         .flatten()
@@ -1253,8 +1259,8 @@ pub fn sign_cet<C: secp256k1_zkp::Signing>(
     funding_witness_script: &Script,
     fund_output_value: Amount,
 ) -> Result<(), Error> {
-    let adaptor_secret = signatures_to_secret(oracle_signatures)?;
-    let adapted_sig = adaptor_signature.decrypt(&adaptor_secret)?;
+    let secret = adaptor_secret(oracle_signatures)?;
+    let adapted_sig = adaptor_signature.decrypt(&secret)?;
 
     util::sign_multi_sig_input(
         secp,
@@ -1345,19 +1351,19 @@ mod tests {
     use util;
 
     #[test]
-    fn signatures_to_secret_rejects_an_empty_signature_set() {
+    fn adaptor_secret_rejects_an_empty_signature_set() {
         assert!(matches!(
-            signatures_to_secret(&[]),
+            adaptor_secret(&[]),
             Err(Error::InvalidArgument(_))
         ));
         assert!(matches!(
-            signatures_to_secret(&[Vec::new()]),
+            adaptor_secret(&[Vec::new()]),
             Err(Error::InvalidArgument(_))
         ));
     }
 
     #[test]
-    fn signatures_to_secret_rejects_a_zero_s_value() {
+    fn adaptor_secret_rejects_a_zero_s_value() {
         let secp = Secp256k1::new();
         let keypair = Keypair::from_secret_key(&secp, &SecretKey::from_slice(&[7; 32]).unwrap());
         let valid = secp.sign_schnorr_no_aux_rand(&Message::from_digest([1; 32]), &keypair);
@@ -1368,10 +1374,10 @@ mod tests {
         bytes[..32].copy_from_slice(&keypair.x_only_public_key().0.serialize());
         let zero_s = SchnorrSignature::from_slice(&bytes).unwrap();
 
-        assert!(signatures_to_secret(&[vec![zero_s]]).is_err());
-        assert!(signatures_to_secret(&[vec![valid], vec![zero_s]]).is_err());
-        assert!(signatures_to_secret(&[vec![valid, zero_s]]).is_err());
-        assert!(signatures_to_secret(&[vec![valid], vec![valid]]).is_ok());
+        assert!(adaptor_secret(&[vec![zero_s]]).is_err());
+        assert!(adaptor_secret(&[vec![valid], vec![zero_s]]).is_err());
+        assert!(adaptor_secret(&[vec![valid, zero_s]]).is_err());
+        assert!(adaptor_secret(&[vec![valid], vec![valid]]).is_ok());
     }
 
     fn create_txin_vec(sequence: Sequence) -> Vec<TxIn> {
@@ -2132,8 +2138,8 @@ mod tests {
             fund_output_value,
         );
 
-        let adaptor_secret = signatures_to_secret(&oracle_sigs).unwrap();
-        let adapted_sig = cet_sigs[0].decrypt(&adaptor_secret).unwrap();
+        let secret = adaptor_secret(&oracle_sigs).unwrap();
+        let adapted_sig = cet_sigs[0].decrypt(&secret).unwrap();
 
         // Assert
         assert!(cet_sigs
