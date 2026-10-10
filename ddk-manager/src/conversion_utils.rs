@@ -127,14 +127,21 @@ pub(crate) fn get_contract_info_and_announcements(
                 let outcome_payouts = enumerated
                     .payouts
                     .iter()
-                    .map(|x| EnumerationPayout {
-                        outcome: x.outcome.clone(),
-                        payout: Payout {
-                            offer: x.offer_payout,
-                            accept: total_collateral - x.offer_payout,
-                        },
+                    .map(|x| {
+                        // A payout above the total comes from the counterparty's
+                        // message, so it is an error rather than an underflow.
+                        let accept = total_collateral
+                            .checked_sub(x.offer_payout)
+                            .ok_or(Error::InvalidParameters)?;
+                        Ok(EnumerationPayout {
+                            outcome: x.outcome.clone(),
+                            payout: Payout {
+                                offer: x.offer_payout,
+                                accept,
+                            },
+                        })
                     })
-                    .collect();
+                    .collect::<Result<_, Error>>()?;
                 let descriptor = ContractDescriptor::Enum(EnumDescriptor { outcome_payouts });
                 let mut threshold = 1;
                 let announcements = match contract_info.oracle_info {
@@ -201,7 +208,7 @@ pub(crate) fn get_contract_info_and_announcements(
                     })
                     .collect::<Result<Vec<_>, _>>()?;
                 let descriptor = ContractDescriptor::Numerical(NumericalDescriptor {
-                    payout_function: (&numeric.payout_function).into(),
+                    payout_function: (&numeric.payout_function).try_into()?,
                     rounding_intervals: (&numeric.rounding_intervals).into(),
                     difference_params,
                     oracle_numeric_infos: OracleNumericInfo {
@@ -374,9 +381,16 @@ impl From<&PayoutFunction> for SerPayoutFunction {
     }
 }
 
-impl From<&SerPayoutFunction> for PayoutFunction {
-    fn from(payout_function: &SerPayoutFunction) -> PayoutFunction {
-        PayoutFunction {
+/// Fails on a function with no pieces: the payout curve code assumes at least
+/// one, and the wire message comes from the counterparty.
+impl TryFrom<&SerPayoutFunction> for PayoutFunction {
+    type Error = Error;
+
+    fn try_from(payout_function: &SerPayoutFunction) -> Result<PayoutFunction, Error> {
+        if payout_function.payout_function_pieces.is_empty() {
+            return Err(Error::InvalidParameters);
+        }
+        Ok(PayoutFunction {
             payout_function_pieces: payout_function
                 .payout_function_pieces
                 .iter()
@@ -390,7 +404,7 @@ impl From<&SerPayoutFunction> for PayoutFunction {
                 )
                 .map(|(x, y)| from_ser_payout_function_piece(x, y))
                 .collect(),
-        }
+        })
     }
 }
 
@@ -593,7 +607,7 @@ mod tests {
             ],
         };
         let ser_payout_function: SerPayoutFunction = (&payout_function).into();
-        let res: PayoutFunction = (&ser_payout_function).into();
+        let res = PayoutFunction::try_from(&ser_payout_function).unwrap();
         assert_eq!(payout_function, res);
     }
 }
