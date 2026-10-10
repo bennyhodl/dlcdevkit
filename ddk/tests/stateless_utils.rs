@@ -17,6 +17,7 @@
 //! | a party's keys, UTXOs, and signer | [`TestParty`] |
 //! | offer → accept → sign → broadcast | [`fund_contract`] |
 //! | CET / refund settlement | [`close_with_cet`], [`close_with_refund`] |
+//! | keyless settlement | [`close_with_cet_from_messages`], [`close_with_refund_from_messages`] |
 
 #![allow(dead_code)]
 
@@ -31,9 +32,10 @@ use bitcoincore_rpc::{Client, RpcApi};
 use ddk::chain::EsploraClient;
 use ddk::contract::{
     accept_offer, chain_hash_from_network, create_dlc_splice_input, create_dlc_transactions,
-    create_funding_psbt, create_offer, finalize_sign_spliced, funding_input, sign_accept_spliced,
-    sign_cet, sign_refund, signing, AcceptOfferParams, ContractError, ContractKeyProvider,
-    CreateOfferParams, DescriptorInput, DlcInputSigningKey, InputDerivation, Party, PartyParams,
+    create_funding_psbt, create_offer, finalize_sign_spliced, funding_input,
+    settle_cet_from_messages, settle_refund_from_messages, sign_accept_spliced, sign_cet,
+    sign_refund, signing, AcceptOfferParams, ContractError, ContractKeyProvider, CreateOfferParams,
+    DescriptorInput, DlcInputSigningKey, InputDerivation, Party, PartyParams,
     DLC_INPUT_MAX_WITNESS_LEN,
 };
 use ddk::logger::Logger;
@@ -1314,6 +1316,34 @@ pub async fn close_with_cet(
         attestations,
     )
     .expect("could not sign the CET");
+    broadcast_cet(ctx, contract, cet).await
+}
+
+/// Settles the contract by broadcasting the CET for `attestations`, built from
+/// the messages alone: both halves of the 2-of-2 come from the parties' adaptor
+/// signatures, and no funding key is involved.
+pub async fn close_with_cet_from_messages(
+    ctx: &ChainContext,
+    contract: &FundedContract,
+    attestations: &[(usize, OracleAttestation)],
+) -> Transaction {
+    let cet = settle_cet_from_messages(
+        &contract.offer,
+        &contract.accept,
+        &contract.sign,
+        attestations,
+    )
+    .expect("could not build the CET from the messages");
+    broadcast_cet(ctx, contract, cet).await
+}
+
+/// Checks that `cet` is one of the contract's CETs paying the parties, then
+/// confirms it on chain as the spend of the funding output.
+async fn broadcast_cet(
+    ctx: &ChainContext,
+    contract: &FundedContract,
+    cet: Transaction,
+) -> Transaction {
     assert!(
         contract
             .transactions
@@ -1357,7 +1387,27 @@ pub async fn close_with_refund(
         &contract.party(closer).funding_secret_key,
     )
     .expect("could not sign the refund transaction");
+    broadcast_refund(ctx, contract, refund).await
+}
 
+/// Settles the contract by broadcasting the refund transaction with both
+/// parties' refund signatures taken from the messages, and no funding key.
+pub async fn close_with_refund_from_messages(
+    ctx: &ChainContext,
+    contract: &FundedContract,
+) -> Transaction {
+    let refund = settle_refund_from_messages(&contract.offer, &contract.accept, &contract.sign)
+        .expect("could not build the refund transaction from the messages");
+    broadcast_refund(ctx, contract, refund).await
+}
+
+/// Checks that `refund` is the contract's refund transaction, then confirms it
+/// on chain as the spend of the funding output.
+async fn broadcast_refund(
+    ctx: &ChainContext,
+    contract: &FundedContract,
+    refund: Transaction,
+) -> Transaction {
     assert_eq!(
         refund.compute_txid(),
         contract.transactions.refund.compute_txid(),

@@ -461,6 +461,96 @@ async fn refund_closes_the_contract_from_the_accept_party() {
     close_with_refund(&ctx, &contract, Party::Accept).await;
 }
 
+/// Funds a contract of `shape` and closes it with the CET built from the
+/// messages alone. Confirming it proves the keyless witness — both parties'
+/// decrypted adaptor signatures — satisfies the funding script on a real node.
+async fn close_from_the_messages(label: &str, shape: ContractShape) {
+    let ctx = ChainContext::new(label).await;
+    let temporary_contract_id = temporary_contract_id(label);
+    let shaped = ShapedContract::new(shape, label, OFFER_COLLATERAL, ACCEPT_COLLATERAL).await;
+
+    let contract = fund_contract(
+        &ctx,
+        ContractSetup::new(
+            shaped.contract_info.clone(),
+            OFFER_COLLATERAL,
+            temporary_contract_id,
+            TestParty::new(
+                &ctx,
+                PartySpec::new(Party::Offer, 91, 1),
+                temporary_contract_id,
+            )
+            .await,
+            TestParty::new(
+                &ctx,
+                PartySpec::new(Party::Accept, 92, 2),
+                temporary_contract_id,
+            )
+            .await,
+        ),
+    )
+    .await;
+
+    let attestations = shaped.attest().await;
+    close_with_cet_from_messages(&ctx, &contract, &attestations).await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn enum_three_of_five_oracles_closes_from_the_messages() {
+    close_from_the_messages(
+        "enum_three_of_five_oracles_closes_from_the_messages",
+        ContractShape::enums(5, 3),
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn numeric_with_difference_three_of_five_oracles_closes_from_the_messages() {
+    close_from_the_messages(
+        "numeric_with_difference_three_of_five_oracles_closes_from_the_messages",
+        ContractShape::numeric_with_difference(5, 3),
+    )
+    .await;
+}
+
+/// Nobody attests and nobody holds a key: the refund is assembled from the two
+/// refund signatures in the accept and sign messages.
+#[tokio::test]
+#[ignore]
+async fn refund_closes_the_contract_from_the_messages() {
+    let label = "refund_closes_the_contract_from_the_messages";
+    let ctx = ChainContext::new(label).await;
+    let temporary_contract_id = temporary_contract_id(label);
+    let oracles = TestOracles::enums(1, 1, label).await;
+
+    let contract = fund_contract(
+        &ctx,
+        ContractSetup::new(
+            enum_contract_info(&oracles, TOTAL_COLLATERAL),
+            OFFER_COLLATERAL,
+            temporary_contract_id,
+            TestParty::new(
+                &ctx,
+                PartySpec::new(Party::Offer, 93, 1),
+                temporary_contract_id,
+            )
+            .await,
+            TestParty::new(
+                &ctx,
+                PartySpec::new(Party::Accept, 94, 2),
+                temporary_contract_id,
+            )
+            .await,
+        ),
+    )
+    .await;
+
+    let refund = close_with_refund_from_messages(&ctx, &contract).await;
+    assert_eq!(refund.output.len(), 2);
+}
+
 /// Several inputs per party, with serial ids that interleave across parties so
 /// the witness-to-input mapping cannot rely on ordering.
 #[tokio::test]
