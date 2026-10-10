@@ -10,24 +10,29 @@ use bitcoin::absolute::LockTime;
 use bitcoin::bip32::{DerivationPath, Xpriv};
 use bitcoin::hashes::Hash;
 use bitcoin::psbt::Psbt;
+use bitcoin::script::Instruction;
+use bitcoin::sighash::EcdsaSighashType;
 use bitcoin::transaction::Version;
 use bitcoin::{Amount, Network, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Witness};
 use ddk::contract::{
     accept_offer, chain_hash_from_network, create_dlc_splice_input, create_dlc_transactions,
     create_funding_psbt, create_offer, create_signed_dlc_transactions, finalize_sign,
-    finalize_sign_spliced, funding_input, sign_accept, sign_accept_spliced, sign_cet, sign_refund,
-    signing, AcceptOfferParams, ContractError, CreateOfferParams, DescriptorInput,
-    DlcInputSigningKey, InputDerivation, Party, PartyParams, DLC_INPUT_MAX_WITNESS_LEN,
+    finalize_sign_spliced, funding_input, settle_cet_from_messages, settle_refund_from_messages,
+    sign_accept, sign_accept_spliced, sign_cet, sign_refund, signing, AcceptOfferParams,
+    ContractError, CreateOfferParams, DescriptorInput, DlcInputSigningKey, InputDerivation, Party,
+    PartyParams, DLC_INPUT_MAX_WITNESS_LEN,
 };
-use ddk_dlc::secp256k1_zkp::{All, Keypair, PublicKey, Secp256k1, SecretKey, XOnlyPublicKey};
+use ddk_dlc::secp256k1_zkp::{
+    ecdsa::Signature, All, Keypair, PublicKey, Secp256k1, SecretKey, XOnlyPublicKey,
+};
 use ddk_messages::contract_msgs::{
     ContractDescriptor, ContractInfo, ContractInfoInner, ContractOutcome,
     EnumeratedContractDescriptor, NumericOutcomeContractDescriptor, SingleContractInfo,
 };
 use ddk_messages::oracle_msgs::{
     tagged_announcement_msg, tagged_attestation_msg, DigitDecompositionEventDescriptor,
-    EnumEventDescriptor, EventDescriptor, OracleAnnouncement, OracleAttestation, OracleEvent,
-    OracleInfo, SingleOracleInfo,
+    EnumEventDescriptor, EventDescriptor, MultiOracleInfo, OracleAnnouncement, OracleAttestation,
+    OracleEvent, OracleInfo, SingleOracleInfo,
 };
 use ddk_messages::{AcceptDlc, FundingInput, OfferDlc, SignDlc, WitnessElement};
 use std::str::FromStr;
@@ -240,14 +245,30 @@ fn oracle_announcement(
     event_descriptor: EventDescriptor,
     nonce_count: usize,
 ) -> OracleAnnouncement {
+    oracle_announcement_by(0, event_descriptor, nonce_count)
+}
+
+/// The key of test oracle `oracle` and the secret of its `index`-th nonce.
+/// Oracle 0 is the one [`oracle_announcement`] and [`oracle_attestation`] use.
+fn oracle_secrets(oracle: u8, index: usize) -> (SecretKey, SecretKey) {
+    let base = 20 * oracle;
+    (
+        SecretKey::from_slice(&[88 + base; 32]).unwrap(),
+        SecretKey::from_slice(&[90 + base + index as u8; 32]).unwrap(),
+    )
+}
+
+/// Like [`oracle_announcement`], for test oracle `oracle` of several.
+fn oracle_announcement_by(
+    oracle: u8,
+    event_descriptor: EventDescriptor,
+    nonce_count: usize,
+) -> OracleAnnouncement {
     let secp = Secp256k1::new();
-    let oracle_key = Keypair::from_secret_key(&secp, &SecretKey::from_slice(&[88; 32]).unwrap());
+    let oracle_key = Keypair::from_secret_key(&secp, &oracle_secrets(oracle, 0).0);
     let oracle_nonces = (0..nonce_count)
         .map(|index| {
-            let nonce_key = Keypair::from_secret_key(
-                &secp,
-                &SecretKey::from_slice(&[90 + index as u8; 32]).unwrap(),
-            );
+            let nonce_key = Keypair::from_secret_key(&secp, &oracle_secrets(oracle, index).1);
             XOnlyPublicKey::from_keypair(&nonce_key).0
         })
         .collect();
@@ -266,12 +287,44 @@ fn oracle_announcement(
 }
 
 fn enum_contract_info(total_collateral: Amount) -> ContractInfo {
-    let announcement = oracle_announcement(
+    enum_contract_info_over(
+        total_collateral,
+        OracleInfo::Single(SingleOracleInfo {
+            oracle_announcement: enum_announcement(0),
+        }),
+    )
+}
+
+/// The "up"/"down" contract of [`enum_contract_info`], attested by
+/// `nb_oracles` test oracles of which `threshold` must agree.
+fn threshold_enum_contract_info(
+    total_collateral: Amount,
+    nb_oracles: u8,
+    threshold: u16,
+) -> ContractInfo {
+    enum_contract_info_over(
+        total_collateral,
+        OracleInfo::Multi(MultiOracleInfo {
+            threshold,
+            oracle_announcements: (0..nb_oracles).map(enum_announcement).collect(),
+            oracle_params: None,
+        }),
+    )
+}
+
+fn enum_announcement(oracle: u8) -> OracleAnnouncement {
+    oracle_announcement_by(
+        oracle,
         EventDescriptor::EnumEvent(EnumEventDescriptor {
             outcomes: vec!["up".to_string(), "down".to_string()],
         }),
         1,
-    );
+    )
+}
+
+/// "up" pays the whole contract to the offering party, "down" to the accepting
+/// party.
+fn enum_contract_info_over(total_collateral: Amount, oracle_info: OracleInfo) -> ContractInfo {
     ContractInfo::SingleContractInfo(SingleContractInfo {
         total_collateral,
         contract_info: ContractInfoInner {
@@ -289,9 +342,7 @@ fn enum_contract_info(total_collateral: Amount) -> ContractInfo {
                     ],
                 },
             ),
-            oracle_info: OracleInfo::Single(SingleOracleInfo {
-                oracle_announcement: announcement,
-            }),
+            oracle_info,
         },
     })
 }
@@ -1153,13 +1204,18 @@ fn accept_result_psbt_matches_create_funding_psbt() {
 /// [`oracle_announcement`] publishes, producing an attestation the contract
 /// accepts as genuine.
 fn oracle_attestation(outcomes: Vec<String>) -> OracleAttestation {
+    oracle_attestation_by(0, outcomes)
+}
+
+/// Like [`oracle_attestation`], from test oracle `oracle` of several.
+fn oracle_attestation_by(oracle: u8, outcomes: Vec<String>) -> OracleAttestation {
     let secp = Secp256k1::new();
-    let oracle_key = Keypair::from_secret_key(&secp, &SecretKey::from_slice(&[88; 32]).unwrap());
+    let oracle_key = Keypair::from_secret_key(&secp, &oracle_secrets(oracle, 0).0);
     let signatures = outcomes
         .iter()
         .enumerate()
         .map(|(index, outcome)| {
-            let nonce = SecretKey::from_slice(&[90 + index as u8; 32]).unwrap();
+            let nonce = oracle_secrets(oracle, index).1;
             ddk_dlc::secp_utils::schnorrsig_sign_with_nonce(
                 &secp,
                 &tagged_attestation_msg(outcome),
@@ -1480,6 +1536,247 @@ fn settling_with_a_mismatched_sign_message_is_rejected() {
         sign_refund(&offer, &accept, &sign, &offerer.funding_secret_key),
         Err(ContractError::InvalidSign(_))
     ));
+}
+
+/// A funded contract: both parties and the three messages that settle it.
+struct FundedContract {
+    offerer: PartySetup,
+    accepter: PartySetup,
+    offer: OfferDlc,
+    accept: AcceptDlc,
+    sign: SignDlc,
+    funding_transaction: Transaction,
+}
+
+impl FundedContract {
+    /// Funds a contract over `contract_info` between two fresh parties.
+    fn new(contract_info: ContractInfo, offer_collateral: Amount) -> Self {
+        let secp = Secp256k1::new();
+        let offerer = PartySetup::new(&secp, 71, NETWORK, Amount::from_sat(150_000), 1);
+        let accepter = PartySetup::new(&secp, 72, NETWORK, Amount::from_sat(150_000), 2);
+        let offer = create_offer(offer_params(
+            &secp,
+            &offerer,
+            contract_info,
+            offer_collateral,
+            NETWORK,
+            vec![offerer.funding_input.clone()],
+        ))
+        .unwrap();
+        let accept = accept_offer(
+            &offer,
+            AcceptOfferParams {
+                party: accepter.party_params(&secp, vec![accepter.funding_input.clone()]),
+                min_timeout_interval: MIN_TIMEOUT,
+                max_timeout_interval: MAX_TIMEOUT,
+                now_unix: NOW_UNIX,
+            },
+            &accepter.funding_secret_key,
+        )
+        .unwrap()
+        .accept;
+        let (sign, funding_transaction) =
+            fund_with_xpriv(&secp, &offerer, &accepter, &offer, &accept);
+        Self {
+            offerer,
+            accepter,
+            offer,
+            accept,
+            sign,
+            funding_transaction,
+        }
+    }
+
+    /// Checks a settlement's witness the way `OP_CHECKMULTISIG` does: two
+    /// `SIGHASH_ALL` signatures, each valid for the transaction under the
+    /// funding script's keys, in the script's order.
+    fn assert_valid_witness(&self, settlement: &Transaction) {
+        assert_spends_funding_output(
+            settlement,
+            &self.offer,
+            &self.accept,
+            &self.funding_transaction,
+        );
+        let transactions = create_dlc_transactions(&self.offer, &self.accept).unwrap();
+        let script = &transactions.funding_witness_script;
+        let keys: Vec<PublicKey> = script
+            .instructions()
+            .filter_map(|instruction| match instruction.unwrap() {
+                Instruction::PushBytes(bytes) => Some(PublicKey::from_slice(bytes.as_bytes())),
+                Instruction::Op(_) => None,
+            })
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(keys.len(), 2, "the funding script is a 2-of-2");
+        let sighash = ddk_dlc::util::get_sig_hash_msg(
+            settlement,
+            0,
+            script,
+            transactions.get_fund_output().value,
+        )
+        .unwrap();
+        let secp = Secp256k1::verification_only();
+        for (element, key) in settlement.input[0].witness.iter().skip(1).zip(&keys) {
+            let (sighash_type, der) = element.split_last().unwrap();
+            assert_eq!(u32::from(*sighash_type), EcdsaSighashType::All.to_u32());
+            let signature = Signature::from_der(der).unwrap();
+            secp.verify_ecdsa(&sighash, &signature, key)
+                .expect("a witness signature does not verify under its funding key");
+        }
+    }
+
+    /// Settles `attestations` from the messages alone and checks the result is
+    /// the transaction either party signs with its key, with a valid witness.
+    fn settle_cet_without_a_key(&self, attestations: &[(usize, OracleAttestation)]) -> Transaction {
+        let (offer, accept, sign) = (&self.offer, &self.accept, &self.sign);
+        let keyless = settle_cet_from_messages(offer, accept, sign, attestations).unwrap();
+        self.assert_valid_witness(&keyless);
+        for key in [
+            self.offerer.funding_secret_key,
+            self.accepter.funding_secret_key,
+        ] {
+            let signed = sign_cet(offer, accept, sign, &key, attestations).unwrap();
+            self.assert_valid_witness(&signed);
+            assert_eq!(keyless.compute_txid(), signed.compute_txid());
+        }
+        keyless
+    }
+}
+
+#[test]
+fn an_enum_contract_settles_with_a_cet_from_the_messages() {
+    let contract = FundedContract::new(
+        enum_contract_info(TOTAL_COLLATERAL),
+        Amount::from_sat(50_000),
+    );
+    let cet = contract.settle_cet_without_a_key(&[(0, oracle_attestation(vec!["up".to_string()]))]);
+    assert_eq!(cet.output.len(), 1);
+    assert_eq!(cet.output[0].script_pubkey, contract.offer.payout_spk);
+}
+
+#[test]
+fn a_numerical_contract_settles_with_a_cet_from_the_messages() {
+    let contract = FundedContract::new(
+        numerical_contract_info(Amount::from_sat(50_000), Amount::from_sat(50_000)),
+        Amount::from_sat(50_000),
+    );
+    contract.settle_cet_without_a_key(&[(0, oracle_attestation(digit_outcomes(500, 10)))]);
+}
+
+#[test]
+fn a_threshold_contract_settles_with_a_cet_from_the_messages() {
+    // Two of three oracles must agree. Oracles 0 and 2 attest, so the CET is
+    // the one built for that oracle combination, not the first one.
+    let contract = FundedContract::new(
+        threshold_enum_contract_info(TOTAL_COLLATERAL, 3, 2),
+        Amount::from_sat(50_000),
+    );
+    let down = || vec!["down".to_string()];
+    let cet = contract.settle_cet_without_a_key(&[
+        (0, oracle_attestation_by(0, down())),
+        (2, oracle_attestation_by(2, down())),
+    ]);
+    assert_eq!(cet.output.len(), 1);
+    assert_eq!(cet.output[0].script_pubkey, contract.accept.payout_spk);
+}
+
+#[test]
+fn the_refund_from_the_messages_is_the_signed_refund() {
+    let contract = FundedContract::new(
+        enum_contract_info(TOTAL_COLLATERAL),
+        Amount::from_sat(50_000),
+    );
+    let (offer, accept, sign) = (&contract.offer, &contract.accept, &contract.sign);
+    let refund = settle_refund_from_messages(offer, accept, sign).unwrap();
+    contract.assert_valid_witness(&refund);
+
+    // Refund signatures are deterministic, so the signature a party sent in
+    // its message is the one it would produce now: the transactions are equal
+    // byte for byte, witness included.
+    for key in [
+        contract.offerer.funding_secret_key,
+        contract.accepter.funding_secret_key,
+    ] {
+        assert_eq!(refund, sign_refund(offer, accept, sign, &key).unwrap());
+    }
+}
+
+#[test]
+fn settling_from_the_messages_rejects_a_forged_attestation() {
+    let contract = FundedContract::new(
+        enum_contract_info(TOTAL_COLLATERAL),
+        Amount::from_sat(50_000),
+    );
+
+    // A genuine "up" signature from an oracle this contract does not use,
+    // presented as oracle 0's.
+    let mut forged = oracle_attestation_by(5, vec!["up".to_string()]);
+    forged.oracle_public_key = oracle_attestation(vec!["up".to_string()]).oracle_public_key;
+
+    let error = settle_cet_from_messages(
+        &contract.offer,
+        &contract.accept,
+        &contract.sign,
+        &[(0, forged)],
+    )
+    .unwrap_err();
+    assert!(
+        matches!(error, ContractError::InvalidAttestation(_)),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn settling_from_the_messages_rejects_a_tampered_adaptor_signature() {
+    let contract = FundedContract::new(
+        enum_contract_info(TOTAL_COLLATERAL),
+        Amount::from_sat(50_000),
+    );
+    let up = [(0, oracle_attestation(vec!["up".to_string()]))];
+
+    // Swapping a party's "up" and "down" adaptor signatures leaves each one a
+    // well-formed adaptor signature, but for the other CET. The error names
+    // the message that carried the bad signature.
+    let mut sign = contract.sign.clone();
+    sign.cet_adaptor_signatures
+        .ecdsa_adaptor_signatures
+        .swap(0, 1);
+    let error =
+        settle_cet_from_messages(&contract.offer, &contract.accept, &sign, &up).unwrap_err();
+    assert!(
+        matches!(error, ContractError::InvalidSign(_)),
+        "unexpected error: {error}"
+    );
+
+    let mut accept = contract.accept.clone();
+    accept
+        .cet_adaptor_signatures
+        .ecdsa_adaptor_signatures
+        .swap(0, 1);
+    let error =
+        settle_cet_from_messages(&contract.offer, &accept, &contract.sign, &up).unwrap_err();
+    assert!(
+        matches!(error, ContractError::InvalidAccept(_)),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn settling_the_refund_from_the_messages_rejects_a_tampered_refund_signature() {
+    let contract = FundedContract::new(
+        enum_contract_info(TOTAL_COLLATERAL),
+        Amount::from_sat(50_000),
+    );
+
+    // The offering party's refund signature, presented as the accepting
+    // party's.
+    let mut accept = contract.accept.clone();
+    accept.refund_signature = contract.sign.refund_signature;
+    let error = settle_refund_from_messages(&contract.offer, &accept, &contract.sign).unwrap_err();
+    assert!(
+        matches!(error, ContractError::InvalidAccept(_)),
+        "unexpected error: {error}"
+    );
 }
 
 /// A minimal wallet implementing [`ddk_manager::Wallet`] over an in-memory
@@ -2199,6 +2496,26 @@ fn a_pre_rc4_single_funded_contract_settles_with_the_same_transactions() {
         contract.refund_signed_by_accepter.compute_txid()
     );
     let cet = sign_cet(offer, accept, sign, &contract.accepter_key, &attestations).unwrap();
+    assert_eq!(
+        cet.compute_txid(),
+        contract.cet_up_signed_by_offerer.compute_txid()
+    );
+}
+
+#[test]
+fn a_pre_rc4_single_funded_contract_settles_from_the_messages() {
+    // The contract was built under the OwnPayoutOnly fee rule, so this proves
+    // the keyless path rebuilds it from the sign message like the keyed one.
+    let contract = pre_rc4_single_funded_contract();
+    let (offer, accept, sign) = (&contract.offer, &contract.accept, &contract.sign);
+
+    let refund = settle_refund_from_messages(offer, accept, sign).unwrap();
+    assert_eq!(
+        refund.compute_txid(),
+        contract.refund_signed_by_accepter.compute_txid()
+    );
+    let attestations = vec![(0, oracle_attestation(vec!["up".to_string()]))];
+    let cet = settle_cet_from_messages(offer, accept, sign, &attestations).unwrap();
     assert_eq!(
         cet.compute_txid(),
         contract.cet_up_signed_by_offerer.compute_txid()
