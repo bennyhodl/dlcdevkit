@@ -35,6 +35,12 @@ pub enum ContractError {
         /// The index of the input in the funding transaction.
         input_index: usize,
     },
+    /// A signature produced for this party, by a signer outside the process
+    /// or with a key passed in, is missing, does not verify against the
+    /// transaction it was requested for, uses a sighash other than
+    /// `SIGHASH_ALL`, or comes in the wrong number.
+    #[error("invalid signature: {0}")]
+    InvalidSignature(String),
     /// An oracle attestation is malformed, forged, or does not correspond to
     /// the announcement of the oracle it claims to come from.
     #[error("invalid attestation: {0}")]

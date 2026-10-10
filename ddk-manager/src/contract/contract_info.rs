@@ -274,6 +274,29 @@ impl ContractInfo {
         }
     }
 
+    /// Returns what each of the contract's adaptor signatures is made over, in
+    /// adaptor signature order: the index of the CET it signs, relative to
+    /// this contract info's CETs, and the adaptor point it is encrypted to.
+    ///
+    /// These are the points [`ContractInfo::get_adaptor_info`] signs with, for
+    /// a signer that holds the funding key outside the process.
+    pub fn get_adaptor_points<C: Verification>(
+        &self,
+        secp: &Secp256k1<C>,
+        total_collateral: Amount,
+    ) -> Result<Vec<(usize, PublicKey)>, Error> {
+        match &self.contract_descriptor {
+            ContractDescriptor::Enum(e) => {
+                Ok(e.get_adaptor_points(secp, &self.get_oracle_infos(), self.threshold)?)
+            }
+            ContractDescriptor::Numerical(n) => n.get_adaptor_points(
+                total_collateral,
+                self.threshold,
+                &self.precompute_points(secp)?,
+            ),
+        }
+    }
+
     /// Generate the adaptor info and adaptor signatures for the contract.
     #[allow(clippy::too_many_arguments)]
     pub fn get_adaptor_info(

@@ -18,6 +18,12 @@
 //! lifecycle functions. Inputs belonging to the other party may remain
 //! unsigned.
 //!
+//! These sources sign wallet inputs only. A splice input spends the previous
+//! contract's 2-of-2, whose keys are DLC funding keys, not wallet keys: they
+//! leave it alone, and its halves come from
+//! [`DlcInputSigningKey`](super::DlcInputSigningKey)s or, for a signer outside
+//! the process, from [`external`](super::external).
+//!
 //! Inputs are identified by funding input serial id, so any subset of inputs
 //! can be signed regardless of transaction position or which party owns them.
 

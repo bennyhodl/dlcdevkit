@@ -2,13 +2,15 @@
 //!
 //! The PSBT is the universal signing boundary for funding inputs: every
 //! signing source (wallet, xpriv, descriptor, or external signer) produces
-//! finalized witnesses inside a PSBT, and the lifecycle functions extract wire
+//! finalized witnesses inside a PSBT, and a party's half of each splice input
+//! as a partial signature, and the lifecycle functions extract wire
 //! [`FundingSignatures`] from it. PSBTs never contain private key material.
 
 use bitcoin::psbt::Psbt;
 use bitcoin::script::PushBytesBuf;
 use bitcoin::sighash::EcdsaSighashType;
 use bitcoin::{ScriptBuf, Transaction, Witness};
+use ddk_dlc::secp256k1_zkp::PublicKey;
 use ddk_messages::{AcceptDlc, FundingSignature, FundingSignatures, OfferDlc, WitnessElement};
 
 use super::context::{
@@ -22,8 +24,10 @@ use super::types::Party;
 /// The PSBT contains, for every funding input: the `witness_utxo` (for SegWit
 /// inputs), the `non_witness_utxo` (the full previous transaction, which some
 /// signers require), the redeem script for P2SH-wrapped inputs, and the
-/// `SIGHASH_ALL` sighash type. Input order follows ascending funding input
-/// serial ids, matching the funding transaction.
+/// `SIGHASH_ALL` sighash type. A splice input also carries the previous
+/// contract's 2-of-2 `witness_script`, so a PSBT signer holding one of its two
+/// keys can produce that half of the signature. Input order follows ascending
+/// funding input serial ids, matching the funding transaction.
 pub fn create_funding_psbt(offer: &OfferDlc, accept: &AcceptDlc) -> Result<Psbt, ContractError> {
     let transactions = context_from_messages(offer, accept)?.transactions;
     build_funding_psbt(offer, accept, transactions.fund)
@@ -44,12 +48,6 @@ pub(crate) fn build_funding_psbt(
         .map_err(|e| ContractError::PsbtMismatch(format!("could not create PSBT: {e}")))?;
 
     for input in offer.funding_inputs.iter().chain(&accept.funding_inputs) {
-        // DLC (splice) inputs are 2-of-2 multisig, not wallet-signable. Leave
-        // them as bare PSBT inputs (no witness UTXO / sighash) so wallet signers
-        // cannot match them; their witness is completed by the combine step.
-        if input.dlc_input.is_some() {
-            continue;
-        }
         let input_index = funding_input_index(offer, accept, input.input_serial_id)?;
         let previous_transaction = decode_previous_transaction(input)?;
         let outpoint = psbt.unsigned_tx.input[input_index].previous_output;
@@ -98,6 +96,14 @@ pub(crate) fn build_funding_psbt(
         if is_segwit {
             psbt.inputs[input_index].witness_utxo = Some(prevout.clone());
         }
+        // A wallet signer owns neither key of the 2-of-2, so it leaves the
+        // input alone; the two halves are combined in `finalize_sign`.
+        if let Some(dlc_input) = &input.dlc_input {
+            psbt.inputs[input_index].witness_script = Some(ddk_dlc::make_funding_redeemscript(
+                &dlc_input.local_fund_pubkey,
+                &dlc_input.remote_fund_pubkey,
+            ));
+        }
         psbt.inputs[input_index].non_witness_utxo = Some(previous_transaction);
         psbt.inputs[input_index].sighash_type = Some(EcdsaSighashType::All.into());
     }
@@ -142,9 +148,14 @@ pub(crate) fn ensure_matching_psbt(
     ensure_psbt_matches_funding_transaction(psbt, &transactions.fund)
 }
 
-/// Extracts one party's finalized funding witnesses from a PSBT.
+/// Extracts one party's funding signatures from a PSBT, in message order.
 ///
-/// The PSBT must already be verified against the rebuilt funding transaction.
+/// A wallet input contributes its finalized witness. A splice input, which
+/// only the offering party contributes, cannot be finalized by one party: it
+/// contributes the party's half of the 2-of-2, the partial signature by the
+/// input's local funding key, as the one witness element the sign message
+/// carries for it. The PSBT must already be verified against the rebuilt
+/// funding transaction.
 pub(crate) fn extract_funding_signatures(
     offer: &OfferDlc,
     accept: &AcceptDlc,
@@ -155,16 +166,42 @@ pub(crate) fn extract_funding_signatures(
         .iter()
         .map(|input| {
             let input_index = funding_input_index(offer, accept, input.input_serial_id)?;
-            let witness = psbt.inputs[input_index]
-                .final_script_witness
-                .clone()
-                .filter(|witness| !witness.is_empty())
-                .ok_or(ContractError::MissingFinalizedInput { input_index })?;
+            let witness = match &input.dlc_input {
+                Some(dlc_input) => Witness::from_slice(&[splice_signature(
+                    psbt,
+                    input_index,
+                    &dlc_input.local_fund_pubkey,
+                )?]),
+                None => psbt.inputs[input_index]
+                    .final_script_witness
+                    .clone()
+                    .filter(|witness| !witness.is_empty())
+                    .ok_or(ContractError::MissingFinalizedInput { input_index })?,
+            };
             Ok(funding_signature_from_witness(witness))
         })
         .collect::<Result<Vec<_>, ContractError>>()?;
 
     Ok(FundingSignatures { funding_signatures })
+}
+
+/// One half of a splice input's 2-of-2 signature: the partial signature
+/// `funding_pubkey` left on the input, as a DER signature followed by its
+/// sighash byte. Verifying it is the caller's job.
+pub(crate) fn splice_signature(
+    psbt: &Psbt,
+    input_index: usize,
+    funding_pubkey: &PublicKey,
+) -> Result<Vec<u8>, ContractError> {
+    psbt.inputs[input_index]
+        .partial_sigs
+        .get(&bitcoin::PublicKey::new(*funding_pubkey))
+        .map(|signature| signature.to_vec())
+        .ok_or_else(|| {
+            ContractError::InvalidSignature(format!(
+                "splice input {input_index} has no signature by {funding_pubkey}"
+            ))
+        })
 }
 
 /// Finalizes a signed P2WPKH or P2SH-P2WPKH PSBT input.

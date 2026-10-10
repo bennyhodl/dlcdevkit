@@ -20,6 +20,9 @@
 
 #![allow(dead_code)]
 
+#[path = "external_signer/mod.rs"]
+mod external_signer;
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -29,6 +32,7 @@ use bitcoin::psbt::Psbt;
 use bitcoin::{Address, Amount, Network, OutPoint, ScriptBuf, Transaction, Txid, Witness};
 use bitcoincore_rpc::{Client, RpcApi};
 use ddk::chain::EsploraClient;
+use ddk::contract::external;
 use ddk::contract::{
     accept_offer, chain_hash_from_network, create_dlc_splice_input, create_dlc_transactions,
     create_funding_psbt, create_offer, finalize_sign_spliced, funding_input, sign_accept_spliced,
@@ -825,28 +829,16 @@ impl TestParty {
         }
     }
 
-    /// Recovers this party's funding key for a *previous* contract, so it can
-    /// sign that contract's 2-of-2 output when splicing.
+    /// Recovers this party's funding key for the *previous* contract a splice
+    /// input spends, so it can sign that contract's 2-of-2 output.
     ///
-    /// Providers recompute the key from the previous temporary contract id and
-    /// the funding pubkey published in the previous contract's messages; a raw
-    /// key is simply the one the party already holds.
-    pub fn dlc_input_signing_key(
-        &self,
-        prior_temporary_contract_id: [u8; 32],
-        prior_funding_pubkey: &PublicKey,
-        input_serial_id: u64,
-    ) -> DlcInputSigningKey {
+    /// Providers recompute the key from the splice input alone, which names the
+    /// previous contract; a raw key is simply the one the party already holds.
+    pub fn dlc_input_signing_key(&self, splice_input: &FundingInput) -> DlcInputSigningKey {
         match &self.contract_keys {
-            Some(keys) => keys
-                .dlc_input_signing_key(
-                    prior_temporary_contract_id,
-                    prior_funding_pubkey,
-                    input_serial_id,
-                )
-                .unwrap(),
+            Some(keys) => keys.dlc_input_signing_key(splice_input).unwrap(),
             None => DlcInputSigningKey {
-                input_serial_id,
+                input_serial_id: splice_input.input_serial_id,
                 prior_funding_secret_key: self.funding_secret_key,
             },
         }
@@ -1034,6 +1026,9 @@ pub struct ContractSetup {
     /// maturity unless a test sets it, since the fixture events matured long
     /// ago. `None` lets `create_offer` use the time of creation.
     pub cet_locktime: Option<u32>,
+    /// Run the contract through [`ddk::contract::external`], with every DLC
+    /// funding key held by a signer outside the protocol code.
+    pub external_signers: bool,
 }
 
 impl ContractSetup {
@@ -1052,7 +1047,13 @@ impl ContractSetup {
             offerer,
             accepter,
             splice: None,
+            external_signers: false,
         }
+    }
+
+    pub fn through_external_signers(mut self) -> Self {
+        self.external_signers = true;
+        self
     }
 
     pub fn with_splice(mut self, splice: SpliceSetup) -> Self {
@@ -1143,7 +1144,8 @@ impl FundedContract {
 ///
 /// The parties passed here are the ones signing the *new* contract; they may be
 /// freshly constructed, which is the point — nothing about the previous
-/// contract's keys was carried over, only its temporary id and wire messages.
+/// contract's keys was carried over, only its wire messages, from which the
+/// splice input is built.
 pub fn splice_from(
     previous: &FundedContract,
     splicer: Party,
@@ -1151,39 +1153,19 @@ pub fn splice_from(
     accepter: &TestParty,
     input_serial_id: u64,
 ) -> SpliceSetup {
-    // The keys travel with the roles (see `splice_setup_by`): when the accept
-    // party splices, `offerer` is the previous accepter, so its previous
-    // funding pubkey is the one from the previous accept message.
-    let (offerer_prior_pubkey, accepter_prior_pubkey) = match splicer {
-        Party::Offer => (
-            previous.offer.funding_pubkey,
-            previous.accept.funding_pubkey,
-        ),
-        Party::Accept => (
-            previous.accept.funding_pubkey,
-            previous.offer.funding_pubkey,
-        ),
-    };
+    let funding_input = create_dlc_splice_input(
+        &previous.offer,
+        &previous.accept,
+        &previous.sign,
+        splicer,
+        Some(input_serial_id),
+        DLC_INPUT_MAX_WITNESS_LEN,
+    )
+    .unwrap();
     SpliceSetup {
-        funding_input: create_dlc_splice_input(
-            &previous.offer,
-            &previous.accept,
-            &previous.sign,
-            splicer,
-            Some(input_serial_id),
-            DLC_INPUT_MAX_WITNESS_LEN,
-        )
-        .unwrap(),
-        offer_key: offerer.dlc_input_signing_key(
-            previous.temporary_contract_id,
-            &offerer_prior_pubkey,
-            input_serial_id,
-        ),
-        accept_key: accepter.dlc_input_signing_key(
-            previous.temporary_contract_id,
-            &accepter_prior_pubkey,
-            input_serial_id,
-        ),
+        offer_key: offerer.dlc_input_signing_key(&funding_input),
+        accept_key: accepter.dlc_input_signing_key(&funding_input),
+        funding_input,
     }
 }
 
@@ -1198,6 +1180,7 @@ pub async fn fund_contract(ctx: &ChainContext, setup: ContractSetup) -> FundedCo
         accepter,
         splice,
         cet_locktime,
+        external_signers,
     } = setup;
     let maturity = contract_info.get_closest_maturity_date();
 
@@ -1205,15 +1188,6 @@ pub async fn fund_contract(ctx: &ChainContext, setup: ContractSetup) -> FundedCo
         .as_ref()
         .map(|splice| vec![splice.funding_input.clone()])
         .unwrap_or_default();
-    let offer_dlc_keys: Vec<DlcInputSigningKey> = splice
-        .as_ref()
-        .map(|splice| vec![splice.offer_key.clone()])
-        .unwrap_or_default();
-    let accept_dlc_keys: Vec<DlcInputSigningKey> = splice
-        .as_ref()
-        .map(|splice| vec![splice.accept_key.clone()])
-        .unwrap_or_default();
-
     let offer = create_offer(CreateOfferParams {
         chain_hash: chain_hash_from_network(NETWORK),
         temporary_contract_id: Some(temporary_contract_id),
@@ -1227,45 +1201,18 @@ pub async fn fund_contract(ctx: &ChainContext, setup: ContractSetup) -> FundedCo
         contract_flags: 0,
     })
     .expect("could not create the offer");
+    let accept_params = AcceptOfferParams {
+        party: accepter.party_params(vec![]),
+        min_timeout_interval: MIN_TIMEOUT_INTERVAL,
+        max_timeout_interval: MAX_TIMEOUT_INTERVAL,
+        now_unix: u64::from(maturity) - 1,
+    };
 
-    let accept_result = accept_offer(
-        &offer,
-        AcceptOfferParams {
-            party: accepter.party_params(vec![]),
-            min_timeout_interval: MIN_TIMEOUT_INTERVAL,
-            max_timeout_interval: MAX_TIMEOUT_INTERVAL,
-            now_unix: u64::from(maturity) - 1,
-        },
-        &accepter.funding_secret_key,
-    )
-    .expect("could not accept the offer");
-    let accept = accept_result.accept;
-
-    // The offering party signs its own inputs, then the accept message.
-    let mut offer_psbt = create_funding_psbt(&offer, &accept).unwrap();
-    offerer
-        .sign_funding_psbt(&offer, &accept, &mut offer_psbt)
-        .await
-        .expect("the offering party could not sign the funding PSBT");
-    let sign = sign_accept_spliced(
-        &offer,
-        &accept,
-        &offerer.funding_secret_key,
-        &offer_psbt,
-        &offer_dlc_keys,
-    )
-    .expect("could not create the sign message")
-    .sign;
-
-    // The accepting party signs its own inputs and completes the transaction.
-    let mut accept_psbt = create_funding_psbt(&offer, &accept).unwrap();
-    accepter
-        .sign_funding_psbt(&offer, &accept, &mut accept_psbt)
-        .await
-        .expect("the accepting party could not sign the funding PSBT");
-    let funding_transaction =
-        finalize_sign_spliced(&offer, &accept, &sign, &accept_psbt, &accept_dlc_keys)
-            .expect("could not finalize the funding transaction");
+    let (accept, sign, funding_transaction) = if external_signers {
+        sign_through_external_signers(&offer, accept_params, &offerer, &accepter, splice).await
+    } else {
+        sign_with_keys_in_process(&offer, accept_params, &offerer, &accepter, splice).await
+    };
 
     let transactions = create_dlc_transactions(&offer, &accept).unwrap();
     assert_eq!(
@@ -1297,6 +1244,107 @@ pub async fn fund_contract(ctx: &ChainContext, setup: ContractSetup) -> FundedCo
         accepter,
         temporary_contract_id,
     }
+}
+
+/// Accepts, signs and finalizes `offer` with each party's DLC funding keys
+/// passed into the lifecycle functions.
+async fn sign_with_keys_in_process(
+    offer: &OfferDlc,
+    accept_params: AcceptOfferParams,
+    offerer: &TestParty,
+    accepter: &TestParty,
+    splice: Option<SpliceSetup>,
+) -> (AcceptDlc, SignDlc, Transaction) {
+    let (offer_dlc_keys, accept_dlc_keys): (Vec<DlcInputSigningKey>, Vec<DlcInputSigningKey>) =
+        splice
+            .map(|splice| (vec![splice.offer_key], vec![splice.accept_key]))
+            .unwrap_or_default();
+
+    let accept = accept_offer(offer, accept_params, &accepter.funding_secret_key)
+        .expect("could not accept the offer")
+        .accept;
+
+    // The offering party signs its own inputs, then the accept message.
+    let mut offer_psbt = create_funding_psbt(offer, &accept).unwrap();
+    offerer
+        .sign_funding_psbt(offer, &accept, &mut offer_psbt)
+        .await
+        .expect("the offering party could not sign the funding PSBT");
+    let sign = sign_accept_spliced(
+        offer,
+        &accept,
+        &offerer.funding_secret_key,
+        &offer_psbt,
+        &offer_dlc_keys,
+    )
+    .expect("could not create the sign message")
+    .sign;
+
+    // The accepting party signs its own inputs and completes the transaction.
+    let mut accept_psbt = create_funding_psbt(offer, &accept).unwrap();
+    accepter
+        .sign_funding_psbt(offer, &accept, &mut accept_psbt)
+        .await
+        .expect("the accepting party could not sign the funding PSBT");
+    let funding_transaction =
+        finalize_sign_spliced(offer, &accept, &sign, &accept_psbt, &accept_dlc_keys)
+            .expect("could not finalize the funding transaction");
+    (accept, sign, funding_transaction)
+}
+
+/// Accepts, signs and finalizes `offer` through [`ddk::contract::external`]:
+/// each party's DLC funding keys stay with a signer that answers the requests
+/// with nothing but rust-bitcoin, and its wallet inputs are signed by its own
+/// funding-input signer.
+async fn sign_through_external_signers(
+    offer: &OfferDlc,
+    accept_params: AcceptOfferParams,
+    offerer: &TestParty,
+    accepter: &TestParty,
+    splice: Option<SpliceSetup>,
+) -> (AcceptDlc, SignDlc, Transaction) {
+    let request = external::accept_request(offer, accept_params).unwrap();
+    let signatures =
+        external_signer::sign_contract(request.contract(), &accepter.funding_secret_key);
+    let accept = external::complete_accept(request, signatures)
+        .expect("could not complete the accept message")
+        .accept;
+
+    let request = external::sign_request(offer, &accept).unwrap();
+    let signatures =
+        external_signer::sign_contract(request.contract(), &offerer.funding_secret_key);
+    let mut offer_psbt = request.funding().psbt.clone();
+    offerer
+        .sign_funding_psbt(offer, &accept, &mut offer_psbt)
+        .await
+        .expect("the offering party could not sign the funding PSBT");
+    if let Some(splice) = &splice {
+        external_signer::sign_splice_inputs(
+            request.funding(),
+            &splice.offer_key.prior_funding_secret_key,
+            &mut offer_psbt,
+        );
+    }
+    let sign = external::complete_sign(request, signatures, &offer_psbt)
+        .expect("could not complete the sign message")
+        .sign;
+
+    let request = external::finalize_request(offer, &accept, &sign).unwrap();
+    let mut accept_psbt = request.funding().psbt.clone();
+    accepter
+        .sign_funding_psbt(offer, &accept, &mut accept_psbt)
+        .await
+        .expect("the accepting party could not sign the funding PSBT");
+    if let Some(splice) = &splice {
+        external_signer::sign_splice_inputs(
+            request.funding(),
+            &splice.accept_key.prior_funding_secret_key,
+            &mut accept_psbt,
+        );
+    }
+    let funding_transaction = external::complete_finalize(request, &accept_psbt)
+        .expect("could not complete the funding transaction");
+    (accept, sign, funding_transaction)
 }
 
 /// Settles the contract by broadcasting the CET for `attestations`.

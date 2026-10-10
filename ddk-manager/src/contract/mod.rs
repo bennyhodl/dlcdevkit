@@ -33,6 +33,46 @@ pub fn chain_hash_from_network(network: bitcoin::Network) -> [u8; 32] {
     bitcoin::blockdata::constants::ChainHash::using_genesis_block_const(network).to_bytes()
 }
 
+/// The contract id of a funded contract, as the DLC specification defines it:
+/// the temporary contract id XORed with the funding txid in wire byte order,
+/// with the funding output index folded into the last two bytes.
+///
+/// <https://github.com/discreetlogcontracts/dlcspecs/blob/master/Protocol.md#requirements-2>
+pub fn contract_id_from_outpoint(
+    funding_outpoint: bitcoin::OutPoint,
+    temporary_contract_id: &[u8; 32],
+) -> [u8; 32] {
+    xor_funding_outpoint(funding_outpoint, temporary_contract_id)
+}
+
+/// The temporary contract id a funded contract was negotiated under, from its
+/// funding outpoint and contract id: the inverse of
+/// [`contract_id_from_outpoint`].
+///
+/// A splice input names the contract it spends by contract id and carries
+/// that contract's funding transaction. Contract funding keys derive from the
+/// temporary id, so this is how the key for a splice input is found from the
+/// input alone.
+pub fn temporary_contract_id_from_outpoint(
+    funding_outpoint: bitcoin::OutPoint,
+    contract_id: &[u8; 32],
+) -> [u8; 32] {
+    // XOR is its own inverse.
+    xor_funding_outpoint(funding_outpoint, contract_id)
+}
+
+fn xor_funding_outpoint(funding_outpoint: bitcoin::OutPoint, id: &[u8; 32]) -> [u8; 32] {
+    let txid = funding_outpoint.txid;
+    let vout = funding_outpoint.vout as u16;
+    let mut result = [0; 32];
+    for i in 0..32 {
+        result[i] = txid[31 - i] ^ id[i];
+    }
+    result[30] ^= ((vout >> 8) & 0xff) as u8;
+    result[31] ^= (vout & 0xff) as u8;
+    result
+}
+
 /// Converts wire-level contract information into the execution information
 /// required to construct CETs and adaptor signatures.
 pub fn execution_contract_infos(

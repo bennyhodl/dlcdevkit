@@ -131,6 +131,29 @@ impl NumericalDescriptor {
         }
     }
 
+    /// Returns, in adaptor signature order, the index of the CET each adaptor
+    /// signature signs and the adaptor point it is encrypted to.
+    pub fn get_adaptor_points(
+        &self,
+        total_collateral: Amount,
+        threshold: usize,
+        precomputed_points: &[Vec<Vec<PublicKey>>],
+    ) -> Result<Vec<(usize, PublicKey)>, Error> {
+        let outcomes = self.get_range_payouts(total_collateral)?;
+        let points = match &self.difference_params {
+            Some(params) => MultiOracleTrieWithDiff::new(
+                &self.oracle_numeric_infos,
+                threshold,
+                params.min_support_exp,
+                params.max_error_exp,
+            )?
+            .generate_adaptor_points(&outcomes, precomputed_points)?,
+            None => MultiOracleTrie::new(&self.oracle_numeric_infos, threshold)?
+                .generate_adaptor_points(&outcomes, precomputed_points)?,
+        };
+        Ok(points)
+    }
+
     /// Generate the set of adaptor signatures and the adaptor info.
     #[allow(clippy::too_many_arguments)]
     pub fn get_adaptor_info(

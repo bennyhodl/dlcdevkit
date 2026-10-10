@@ -121,15 +121,17 @@ wipes it, and the hash input buffer that contains it, as soon as `sk` exists.
 | Key for a new contract | `funding_secret_key(temp_id)` / `funding_pubkey(temp_id)` |
 | Key under a given scheme | `funding_secret_key_with_scheme(temp_id, scheme)` |
 | Key of an existing contract from its messages | `funding_secret_key_for_pubkey(temp_id, &funding_pubkey)` |
-| Splice key for a prior contract | `dlc_input_signing_key(prior_temp_id, &prior_funding_pubkey, serial_id)` |
+| Splice key for a prior contract | `dlc_input_signing_key(&splice_input)` |
 | Which scheme made a key id | `KeyScheme::of_keys_id(&keys_id)` |
 
 `funding_secret_key_for_pubkey` and `dlc_input_signing_key` try every scheme,
 newest first, and return the key whose public key matches. They fail if no
 scheme matches. The stateless API keeps only wire messages, and the messages do
 not say which scheme was current when the contract was made, so the published
-funding pubkey is the selector. A splice of a V0 contract therefore works with
-the prior offer or accept message alone.
+funding pubkey is the selector. A splice input carries both funding pubkeys of
+the prior contract, its contract id and its funding transaction, which give back
+the prior temporary id (`advanced::temporary_contract_id_from_outpoint`), so a
+splice of a V0 contract works with the splice input alone.
 
 ## Disaster recovery
 
@@ -163,7 +165,7 @@ Nothing needs to be done at upgrade time:
 - Contracts **offered or accepted after** the upgrade get V1 ids and derive on
   **V1**.
 - Splices from a V0 contract into a new V1 contract work through
-  `dlc_input_signing_key`, which selects V0 from the prior funding pubkey.
+  `dlc_input_signing_key`, which selects V0 from the prior funding pubkeys.
 
 Tests in `keys.rs` pin this behaviour: `v0_reference_matches_the_shipped_v0_vectors`
 pins the exact `2.0.0-rc.2` output for a fixed mnemonic against an independent
