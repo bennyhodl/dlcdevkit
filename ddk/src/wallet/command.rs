@@ -1,5 +1,6 @@
 use super::contract_tracker::ContractUtxoTracker;
 use super::WalletStorage;
+use crate::contract::labels;
 use crate::error::WalletError;
 use crate::logger::{log_debug, log_error, WriteLog};
 use crate::{chain::EsploraClient, logger::Logger};
@@ -158,15 +159,16 @@ async fn sync_contract_utxos(
             for contract in &contracts {
                 if let Some((contract_id, spk, outpoint)) = contract_funding_info(contract) {
                     if tracker.register(contract_id, spk) {
+                        let funding = labels::funding_labels(&contract_id, outpoint);
                         let funding_tx_label =
                             bip329::Label::Transaction(bip329::TransactionRecord {
-                                ref_: outpoint.txid,
-                                label: Some(format!("DLC funding {}", hex::encode(contract_id))),
+                                ref_: funding.txid,
+                                label: Some(funding.transaction_label),
                                 origin: None,
                             });
                         let funding_output_label = bip329::Label::Output(bip329::OutputRecord {
-                            ref_: outpoint,
-                            label: Some(hex::encode(contract_id)),
+                            ref_: funding.outpoint,
+                            label: Some(funding.output_label),
                             spendable: Some(false),
                         });
                         for label in [funding_tx_label, funding_output_label] {
@@ -281,19 +283,11 @@ pub(super) fn contract_close_label(contract: &Contract) -> Option<(bitcoin::Txid
     };
     let txid = cet?.compute_txid();
     let outcomes = attestations
-        .map(|attestations| {
-            attestations
-                .iter()
-                .flat_map(|attestation| attestation.outcomes.clone())
-                .collect::<Vec<_>>()
-                .join(",")
-        })
-        .filter(|outcomes| !outcomes.is_empty());
-    let label = match outcomes {
-        Some(outcomes) => format!("DLC close {}: {}", hex::encode(contract_id), outcomes),
-        None => format!("DLC close {}", hex::encode(contract_id)),
-    };
-    Some((txid, label))
+        .into_iter()
+        .flatten()
+        .flat_map(|attestation| attestation.outcomes.clone())
+        .collect::<Vec<_>>();
+    Some((txid, labels::close_label(&contract_id, &outcomes)))
 }
 
 /// What a send spends: a specific amount, or the whole wallet.

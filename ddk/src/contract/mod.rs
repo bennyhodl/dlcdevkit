@@ -130,12 +130,15 @@
 //! broadcast it with the chain client of your choice (for example
 //! [`ddk_manager::Blockchain::send_transaction`] implemented by
 //! [`crate::chain::EsploraClient`]). Persisting messages for later execution
-//! is likewise the caller's responsibility.
+//! is likewise the caller's responsibility. A wallet that labels its contract
+//! transactions (BIP-329) takes the text from [`labels`](crate::contract::labels),
+//! so its export reads the same as DDK's own wallet's.
 //!
 //! Lower-level operations (raw witnesses, adaptor signatures, contract ids)
 //! live in [`advanced`](crate::contract::advanced).
 
 pub mod advanced;
+pub mod labels;
 pub mod signing;
 
 mod accept;
