@@ -22,7 +22,9 @@ pub extern crate secp256k1_zkp;
 #[cfg(feature = "use-serde")]
 extern crate serde;
 
+use bitcoin::hashes::Hash;
 use bitcoin::secp256k1::Scalar;
+use bitcoin::sighash::{EcdsaSighashType, Prevouts, SighashCache, TapSighashType};
 use bitcoin::transaction::Version;
 use bitcoin::Amount;
 use bitcoin::{
@@ -231,6 +233,10 @@ pub enum Error {
     Miniscript(miniscript::Error),
     /// Error attempting to do an out of bounds access on the transaction inputs vector.
     InputsIndex(bitcoin::transaction::InputsIndexError),
+    /// A funding witness spends a script type that
+    /// [`verify_funding_witness`] cannot check. The witness is neither valid
+    /// nor invalid as far as this crate can tell.
+    UnsupportedScriptType,
 }
 
 impl From<secp256k1_zkp::Error> for Error {
@@ -271,6 +277,12 @@ impl fmt::Display for Error {
             Error::P2wpkh(ref e) => write!(f, "Error while computing p2wpkh sighash: {e}"),
             Error::InputsIndex(ref e) => write!(f, "Error ordering inputs: {e}"),
             Error::Miniscript(_) => write!(f, "Error within miniscript"),
+            Error::UnsupportedScriptType => {
+                write!(
+                    f,
+                    "The witness spends a script type that cannot be verified"
+                )
+            }
         }
     }
 }
@@ -284,6 +296,7 @@ impl std::error::Error for Error {
             Error::InputsIndex(e) => Some(e),
             Error::InvalidArgument(_) => None,
             Error::Miniscript(e) => Some(e),
+            Error::UnsupportedScriptType => None,
         }
     }
 }
@@ -1326,6 +1339,133 @@ pub fn verify_tx_input_sig<V: Verification>(
     Ok(())
 }
 
+/// Verifies that `witness` spends the ordinary (non-DLC) funding input `input`
+/// at `input_index` of the funding transaction `fund_tx`.
+///
+/// `prevouts` are the outputs spent by every input of `fund_tx`, in input
+/// order: a Taproot signature commits to all of them.
+///
+/// Three kinds of coin can be verified: native P2WPKH, P2SH-wrapped P2WPKH
+/// (whose program is `input.redeem_script`), and a Taproot key-path spend.
+/// For those, the witness must belong to the key that owns the coin and sign
+/// the whole transaction: `SIGHASH_ALL`, or Taproot's default, which commits
+/// to the same data. A signature that commits to less would let the signer's
+/// coin be moved into a different transaction. The input's script signature
+/// must be empty for a native coin and the single push of the redeem script
+/// for a wrapped one, or the spend is invalid however good the signature is.
+///
+/// Any other script type (P2WSH, P2SH-P2WSH, a Taproot script-path spend, ...)
+/// returns [`Error::UnsupportedScriptType`]: the witness has not been checked
+/// and must not be treated as valid, but it is not known to be invalid either.
+///
+/// The witness length is not checked against `input.max_witness_len`: a
+/// signer that does not grind for a low R value produces a P2WPKH witness one
+/// byte over the 108 bytes the fee was computed for, which lowers the fee rate
+/// marginally but is valid.
+pub fn verify_funding_witness<C: Verification>(
+    secp: &Secp256k1<C>,
+    fund_tx: &Transaction,
+    input_index: usize,
+    input: &TxInputInfo,
+    prevouts: &[TxOut],
+    witness: &Witness,
+) -> Result<(), Error> {
+    let invalid = |message: &str| Error::InvalidArgument(format!("input {input_index}: {message}"));
+    let tx_in = fund_tx
+        .input
+        .get(input_index)
+        .ok_or_else(|| invalid("the funding transaction has no such input"))?;
+    if tx_in.previous_output != input.outpoint {
+        return Err(invalid("the funding input spends a different outpoint"));
+    }
+    if prevouts.len() != fund_tx.input.len() {
+        return Err(invalid(
+            "expected one previous output per funding transaction input",
+        ));
+    }
+    let prevout = &prevouts[input_index];
+    let elements: Vec<&[u8]> = witness.iter().collect();
+
+    let program = if input.redeem_script.is_empty() {
+        &prevout.script_pubkey
+    } else if input.redeem_script.to_p2sh() == prevout.script_pubkey {
+        &input.redeem_script
+    } else {
+        return Err(invalid(
+            "the redeem script does not hash to the previous output",
+        ));
+    };
+    // More than one element on a Taproot output is a script-path spend (or
+    // carries an annex), which is not checked here.
+    let taproot_key_path =
+        program.is_p2tr() && input.redeem_script.is_empty() && elements.len() <= 1;
+    if !program.is_p2wpkh() && !taproot_key_path {
+        return Err(Error::UnsupportedScriptType);
+    }
+    if tx_in.script_sig != util::redeem_script_to_script_sig(&input.redeem_script)? {
+        return Err(invalid(
+            "the script signature must be empty for a native SegWit coin and push the redeem \
+             script for a wrapped one",
+        ));
+    }
+
+    if taproot_key_path {
+        let [signature] = elements[..] else {
+            return Err(invalid("a Taproot key-path witness is a single signature"));
+        };
+        let signature = bitcoin::taproot::Signature::from_slice(signature)
+            .map_err(|e| invalid(&format!("not a Taproot signature: {e}")))?;
+        if !matches!(
+            signature.sighash_type,
+            TapSighashType::Default | TapSighashType::All
+        ) {
+            return Err(invalid(&format!(
+                "signature uses {}, SIGHASH_ALL is required",
+                signature.sighash_type
+            )));
+        }
+        let output_key = XOnlyPublicKey::from_slice(&program.as_bytes()[2..])?;
+        let sighash = SighashCache::new(fund_tx)
+            .taproot_key_spend_signature_hash(
+                input_index,
+                &Prevouts::All(prevouts),
+                signature.sighash_type,
+            )
+            .map_err(|e| invalid(&e.to_string()))?;
+        secp.verify_schnorr(
+            &signature.signature,
+            &Message::from_digest(sighash.to_byte_array()),
+            &output_key,
+        )?;
+        return Ok(());
+    }
+
+    let [signature, public_key] = elements[..] else {
+        return Err(invalid("a P2WPKH witness is a signature and a public key"));
+    };
+    let signature = util::sighash_all_signature(signature)?;
+    let public_key = bitcoin::PublicKey::from_slice(public_key)
+        .map_err(|e| invalid(&format!("not a public key: {e}")))?;
+    let key_hash = public_key
+        .wpubkey_hash()
+        .map_err(|e| invalid(&e.to_string()))?;
+    if ScriptBuf::new_p2wpkh(&key_hash) != *program {
+        return Err(invalid("the public key does not own the coin"));
+    }
+    let sighash = SighashCache::new(fund_tx).p2wpkh_signature_hash(
+        input_index,
+        program,
+        prevout.value,
+        EcdsaSighashType::All,
+    )?;
+    secp.verify_ecdsa(
+        &Message::from_digest(sighash.to_byte_array()),
+        &signature,
+        &public_key.inner,
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2325,5 +2465,165 @@ mod tests {
             refund_tx.output[0].script_pubkey, accept_party_params.payout_script_pubkey,
             "Output should pay to the accepter's payout SPK"
         );
+    }
+
+    #[test]
+    fn funding_witnesses_verify_for_each_supported_coin() {
+        use bitcoin::key::TapTweak;
+
+        let secp = Secp256k1::new();
+        let secret_key = |byte| SecretKey::from_slice(&[byte; 32]).unwrap();
+        let p2wpkh = |secret_key: &SecretKey| {
+            let public_key = CompressedPublicKey(PublicKey::from_secret_key(&secp, secret_key));
+            ScriptBuf::new_p2wpkh(&public_key.wpubkey_hash())
+        };
+        let (native, wrapped) = (secret_key(1), secret_key(2));
+        let taproot = Keypair::from_secret_key(&secp, &secret_key(3));
+        let wrapped_program = p2wpkh(&wrapped);
+        let prevouts = vec![
+            TxOut {
+                value: Amount::from_sat(10_000),
+                script_pubkey: p2wpkh(&native),
+            },
+            TxOut {
+                value: Amount::from_sat(20_000),
+                script_pubkey: wrapped_program.to_p2sh(),
+            },
+            TxOut {
+                value: Amount::from_sat(30_000),
+                script_pubkey: ScriptBuf::new_p2tr(&secp, taproot.x_only_public_key().0, None),
+            },
+        ];
+        let inputs: Vec<TxInputInfo> = (0..3u8)
+            .map(|i| TxInputInfo {
+                outpoint: OutPoint::new(Txid::from_byte_array([i + 1; 32]), 0),
+                max_witness_len: 108,
+                redeem_script: if i == 1 {
+                    wrapped_program.clone()
+                } else {
+                    ScriptBuf::new()
+                },
+                serial_id: i as u64,
+            })
+            .collect();
+        let fund_tx = Transaction {
+            version: Version::TWO,
+            lock_time: LockTime::ZERO,
+            input: inputs
+                .iter()
+                .map(|input| TxIn {
+                    previous_output: input.outpoint,
+                    script_sig: util::redeem_script_to_script_sig(&input.redeem_script).unwrap(),
+                    ..Default::default()
+                })
+                .collect(),
+            output: vec![TxOut {
+                value: Amount::from_sat(55_000),
+                script_pubkey: ScriptBuf::new(),
+            }],
+        };
+        let ecdsa_witness = |secret_key: &SecretKey, index: usize| {
+            util::get_witness_for_p2wpkh_input(
+                &secp,
+                secret_key,
+                &fund_tx,
+                index,
+                EcdsaSighashType::All,
+                prevouts[index].value,
+            )
+            .unwrap()
+        };
+        let taproot_witness = |sighash_type| {
+            let sighash = SighashCache::new(&fund_tx)
+                .taproot_key_spend_signature_hash(2, &Prevouts::All(&prevouts), sighash_type)
+                .unwrap();
+            let signature = secp.sign_schnorr_no_aux_rand(
+                &Message::from_digest(sighash.to_byte_array()),
+                &taproot.tap_tweak(&secp, None).to_keypair(),
+            );
+            let signature = bitcoin::taproot::Signature {
+                signature,
+                sighash_type,
+            };
+            Witness::from_slice(&[signature.to_vec()])
+        };
+        let verify = |tx: &Transaction, index: usize, prevouts: &[TxOut], witness: &Witness| {
+            verify_funding_witness(&secp, tx, index, &inputs[index], prevouts, witness)
+        };
+
+        verify(&fund_tx, 0, &prevouts, &ecdsa_witness(&native, 0)).unwrap();
+        verify(&fund_tx, 1, &prevouts, &ecdsa_witness(&wrapped, 1)).unwrap();
+        verify(
+            &fund_tx,
+            2,
+            &prevouts,
+            &taproot_witness(TapSighashType::Default),
+        )
+        .unwrap();
+        verify(
+            &fund_tx,
+            2,
+            &prevouts,
+            &taproot_witness(TapSighashType::All),
+        )
+        .unwrap();
+
+        // A Taproot signature that commits to less than the whole transaction
+        // is valid on chain but would let the coin move into another one.
+        assert!(matches!(
+            verify(
+                &fund_tx,
+                2,
+                &prevouts,
+                &taproot_witness(TapSighashType::None)
+            ),
+            Err(Error::InvalidArgument(_))
+        ));
+
+        // The SegWit signature hash does not cover script signatures, so the
+        // same witnesses stay valid signatures while the spend itself breaks:
+        // a wrapped coin without, or with the wrong, redeem script push, and a
+        // native coin with any script signature at all.
+        let with_script_sig = |index: usize, script_sig: ScriptBuf| {
+            let mut tx = fund_tx.clone();
+            tx.input[index].script_sig = script_sig;
+            tx
+        };
+        let wrong_push = util::redeem_script_to_script_sig(&p2wpkh(&native)).unwrap();
+        for (index, script_sig, witness) in [
+            (1, ScriptBuf::new(), ecdsa_witness(&wrapped, 1)),
+            (1, wrong_push.clone(), ecdsa_witness(&wrapped, 1)),
+            (0, wrong_push.clone(), ecdsa_witness(&native, 0)),
+            (2, wrong_push, taproot_witness(TapSighashType::Default)),
+        ] {
+            assert!(matches!(
+                verify(
+                    &with_script_sig(index, script_sig),
+                    index,
+                    &prevouts,
+                    &witness
+                ),
+                Err(Error::InvalidArgument(_))
+            ));
+        }
+
+        // A coin whose script cannot be checked is reported as such: neither
+        // valid nor invalid. A Taproot script-path spend is one of them.
+        let mut unsupported = prevouts.clone();
+        unsupported[0].script_pubkey =
+            ScriptBuf::new_p2wsh(&bitcoin::WScriptHash::from_byte_array([9; 32]));
+        assert!(matches!(
+            verify(&fund_tx, 0, &unsupported, &ecdsa_witness(&native, 0)),
+            Err(Error::UnsupportedScriptType)
+        ));
+        assert!(matches!(
+            verify(
+                &fund_tx,
+                2,
+                &prevouts,
+                &Witness::from_slice(&[vec![0x51], vec![0xc0; 33]])
+            ),
+            Err(Error::UnsupportedScriptType)
+        ));
     }
 }
