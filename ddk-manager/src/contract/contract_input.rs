@@ -8,8 +8,6 @@ use secp256k1_zkp::XOnlyPublicKey;
 #[cfg(feature = "use-serde")]
 use serde::{Deserialize, Serialize};
 
-const DUST_LIMIT: Amount = Amount::from_sat(1000);
-
 /// Oracle information required for the initial creation of a contract.
 #[derive(Debug, Clone)]
 #[cfg_attr(
@@ -92,19 +90,11 @@ pub struct ContractInput {
 impl ContractInput {
     /// Validate the contract input parameters
     pub fn validate(&self) -> Result<(), Error> {
-        // Allow 0 collateral for single-funded DLCs, but non-zero must exceed dust limit
-        if self.offer_collateral > Amount::ZERO && self.offer_collateral < DUST_LIMIT {
-            return Err(Error::InvalidParameters(
-                "Non-zero offer collateral must be greater than dust limit.".to_string(),
-            ));
-        }
-
-        let total_collateral = self.offer_collateral + self.accept_collateral;
-        if total_collateral < DUST_LIMIT {
-            return Err(Error::InvalidParameters(
-                "Total collateral must be greater than dust limit.".to_string(),
-            ));
-        }
+        ddk_dlc::util::validate_collateral(
+            self.offer_collateral,
+            self.offer_collateral + self.accept_collateral,
+        )
+        .map_err(|e| Error::InvalidParameters(e.to_string()))?;
 
         if self.contract_infos.is_empty() {
             return Err(Error::InvalidParameters(

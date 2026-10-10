@@ -119,7 +119,7 @@ where
     )?;
 
     let offer_msg = OfferDlc::from(&offered_contract);
-    offer_msg.validate_cet_locktime()?;
+    offer_msg.validate_terms()?;
 
     Ok((offered_contract, offer_msg))
 }

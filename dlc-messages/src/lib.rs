@@ -45,6 +45,7 @@ use std::fmt::Display;
 
 use crate::ser_impls::{read_ecdsa_adaptor_signature, write_ecdsa_adaptor_signature};
 use crate::types::*;
+use bitcoin::absolute::LockTime;
 use bitcoin::{consensus::Decodable, OutPoint, Transaction};
 use bitcoin::{Amount, ScriptBuf};
 use contract_msgs::ContractInfo;
@@ -391,36 +392,114 @@ impl OfferDlc {
         Ok(())
     }
 
-    /// Returns whether the message satisfies validity requirements.
+    /// Returns an error when an oracle announcement in the contract info is
+    /// not signed by its oracle or describes a malformed event.
     ///
-    /// `now_unix` is the receiver's clock as a unix timestamp. An offer whose
-    /// closest oracle event has already matured is rejected: the oracle may
-    /// have published the attestation, so the offering party knows the outcome
-    /// before the accepting party commits any collateral.
-    pub fn validate<C: Verification>(
+    /// This is the receiving party's check on oracles it did not choose. It is
+    /// kept apart from [`OfferDlc::validate_terms`] so that the offering party
+    /// can check the offer it built without it.
+    pub fn validate_announcements<C: Verification>(
         &self,
         secp: &Secp256k1<C>,
+    ) -> Result<(), Error> {
+        match &self.contract_info {
+            ContractInfo::SingleContractInfo(s) => s.contract_info.oracle_info.validate(secp),
+            ContractInfo::DisjointContractInfo(d) => d
+                .contract_infos
+                .iter()
+                .try_for_each(|c| c.oracle_info.validate(secp)),
+        }
+    }
+
+    /// Returns an error when the offer's terms break a rule of the DLC
+    /// protocol.
+    ///
+    /// These are the checks that need nothing but the message and no oracle
+    /// signatures: a disjoint contract has at least two parts, the fee rate is
+    /// not absurd, the collateral fits the total and clears the dust limit,
+    /// the payout and change scripts are standard, the locktimes share a unit
+    /// and an order (CET, then refund, with the CET locktime no later than
+    /// maturity), and the serial ids that order the funding transaction are
+    /// distinct. Whether the timeouts suit the receiver and whether the event
+    /// is still in the future depend on the receiver's policy and clock; see
+    /// [`OfferDlc::validate_timing`].
+    pub fn validate_terms(&self) -> Result<(), Error> {
+        if let ContractInfo::DisjointContractInfo(d) = &self.contract_info {
+            if d.contract_infos.len() < 2 {
+                return Err(Error::InvalidArgument(
+                    "Need at least two contract infos for disjoint contract".to_string(),
+                ));
+            }
+        }
+
+        ddk_dlc::util::validate_fee_rate(self.fee_rate_per_vb)?;
+        ddk_dlc::util::validate_collateral(self.offer_collateral, self.get_total_collateral())?;
+
+        for (name, script) in [("payout", &self.payout_spk), ("change", &self.change_spk)] {
+            if !is_standard_script_pubkey(script) {
+                return Err(Error::InvalidArgument(format!(
+                    "{name} script pubkey is not a standard script pubkey"
+                )));
+            }
+        }
+
+        // The specification asks for both locktimes in one unit. A zero CET
+        // locktime is accepted against either: it does not lock the CETs at
+        // all, so there is no unit to disagree, and it is how an offer lets
+        // its CETs settle as soon as the oracles attest.
+        let cet_locktime = LockTime::from_consensus(self.cet_locktime);
+        let refund_locktime = LockTime::from_consensus(self.refund_locktime);
+        if self.cet_locktime != 0 && !cet_locktime.is_same_unit(refund_locktime) {
+            return Err(Error::InvalidArgument(
+                "CET and refund locktimes must both be block heights or both be timestamps"
+                    .to_string(),
+            ));
+        }
+        if self.cet_locktime >= self.refund_locktime {
+            return Err(Error::InvalidArgument(
+                "refund locktime must be after the CET locktime".to_string(),
+            ));
+        }
+        self.validate_cet_locktime()?;
+
+        let mut input_serial_ids = self
+            .funding_inputs
+            .iter()
+            .map(|input| input.input_serial_id)
+            .collect::<Vec<_>>();
+        input_serial_ids.sort_unstable();
+        if input_serial_ids.windows(2).any(|pair| pair[0] == pair[1]) {
+            return Err(Error::InvalidArgument(
+                "funding input serial ids are not unique".to_string(),
+            ));
+        }
+        if self.change_serial_id == self.fund_output_serial_id {
+            return Err(Error::InvalidArgument(
+                "change and fund output serial ids must differ".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Returns an error when the offer's timing does not suit the receiver.
+    ///
+    /// The refund locktime must fall between `min_timeout_interval` and
+    /// `max_timeout_interval` after the closest oracle event maturity; both
+    /// bounds are the receiver's policy. `now_unix` is the receiver's clock as
+    /// a unix timestamp. An offer whose closest oracle event has already
+    /// matured is rejected: the oracle may have published the attestation, so
+    /// the offering party knows the outcome before the accepting party commits
+    /// any collateral.
+    ///
+    /// Run [`OfferDlc::validate_terms`] first: a disjoint contract with no
+    /// parts has no maturity to measure from.
+    pub fn validate_timing(
+        &self,
         min_timeout_interval: u32,
         max_timeout_interval: u32,
         now_unix: u64,
     ) -> Result<(), Error> {
-        match &self.contract_info {
-            ContractInfo::SingleContractInfo(s) => s.contract_info.oracle_info.validate(secp)?,
-            ContractInfo::DisjointContractInfo(d) => {
-                if d.contract_infos.len() < 2 {
-                    return Err(Error::InvalidArgument(
-                        "Need at least two contract infos for disjoint contract".to_string(),
-                    ));
-                }
-
-                for c in &d.contract_infos {
-                    c.oracle_info.validate(secp)?;
-                }
-            }
-        }
-
-        self.validate_cet_locktime()?;
-
         let closest_maturity_date = self.contract_info.get_closest_maturity_date();
         let valid_refund = closest_maturity_date + min_timeout_interval <= self.refund_locktime
             && self.refund_locktime <= closest_maturity_date + max_timeout_interval;
@@ -438,6 +517,35 @@ impl OfferDlc {
 
         Ok(())
     }
+
+    /// Returns whether the message satisfies validity requirements: the
+    /// oracle announcements ([`OfferDlc::validate_announcements`]), the
+    /// protocol rules ([`OfferDlc::validate_terms`]), and the receiver's timing
+    /// policy ([`OfferDlc::validate_timing`]).
+    pub fn validate<C: Verification>(
+        &self,
+        secp: &Secp256k1<C>,
+        min_timeout_interval: u32,
+        max_timeout_interval: u32,
+        now_unix: u64,
+    ) -> Result<(), Error> {
+        self.validate_announcements(secp)?;
+        self.validate_terms()?;
+        self.validate_timing(min_timeout_interval, max_timeout_interval, now_unix)
+    }
+}
+
+/// Whether a script pubkey has one of the forms the DLC specification calls
+/// standard: P2PKH, P2SH, P2WPKH, P2WSH, or a witness program of version 1
+/// through 16. Nodes may not relay a funding transaction, CET, or refund that
+/// pays any other form, and the contract could fail to fund or settle.
+fn is_standard_script_pubkey(script: &bitcoin::Script) -> bool {
+    script.is_p2pkh()
+        || script.is_p2sh()
+        || script.is_p2wpkh()
+        || script.is_p2wsh()
+        || (script.is_witness_program()
+            && script.witness_version() != Some(bitcoin::WitnessVersion::V0))
 }
 
 impl Writeable for OfferDlc {
