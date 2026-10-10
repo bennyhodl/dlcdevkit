@@ -69,6 +69,7 @@ let signed_cet = sign_cet(
 | `create_refund_transaction` | Create refund transaction |
 | `create_cet_adaptor_sig_from_oracle_info` | Create adaptor signature for CET |
 | `sign_cet` | Sign CET with oracle attestation |
+| `adaptor_secret` | Sum oracle signatures into the secret that decrypts a CET adaptor signature |
 | `verify_cet_adaptor_sig_from_oracle_info` | Verify adaptor signature |
 
 ## Channel Operations
