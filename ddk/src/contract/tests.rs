@@ -237,6 +237,7 @@ fn network_round_trips_through_chain_hash() {
     for network in [
         Network::Bitcoin,
         Network::Testnet,
+        Network::Testnet4,
         Network::Signet,
         Network::Regtest,
     ] {

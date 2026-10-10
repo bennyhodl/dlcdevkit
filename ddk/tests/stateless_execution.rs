@@ -1179,3 +1179,65 @@ async fn splice_recovers_prior_keys_from_a_mnemonic() {
     let attestations = spliced_oracles.attest_enum("a").await;
     close_with_cet(&ctx, &spliced, Party::Accept, &attestations).await;
 }
+
+// --- External signers -----------------------------------------------------
+//
+// Every DLC funding key is held outside the protocol code, the way a vault, an
+// HSM or a hardware wallet holds it, and the contract runs through
+// `ddk::contract::external`.
+
+/// Both parties keep their keys in external signers, fund a contract, splice it
+/// into a replacement that adds a wallet input, and settle the replacement.
+#[tokio::test]
+#[ignore]
+async fn external_signers_fund_splice_and_close() {
+    let label = "external_signers_fund_splice_and_close";
+    let ctx = ChainContext::new(label).await;
+    let spec = |role, seed_byte, serial_id| {
+        PartySpec::new(role, seed_byte, serial_id).with_input_source(InputSource::ExternalSigner)
+    };
+
+    let previous_id = temporary_contract_id(&format!("{label}-previous"));
+    let previous_oracles = TestOracles::enums(1, 1, &format!("{label}-previous")).await;
+    let previous = fund_contract(
+        &ctx,
+        ContractSetup::new(
+            enum_contract_info(&previous_oracles, TOTAL_COLLATERAL),
+            OFFER_COLLATERAL,
+            previous_id,
+            TestParty::new(&ctx, spec(Party::Offer, 91, 1), previous_id).await,
+            TestParty::new(&ctx, spec(Party::Accept, 92, 2), previous_id).await,
+        )
+        .through_external_signers(),
+    )
+    .await;
+
+    let collateral = previous.fund_value() + SPLICE_AMOUNT;
+    let spliced_id = temporary_contract_id(&format!("{label}-spliced"));
+    let spliced_oracles = TestOracles::enums(1, 1, &format!("{label}-spliced")).await;
+    let offerer = TestParty::new(&ctx, spec(Party::Offer, 91, 3), spliced_id).await;
+    let accepter = TestParty::new(
+        &ctx,
+        PartySpec::unfunded(Party::Accept, 92).with_input_source(InputSource::ExternalSigner),
+        spliced_id,
+    )
+    .await;
+    let splice = splice_from(&previous, Party::Offer, &offerer, &accepter, 900);
+    let spliced = fund_contract(
+        &ctx,
+        ContractSetup::new(
+            enum_contract_info(&spliced_oracles, collateral),
+            collateral,
+            spliced_id,
+            offerer,
+            accepter,
+        )
+        .with_splice(splice)
+        .through_external_signers(),
+    )
+    .await;
+    assert_splice(&ctx, &previous, &spliced, true).await;
+
+    let attestations = spliced_oracles.attest_enum(SETTLEMENT_OUTCOME).await;
+    close_with_cet(&ctx, &spliced, Party::Accept, &attestations).await;
+}

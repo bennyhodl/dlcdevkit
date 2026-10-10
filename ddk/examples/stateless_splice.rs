@@ -11,7 +11,8 @@
 //!    deterministic "key generator". A contract's funding key is a pure function
 //!    of its temporary id, so the caller never stores it: when splicing, each
 //!    party re-derives the *previous* contract's funding key with
-//!    [`ContractKeyProvider::dlc_input_signing_key`] and the prior temporary id.
+//!    [`ContractKeyProvider::dlc_input_signing_key`] from the splice input alone,
+//!    which names the previous contract and carries its funding transaction.
 //!    A [`ContractKeyProvider`] can be built from an xpriv, a seed, a BIP39
 //!    mnemonic, or a private descriptor; in production
 //!    [`ddk::wallet::DlcDevKitWallet`] is itself a provider.
@@ -236,7 +237,7 @@ async fn main() {
             offerer_keys.funding_pubkey(temp_id_b).unwrap(),
             offerer_wallet.script_pubkey.clone(),
             vec![
-                splice_input,
+                splice_input.clone(),
                 offerer_wallet.utxo(Amount::from_sat(200_000), 10),
             ],
         ),
@@ -266,9 +267,9 @@ async fn main() {
     .accept;
 
     // Offer side: sign the new wallet UTXO, then produce this party's half of the
-    // prior 2-of-2. The prior funding key is RE-DERIVED from `temp_id_a` — not
-    // stored — via the provider's `dlc_input_signing_key` helper. The funding
-    // pubkey from the prior offer selects the key scheme the prior contract used.
+    // prior 2-of-2. The prior funding key is RE-DERIVED — not stored — via the
+    // provider's `dlc_input_signing_key` helper, from the splice input alone: it
+    // gives back `temp_id_a` and selects the key scheme the prior contract used.
     let mut offer_b_psbt = create_funding_psbt(&offer_b, &accept_b).unwrap();
     signing::sign_funding_psbt_with_wallet(
         &offer_b,
@@ -280,7 +281,7 @@ async fn main() {
     .await
     .expect("offer B wallet signing");
     let offer_prior_key = offerer_keys
-        .dlc_input_signing_key(temp_id_a, &offer_a.funding_pubkey, splice_serial)
+        .dlc_input_signing_key(&splice_input)
         .expect("recover offer prior key");
     let sign_b = sign_accept_spliced(
         &offer_b,
@@ -295,7 +296,7 @@ async fn main() {
     // again from the RE-DERIVED prior funding key.
     let accept_b_psbt = create_funding_psbt(&offer_b, &accept_b).unwrap();
     let accept_prior_key = accepter_keys
-        .dlc_input_signing_key(temp_id_a, &accept_a.funding_pubkey, splice_serial)
+        .dlc_input_signing_key(&splice_input)
         .expect("recover accept prior key");
     let funding_tx_b = finalize_sign_spliced(
         &offer_b,
