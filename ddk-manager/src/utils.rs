@@ -45,11 +45,21 @@ pub(crate) fn get_new_serial_id() -> u64 {
     thread_rng().next_u64()
 }
 
+// A fixed seed keeps a fuzz run reproducible. The generator lives for the
+// thread and advances with each draw, so two ids drawn in one run differ, as
+// the specification asks of serial ids and as two contracts need of their
+// temporary ids.
+#[cfg(feature = "fuzztarget")]
+thread_local! {
+    static FUZZ_RNG: std::cell::RefCell<rand_chacha::ChaCha8Rng> = std::cell::RefCell::new(
+        rand_chacha::rand_core::SeedableRng::from_seed([0u8; 32]),
+    );
+}
+
 #[cfg(feature = "fuzztarget")]
 pub(crate) fn get_new_serial_id() -> u64 {
     use rand_chacha::rand_core::RngCore;
-    use rand_chacha::rand_core::SeedableRng;
-    rand_chacha::ChaCha8Rng::from_seed([0u8; 32]).next_u64()
+    FUZZ_RNG.with(|rng| rng.borrow_mut().next_u64())
 }
 
 #[cfg(not(feature = "fuzztarget"))]
@@ -60,9 +70,8 @@ pub(crate) fn get_new_temporary_id() -> [u8; 32] {
 #[cfg(feature = "fuzztarget")]
 pub(crate) fn get_new_temporary_id() -> [u8; 32] {
     use rand_chacha::rand_core::RngCore;
-    use rand_chacha::rand_core::SeedableRng;
     let mut res = [0u8; 32];
-    rand_chacha::ChaCha8Rng::from_seed([0u8; 32]).fill_bytes(&mut res);
+    FUZZ_RNG.with(|rng| rng.borrow_mut().fill_bytes(&mut res));
     res
 }
 
