@@ -52,7 +52,7 @@ pub mod util;
 /// Minimum value that can be included in a transaction output. Under this value,
 /// outputs are discarded
 /// See: https://github.com/discreetlogcontracts/dlcspecs/blob/master/Transactions.md#change-outputs
-const DUST_LIMIT: Amount = Amount::from_sat(1000);
+pub const DUST_LIMIT: Amount = Amount::from_sat(1000);
 
 /// Bit 0 of `contract_flags`: redirect all refund proceeds to the accepter.
 pub const REFUND_TO_ACCEPTER_FLAG: u8 = 0x01;
@@ -116,7 +116,7 @@ pub struct RangePayout {
 }
 
 /// Representation of a payout for an enumeration outcome.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "use-serde", derive(Serialize, Deserialize))]
 pub struct EnumerationPayout {
     /// The outcome value (prior to hashing)
@@ -356,6 +356,27 @@ impl PartyParams {
         extra_fee: Amount,
         counterparty_payout_script_pubkey: Option<&Script>,
     ) -> Result<(TxOut, Amount, Amount), Error> {
+        self.change_output_and_fees(
+            total_collateral,
+            fee_rate_per_vb,
+            extra_fee,
+            self.payout_script_pubkey.len(),
+            counterparty_payout_script_pubkey.map(|script_pubkey| script_pubkey.len()),
+        )
+    }
+
+    /// [`PartyParams::get_change_output_and_fees_with_counterparty`] with the
+    /// CET fee priced from script lengths: `payout_script_len` is the longest
+    /// script a CET pays this party, and `counterparty_payout_script_len` the
+    /// longest a CET pays the counterparty.
+    fn change_output_and_fees(
+        &self,
+        total_collateral: Amount,
+        fee_rate_per_vb: u64,
+        extra_fee: Amount,
+        payout_script_len: usize,
+        counterparty_payout_script_len: Option<usize>,
+    ) -> Result<(TxOut, Amount, Amount), Error> {
         let mut inputs_weight: usize = 0;
 
         // first check if a party does not need to fund the contract if so, then it is zero
@@ -423,23 +444,20 @@ impl PartyParams {
         };
 
         // size of the payout script pubkey scaled by 4 from vBytes to weight units
-        let output_spk_weight =
-            self.payout_script_pubkey
-                .len()
-                .checked_mul(4)
-                .ok_or(Error::InvalidArgument(format!(
-                    "Output spk checked multiplication failed: {} * 4",
-                    self.payout_script_pubkey.len()
-                )))?;
+        let output_spk_weight = payout_script_len
+            .checked_mul(4)
+            .ok_or(Error::InvalidArgument(format!(
+                "Output spk checked multiplication failed: {} * 4",
+                payout_script_len
+            )))?;
         // A party funding the whole contract also pays for the counterparty's
         // payout output, which nobody else prices.
-        let counterparty_spk_weight = match counterparty_payout_script_pubkey {
-            Some(script_pubkey) if self.collateral == total_collateral => script_pubkey
-                .len()
+        let counterparty_spk_weight = match counterparty_payout_script_len {
+            Some(script_len) if self.collateral == total_collateral => script_len
                 .checked_mul(4)
                 .ok_or(Error::InvalidArgument(format!(
                     "Counterparty output spk checked multiplication failed: {} * 4",
-                    script_pubkey.len()
+                    script_len
                 )))?,
             _ => 0,
         };
@@ -515,10 +533,13 @@ pub fn create_spliced_dlc_transactions(
         fund_output_serial_id,
         contract_flags,
         FeeRule::default(),
+        accept_params.payout_script_pubkey.len(),
     )
 }
 
-/// [`create_spliced_dlc_transactions`] under an explicit [`FeeRule`].
+/// [`create_spliced_dlc_transactions`] under an explicit [`FeeRule`], with the
+/// CET fee reserved for an accepting party's output of `accept_cet_script_len`
+/// script bytes; see [`create_dlc_transactions_with_fee_rule`].
 #[allow(clippy::too_many_arguments)]
 pub fn create_spliced_dlc_transactions_with_fee_rule(
     offer_params: &PartyParams,
@@ -531,6 +552,7 @@ pub fn create_spliced_dlc_transactions_with_fee_rule(
     fund_output_serial_id: u64,
     contract_flags: u8,
     fee_rule: FeeRule,
+    accept_cet_script_len: usize,
 ) -> Result<DlcTransactions, Error> {
     // Create enhanced party parameters that include DLC inputs as regular inputs
     let mut enhanced_offer_params = offer_params.clone();
@@ -577,6 +599,7 @@ pub fn create_spliced_dlc_transactions_with_fee_rule(
         fund_output_serial_id,
         contract_flags,
         fee_rule,
+        accept_cet_script_len,
     )
 }
 
@@ -604,10 +627,18 @@ pub fn create_dlc_transactions(
         fund_output_serial_id,
         contract_flags,
         FeeRule::default(),
+        accept_params.payout_script_pubkey.len(),
     )
 }
 
-/// [`create_dlc_transactions`] under an explicit [`FeeRule`].
+/// [`create_dlc_transactions`] under an explicit [`FeeRule`], with the CET
+/// fee reserved for an accepting party's output of `accept_cet_script_len`
+/// script bytes.
+///
+/// That is the length of the longest script a CET pays the accepting party:
+/// its payout script, or a longer one a CET may pay in its place. The CETs
+/// built here pay its payout script; a caller that puts a longer script in
+/// some of them passes that script's length, so those CETs keep the fee rate.
 #[allow(clippy::too_many_arguments)]
 pub fn create_dlc_transactions_with_fee_rule(
     offer_params: &PartyParams,
@@ -620,6 +651,7 @@ pub fn create_dlc_transactions_with_fee_rule(
     fund_output_serial_id: u64,
     contract_flags: u8,
     fee_rule: FeeRule,
+    accept_cet_script_len: usize,
 ) -> Result<DlcTransactions, Error> {
     let (fund_tx, funding_witness_script) = create_fund_transaction_with_fees_and_rule(
         offer_params,
@@ -629,6 +661,7 @@ pub fn create_dlc_transactions_with_fee_rule(
         fund_output_serial_id,
         Amount::ZERO,
         fee_rule,
+        accept_cet_script_len,
     )?;
     let fund_outpoint = OutPoint {
         txid: fund_tx.compute_txid(),
@@ -673,10 +706,15 @@ pub fn create_fund_transaction_with_fees(
         fund_output_serial_id,
         extra_fee,
         FeeRule::default(),
+        accept_params.payout_script_pubkey.len(),
     )
 }
 
-/// [`create_fund_transaction_with_fees`] under an explicit [`FeeRule`].
+/// [`create_fund_transaction_with_fees`] under an explicit [`FeeRule`], with
+/// the CET fee reserved for an accepting party's output of
+/// `accept_cet_script_len` script bytes; see
+/// [`create_dlc_transactions_with_fee_rule`].
+#[allow(clippy::too_many_arguments)]
 pub fn create_fund_transaction_with_fees_and_rule(
     offer_params: &PartyParams,
     accept_params: &PartyParams,
@@ -685,26 +723,29 @@ pub fn create_fund_transaction_with_fees_and_rule(
     fund_output_serial_id: u64,
     extra_fee: Amount,
     fee_rule: FeeRule,
+    accept_cet_script_len: usize,
 ) -> Result<(Transaction, ScriptBuf), Error> {
     let total_collateral = checked_add!(offer_params.collateral, accept_params.collateral)?;
 
-    let counterparty_payout = |script_pubkey| match fee_rule {
-        FeeRule::CounterpartyPayout => Some(script_pubkey),
+    let counterparty_payout = |script_len| match fee_rule {
+        FeeRule::CounterpartyPayout => Some(script_len),
         FeeRule::OwnPayoutOnly => None,
     };
     let (offer_change_output, offer_fund_fee, offer_cet_fee) = offer_params
-        .get_change_output_and_fees_with_counterparty(
+        .change_output_and_fees(
             total_collateral,
             fee_rate_per_vb,
             extra_fee,
-            counterparty_payout(accept_params.payout_script_pubkey.as_script()),
+            offer_params.payout_script_pubkey.len(),
+            counterparty_payout(accept_cet_script_len),
         )?;
     let (accept_change_output, accept_fund_fee, accept_cet_fee) = accept_params
-        .get_change_output_and_fees_with_counterparty(
+        .change_output_and_fees(
             total_collateral,
             fee_rate_per_vb,
             extra_fee,
-            counterparty_payout(offer_params.payout_script_pubkey.as_script()),
+            accept_cet_script_len,
+            counterparty_payout(offer_params.payout_script_pubkey.len()),
         )?;
 
     let fund_output_value = checked_add!(offer_params.input_amount, accept_params.input_amount)?
@@ -1876,6 +1917,20 @@ mod tests {
         accept_params: &PartyParams,
         fee_rule: FeeRule,
     ) -> DlcTransactions {
+        build_for_accept_cet_script(
+            offer_params,
+            accept_params,
+            fee_rule,
+            accept_params.payout_script_pubkey.len(),
+        )
+    }
+
+    fn build_for_accept_cet_script(
+        offer_params: &PartyParams,
+        accept_params: &PartyParams,
+        fee_rule: FeeRule,
+        accept_cet_script_len: usize,
+    ) -> DlcTransactions {
         let total = offer_params.collateral + accept_params.collateral;
         let payouts = vec![
             Payout {
@@ -1898,6 +1953,7 @@ mod tests {
             0,
             0,
             fee_rule,
+            accept_cet_script_len,
         )
         .unwrap()
     }
@@ -1946,6 +2002,51 @@ mod tests {
         let legacy = build_with_rule(&dual_offer, &dual_accept, FeeRule::OwnPayoutOnly);
         assert_eq!(current.fund, legacy.fund);
         assert_eq!(current.refund, legacy.refund);
+    }
+
+    /// A CET may pay the accepting party a longer script than its own, a
+    /// taproot one in place of P2WPKH for instance. Whoever pays for the
+    /// accepting party's CET output reserves the fee for the longer script:
+    /// the accepting party when both fund, the offering party when it funds
+    /// the whole contract.
+    #[test]
+    fn the_cet_fee_is_reserved_for_the_accepting_partys_longest_script() {
+        let [single, dual] = single_and_dual_funded_params();
+        for ((offer_params, accept_params), offer_pays) in [(single, true), (dual, false)] {
+            let own_len = accept_params.payout_script_pubkey.len();
+            let own = build_with_rule(&offer_params, &accept_params, FeeRule::default());
+            let longer = build_for_accept_cet_script(
+                &offer_params,
+                &accept_params,
+                FeeRule::default(),
+                own_len + 12,
+            );
+
+            let (payer, other, base_weight) = if offer_pays {
+                let base_weight = CET_BASE_WEIGHT + offer_params.payout_script_pubkey.len() * 4;
+                (&offer_params, &accept_params, base_weight)
+            } else {
+                (&accept_params, &offer_params, CET_BASE_WEIGHT / 2)
+            };
+            let extra_fee = util::weight_to_fee(base_weight + (own_len + 12) * 4, 4).unwrap()
+                - util::weight_to_fee(base_weight + own_len * 4, 4).unwrap();
+            assert!(extra_fee > Amount::ZERO);
+            assert_eq!(
+                longer.get_fund_output().value - own.get_fund_output().value,
+                extra_fee
+            );
+            let change = |tx: &Transaction, params: &PartyParams| {
+                tx.output
+                    .iter()
+                    .find(|output| output.script_pubkey == params.change_script_pubkey)
+                    .map(|output| output.value)
+            };
+            assert_eq!(
+                change(&own.fund, payer).unwrap() - change(&longer.fund, payer).unwrap(),
+                extra_fee
+            );
+            assert_eq!(change(&own.fund, other), change(&longer.fund, other));
+        }
     }
 
     #[test]

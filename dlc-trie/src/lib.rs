@@ -74,7 +74,7 @@ pub struct RangeInfo {
     pub adaptor_index: usize,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(
     feature = "use-serde",
     derive(Serialize, Deserialize),

@@ -124,6 +124,17 @@
 //! large numeric contract is the same order of work as accepting it. That is
 //! the cost of keeping no state.
 //!
+//! # Shaping the CETs with records on the offer
+//!
+//! A TLV record on the offer can change the CETs a contract produces; the
+//! payout script override, which makes an enum outcome pay a third party in
+//! the accepting party's place, is the first. Add the record to `offer.tlvs`
+//! after [`create_offer`](crate::contract::create_offer) and before the offer
+//! is sent. Every function here reads it from the offer from then on, and
+//! [`validate_offer`](crate::contract::validate_offer) rejects one the
+//! contract cannot carry. The records, and the path to adding one, are in
+//! [`ddk_manager::contract::cet_records`].
+//!
 //! # Broadcasting and storage stay with the caller
 //!
 //! [`finalize_sign`](crate::contract::finalize_sign) returns a fully signed [`bitcoin::Transaction`];

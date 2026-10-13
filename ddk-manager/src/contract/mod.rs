@@ -18,6 +18,7 @@ use std::fmt::Write;
 use self::utils::unordered_equal;
 
 pub mod accepted_contract;
+pub mod cet_records;
 pub mod contract_info;
 pub mod contract_input;
 pub mod enum_descriptor;
@@ -25,6 +26,7 @@ pub mod numerical_descriptor;
 pub mod offered_contract;
 pub mod ser;
 pub mod signed_contract;
+pub mod transactions;
 pub(crate) mod utils;
 
 /// The genesis block hash identifying `network`, in the byte order DLC
@@ -449,7 +451,7 @@ pub enum AdaptorInfo {
 }
 
 /// The descriptor of a contract.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(
     feature = "use-serde",
     derive(Serialize, Deserialize),

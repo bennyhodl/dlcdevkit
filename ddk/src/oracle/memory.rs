@@ -59,6 +59,13 @@ impl ddk_manager::Oracle for MemoryOracle {
             .await
             .unwrap()
             .unwrap();
+        // An event the oracle has not signed has no attestation, as with any
+        // oracle reached over the network.
+        if event.signatures.is_empty() {
+            return Err(ddk_manager::error::Error::OracleError(format!(
+                "event {event_id} has not been attested"
+            )));
+        }
 
         let sigs = event
             .signatures
