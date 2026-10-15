@@ -269,6 +269,40 @@ pub fn validate_fee_rate(fee_rate_per_vb: u64) -> Result<(), Error> {
     Ok(())
 }
 
+/// Validate the offering party's collateral against the contract's total.
+///
+/// The offering party cannot lock more than the whole contract. The total must
+/// reach the dust limit, or the funding transaction drops its funding output
+/// and there is no contract to spend. A non-zero offer collateral must reach
+/// it too, or the offering party's share of the refund is dust.
+///
+/// Zero offer collateral is allowed so the accepting party can fund the
+/// contract alone, although the specification asks the offering party for at
+/// least 1000 sats.
+pub fn validate_collateral(
+    offer_collateral: Amount,
+    total_collateral: Amount,
+) -> Result<(), Error> {
+    if offer_collateral > total_collateral {
+        return Err(Error::InvalidArgument(format!(
+            "offer collateral {offer_collateral} exceeds total collateral {total_collateral}"
+        )));
+    }
+    if total_collateral < crate::DUST_LIMIT {
+        return Err(Error::InvalidArgument(format!(
+            "total collateral {total_collateral} is below the dust limit {}",
+            crate::DUST_LIMIT
+        )));
+    }
+    if offer_collateral > Amount::ZERO && offer_collateral < crate::DUST_LIMIT {
+        return Err(Error::InvalidArgument(format!(
+            "non-zero offer collateral {offer_collateral} is below the dust limit {}",
+            crate::DUST_LIMIT
+        )));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

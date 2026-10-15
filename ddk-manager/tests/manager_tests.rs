@@ -177,6 +177,62 @@ async fn reject_offer_creation_with_mismatched_announcements() {
     );
 }
 
+/// An enum event commits to one nonce. The receiving party refuses an
+/// announcement with a nonce per outcome, so the offering party does not
+/// create an offer over one.
+#[tokio::test]
+async fn reject_offer_creation_with_a_nonce_per_enum_outcome() {
+    use ddk_messages::oracle_msgs::{
+        tagged_announcement_msg, EnumEventDescriptor, EventDescriptor, OracleAnnouncement,
+        OracleEvent,
+    };
+    use ddk_testenv::dlc::enum_outcomes;
+    use secp256k1_zkp::{Keypair, Secp256k1};
+
+    let logger = Arc::new(Logger::disabled("test_manager".to_string()));
+    let manager = get_manager(logger).await;
+
+    let secp = Secp256k1::new();
+    let mut rng = bitcoin::key::rand::thread_rng();
+    let oracle_key = Keypair::new(&secp, &mut rng);
+    let oracle_event = OracleEvent {
+        oracle_nonces: enum_outcomes()
+            .iter()
+            .map(|_| Keypair::new(&secp, &mut rng).x_only_public_key().0)
+            .collect(),
+        event_maturity_epoch: 2_000_000_000,
+        event_descriptor: EventDescriptor::EnumEvent(EnumEventDescriptor {
+            outcomes: enum_outcomes(),
+        }),
+        event_id: "nonce-per-outcome".to_string(),
+    };
+    let announcement = OracleAnnouncement {
+        announcement_signature: secp
+            .sign_schnorr(&tagged_announcement_msg(&oracle_event), &oracle_key),
+        oracle_public_key: oracle_key.x_only_public_key().0,
+        oracle_event,
+    };
+    let total = bitcoin::Amount::from_sat(100_000);
+    let input = contract_input(
+        &[ContractLeg::new(
+            enum_descriptor(total),
+            vec![announcement.clone()],
+            1,
+        )],
+        total,
+        bitcoin::Amount::ZERO,
+        2,
+    );
+
+    let result = manager
+        .send_offer_with_announcements(&input, pubkey(), vec![vec![announcement]])
+        .await;
+    assert!(
+        matches!(result, Err(ddk_manager::error::Error::DlcError(_))),
+        "unexpected result: {result:?}"
+    );
+}
+
 #[tokio::test]
 async fn commit_offer_stores_the_message_stream() {
     use ddk_manager::contract::Contract;

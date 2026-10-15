@@ -77,6 +77,12 @@ where
             contract_input.contract_infos.len()
         )));
     }
+    // The receiving party runs the same check, so an offer it would reject,
+    // such as one whose enum event has a nonce per outcome, is not created.
+    let verification = Secp256k1::verification_only();
+    for announcement in oracle_announcements.iter().flatten() {
+        announcement.validate(&verification)?;
+    }
 
     let id = crate::utils::get_new_temporary_id();
     let keys_id = signer_provider.derive_signer_key_id(id);
@@ -123,7 +129,7 @@ where
     )?;
 
     let offer_msg = OfferDlc::from(&offered_contract);
-    offer_msg.validate_cet_locktime()?;
+    offer_msg.validate_terms()?;
 
     Ok((offered_contract, offer_msg))
 }
@@ -314,6 +320,7 @@ where
     S::Target: Storage,
     L::Target: Logger,
 {
+    accept_msg.validate_terms(&OfferDlc::from(offered_contract))?;
     let (tx_input_infos, input_amount) = get_tx_input_infos(&accept_msg.funding_inputs)?;
     let accept_dlc_inputs = get_dlc_inputs_from_funding_inputs(&accept_msg.funding_inputs);
 

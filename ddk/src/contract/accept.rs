@@ -6,9 +6,10 @@ use ddk_messages::{AcceptDlc, CetAdaptorSignatures, OfferDlc, SignDlc};
 
 use super::context::{
     build_context, context_from_messages, create_adaptor_signatures, create_refund_signature,
-    dlc_party_params, ensure_no_dlc_inputs, ensure_unique_input_serial_ids, signed_context,
+    dlc_party_params, ensure_no_dlc_inputs, signed_context, verify_counterparty_signatures,
+    ContractContext,
 };
-use super::create::validate_offer;
+use super::create::{validate_offer, validate_offer_structure};
 use super::error::ContractError;
 use super::psbt::build_funding_psbt;
 use super::types::{random_serial_id, AcceptOfferParams, AcceptResult};
@@ -44,12 +45,8 @@ pub fn accept_offer(
             "funding secret key does not match the accept party funding public key".to_string(),
         ));
     }
-    let accept_collateral = offer
-        .get_total_collateral()
-        .checked_sub(offer.offer_collateral)
-        .ok_or_else(|| {
-            ContractError::InvalidOffer("offer collateral exceeds total collateral".to_string())
-        })?;
+    // `validate_offer` checked that the offer collateral fits the total.
+    let accept_collateral = offer.get_total_collateral() - offer.offer_collateral;
 
     let payout_serial_id = party.payout_serial_id.unwrap_or_else(random_serial_id);
     let change_serial_id = party.change_serial_id.unwrap_or_else(random_serial_id);
@@ -86,7 +83,11 @@ pub fn accept_offer(
         negotiation_fields: None,
         tlvs: Default::default(),
     };
-    ensure_unique_input_serial_ids(offer, &accept)?;
+    // The offering party runs the same check, so an accept it would reject is
+    // not sent.
+    accept
+        .validate_terms(offer)
+        .map_err(|e| ContractError::InvalidAccept(e.to_string()))?;
 
     let funding_psbt = build_funding_psbt(offer, &accept, context.transactions.fund.clone())?;
     Ok(AcceptResult {
@@ -94,6 +95,42 @@ pub fn accept_offer(
         transactions: context.transactions,
         funding_psbt,
     })
+}
+
+/// Validates an accept message against its offer, without any policy.
+///
+/// Runs [`validate_offer_structure`] on the offer, then the accept's protocol
+/// rules ([`AcceptDlc::validate_terms`]), then rebuilds the contract
+/// transactions, which checks that the collateral adds up to the total and
+/// that the funding inputs pay for it, and verifies the accepting party's
+/// refund and CET adaptor signatures against them. Accept-side splice inputs
+/// are refused, as everywhere in this API.
+///
+/// No timeout or clock is involved: those judge the offer, and the offering
+/// party applied them when it built it. [`sign_accept`](super::sign_accept)
+/// runs the same checks before it signs.
+pub fn validate_accept(offer: &OfferDlc, accept: &AcceptDlc) -> Result<(), ContractError> {
+    verified_accept_context(offer, accept).map(|_| ())
+}
+
+/// The contract rebuilt from an offer and an accept that pass
+/// [`validate_accept`].
+pub(crate) fn verified_accept_context(
+    offer: &OfferDlc,
+    accept: &AcceptDlc,
+) -> Result<ContractContext, ContractError> {
+    validate_offer_structure(offer)?;
+    let context = context_from_messages(offer, accept)?;
+    verify_counterparty_signatures(
+        &Secp256k1::new(),
+        &context,
+        offer.get_total_collateral(),
+        accept.funding_pubkey,
+        &accept.refund_signature,
+        &accept.cet_adaptor_signatures,
+        ContractError::InvalidAccept,
+    )?;
+    Ok(context)
 }
 
 /// Rebuilds the unsigned funding, CET, and refund transactions from wire messages.
