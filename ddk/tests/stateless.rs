@@ -624,10 +624,15 @@ fn offer_structure_is_validated_without_a_timeout_policy() {
     let offer = received_offer(&secp);
     validate_offer_structure(&offer).expect("an offer built by create_offer");
 
-    // An accepting party funds the whole contract.
+    // Structurally valid contracts that an application may still refuse as
+    // policy: the accepting party funds the whole contract, and CETs that are
+    // not time-locked.
     let mut accept_funded = offer.clone();
     accept_funded.offer_collateral = Amount::ZERO;
     validate_offer_structure(&accept_funded).expect("zero offer collateral");
+    let mut no_cet_locktime = offer.clone();
+    no_cet_locktime.cet_locktime = 0;
+    validate_offer_structure(&no_cet_locktime).expect("a zero CET locktime");
 
     let defects: Vec<(&str, fn(&mut OfferDlc))> = vec![
         ("duplicate funding input serial ids", |offer| {
@@ -701,26 +706,25 @@ fn validate_offer_adds_the_timeout_policy_to_the_structure() {
         .expect_err("a structural defect");
 }
 
-/// Whether DDK supports oracles that commit one nonce per enum outcome is
-/// undecided (issue #225, item 7). Until it is, the offering party may build
-/// such an offer, and only the receiving party's announcement check rejects it.
+/// An enum event commits to one nonce. An oracle that commits one per outcome
+/// is refused when the offer is created, as the receiving party would refuse
+/// it, so creation and validation agree.
 #[test]
-fn only_the_receiver_checks_the_announcements() {
+fn an_offer_with_a_nonce_per_enum_outcome_is_not_created() {
     let secp = Secp256k1::new();
     let offerer = PartySetup::new(&secp, 1, NETWORK, Amount::from_sat(150_000), 1);
-    let offer = create_offer(offer_params(
+    let result = create_offer(offer_params(
         &secp,
         &offerer,
         enum_contract_info_with_nonces(TOTAL_COLLATERAL, TOTAL_COLLATERAL, 2),
         Amount::from_sat(50_000),
         NETWORK,
         vec![offerer.funding_input.clone()],
-    ))
-    .expect("the offering party chose its own oracle");
-    assert!(matches!(
-        validate_offer_structure(&offer),
-        Err(ContractError::InvalidOffer(_))
     ));
+    assert!(
+        matches!(result, Err(ContractError::InvalidOffer(_))),
+        "unexpected result: {result:?}"
+    );
 }
 
 /// Payout data comes from the counterparty, so a payout the conversion cannot

@@ -397,9 +397,11 @@ impl OfferDlc {
     /// Returns an error when an oracle announcement in the contract info is
     /// not signed by its oracle or describes a malformed event.
     ///
-    /// This is the receiving party's check on oracles it did not choose. It is
-    /// kept apart from [`OfferDlc::validate_terms`] so that the offering party
-    /// can check the offer it built without it.
+    /// An enum event must commit to exactly one nonce
+    /// ([`OracleEvent::validate`](crate::oracle_msgs::OracleEvent::validate)),
+    /// so an announcement with one nonce per outcome fails here. Both parties
+    /// run it: the offering party before it sends the offer, the receiving
+    /// party on oracles it did not choose.
     pub fn validate_announcements<C: Verification>(
         &self,
         secp: &Secp256k1<C>,

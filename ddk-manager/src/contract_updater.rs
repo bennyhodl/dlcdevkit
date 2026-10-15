@@ -77,6 +77,12 @@ where
             contract_input.contract_infos.len()
         )));
     }
+    // The receiving party runs the same check, so an offer it would reject,
+    // such as one whose enum event has a nonce per outcome, is not created.
+    let verification = Secp256k1::verification_only();
+    for announcement in oracle_announcements.iter().flatten() {
+        announcement.validate(&verification)?;
+    }
 
     let id = crate::utils::get_new_temporary_id();
     let keys_id = signer_provider.derive_signer_key_id(id);

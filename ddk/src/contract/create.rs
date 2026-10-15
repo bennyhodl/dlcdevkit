@@ -15,8 +15,8 @@ use super::PROTOCOL_VERSION;
 /// funding *public* key, and funding inputs are signed later through the PSBT
 /// signing layer. Serial ids and the temporary contract id are randomly
 /// generated when omitted from `params`. The built offer must pass
-/// [`validate_offer_structure`] apart from the oracle announcement check, so a
-/// malformed offer never leaves this party.
+/// [`validate_offer_structure`], so this party never sends an offer its
+/// counterparty would reject.
 pub fn create_offer(params: CreateOfferParams) -> Result<OfferDlc, ContractError> {
     let CreateOfferParams {
         chain_hash,
@@ -57,24 +57,29 @@ pub fn create_offer(params: CreateOfferParams) -> Result<OfferDlc, ContractError
         refund_locktime,
         tlvs: Default::default(),
     };
-    // The offering party chose its own oracles, so it skips the announcement
-    // check; verifying them is the receiving party's job.
-    validate_offer_terms(&offer)?;
+    validate_offer_structure(&offer)?;
     Ok(offer)
 }
 
 /// Validates an offer's structure: the checks that do not depend on the
 /// receiver's timeout policy or clock.
 ///
-/// Checks the oracle announcement signatures and events, the protocol
-/// version, the fee rate, the collateral against the total and the dust
-/// limit, that the payout and change scripts are standard, that the CET and
-/// refund locktimes share a unit and are ordered (with the CET locktime no
-/// later than the closest maturity), that the funding input serial ids are
-/// unique and the change and fund output serial ids differ, that any splice
-/// input spends the 2-of-2 it names, that the payouts cover every outcome
-/// the oracles can attest, and that every CET record on the offer applies to
-/// the contract.
+/// Checks the oracle announcement signatures and events (an enum event
+/// commits to exactly one nonce, so an oracle that commits one per outcome is
+/// rejected), the protocol version, the fee rate, the collateral against the
+/// total and the dust limit, that the payout and change scripts are standard,
+/// that the CET and refund locktimes share a unit and are ordered (with the
+/// CET locktime no later than the closest maturity), that the funding input
+/// serial ids are unique and the change and fund output serial ids differ,
+/// that any splice input spends the 2-of-2 it names, that the payouts cover
+/// every outcome the oracles can attest, and that every CET record on the
+/// offer applies to the contract.
+///
+/// Zero offer collateral and a zero CET locktime are allowed. The first is a
+/// contract the accepting party funds alone, the second one whose CETs are not
+/// time-locked and settle as soon as the oracles attest. Both build valid
+/// transactions; an application that will not take part in them refuses them
+/// as its own policy.
 ///
 /// It does not check ordinary funding inputs: their previous transactions are
 /// not decoded, so neither the input values nor the specification's SegWit
@@ -86,12 +91,6 @@ pub fn validate_offer_structure(offer: &OfferDlc) -> Result<(), ContractError> {
     offer
         .validate_announcements(&Secp256k1::verification_only())
         .map_err(|e| ContractError::InvalidOffer(e.to_string()))?;
-    validate_offer_terms(offer)
-}
-
-/// The structural checks shared by offer creation and validation: all of
-/// [`validate_offer_structure`] except the oracle announcements.
-fn validate_offer_terms(offer: &OfferDlc) -> Result<(), ContractError> {
     ensure_protocol_version(offer.protocol_version, ContractError::InvalidOffer)?;
     offer
         .validate_terms()
