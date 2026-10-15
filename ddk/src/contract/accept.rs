@@ -109,10 +109,13 @@ pub fn create_dlc_transactions(
 }
 
 /// Rebuilds a signed contract's transactions under the [`ddk_dlc::FeeRule`]
-/// whose funding transaction matches `sign`'s contract id.
+/// and splice input layout whose funding transaction matches `sign`'s
+/// contract id.
 ///
-/// Tries [`ddk_dlc::FeeRule::CounterpartyPayout`] first, then
-/// [`ddk_dlc::FeeRule::OwnPayoutOnly`]. Fails when neither rule matches.
+/// Tries the current rules first: [`ddk_dlc::FeeRule::CounterpartyPayout`]
+/// and [`ddk_dlc::PartyParams::spliced`]. Then
+/// [`ddk_dlc::FeeRule::OwnPayoutOnly`], and both fee rules again with
+/// [`ddk_dlc::PartyParams::legacy_spliced`]. Fails when no rule matches.
 pub fn create_signed_dlc_transactions(
     offer: &OfferDlc,
     accept: &AcceptDlc,

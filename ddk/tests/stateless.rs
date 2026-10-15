@@ -1910,9 +1910,10 @@ fn a_splice_offer_funded_with_exactly_its_requirement_is_accepted() {
     });
 }
 
-/// The spliced constructor leaves out an ordinary input whose witness is
-/// larger than a P2WPKH witness, and the requirement does too: an offer one
-/// sat short of it is refused with exactly that requirement.
+/// The spliced constructor spends an ordinary input whose witness is larger
+/// than a P2WPKH witness alongside the splice input, and the requirement
+/// prices it too: an offer one sat short of it is refused with exactly that
+/// requirement.
 #[test]
 fn a_splice_offer_is_priced_as_the_spliced_constructor_funds_it() {
     let secp = Secp256k1::new();

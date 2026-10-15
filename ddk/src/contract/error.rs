@@ -6,8 +6,10 @@ use thiserror::Error;
 /// Errors returned by the stateless contract functions.
 ///
 /// Variants carry plain strings so they can cross FFI and binding boundaries
-/// without exposing internal library error types.
+/// without exposing internal library error types. New variants may be added
+/// in a minor release, so a `match` on it needs a wildcard arm.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum ContractError {
     /// The offer message, or data used to build one, is invalid.
     #[error("invalid offer: {0}")]

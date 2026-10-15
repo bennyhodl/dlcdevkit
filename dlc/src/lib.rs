@@ -528,20 +528,47 @@ impl PartyParams {
     /// [`create_spliced_dlc_transactions`] funds them, which is also how a
     /// splicing party's [`PartyParams::funding_requirements`] must be priced.
     ///
-    /// A splice input is listed both in `inputs` and in `dlc_inputs`. The
-    /// duplicate is removed by dropping every ordinary input whose witness is
-    /// larger than a P2WPKH witness, and each DLC input is then listed as an
-    /// ordinary input. An ordinary input with a larger witness is dropped too;
-    /// spliced contracts have always been built this way, so the rule stays
-    /// for them to rebuild identically.
+    /// A splice input is listed both in `inputs` and in `dlc_inputs`. Each DLC
+    /// input replaces the ordinary input with its outpoint and is listed after
+    /// the remaining ordinary inputs, whatever their witness size.
     pub fn spliced(&self) -> PartyParams {
+        self.with_dlc_inputs_listed(|input, dlc_inputs| {
+            dlc_inputs
+                .iter()
+                .all(|dlc_input| dlc_input.outpoint != input.outpoint)
+        })
+    }
+
+    /// These params with their inputs laid out as spliced contracts built by
+    /// ddk-dlc 2.0.0-rc.8 and earlier were funded. Use it only to rebuild such
+    /// a contract; new contracts use [`PartyParams::spliced`].
+    ///
+    /// The duplicate of a splice input was removed by dropping every ordinary
+    /// input whose witness is larger than a P2WPKH witness, so an ordinary
+    /// input with a larger witness was dropped too. For any other inputs the
+    /// two layouts are identical.
+    pub fn legacy_spliced(&self) -> PartyParams {
+        self.with_dlc_inputs_listed(|input, _| input.max_witness_len <= P2WPKH_WITNESS_SIZE)
+    }
+
+    /// These params with the ordinary inputs `keep` accepts, followed by the
+    /// DLC inputs listed as ordinary inputs.
+    fn with_dlc_inputs_listed(
+        &self,
+        keep: impl Fn(&TxInputInfo, &[TxInputInfo]) -> bool,
+    ) -> PartyParams {
+        let dlc_inputs = self
+            .dlc_inputs
+            .iter()
+            .map(TxInputInfo::from)
+            .collect::<Vec<_>>();
         let mut inputs = self
             .inputs
             .iter()
-            .filter(|input| input.max_witness_len <= P2WPKH_WITNESS_SIZE)
+            .filter(|input| keep(input, &dlc_inputs))
             .cloned()
             .collect::<Vec<_>>();
-        inputs.extend(self.dlc_inputs.iter().map(TxInputInfo::from));
+        inputs.extend(dlc_inputs);
         PartyParams {
             inputs,
             dlc_inputs: Vec::new(),
@@ -2158,10 +2185,11 @@ mod tests {
         assert_eq!(output(&accept_params.change_script_pubkey), None);
     }
 
-    /// The spliced constructor funds the inputs `PartyParams::spliced` lays
-    /// out, so a splicing party priced on them and funded at exactly that
-    /// requirement builds with no change, and one sat less fails with it. Its
-    /// ordinary input with a witness above P2WPKH's is left out by both.
+    /// `PartyParams::spliced` drops the ordinary copy of a splice input by its
+    /// outpoint and keeps an ordinary input with a witness above P2WPKH's,
+    /// which the legacy layout drops. The spliced constructor funds those
+    /// inputs, so a splicing party priced on them and funded at exactly that
+    /// requirement builds with no change, and one sat less fails with it.
     #[test]
     fn a_splicing_party_is_priced_on_its_spliced_inputs() {
         let (mut offer_params, _) = get_party_params(Amount::ZERO, Amount::ONE_BTC, None);
@@ -2192,20 +2220,28 @@ mod tests {
         // A splice input is listed both as an ordinary input and a DLC input.
         offer_params.inputs.push(TxInputInfo::from(&splice));
         offer_params.dlc_inputs.push(splice);
+        let wide_outpoint = OutPoint {
+            txid: Txid::from_byte_array([7; 32]),
+            vout: 0,
+        };
         offer_params.inputs.push(TxInputInfo {
-            outpoint: OutPoint {
-                txid: Txid::from_byte_array([7; 32]),
-                vout: 0,
-            },
+            outpoint: wide_outpoint,
             max_witness_len: 200,
             redeem_script: ScriptBuf::new(),
             serial_id: 7,
         });
+        let serial_ids = |params: PartyParams| {
+            assert!(params.dlc_inputs.is_empty());
+            params
+                .inputs
+                .iter()
+                .map(|input| input.serial_id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(serial_ids(offer_params.legacy_spliced()), vec![1, 9]);
 
         let spliced = offer_params.spliced();
-        let serial_ids = spliced.inputs.iter().map(|input| input.serial_id);
-        assert_eq!(serial_ids.collect::<Vec<_>>(), vec![1, 9]);
-        assert!(spliced.dlc_inputs.is_empty());
+        assert_eq!(serial_ids(spliced.clone()), vec![1, 7, 9]);
         let required = spliced
             .funding_requirements(
                 Amount::ONE_BTC,
@@ -2244,7 +2280,18 @@ mod tests {
                 0,
             )
         };
-        assert_eq!(build(required).unwrap().fund.output.len(), 1);
+        let exact = build(required).unwrap();
+        assert_eq!(exact.fund.output.len(), 1);
+        assert_eq!(
+            exact.fund.input.len(),
+            spliced.inputs.len() + accept_params.inputs.len(),
+            "the funding transaction spends the splice input once"
+        );
+        assert!(exact
+            .fund
+            .input
+            .iter()
+            .any(|input| input.previous_output == wide_outpoint));
         let one_sat_short = required - Amount::from_sat(1);
         assert!(matches!(
             build(one_sat_short),

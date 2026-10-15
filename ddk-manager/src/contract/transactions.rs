@@ -65,6 +65,61 @@ impl From<&OfferDlc> for ContractTerms {
     }
 }
 
+/// How a contract's transactions are built: how the CET fee is split, and how
+/// a splicing party's inputs are laid out.
+///
+/// A new contract is built under [`BuildRule::CURRENT`]. A signed contract is
+/// rebuilt under whichever rule in [`BuildRule::SIGNED`] reproduces the
+/// funding transaction both parties signed.
+#[derive(Clone, Copy, Debug)]
+pub struct BuildRule {
+    /// How the CET fee is split between the parties.
+    pub fee_rule: FeeRule,
+    /// How a party's inputs are laid out when the contract spends a splice
+    /// input: [`PartyParams::spliced`], or [`PartyParams::legacy_spliced`] for
+    /// a contract built by ddk-dlc 2.0.0-rc.8 and earlier.
+    pub splice_layout: fn(&PartyParams) -> PartyParams,
+}
+
+impl BuildRule {
+    /// The rule new contracts are built under.
+    pub const CURRENT: BuildRule = BuildRule {
+        fee_rule: FeeRule::CounterpartyPayout,
+        splice_layout: PartyParams::spliced,
+    };
+
+    /// Every rule a signed contract can have been built under, the current
+    /// rule first. [`PartyParams::legacy_spliced`] differs from the current
+    /// layout only for a splice with an ordinary input whose witness is larger
+    /// than a P2WPKH witness, so both fee rules are tried with the current
+    /// layout before either is tried with the legacy one.
+    pub const SIGNED: [BuildRule; 4] = [
+        BuildRule::CURRENT,
+        BuildRule {
+            fee_rule: FeeRule::OwnPayoutOnly,
+            splice_layout: PartyParams::spliced,
+        },
+        BuildRule {
+            fee_rule: FeeRule::CounterpartyPayout,
+            splice_layout: PartyParams::legacy_spliced,
+        },
+        BuildRule {
+            fee_rule: FeeRule::OwnPayoutOnly,
+            splice_layout: PartyParams::legacy_spliced,
+        },
+    ];
+
+    /// `params` with their inputs laid out as this rule funds them, in a
+    /// contract that spends a splice input if `splicing`.
+    fn lay_out(&self, params: &PartyParams, splicing: bool) -> PartyParams {
+        if splicing {
+            (self.splice_layout)(params)
+        } else {
+            params.clone()
+        }
+    }
+}
+
 /// A contract's transactions, with the CETs of each contract info located.
 #[derive(Clone)]
 pub struct ContractTransactions {
@@ -144,16 +199,16 @@ impl From<BuildError> for Error {
 ///
 /// The first contract info's payouts give the funding, CET and refund
 /// transactions; every further contract info adds its CETs after them. The
-/// fee rule is the one the contract was funded under: [`FeeRule::default`]
-/// for a new contract, and whichever rule reproduces a signed contract's
-/// funding transaction for an existing one.
+/// rule is the one the contract was built under: [`BuildRule::CURRENT`] for a
+/// new contract, and whichever rule in [`BuildRule::SIGNED`] reproduces a
+/// signed contract's funding transaction for an existing one.
 pub fn build_contract_transactions(
     offer: &PartyParams,
     accept: &PartyParams,
     contract_infos: &[ContractInfo],
     offer_tlvs: &TlvStream,
     terms: &ContractTerms,
-    fee_rule: FeeRule,
+    rule: BuildRule,
 ) -> Result<ContractTransactions, BuildError> {
     if contract_infos.is_empty() {
         return Err(BuildError::Offer(
@@ -176,38 +231,23 @@ pub fn build_contract_transactions(
 
     let payouts = contract_infos[0].get_payouts(terms.total_collateral)?;
     // A splice input carries a `dlc_input`; when present the funding
-    // transaction spends the previous contract's 2-of-2 output and must be
-    // built through the spliced constructor.
-    let has_dlc_inputs = !offer.dlc_inputs.is_empty() || !accept.dlc_inputs.is_empty();
-    let mut transactions = if has_dlc_inputs {
-        ddk_dlc::create_spliced_dlc_transactions_with_fee_rule(
-            offer,
-            accept,
-            &payouts,
-            terms.refund_locktime,
-            terms.fee_rate_per_vb,
-            0,
-            terms.cet_locktime,
-            terms.fund_output_serial_id,
-            terms.contract_flags,
-            fee_rule,
-            accept_cet_script_len,
-        )?
-    } else {
-        ddk_dlc::create_dlc_transactions_with_fee_rule(
-            offer,
-            accept,
-            &payouts,
-            terms.refund_locktime,
-            terms.fee_rate_per_vb,
-            0,
-            terms.cet_locktime,
-            terms.fund_output_serial_id,
-            terms.contract_flags,
-            fee_rule,
-            accept_cet_script_len,
-        )?
-    };
+    // transaction spends the previous contract's 2-of-2 output, so both
+    // parties' inputs are laid out as the rule's spliced constructor lays them
+    // out.
+    let splicing = !offer.dlc_inputs.is_empty() || !accept.dlc_inputs.is_empty();
+    let mut transactions = ddk_dlc::create_dlc_transactions_with_fee_rule(
+        &rule.lay_out(offer, splicing),
+        &rule.lay_out(accept, splicing),
+        &payouts,
+        terms.refund_locktime,
+        terms.fee_rate_per_vb,
+        0,
+        terms.cet_locktime,
+        terms.fund_output_serial_id,
+        terms.contract_flags,
+        rule.fee_rule,
+        accept_cet_script_len,
+    )?;
 
     let mut cet_ranges = Vec::with_capacity(contract_infos.len());
     cet_ranges.push(0..transactions.cets.len());
@@ -269,20 +309,17 @@ pub fn offer_funding_requirements(
     terms: &ContractTerms,
 ) -> Result<FundingRequirements, BuildError> {
     let records = cet_records(offer_tlvs)?;
-    // An offer with a splice input is built by the spliced constructor, which
-    // lays out its inputs this way.
-    let offer = if offer.dlc_inputs.is_empty() {
-        offer.clone()
-    } else {
-        offer.spliced()
-    };
+    // Only the offering party may contribute a splice input, so the offer's
+    // own inputs say whether the contract splices.
+    let rule = BuildRule::CURRENT;
+    let offer = rule.lay_out(offer, !offer.dlc_inputs.is_empty());
     Ok(offer.funding_requirements(
         terms.total_collateral,
         terms.fee_rate_per_vb,
         Amount::ZERO,
         offer.payout_script_pubkey.len(),
         accept_cet_script_len(&records, accept_payout_script_len),
-        FeeRule::default(),
+        rule.fee_rule,
     )?)
 }
 
