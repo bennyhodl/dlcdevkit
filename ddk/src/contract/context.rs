@@ -7,9 +7,11 @@
 use bitcoin::consensus::Decodable;
 use bitcoin::{Amount, ScriptBuf, Transaction, Witness};
 use ddk_dlc::secp256k1_zkp::{All, EcdsaAdaptorSignature, PublicKey, Secp256k1, SecretKey};
-use ddk_dlc::{DlcTransactions, FeeRule, PartyParams as DlcPartyParams, TxInputInfo};
+use ddk_dlc::{DlcTransactions, PartyParams as DlcPartyParams, TxInputInfo};
 use ddk_manager::contract::contract_info::ContractInfo as ExecutionContractInfo;
-use ddk_manager::contract::transactions::{build_contract_transactions, ContractTransactions};
+use ddk_manager::contract::transactions::{
+    build_contract_transactions, BuildRule, ContractTransactions,
+};
 use ddk_messages::{
     AcceptDlc, CetAdaptorSignatures, FundingInput, FundingSignatures, OfferDlc, SignDlc,
 };
@@ -30,19 +32,20 @@ pub(crate) fn context_from_messages(
     offer: &OfferDlc,
     accept: &AcceptDlc,
 ) -> Result<ContractContext, ContractError> {
-    context_from_messages_with_fee_rule(offer, accept, FeeRule::default())
+    context_from_messages_with_rule(offer, accept, BuildRule::CURRENT)
 }
 
-/// Rebuilds a signed contract under the [`FeeRule`] whose funding transaction
-/// matches the sign message's contract id.
+/// Rebuilds a signed contract under the [`BuildRule`] whose funding
+/// transaction matches the sign message's contract id.
 ///
-/// The two rules give different funding transactions when one party funds the
-/// whole contract. The contract id comes from the funding transaction that
-/// both parties signed, so only the rule the contract was built with matches
-/// it. [`FeeRule::CounterpartyPayout`] is tried first. If it cannot build the
-/// transactions, or its contract id does not match, [`FeeRule::OwnPayoutOnly`]
-/// is tried. If neither rule matches, the error from the first rule is
-/// returned.
+/// The [`ddk_dlc::FeeRule`]s give different funding transactions when one
+/// party funds the whole contract, and the splice layouts do when a splice has
+/// an ordinary input with a witness larger than a P2WPKH witness. The contract
+/// id comes from the funding transaction that both parties signed, so only the
+/// rule the contract was built with matches it. The rules in
+/// [`BuildRule::SIGNED`] are tried in order: when one cannot build the
+/// transactions, or its contract id does not match, the next is tried. If none
+/// matches, the error from the current rule is returned.
 ///
 /// Use this only for a contract that is already signed. New contracts use
 /// [`context_from_messages`].
@@ -52,20 +55,22 @@ pub(crate) fn signed_context(
     sign: &SignDlc,
 ) -> Result<ContractContext, ContractError> {
     let rebuild = |rule| {
-        let context = context_from_messages_with_fee_rule(offer, accept, rule)?;
+        let context = context_from_messages_with_rule(offer, accept, rule)?;
         ensure_sign_message(offer, sign, &context)?;
         Ok(context)
     };
     // The inputs of an OwnPayoutOnly contract can be too small for the
     // CounterpartyPayout fee, so a build error also moves to the next rule.
-    rebuild(FeeRule::default())
-        .or_else(|current_error| rebuild(FeeRule::OwnPayoutOnly).map_err(|_| current_error))
+    let [current, older @ ..] = BuildRule::SIGNED;
+    older.into_iter().fold(rebuild(current), |result, rule| {
+        result.or_else(|current_error| rebuild(rule).map_err(|_| current_error))
+    })
 }
 
-fn context_from_messages_with_fee_rule(
+fn context_from_messages_with_rule(
     offer: &OfferDlc,
     accept: &AcceptDlc,
-    fee_rule: FeeRule,
+    rule: BuildRule,
 ) -> Result<ContractContext, ContractError> {
     ensure_protocol_version(offer.protocol_version, ContractError::InvalidOffer)?;
     ensure_protocol_version(accept.protocol_version, ContractError::InvalidAccept)?;
@@ -97,7 +102,7 @@ fn context_from_messages_with_fee_rule(
         accept.accept_collateral,
         &accept.funding_inputs,
     )?;
-    build_context_with_fee_rule(offer, &accept_params, fee_rule)
+    build_context_with_rule(offer, &accept_params, rule)
 }
 
 /// Rebuilds the contract transactions from an offer and the accepting party's
@@ -107,13 +112,13 @@ pub(crate) fn build_context(
     offer: &OfferDlc,
     accept_params: &DlcPartyParams,
 ) -> Result<ContractContext, ContractError> {
-    build_context_with_fee_rule(offer, accept_params, FeeRule::default())
+    build_context_with_rule(offer, accept_params, BuildRule::CURRENT)
 }
 
-fn build_context_with_fee_rule(
+fn build_context_with_rule(
     offer: &OfferDlc,
     accept_params: &DlcPartyParams,
-    fee_rule: FeeRule,
+    rule: BuildRule,
 ) -> Result<ContractContext, ContractError> {
     let offer_params = dlc_party_params(
         offer.funding_pubkey,
@@ -137,7 +142,7 @@ fn build_context_with_fee_rule(
         &execution_infos,
         &offer.tlvs,
         &offer.into(),
-        fee_rule,
+        rule,
     )?;
     Ok(ContractContext {
         execution_infos,
@@ -580,8 +585,11 @@ mod tests {
         previous.output[input.prev_tx_vout as usize].value =
             offer.offer_collateral + fund_fee + cet_fee;
         input.prev_tx = bitcoin::consensus::serialize(&previous);
-        let legacy =
-            context_from_messages_with_fee_rule(&offer, &accept, FeeRule::OwnPayoutOnly).unwrap();
+        let legacy_rule = BuildRule {
+            fee_rule: ddk_dlc::FeeRule::OwnPayoutOnly,
+            ..BuildRule::CURRENT
+        };
+        let legacy = context_from_messages_with_rule(&offer, &accept, legacy_rule).unwrap();
         assert!(context_from_messages(&offer, &accept).is_err());
 
         let secp = Secp256k1::new();

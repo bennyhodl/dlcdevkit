@@ -8,7 +8,7 @@ use bitcoin::script::PushBytesBuf;
 use bitcoin::Amount;
 use bitcoin::{consensus::Decodable, Script, ScriptBuf, Transaction, Witness};
 use ddk_dlc::dlc_input::DlcInputInfo;
-use ddk_dlc::{DlcTransactions, FeeRule, PartyParams};
+use ddk_dlc::{DlcTransactions, PartyParams};
 use ddk_messages::{
     oracle_msgs::{OracleAnnouncement, OracleAttestation},
     AcceptDlc, FundingSignature, FundingSignatures, OfferDlc, SignDlc, WitnessElement,
@@ -29,7 +29,7 @@ use crate::{
         contract_input::ContractInput,
         offered_contract::OfferedContract,
         signed_contract::SignedContract,
-        transactions::{build_contract_transactions, ContractTransactions},
+        transactions::{build_contract_transactions, BuildRule, ContractTransactions},
         AdaptorInfo,
     },
     conversion_utils::get_tx_input_infos,
@@ -198,7 +198,7 @@ where
         &offered_contract.contract_info,
         &offered_contract.tlvs,
         &offered_contract.into(),
-        FeeRule::default(),
+        BuildRule::CURRENT,
     )?;
     log_created_transactions(
         logger,
@@ -355,7 +355,7 @@ where
         &offered_contract.contract_info,
         &offered_contract.tlvs,
         &offered_contract.into(),
-        FeeRule::default(),
+        BuildRule::CURRENT,
     )?;
     log_created_transactions(
         logger,

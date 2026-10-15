@@ -15,9 +15,14 @@ use ddk_messages::oracle_msgs::{
     tagged_announcement_msg, EnumEventDescriptor, EventDescriptor, OracleAnnouncement, OracleEvent,
     OracleInfo, SingleOracleInfo,
 };
-use ddk_messages::{AcceptDlc, CetAdaptorSignatures, DlcInput, FundingInput, OfferDlc};
+use ddk_messages::{
+    AcceptDlc, CetAdaptorSignatures, DlcInput, FundingInput, FundingSignatures, OfferDlc, SignDlc,
+};
 
-use super::context::{ensure_no_dlc_inputs, funding_input_index, validate_offer_funding_inputs};
+use super::context::{
+    contract_id_from_transactions, dlc_party_params, ensure_no_dlc_inputs, funding_input_index,
+    validate_offer_funding_inputs,
+};
 use super::psbt::finalize_segwit_input;
 use super::types::{funding_input, network_from_chain_hash, random_serial_id};
 use super::*;
@@ -208,6 +213,123 @@ fn ensure_no_dlc_inputs_rejects_a_dlc_input() {
     ));
     // Ordinary inputs are permitted.
     assert!(ensure_no_dlc_inputs(&[dummy_funding_input(1)]).is_ok());
+}
+
+/// A single funded splice offer that also spends an ordinary P2WSH input of
+/// 330 sats, whose witness is larger than a P2WPKH witness. Returns the
+/// messages and the P2WSH input's outpoint.
+fn splice_with_a_p2wsh_input() -> (OfferDlc, AcceptDlc, OutPoint) {
+    let (mut offer, mut accept) = messages_with_serial_ids(&[1], &[]);
+    offer.offer_collateral = Amount::from_sat(100_000);
+    accept.accept_collateral = Amount::ZERO;
+    let script = ScriptBuf::new_p2wsh(&bitcoin::WScriptHash::from_byte_array([3; 32]));
+    let previous_transaction = dummy_transaction(Amount::from_sat(330), script);
+    let p2wsh_outpoint = OutPoint::new(previous_transaction.compute_txid(), 0);
+    let p2wsh_input = funding_input(
+        &previous_transaction,
+        0,
+        Some(7),
+        u32::MAX,
+        200,
+        ScriptBuf::new(),
+    )
+    .unwrap();
+    offer
+        .funding_inputs
+        .extend([dlc_funding_input(220, ScriptBuf::new(), true), p2wsh_input]);
+    (offer, accept, p2wsh_outpoint)
+}
+
+#[test]
+fn a_new_splice_spends_its_p2wsh_input() {
+    let (offer, accept, p2wsh_outpoint) = splice_with_a_p2wsh_input();
+    let fund = create_dlc_transactions(&offer, &accept).unwrap().fund;
+    let mut spent = fund.input.iter().map(|input| input.previous_output);
+    assert_eq!(fund.input.len(), 3, "the splice input is spent once");
+    assert!(spent.any(|outpoint| outpoint == p2wsh_outpoint));
+}
+
+/// ddk-dlc 2.0.0-rc.8 and earlier left a splice's P2WSH input out of the
+/// funding transaction. With 330 sats, less than the funding fee, that
+/// transaction was still valid, so a signed contract built that way must
+/// rebuild exactly.
+#[test]
+fn a_splice_built_with_the_legacy_layout_rebuilds_from_its_sign_message() {
+    let (offer, accept, p2wsh_outpoint) = splice_with_a_p2wsh_input();
+    // What the spliced constructor of ddk-dlc 2.0.0-rc.8 built.
+    let offer_params = dlc_party_params(
+        offer.funding_pubkey,
+        offer.payout_spk.clone(),
+        offer.payout_serial_id,
+        offer.change_spk.clone(),
+        offer.change_serial_id,
+        offer.offer_collateral,
+        &offer.funding_inputs,
+    )
+    .unwrap();
+    let accept_params = dlc_party_params(
+        accept.funding_pubkey,
+        accept.payout_spk.clone(),
+        accept.payout_serial_id,
+        accept.change_spk.clone(),
+        accept.change_serial_id,
+        accept.accept_collateral,
+        &accept.funding_inputs,
+    )
+    .unwrap();
+    let total = offer.get_total_collateral();
+    let legacy = ddk_dlc::create_dlc_transactions(
+        &offer_params.legacy_spliced(),
+        &accept_params.legacy_spliced(),
+        &[
+            ddk_dlc::Payout {
+                offer: total,
+                accept: Amount::ZERO,
+            },
+            ddk_dlc::Payout {
+                offer: Amount::ZERO,
+                accept: total,
+            },
+        ],
+        offer.refund_locktime,
+        offer.fee_rate_per_vb,
+        0,
+        offer.cet_locktime,
+        offer.fund_output_serial_id,
+        offer.contract_flags,
+    )
+    .unwrap();
+    let spent_value = offer_params.input_amount - Amount::from_sat(330);
+    let output_value = legacy.fund.output.iter().map(|output| output.value).sum();
+    assert!(spent_value > output_value, "the legacy funding pays a fee");
+    assert!(legacy
+        .fund
+        .input
+        .iter()
+        .all(|input| input.previous_output != p2wsh_outpoint));
+    assert_ne!(
+        create_dlc_transactions(&offer, &accept).unwrap().fund,
+        legacy.fund
+    );
+
+    let secp = Secp256k1::new();
+    let sign = SignDlc {
+        protocol_version: PROTOCOL_VERSION,
+        contract_id: contract_id_from_transactions(&legacy, &offer.temporary_contract_id),
+        cet_adaptor_signatures: CetAdaptorSignatures::from(&[][..]),
+        refund_signature: secp.sign_ecdsa(
+            &Message::from_digest([1; 32]),
+            &SecretKey::from_slice(&[1; 32]).unwrap(),
+        ),
+        funding_signatures: FundingSignatures {
+            funding_signatures: vec![],
+        },
+        tlvs: Default::default(),
+    };
+    let rebuilt = create_signed_dlc_transactions(&offer, &accept, &sign).unwrap();
+    assert_eq!(rebuilt.fund, legacy.fund);
+    assert_eq!(rebuilt.refund, legacy.refund);
+    assert_eq!(rebuilt.cets, legacy.cets);
 }
 
 #[test]
