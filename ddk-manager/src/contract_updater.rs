@@ -914,7 +914,7 @@ where
                 &funding_signatures.witness_elements[0].witness,
                 &own_fund_pubkey,
                 &counter_party_fund_pubkey,
-            );
+            )?;
 
             log_debug!(
                 logger,

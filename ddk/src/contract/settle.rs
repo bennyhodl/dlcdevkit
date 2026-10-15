@@ -10,6 +10,12 @@
 //! Like the rest of the module, nothing is stored: the CET set, the refund
 //! transaction, and the adaptor information are all rebuilt from the offer and
 //! accept messages on demand.
+//!
+//! Settlement checks only the counterparty signatures it combines, not the
+//! whole contract as [`verify_signed_contract`](super::verify_signed_contract)
+//! does. The funding transaction is already on chain, so its witnesses no
+//! longer matter, and a refund must stay possible on the counterparty's refund
+//! signature alone, however expensive or damaged the rest of the messages are.
 
 use bitcoin::Transaction;
 use ddk_dlc::secp256k1_zkp::{
@@ -18,7 +24,7 @@ use ddk_dlc::secp256k1_zkp::{
 use ddk_messages::oracle_msgs::OracleAttestation;
 use ddk_messages::{AcceptDlc, OfferDlc, SignDlc};
 
-use super::context::signed_context;
+use super::context::{signed_context, verify_adaptor_signatures, verify_refund_signature};
 use super::error::ContractError;
 use super::types::Party;
 
@@ -60,37 +66,32 @@ pub fn sign_cet(
     let (counterparty_pubkey, adaptor_signatures) =
         counterparty_adaptor_signatures(offer, accept, sign, party);
 
-    let total_collateral = offer.get_total_collateral();
+    // Verifying the counterparty's adaptor signatures is also how the adaptor
+    // info of each execution info is obtained.
+    let adaptor_infos = verify_adaptor_signatures(
+        &secp,
+        &context,
+        offer.get_total_collateral(),
+        counterparty_pubkey,
+        &adaptor_signatures,
+        counterparty_error(party),
+    )?;
     let funding_witness_script = &context.transactions.funding_witness_script;
     let fund_value = context.transactions.get_fund_output().value;
 
-    let mut signature_index = 0;
-    for (info, cet_range) in context.execution_infos.iter().zip(&context.cet_ranges) {
-        // Verifying the counterparty's adaptor signatures is also how the
-        // adaptor info and the next signature offset are obtained.
-        let (adaptor_info, next_index) = info
-            .verify_and_get_adaptor_info(
-                &secp,
-                total_collateral,
-                &counterparty_pubkey,
-                funding_witness_script,
-                fund_value,
-                &context.transactions.cets[cet_range.clone()],
-                &adaptor_signatures,
-                signature_index,
-            )
-            .map_err(|e| {
-                counterparty_error(party)(format!("invalid CET adaptor signatures: {e}"))
-            })?;
-
+    for ((info, cet_range), (adaptor_info, signature_start)) in context
+        .execution_infos
+        .iter()
+        .zip(&context.cet_ranges)
+        .zip(&adaptor_infos)
+    {
         // The lookup also binds the attestations to the oracle combination the
         // adaptor point was built for: one attestation per oracle, and a
         // signature set for every oracle of the matched combination.
         let Some((range_info, oracle_signatures)) = info
-            .get_range_info_and_oracle_signatures(&adaptor_info, attestations, signature_index)
+            .get_range_info_and_oracle_signatures(adaptor_info, attestations, *signature_start)
             .map_err(attestation_error)?
         else {
-            signature_index = next_index;
             continue;
         };
 
@@ -140,19 +141,16 @@ pub fn sign_refund(
         Party::Accept => (offer.funding_pubkey, sign.refund_signature),
     };
 
+    verify_refund_signature(
+        &secp,
+        &context,
+        counterparty_pubkey,
+        &counterparty_signature,
+        counterparty_error(party),
+    )?;
+
     let funding_witness_script = &context.transactions.funding_witness_script;
     let fund_value = context.transactions.get_fund_output().value;
-    ddk_dlc::verify_tx_input_sig(
-        &secp,
-        &counterparty_signature,
-        &context.transactions.refund,
-        0,
-        funding_witness_script,
-        fund_value,
-        &counterparty_pubkey,
-    )
-    .map_err(|e| counterparty_error(party)(format!("invalid refund signature: {e}")))?;
-
     let mut refund = context.transactions.refund.clone();
     ddk_dlc::util::sign_multi_sig_input(
         &secp,

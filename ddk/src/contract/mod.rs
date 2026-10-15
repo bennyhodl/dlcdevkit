@@ -79,8 +79,38 @@
 //! descriptor signing supports `wpkh()` and `sh(wpkh())`, with or without a
 //! wildcard. Unsupported script types fail with
 //! [`ContractError::UnsupportedScriptType`](crate::contract::ContractError::UnsupportedScriptType) rather than producing incomplete
-//! signatures. External signers can fund with any script type they can
-//! finalize themselves.
+//! signatures. An external signer can fund the accepting party's inputs with
+//! any script type it can finalize itself.
+//!
+//! The offering party's inputs are narrower, because the accepting party
+//! verifies their witnesses before it completes the funding transaction (see
+//! below): they must be native P2WPKH, P2SH-P2WPKH or Taproot key-path spends,
+//! signing with `SIGHASH_ALL`. A witness for any other script type cannot be
+//! checked, so verification refuses it with
+//! [`ContractError::UnverifiableFundingWitness`](crate::contract::ContractError::UnverifiableFundingWitness)
+//! rather than passing a contract it has not fully verified. A witness longer
+//! than its input's declared `max_witness_len` is refused with
+//! [`ContractError::FundingWitnessTooLong`](crate::contract::ContractError::FundingWitnessTooLong):
+//! the funding fee was paid on the declared length.
+//!
+//! # Verifying a signed contract
+//!
+//! [`verify_signed_contract`](crate::contract::verify_signed_contract) checks
+//! that the three messages describe one contract and that every signature they
+//! carry is valid: both parties' refund and CET adaptor signatures, the
+//! offering party's funding witnesses, and its halves of any splice inputs. A
+//! success means all of it was verified; it returns a
+//! [`VerifiedContract`](crate::contract::VerifiedContract) holding the
+//! contract id and the transactions.
+//! [`finalize_sign`](crate::contract::finalize_sign) runs it before completing
+//! the funding transaction; call it directly to check messages received or
+//! restored from elsewhere.
+//!
+//! **The accepting party's funding witnesses are not in the three messages**,
+//! so they are not part of what `verify_signed_contract` verifies, and no one
+//! can verify them from the messages alone. The accepting party adds them
+//! when it finalizes, and the funding transaction a
+//! [`VerifiedContract`](crate::contract::VerifiedContract) exposes is unsigned.
 //!
 //! # Splicing
 //!
@@ -160,6 +190,7 @@ mod settle;
 mod sign;
 mod splice;
 mod types;
+mod verify;
 
 #[cfg(test)]
 mod tests;
@@ -177,6 +208,7 @@ pub use types::{
     chain_hash_from_network, funding_input, AcceptOfferParams, AcceptResult, CreateOfferParams,
     DescriptorInput, DlcInputSigningKey, InputDerivation, Party, PartyParams, SignResult,
 };
+pub use verify::{verify_signed_contract, VerifiedContract};
 
 /// The current DLC protocol version used by DDK.
 pub const PROTOCOL_VERSION: u32 = 1;
