@@ -16,9 +16,9 @@ use ddk::contract::{
     accept_offer, chain_hash_from_network, create_dlc_splice_input, create_dlc_transactions,
     create_funding_psbt, create_offer, create_signed_dlc_transactions, finalize_sign,
     finalize_sign_spliced, funding_input, sign_accept, sign_accept_spliced, sign_cet, sign_refund,
-    signing, validate_offer, validate_offer_structure, AcceptOfferParams, ContractError,
-    CreateOfferParams, DescriptorInput, DlcInputSigningKey, InputDerivation, Party, PartyParams,
-    DLC_INPUT_MAX_WITNESS_LEN,
+    signing, validate_accept, validate_offer, validate_offer_structure, AcceptOfferParams,
+    ContractError, CreateOfferParams, DescriptorInput, DlcInputSigningKey, InputDerivation, Party,
+    PartyParams, DLC_INPUT_MAX_WITNESS_LEN,
 };
 use ddk_dlc::secp256k1_zkp::{All, Keypair, PublicKey, Secp256k1, SecretKey, XOnlyPublicKey};
 use ddk_messages::contract_msgs::{
@@ -704,6 +704,25 @@ fn validate_offer_adds_the_timeout_policy_to_the_structure() {
         .push(offer.funding_inputs[0].clone());
     validate_offer(&duplicate_inputs, MIN_TIMEOUT, MAX_TIMEOUT, NOW_UNIX)
         .expect_err("a structural defect");
+}
+
+/// The offering party, or anyone holding the pair, checks an accept without a
+/// funding key or a policy. The signatures are checked as well as the terms.
+#[test]
+fn validate_accept_checks_an_accept_against_its_offer() {
+    let secp = Secp256k1::new();
+    let (_, _, offer, accept) = enum_contract(&secp, NETWORK);
+    validate_accept(&offer, &accept).expect("an accept built by accept_offer");
+
+    let mut reordered_signatures = accept;
+    reordered_signatures
+        .cet_adaptor_signatures
+        .ecdsa_adaptor_signatures
+        .reverse();
+    assert!(matches!(
+        validate_accept(&offer, &reordered_signatures),
+        Err(ContractError::InvalidAccept(_))
+    ));
 }
 
 /// An enum event commits to one nonce. An oracle that commits one per outcome

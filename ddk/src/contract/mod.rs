@@ -124,6 +124,17 @@
 //! large numeric contract is the same order of work as accepting it. That is
 //! the cost of keeping no state.
 //!
+//! # Checking messages without acting on them
+//!
+//! A party that stores, relays, or audits messages can check them without a
+//! funding key or a timeout policy:
+//! [`validate_offer_structure`](crate::contract::validate_offer_structure)
+//! checks an offer, and [`validate_accept`](crate::contract::validate_accept)
+//! an accept against its offer. [`validate_offer`](crate::contract::validate_offer)
+//! adds the accepting party's timeout policy. [`accept_offer`](crate::contract::accept_offer)
+//! and [`sign_accept`](crate::contract::sign_accept) run the same checks
+//! before they sign.
+//!
 //! # Shaping the CETs with records on the offer
 //!
 //! A TLV record on the offer can change the CETs a contract produces; the
@@ -131,9 +142,9 @@
 //! the accepting party's place, is the first. Add the record to `offer.tlvs`
 //! after [`create_offer`](crate::contract::create_offer) and before the offer
 //! is sent. Every function here reads it from the offer from then on, and
-//! [`validate_offer`](crate::contract::validate_offer) rejects one the
-//! contract cannot carry. The records, and the path to adding one, are in
-//! [`ddk_manager::contract::cet_records`].
+//! [`validate_offer_structure`](crate::contract::validate_offer_structure)
+//! rejects one the contract cannot carry. The records, and the path to adding
+//! one, are in [`ddk_manager::contract::cet_records`].
 //!
 //! # Broadcasting and storage stay with the caller
 //!
@@ -164,7 +175,9 @@ mod types;
 #[cfg(test)]
 mod tests;
 
-pub use accept::{accept_offer, create_dlc_transactions, create_signed_dlc_transactions};
+pub use accept::{
+    accept_offer, create_dlc_transactions, create_signed_dlc_transactions, validate_accept,
+};
 pub use create::{create_offer, validate_offer, validate_offer_structure};
 pub use error::ContractError;
 pub use finalize::{finalize_sign, finalize_sign_spliced};

@@ -67,26 +67,14 @@ fn context_from_messages_with_fee_rule(
     accept: &AcceptDlc,
     fee_rule: FeeRule,
 ) -> Result<ContractContext, ContractError> {
+    // The accept's version must equal the offer's, so checking the offer's
+    // covers both.
     ensure_protocol_version(offer.protocol_version, ContractError::InvalidOffer)?;
-    ensure_protocol_version(accept.protocol_version, ContractError::InvalidAccept)?;
-    if offer.protocol_version != accept.protocol_version {
-        return Err(ContractError::InvalidAccept(
-            "offer and accept protocol versions differ".to_string(),
-        ));
-    }
-    if offer.temporary_contract_id != accept.temporary_contract_id {
-        return Err(ContractError::InvalidAccept(
-            "accept message references a different temporary contract id".to_string(),
-        ));
-    }
-    if accept.negotiation_fields.is_some() {
-        return Err(ContractError::InvalidAccept(
-            "negotiation fields are not supported by the stateless API".to_string(),
-        ));
-    }
+    accept
+        .validate_terms(offer)
+        .map_err(|e| ContractError::InvalidAccept(e.to_string()))?;
     validate_offer_funding_inputs(&offer.funding_inputs)?;
     ensure_no_dlc_inputs(&accept.funding_inputs)?;
-    ensure_unique_input_serial_ids(offer, accept)?;
 
     let accept_params = dlc_party_params(
         accept.funding_pubkey,
@@ -497,25 +485,6 @@ pub(crate) fn validate_offer_funding_inputs(
                     .to_string(),
             ));
         }
-    }
-    Ok(())
-}
-
-pub(crate) fn ensure_unique_input_serial_ids(
-    offer: &OfferDlc,
-    accept: &AcceptDlc,
-) -> Result<(), ContractError> {
-    let mut serial_ids = offer
-        .funding_inputs
-        .iter()
-        .chain(&accept.funding_inputs)
-        .map(|input| input.input_serial_id)
-        .collect::<Vec<_>>();
-    serial_ids.sort_unstable();
-    if serial_ids.windows(2).any(|pair| pair[0] == pair[1]) {
-        return Err(ContractError::InvalidFundingInput(
-            "funding input serial ids are not unique".to_string(),
-        ));
     }
     Ok(())
 }

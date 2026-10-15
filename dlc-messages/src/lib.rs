@@ -439,13 +439,7 @@ impl OfferDlc {
         ddk_dlc::util::validate_fee_rate(self.fee_rate_per_vb)?;
         ddk_dlc::util::validate_collateral(self.offer_collateral, self.get_total_collateral())?;
 
-        for (name, script) in [("payout", &self.payout_spk), ("change", &self.change_spk)] {
-            if !is_standard_script_pubkey(script) {
-                return Err(Error::InvalidArgument(format!(
-                    "{name} script pubkey is not a standard script pubkey"
-                )));
-            }
-        }
+        ensure_standard_scripts(&self.payout_spk, &self.change_spk)?;
 
         // The specification asks for both locktimes in one unit. A zero CET
         // locktime is accepted against either: it does not lock the CETs at
@@ -466,17 +460,7 @@ impl OfferDlc {
         }
         self.validate_cet_locktime()?;
 
-        let mut input_serial_ids = self
-            .funding_inputs
-            .iter()
-            .map(|input| input.input_serial_id)
-            .collect::<Vec<_>>();
-        input_serial_ids.sort_unstable();
-        if input_serial_ids.windows(2).any(|pair| pair[0] == pair[1]) {
-            return Err(Error::InvalidArgument(
-                "funding input serial ids are not unique".to_string(),
-            ));
-        }
+        ensure_unique_input_serial_ids(&self.funding_inputs)?;
         if self.change_serial_id == self.fund_output_serial_id {
             return Err(Error::InvalidArgument(
                 "change and fund output serial ids must differ".to_string(),
@@ -537,6 +521,39 @@ impl OfferDlc {
         self.validate_terms()?;
         self.validate_timing(min_timeout_interval, max_timeout_interval, now_unix)
     }
+}
+
+/// Returns an error unless both of a party's script pubkeys are standard.
+fn ensure_standard_scripts(
+    payout_spk: &bitcoin::Script,
+    change_spk: &bitcoin::Script,
+) -> Result<(), Error> {
+    for (name, script) in [("payout", payout_spk), ("change", change_spk)] {
+        if !is_standard_script_pubkey(script) {
+            return Err(Error::InvalidArgument(format!(
+                "{name} script pubkey is not a standard script pubkey"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Returns an error when two funding inputs share a serial id: the serial ids
+/// order the funding transaction's inputs, so they must be distinct.
+fn ensure_unique_input_serial_ids<'a>(
+    funding_inputs: impl IntoIterator<Item = &'a FundingInput>,
+) -> Result<(), Error> {
+    let mut input_serial_ids = funding_inputs
+        .into_iter()
+        .map(|input| input.input_serial_id)
+        .collect::<Vec<_>>();
+    input_serial_ids.sort_unstable();
+    if input_serial_ids.windows(2).any(|pair| pair[0] == pair[1]) {
+        return Err(Error::InvalidArgument(
+            "funding input serial ids are not unique".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 /// Whether a script pubkey has one of the forms the DLC specification calls
@@ -683,6 +700,48 @@ pub struct AcceptDlc {
     /// no bytes, and unknown records are kept and written back; see
     /// [`tlv_stream`](crate::tlv_stream).
     pub tlvs: TlvStream,
+}
+
+impl AcceptDlc {
+    /// Returns an error when the accept breaks a rule of the DLC protocol
+    /// against `offer`.
+    ///
+    /// These are the checks that need nothing but the two messages: the
+    /// accept answers this offer (same protocol version and temporary
+    /// contract id) without negotiation fields, its payout and change scripts
+    /// are standard, the funding input serial ids are distinct across both
+    /// parties, and its change serial id differs from the fund output serial
+    /// id. Like [`OfferDlc::validate_terms`] it applies no policy.
+    ///
+    /// The collateral is not checked here: the transaction builder owns that
+    /// rule, because it also builds from party parameters that never came in
+    /// an accept message. The CET adaptor and refund signatures need the
+    /// rebuilt transactions, so they are checked with them.
+    pub fn validate_terms(&self, offer: &OfferDlc) -> Result<(), Error> {
+        if self.protocol_version != offer.protocol_version {
+            return Err(Error::InvalidArgument(
+                "offer and accept protocol versions differ".to_string(),
+            ));
+        }
+        if self.temporary_contract_id != offer.temporary_contract_id {
+            return Err(Error::InvalidArgument(
+                "accept message references a different temporary contract id".to_string(),
+            ));
+        }
+        if self.negotiation_fields.is_some() {
+            return Err(Error::InvalidArgument(
+                "negotiation fields are not supported".to_string(),
+            ));
+        }
+        ensure_standard_scripts(&self.payout_spk, &self.change_spk)?;
+        ensure_unique_input_serial_ids(offer.funding_inputs.iter().chain(&self.funding_inputs))?;
+        if self.change_serial_id == offer.fund_output_serial_id {
+            return Err(Error::InvalidArgument(
+                "accept change and fund output serial ids must differ".to_string(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl_dlc_writeable!(
@@ -1131,6 +1190,63 @@ mod tests {
     fn accept_msg_roundtrip() {
         let input = include_str!("./test_inputs/accept_msg.json");
         roundtrip_test!(AcceptDlc, input);
+    }
+
+    /// One change to an accept that breaks a rule against its offer.
+    type AcceptDefect = (&'static str, fn(&mut AcceptDlc, &OfferDlc));
+
+    #[test]
+    fn accept_terms_are_validated_against_the_offer() {
+        let offer: OfferDlc =
+            serde_json::from_str(include_str!("./test_inputs/offer_msg.json")).unwrap();
+        let mut accept = accept_fixture();
+        accept.temporary_contract_id = offer.temporary_contract_id;
+        accept
+            .validate_terms(&offer)
+            .expect("an accept that answers the offer");
+
+        let defects: [AcceptDefect; 7] = [
+            ("a different protocol version", |accept, _| {
+                accept.protocol_version += 1;
+            }),
+            ("a different temporary contract id", |accept, _| {
+                accept.temporary_contract_id[0] ^= 1;
+            }),
+            ("negotiation fields", |accept, _| {
+                accept.negotiation_fields =
+                    Some(NegotiationFields::Disjoint(DisjointNegotiationFields {
+                        negotiation_fields: Vec::new(),
+                    }));
+            }),
+            ("an OP_RETURN payout script", |accept, _| {
+                accept.payout_spk = ScriptBuf::new_op_return([1; 20]);
+            }),
+            ("a 25-byte version 0 witness change script", |accept, _| {
+                accept.change_spk = ScriptBuf::from_bytes([&[0x00, 25][..], &[7; 25]].concat());
+            }),
+            (
+                "an input serial id the offer already uses",
+                |accept, offer| {
+                    accept.funding_inputs[0].input_serial_id =
+                        offer.funding_inputs[0].input_serial_id;
+                },
+            ),
+            (
+                "a change serial id equal to the fund output's",
+                |accept, offer| {
+                    accept.change_serial_id = offer.fund_output_serial_id;
+                },
+            ),
+        ];
+        for (defect, apply) in defects {
+            let mut invalid = accept.clone();
+            apply(&mut invalid, &offer);
+            assert!(
+                invalid.validate_terms(&offer).is_err(),
+                "{} must be rejected",
+                defect
+            );
+        }
     }
 
     #[test]

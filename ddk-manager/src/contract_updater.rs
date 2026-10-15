@@ -320,6 +320,7 @@ where
     S::Target: Storage,
     L::Target: Logger,
 {
+    accept_msg.validate_terms(&OfferDlc::from(offered_contract))?;
     let (tx_input_infos, input_amount) = get_tx_input_infos(&accept_msg.funding_inputs)?;
     let accept_dlc_inputs = get_dlc_inputs_from_funding_inputs(&accept_msg.funding_inputs);
 
