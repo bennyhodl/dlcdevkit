@@ -35,6 +35,32 @@ pub enum ContractError {
         /// The index of the input in the funding transaction.
         input_index: usize,
     },
+    /// A funding witness spends a script type DDK cannot verify (see
+    /// [`ddk_dlc::verify_funding_witness`]), so the contract cannot be
+    /// verified as a whole.
+    #[error(
+        "the funding witness of input serial id {input_serial_id} spends a script type that \
+         cannot be verified"
+    )]
+    UnverifiableFundingWitness {
+        /// The serial id of the funding input.
+        input_serial_id: u64,
+    },
+    /// A funding witness is longer than the `max_witness_len` its input
+    /// declared. The funding fee was computed from the declared length, so the
+    /// longer witness pays less than the agreed fee rate.
+    #[error(
+        "the funding witness of input serial id {input_serial_id} is {witness_len} bytes, over \
+         its declared maximum of {max_witness_len}"
+    )]
+    FundingWitnessTooLong {
+        /// The serial id of the funding input.
+        input_serial_id: u64,
+        /// The serialized size of the witness.
+        witness_len: usize,
+        /// The size the funding input declared.
+        max_witness_len: usize,
+    },
     /// An oracle attestation is malformed, forged, or does not correspond to
     /// the announcement of the oracle it claims to come from.
     #[error("invalid attestation: {0}")]

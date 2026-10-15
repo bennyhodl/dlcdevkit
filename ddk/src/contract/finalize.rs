@@ -16,8 +16,8 @@ use super::verify::{verify_signed_contract, VerifiedContract};
 ///
 /// The three messages are checked with
 /// [`verify_signed_contract`](super::verify_signed_contract) first, so a sign
-/// message with a bad signature or funding witness is rejected before any
-/// transaction is returned.
+/// message with a bad signature or funding witness, or a funding witness DDK
+/// cannot verify, is rejected before any transaction is returned.
 ///
 /// `signed_funding_psbt` must contain finalized witnesses for every
 /// accept-side funding input; for single-funded contracts with no accept-side

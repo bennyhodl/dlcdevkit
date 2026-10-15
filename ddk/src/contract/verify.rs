@@ -10,29 +10,19 @@ use super::error::ContractError;
 /// A contract whose offer, accept and sign messages were checked against each
 /// other by [`verify_signed_contract`].
 ///
-/// Holding one means every signature the messages carry is valid for the
-/// transactions it exposes, except the offer funding witnesses listed by
-/// [`unverified_funding_inputs`](Self::unverified_funding_inputs), whose script
-/// type DDK cannot check. Code that imports, settles or splices the contract
+/// Holding one means every signature the three messages carry is valid for the
+/// transactions it exposes. Code that imports, settles or splices the contract
 /// can use the transactions without checking them again.
+///
+/// The accepting party's funding witnesses are not among those signatures:
+/// they are not in the messages, so the funding transaction exposed here is
+/// unsigned.
 pub struct VerifiedContract {
     contract_id: [u8; 32],
     transactions: DlcTransactions,
-    unverified_funding_inputs: Vec<u64>,
 }
 
 impl VerifiedContract {
-    /// Serial ids of the offering party's funding inputs whose witnesses were
-    /// not checked, because they spend a script type DDK cannot verify (see
-    /// [`ddk_dlc::verify_funding_witness`]).
-    ///
-    /// Such a witness is neither accepted nor rejected: if it is bad, the
-    /// funding transaction simply does not confirm. A consumer that must know
-    /// every signature is valid before it proceeds requires this to be empty.
-    pub fn unverified_funding_inputs(&self) -> &[u64] {
-        &self.unverified_funding_inputs
-    }
-
     /// The contract id named by the sign message, which the rebuilt funding
     /// transaction matches.
     pub fn contract_id(&self) -> [u8; 32] {
@@ -54,6 +44,12 @@ impl VerifiedContract {
 /// Verifies that the offer, accept and sign messages describe one signed
 /// contract and returns its transactions.
 ///
+/// **The accepting party's funding witnesses are not verified here.** They,
+/// and its halves of any splice inputs, never travel in the three messages:
+/// the accepting party adds them in [`finalize_sign`](super::finalize_sign).
+/// This function verifies what the messages carry, all of it, and a success
+/// means none of it is left unchecked.
+///
 /// The transactions are rebuilt under the fee rule whose funding transaction
 /// matches the sign message's contract id, as in
 /// [`create_signed_dlc_transactions`](super::create_signed_dlc_transactions),
@@ -65,23 +61,20 @@ impl VerifiedContract {
 ///   party's);
 /// - the offering party's funding witnesses from the sign message: each
 ///   ordinary input's witness against the output it spends (P2WPKH,
-///   P2SH-P2WPKH or a Taproot key-path spend, signing with `SIGHASH_ALL`), and
-///   each splice input's half signature against the previous contract's
-///   offer-side funding key.
+///   P2SH-P2WPKH or a Taproot key-path spend, signing with `SIGHASH_ALL`, and
+///   no longer than the input's declared `max_witness_len`), and each splice
+///   input's half signature against the previous contract's offer-side funding
+///   key.
 ///
 /// An offer funding input of any other script type (a P2WSH multisig, for
-/// example, which an external signer can fund from) does not fail
-/// verification, because DDK cannot tell whether its witness is valid. It is
-/// listed in [`VerifiedContract::unverified_funding_inputs`] instead, and the
-/// chain is its final check.
-///
-/// The accepting party's funding witnesses, and its halves of any splice
-/// inputs, never travel in the messages; it adds them in
-/// [`finalize_sign`](super::finalize_sign). They cannot be checked here.
-///
-/// Failures are attributed to the message that carried the bad data:
-/// [`ContractError::InvalidAccept`] for the accept message's signatures and
-/// [`ContractError::InvalidSign`] for the sign message's.
+/// example) fails with [`ContractError::UnverifiableFundingWitness`]: DDK
+/// cannot tell whether its witness is valid, so the contract cannot be
+/// verified. A witness longer than its input declared fails with
+/// [`ContractError::FundingWitnessTooLong`], since the funding fee was paid on
+/// the declared length. Other failures are attributed to the message that
+/// carried the bad data: [`ContractError::InvalidAccept`] for the accept
+/// message's signatures and [`ContractError::InvalidSign`] for the sign
+/// message's.
 pub fn verify_signed_contract(
     offer: &OfferDlc,
     accept: &AcceptDlc,
@@ -108,7 +101,7 @@ pub fn verify_signed_contract(
         &sign.cet_adaptor_signatures,
         ContractError::InvalidSign,
     )?;
-    let unverified_funding_inputs = verify_offer_funding_signatures(
+    verify_offer_funding_signatures(
         &secp,
         offer,
         accept,
@@ -118,6 +111,5 @@ pub fn verify_signed_contract(
     Ok(VerifiedContract {
         contract_id: sign.contract_id,
         transactions: context.transactions,
-        unverified_funding_inputs,
     })
 }

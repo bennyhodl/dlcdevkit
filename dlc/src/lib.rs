@@ -237,6 +237,14 @@ pub enum Error {
     /// [`verify_funding_witness`] cannot check. The witness is neither valid
     /// nor invalid as far as this crate can tell.
     UnsupportedScriptType,
+    /// A funding witness is longer than the `max_witness_len` its input
+    /// declared, which the funding transaction's fee was computed from.
+    WitnessTooLong {
+        /// The serialized size of the witness.
+        witness_len: usize,
+        /// The size the input declared.
+        max_witness_len: usize,
+    },
 }
 
 impl From<secp256k1_zkp::Error> for Error {
@@ -283,6 +291,13 @@ impl fmt::Display for Error {
                     "The witness spends a script type that cannot be verified"
                 )
             }
+            Error::WitnessTooLong {
+                witness_len,
+                max_witness_len,
+            } => write!(
+                f,
+                "The witness is {witness_len} bytes, over the declared maximum of {max_witness_len}"
+            ),
         }
     }
 }
@@ -296,7 +311,7 @@ impl std::error::Error for Error {
             Error::InputsIndex(e) => Some(e),
             Error::InvalidArgument(_) => None,
             Error::Miniscript(e) => Some(e),
-            Error::UnsupportedScriptType => None,
+            Error::UnsupportedScriptType | Error::WitnessTooLong { .. } => None,
         }
     }
 }
@@ -1399,10 +1414,10 @@ pub fn verify_tx_input_sig<V: Verification>(
 /// returns [`Error::UnsupportedScriptType`]: the witness has not been checked
 /// and must not be treated as valid, but it is not known to be invalid either.
 ///
-/// The witness length is not checked against `input.max_witness_len`: a
-/// signer that does not grind for a low R value produces a P2WPKH witness one
-/// byte over the 108 bytes the fee was computed for, which lowers the fee rate
-/// marginally but is valid.
+/// Whatever the script type, a witness longer than `input.max_witness_len`
+/// (its serialized size, as counted in the transaction weight) returns
+/// [`Error::WitnessTooLong`]: the funding fee was computed from the declared
+/// bound, so a longer witness pays less than the agreed fee rate.
 pub fn verify_funding_witness<C: Verification>(
     secp: &Secp256k1<C>,
     fund_tx: &Transaction,
@@ -1423,6 +1438,12 @@ pub fn verify_funding_witness<C: Verification>(
         return Err(invalid(
             "expected one previous output per funding transaction input",
         ));
+    }
+    if witness.size() > input.max_witness_len {
+        return Err(Error::WitnessTooLong {
+            witness_len: witness.size(),
+            max_witness_len: input.max_witness_len,
+        });
     }
     let prevout = &prevouts[input_index];
     let elements: Vec<&[u8]> = witness.iter().collect();
@@ -1451,11 +1472,19 @@ pub fn verify_funding_witness<C: Verification>(
     }
 
     if taproot_key_path {
-        let [signature] = elements[..] else {
+        let [element] = elements[..] else {
             return Err(invalid("a Taproot key-path witness is a single signature"));
         };
-        let signature = bitcoin::taproot::Signature::from_slice(signature)
+        let signature = bitcoin::taproot::Signature::from_slice(element)
             .map_err(|e| invalid(&format!("not a Taproot signature: {e}")))?;
+        // `from_slice` reads a trailing 0x00 as the default sighash type, but
+        // BIP-341 makes a 65-byte signature with hash type 0x00 invalid: the
+        // default is only ever the 64-byte form.
+        if signature.sighash_type == TapSighashType::Default && element.len() != 64 {
+            return Err(invalid(
+                "a 65-byte Taproot signature must not use hash type 0x00",
+            ));
+        }
         if !matches!(
             signature.sighash_type,
             TapSighashType::Default | TapSighashType::All
@@ -2669,6 +2698,24 @@ mod tests {
         )
         .unwrap();
 
+        // The default sighash type is the 64-byte signature. The same
+        // signature with an explicit 0x00 hash byte verifies against the same
+        // digest, but BIP-341 rejects it.
+        let default_witness = taproot_witness(TapSighashType::Default);
+        let default_signature = default_witness.nth(0).unwrap();
+        assert_eq!(default_signature.len(), 64);
+        let mut with_zero_byte = default_signature.to_vec();
+        with_zero_byte.push(0x00);
+        assert!(matches!(
+            verify(
+                &fund_tx,
+                2,
+                &prevouts,
+                &Witness::from_slice(&[with_zero_byte])
+            ),
+            Err(Error::InvalidArgument(_))
+        ));
+
         // A Taproot signature that commits to less than the whole transaction
         // is valid on chain but would let the coin move into another one.
         assert!(matches!(
@@ -2707,6 +2754,17 @@ mod tests {
                 Err(Error::InvalidArgument(_))
             ));
         }
+
+        // A valid witness one byte over the size its input declared pays less
+        // than the fee rate the funding fee was computed for.
+        let witness = ecdsa_witness(&native, 0);
+        let mut short_bound = inputs[0].clone();
+        short_bound.max_witness_len = witness.size() - 1;
+        assert!(matches!(
+            verify_funding_witness(&secp, &fund_tx, 0, &short_bound, &prevouts, &witness),
+            Err(Error::WitnessTooLong { witness_len, max_witness_len })
+                if witness_len == witness.size() && max_witness_len == witness.size() - 1
+        ));
 
         // A coin whose script cannot be checked is reported as such: neither
         // valid nor invalid. A Taproot script-path spend is one of them.

@@ -2922,7 +2922,6 @@ fn a_signed_contract_verifies_from_its_three_messages() {
 
     let contract = verify_signed_contract(&offer, &accept, &sign).unwrap();
     assert_eq!(contract.contract_id(), sign.contract_id);
-    assert!(contract.unverified_funding_inputs().is_empty());
     assert_eq!(
         contract.transactions().fund.compute_txid(),
         funding_transaction.compute_txid()
@@ -3123,7 +3122,7 @@ fn a_splice_half_may_carry_its_key_but_nothing_else() {
 }
 
 #[test]
-fn an_offer_funded_from_a_script_ddk_cannot_check_finalizes_unverified() {
+fn an_offer_funded_from_a_script_ddk_cannot_check_is_refused() {
     use bitcoin::opcodes::all::OP_CHECKSIG;
 
     let secp = Secp256k1::new();
@@ -3174,13 +3173,17 @@ fn an_offer_funded_from_a_script_ddk_cannot_check_finalizes_unverified() {
         secp.sign_ecdsa(&Message::from_digest(sighash.to_byte_array()), &wallet_key),
     );
     let witness = Witness::from_slice(&[signature.to_vec(), witness_script.to_bytes()]);
-    offer_psbt.inputs[index].final_script_witness = Some(witness.clone());
+    offer_psbt.inputs[index].final_script_witness = Some(witness);
     let sign = sign_accept(&offer, &accept, &offerer.funding_secret_key, &offer_psbt)
         .unwrap()
         .sign;
 
-    let contract = verify_signed_contract(&offer, &accept, &sign).unwrap();
-    assert_eq!(contract.unverified_funding_inputs(), &[1]);
+    // The witness may be valid, but DDK cannot tell, so neither verification
+    // nor finalization passes the contract.
+    assert!(matches!(
+        verify_signed_contract(&offer, &accept, &sign),
+        Err(ContractError::UnverifiableFundingWitness { input_serial_id: 1 })
+    ));
 
     let mut accept_psbt = create_funding_psbt(&offer, &accept).unwrap();
     signing::sign_funding_psbt_with_xpriv(
@@ -3191,8 +3194,31 @@ fn an_offer_funded_from_a_script_ddk_cannot_check_finalizes_unverified() {
         &accepter.derivations(),
     )
     .unwrap();
-    let funding_transaction = finalize_sign(&offer, &accept, &sign, &accept_psbt).unwrap();
-    assert_eq!(funding_transaction.input[index].witness, witness);
+    assert!(matches!(
+        finalize_sign(&offer, &accept, &sign, &accept_psbt),
+        Err(ContractError::UnverifiableFundingWitness { input_serial_id: 1 })
+    ));
+}
+
+#[test]
+fn an_offer_funding_witness_longer_than_its_input_declared_is_rejected() {
+    let (_, _, offer, accept, mut sign) = signed_enum_contract();
+    let declared = offer.funding_inputs[0].max_witness_len as usize;
+    // The funding fee was paid on the declared length. A witness padded past
+    // it is caught by its size, whatever else is wrong with it.
+    let elements = &mut sign.funding_signatures.funding_signatures[0].witness_elements;
+    elements.push(WitnessElement {
+        witness: vec![0; declared],
+    });
+    assert!(matches!(
+        verify_signed_contract(&offer, &accept, &sign),
+        Err(ContractError::FundingWitnessTooLong {
+            input_serial_id,
+            max_witness_len,
+            ..
+        }) if input_serial_id == offer.funding_inputs[0].input_serial_id
+            && max_witness_len == declared
+    ));
 }
 
 #[test]

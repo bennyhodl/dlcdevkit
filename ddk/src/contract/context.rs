@@ -351,16 +351,16 @@ pub(crate) fn verify_adaptor_signatures(
 /// (`local_fund_pubkey`). The accepting party's funding witnesses never travel
 /// in the messages, so they cannot be checked here.
 ///
-/// Returns the serial ids of the ordinary inputs whose script type cannot be
-/// checked ([`ddk_dlc::Error::UnsupportedScriptType`]). Their witnesses are
-/// neither accepted as valid nor rejected; the chain is their final check.
+/// A witness whose script type cannot be checked fails with
+/// [`ContractError::UnverifiableFundingWitness`], and one longer than its
+/// input's `max_witness_len` with [`ContractError::FundingWitnessTooLong`].
 pub(crate) fn verify_offer_funding_signatures(
     secp: &Secp256k1<All>,
     offer: &OfferDlc,
     accept: &AcceptDlc,
     funding_transaction: &Transaction,
     signatures: &FundingSignatures,
-) -> Result<Vec<u64>, ContractError> {
+) -> Result<(), ContractError> {
     let signatures = &signatures.funding_signatures;
     if signatures.len() != offer.funding_inputs.len() {
         return Err(ContractError::InvalidSign(format!(
@@ -371,47 +371,50 @@ pub(crate) fn verify_offer_funding_signatures(
     }
     let prevouts = funding_prevouts(offer, accept)?;
     let (input_infos, _) = tx_input_infos(&offer.funding_inputs)?;
-    let mut unverified = Vec::new();
     for ((input, input_info), signature) in offer
         .funding_inputs
         .iter()
         .zip(&input_infos)
         .zip(signatures)
     {
-        let input_index = funding_input_index(offer, accept, input.input_serial_id)?;
-        let invalid = |e: ddk_dlc::Error| {
-            ContractError::InvalidSign(format!(
-                "invalid funding signature for input serial id {}: {e}",
-                input.input_serial_id
-            ))
-        };
-        match &input.dlc_input {
+        let input_serial_id = input.input_serial_id;
+        let input_index = funding_input_index(offer, accept, input_serial_id)?;
+        let result = match &input.dlc_input {
             Some(dlc_input) => ddk_dlc::dlc_input::verify_dlc_funding_input_signature(
                 secp,
                 funding_transaction,
                 input_index,
                 &input.into(),
-                splice_half(input.input_serial_id, dlc_input, signature)?.to_vec(),
+                splice_half(input_serial_id, dlc_input, signature)?.to_vec(),
                 &dlc_input.local_fund_pubkey,
-            )
-            .map_err(invalid)?,
-            None => match ddk_dlc::verify_funding_witness(
+            ),
+            None => ddk_dlc::verify_funding_witness(
                 secp,
                 funding_transaction,
                 input_index,
                 input_info,
                 &prevouts,
                 &funding_witness(signature),
-            ) {
-                Ok(()) => {}
-                Err(ddk_dlc::Error::UnsupportedScriptType) => {
-                    unverified.push(input.input_serial_id)
-                }
-                Err(e) => return Err(invalid(e)),
+            ),
+        };
+        result.map_err(|e| match e {
+            ddk_dlc::Error::UnsupportedScriptType => {
+                ContractError::UnverifiableFundingWitness { input_serial_id }
+            }
+            ddk_dlc::Error::WitnessTooLong {
+                witness_len,
+                max_witness_len,
+            } => ContractError::FundingWitnessTooLong {
+                input_serial_id,
+                witness_len,
+                max_witness_len,
             },
-        }
+            e => ContractError::InvalidSign(format!(
+                "invalid funding signature for input serial id {input_serial_id}: {e}"
+            )),
+        })?;
     }
-    Ok(unverified)
+    Ok(())
 }
 
 /// The offering party's half of a splice input's 2-of-2 signature, from its
