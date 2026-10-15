@@ -12,10 +12,10 @@ use std::fmt;
 use std::ops::Range;
 
 use bitcoin::Amount;
-use ddk_dlc::{DlcTransactions, FeeRule, PartyParams};
+use ddk_dlc::{DlcTransactions, FeeRule, FundingRequirements, PartyParams};
 use ddk_messages::{OfferDlc, TlvStream};
 
-use super::cet_records::{cet_records, CetContext};
+use super::cet_records::{cet_records, CetContext, CetRecord};
 use super::contract_info::ContractInfo;
 use super::offered_contract::OfferedContract;
 use crate::error::Error;
@@ -172,12 +172,7 @@ pub fn build_contract_transactions(
         record.validate(contract_infos, terms.total_collateral)?;
     }
 
-    // A record may make a CET pay the accepting party's amount to a longer
-    // script than its own; the CET fee is reserved for the longest.
-    let accept_cet_script_len = records
-        .iter()
-        .map(|record| record.accept_payout_script_len())
-        .fold(accept.payout_script_pubkey.len(), usize::max);
+    let accept_cet_script_len = accept_cet_script_len(&records, accept.payout_script_pubkey.len());
 
     let payouts = contract_infos[0].get_payouts(terms.total_collateral)?;
     // A splice input carries a `dlc_input`; when present the funding
@@ -256,4 +251,47 @@ pub fn build_contract_transactions(
         transactions,
         cet_ranges,
     })
+}
+
+/// What the offering party's inputs must hold to fund `offer`'s side of a
+/// contract with an accepting party paid at a script of
+/// `accept_payout_script_len` bytes, and the fees that side pays.
+///
+/// This prices the offering party as [`build_contract_transactions`] funds it
+/// for a new contract, so a coin selector can be exact before any accept
+/// exists: the CET records on the offer can make a CET pay the accepting
+/// party a longer script, and a splice input changes the inputs the funding
+/// transaction spends. An offer that funds the whole contract pays for both.
+pub fn offer_funding_requirements(
+    offer: &PartyParams,
+    accept_payout_script_len: usize,
+    offer_tlvs: &TlvStream,
+    terms: &ContractTerms,
+) -> Result<FundingRequirements, BuildError> {
+    let records = cet_records(offer_tlvs)?;
+    // An offer with a splice input is built by the spliced constructor, which
+    // lays out its inputs this way.
+    let offer = if offer.dlc_inputs.is_empty() {
+        offer.clone()
+    } else {
+        offer.spliced()
+    };
+    Ok(offer.funding_requirements(
+        terms.total_collateral,
+        terms.fee_rate_per_vb,
+        Amount::ZERO,
+        offer.payout_script_pubkey.len(),
+        accept_cet_script_len(&records, accept_payout_script_len),
+        FeeRule::default(),
+    )?)
+}
+
+/// The longest script a CET pays the accepting party: its payout script of
+/// `accept_payout_script_len` bytes, or a longer one a record makes a CET pay
+/// in its place. The CET fee is reserved for it.
+fn accept_cet_script_len(records: &[Box<dyn CetRecord>], accept_payout_script_len: usize) -> usize {
+    records
+        .iter()
+        .map(|record| record.accept_payout_script_len())
+        .fold(accept_payout_script_len, usize::max)
 }
