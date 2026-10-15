@@ -22,6 +22,8 @@
 //! the attestations, and verifies the signatures it takes from the messages in
 //! the same way, so the keyless and key-based transactions are the same
 //! transaction: their txids are equal, and only the witness signatures differ.
+//! What settlement verifies, and the unsupported per-outcome nonce convention,
+//! are documented in the Settlement section of [`crate::contract`].
 //!
 //! Like the rest of the module, nothing is stored: the CET set, the refund
 //! transaction, and the adaptor information are all rebuilt from the offer and
@@ -32,12 +34,13 @@ use bitcoin::{Transaction, Witness};
 use ddk_dlc::secp256k1_zkp::{
     ecdsa::Signature, All, EcdsaAdaptorSignature, PublicKey, Secp256k1, SecretKey,
 };
+use ddk_manager::contract::contract_info::ContractInfo as ExecutionContractInfo;
 use ddk_messages::oracle_msgs::OracleAttestation;
 use ddk_messages::{AcceptDlc, CetAdaptorSignatures, OfferDlc, SignDlc};
 
 use super::context::{signed_context, ContractContext};
 use super::error::ContractError;
-use super::types::Party;
+use super::types::{CetSettlement, Party};
 
 /// Signs the CET matching a set of oracle attestations.
 ///
@@ -60,11 +63,21 @@ use super::types::Party;
 /// resolve is used, so it is enough to pass the attestations for one event.
 /// Each oracle may appear at most once: the adaptor secret is the sum of one
 /// signature set per oracle, so a repeated index is rejected with
-/// [`ContractError::InvalidAttestation`] instead of being summed twice.
+/// [`ContractError::InvalidAttestation`] instead of being summed twice. An
+/// attestation must come from the event and the nonces its oracle announced.
+///
+/// Every oracle announcement of the contract is checked first, so an
+/// announcement that is not signed by its oracle, or an enum announcement with
+/// one nonce per outcome (which is unsupported), is refused up front with
+/// [`ContractError::InvalidOffer`].
 ///
 /// Returns [`ContractError::NoMatchingOutcome`] when no contract outcome
 /// corresponds to the attested outcomes, which is also what an attestation for
 /// an event this contract does not use looks like.
+///
+/// This verifies the counterparty's CET adaptor signatures and the signature
+/// decrypted from them, not the funding witnesses or the refund signatures;
+/// see [what settlement verifies](crate::contract#what-settlement-verifies).
 pub fn sign_cet(
     offer: &OfferDlc,
     accept: &AcceptDlc,
@@ -93,18 +106,26 @@ pub fn sign_cet(
 /// holding the three messages and the attestations can therefore close the
 /// contract: either party without its key, a watchtower, or a server.
 ///
-/// The CET is selected and the attestations are validated exactly as in
-/// [`sign_cet`], which documents `attestations` and the errors. The result is
-/// the transaction [`sign_cet`] returns for either party, with the same txid.
-/// A decrypted signature that does not verify is reported against the message
-/// that carried it: [`ContractError::InvalidAccept`] for the accepting party's,
+/// The CET is selected, and the announcements and attestations are validated,
+/// exactly as in [`sign_cet`], which documents `attestations` and the errors.
+/// As there, an enum announcement with one nonce per outcome is unsupported and
+/// refused with [`ContractError::InvalidOffer`]. The returned transaction is the
+/// one [`sign_cet`] returns for either party, with the same txid, and comes
+/// with its index among the contract's CETs. A decrypted signature that does
+/// not verify is reported against the message that carried it:
+/// [`ContractError::InvalidAccept`] for the accepting party's,
 /// [`ContractError::InvalidSign`] for the offering party's.
+///
+/// This verifies the accepting party's CET adaptor signatures, which select the
+/// CET, and the two decrypted signatures; it does not verify the offering
+/// party's other adaptor signatures, the refund signatures or the funding
+/// witnesses. Run `verify_signed_contract` first for the full check.
 pub fn settle_cet_from_messages(
     offer: &OfferDlc,
     accept: &AcceptDlc,
     sign: &SignDlc,
     attestations: &[(usize, OracleAttestation)],
-) -> Result<Transaction, ContractError> {
+) -> Result<CetSettlement, ContractError> {
     let secp = Secp256k1::new();
     let settlement = Settlement::new(offer, accept, sign)?;
     // Selecting the CET verifies one party's adaptor signatures in full, since
@@ -113,7 +134,10 @@ pub fn settle_cet_from_messages(
     let cet = settlement.attested_cet(&secp, Party::Accept, attestations)?;
     let offer_half = settlement.decrypt_cet_signature(&secp, &cet, Party::Offer)?;
     let accept_half = settlement.decrypt_cet_signature(&secp, &cet, Party::Accept)?;
-    Ok(settlement.complete(cet.transaction, offer_half, accept_half))
+    Ok(CetSettlement {
+        cet_index: cet.index,
+        transaction: settlement.complete(cet.transaction, offer_half, accept_half),
+    })
 }
 
 /// Signs the refund transaction.
@@ -125,7 +149,8 @@ pub fn settle_cet_from_messages(
 /// Both parties signed the refund during the offer/accept exchange, so this
 /// only adds `funding_secret_key`'s half. As in [`sign_cet`], the key
 /// identifies the settling party. The counterparty's stored signature is
-/// verified before the two are combined. [`settle_refund_from_messages`]
+/// verified before the two are combined; nothing else is, neither the CET
+/// adaptor signatures nor the funding witnesses. [`settle_refund_from_messages`]
 /// builds the same transaction without the key.
 pub fn sign_refund(
     offer: &OfferDlc,
@@ -152,6 +177,11 @@ pub fn sign_refund(
 /// message that carried it. The result is the transaction [`sign_refund`]
 /// returns for either party, with the same txid. As there, the chain enforces
 /// the refund locktime.
+///
+/// Only the two refund signatures are verified: not the CET adaptor
+/// signatures, the funding witnesses or the oracle announcements, so a
+/// contract whose oracle can never produce a usable attestation can still be
+/// refunded. Run `verify_signed_contract` first for the full check.
 pub fn settle_refund_from_messages(
     offer: &OfferDlc,
     accept: &AcceptDlc,
@@ -191,6 +221,8 @@ struct Committed<'a> {
 /// signature for it.
 struct AttestedCet {
     transaction: Transaction,
+    /// The CET's position in the contract's CETs.
+    index: usize,
     adaptor_index: usize,
     adaptor_secret: SecretKey,
 }
@@ -257,6 +289,7 @@ impl<'a> Settlement<'a> {
         selector: Party,
         attestations: &[(usize, OracleAttestation)],
     ) -> Result<AttestedCet, ContractError> {
+        validate_announcements(secp, &self.context.execution_infos)?;
         let selector = self.committed(selector);
         let adaptor_signatures: Vec<EcdsaAdaptorSignature> = selector.adaptor_signatures.into();
         let transactions = &self.context.transactions;
@@ -300,8 +333,10 @@ impl<'a> Settlement<'a> {
 
             // `cet_index` is relative to the CETs of this contract info; the
             // adaptor index already carries the running offset.
+            let index = cet_range.start + range_info.cet_index;
             return Ok(AttestedCet {
-                transaction: transactions.cets[cet_range.start + range_info.cet_index].clone(),
+                transaction: transactions.cets[index].clone(),
+                index,
                 adaptor_index: range_info.adaptor_index,
                 adaptor_secret,
             });
@@ -423,6 +458,31 @@ fn attestation_error(error: ddk_manager::error::Error) -> ContractError {
         }
         other => ContractError::InvalidAttestation(other.to_string()),
     }
+}
+
+/// Checks that every oracle announcement of the contract is signed by its
+/// oracle and describes a well-formed event.
+///
+/// This is where an enum announcement with one nonce per outcome is refused:
+/// [`OracleEvent::validate`](ddk_messages::oracle_msgs::OracleEvent::validate)
+/// requires exactly one nonce for an enum event. Checked before any adaptor
+/// work, so such a contract fails here instead of in the positional nonce check
+/// of each attestation.
+fn validate_announcements(
+    secp: &Secp256k1<All>,
+    execution_infos: &[ExecutionContractInfo],
+) -> Result<(), ContractError> {
+    for info in execution_infos {
+        for (index, announcement) in info.oracle_announcements.iter().enumerate() {
+            announcement.validate(secp).map_err(|e| {
+                ContractError::InvalidOffer(format!(
+                    "announcement of oracle {index} for event {}: {e}",
+                    announcement.oracle_event.event_id
+                ))
+            })?;
+        }
+    }
+    Ok(())
 }
 
 /// Checks each attestation against the announcement of the oracle it claims to

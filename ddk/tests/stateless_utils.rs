@@ -1327,14 +1327,19 @@ pub async fn close_with_cet_from_messages(
     contract: &FundedContract,
     attestations: &[(usize, OracleAttestation)],
 ) -> Transaction {
-    let cet = settle_cet_from_messages(
+    let settled = settle_cet_from_messages(
         &contract.offer,
         &contract.accept,
         &contract.sign,
         attestations,
     )
     .expect("could not build the CET from the messages");
-    broadcast_cet(ctx, contract, cet).await
+    assert_eq!(
+        contract.transactions.cets[settled.cet_index].compute_txid(),
+        settled.transaction.compute_txid(),
+        "the CET index does not name the settled CET"
+    );
+    broadcast_cet(ctx, contract, settled.transaction).await
 }
 
 /// Checks that `cet` is one of the contract's CETs paying the parties, then

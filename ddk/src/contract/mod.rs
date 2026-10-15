@@ -28,7 +28,8 @@
 //!    broadcast via chain client               broadcast via chain client
 //!
 //!            anyone holding the three messages, with no key:
-//!            settle_cet_from_messages / settle_refund_from_messages ──► Transaction
+//!            settle_cet_from_messages ──► CetSettlement
+//!            settle_refund_from_messages ──► Transaction
 //! ```
 //!
 //! Either party can settle on its own, and neither needs the other's
@@ -127,10 +128,33 @@
 //! settle. Both produce the same transaction, with the same txid.
 //!
 //! The CET functions additionally take the oracle attestations, each paired
-//! with the index of its oracle in the contract's announcements. They select
-//! the matching CET, verify the attestations against the announcements they
-//! claim to come from, verify every signature taken from the messages, and
-//! return the signed transaction.
+//! with the index of its oracle in the contract's announcements. They validate
+//! the contract's announcements, select the matching CET, verify the
+//! attestations against the announcements they claim to come from, verify
+//! every signature taken from the messages, and return the signed transaction;
+//! [`settle_cet_from_messages`](crate::contract::settle_cet_from_messages) also
+//! returns the CET's index, as a [`CetSettlement`](crate::contract::CetSettlement).
+//!
+//! Enum announcements must carry exactly one nonce, as the DLC spec requires.
+//! The per-outcome convention, where an oracle announces one nonce per outcome
+//! and signs with that outcome's nonce, is not supported: the CET functions
+//! refuse such an announcement with
+//! [`ContractError::InvalidOffer`](crate::contract::ContractError::InvalidOffer)
+//! before doing any other work.
+//!
+//! ## What settlement verifies
+//!
+//! Settlement verifies what it needs to close, not the whole signed contract.
+//! Every path rebuilds the contract from the messages and checks the sign
+//! message's contract id. A CET path also checks the oracle announcements, the
+//! attestations, one party's full set of CET adaptor signatures (the
+//! counterparty's for a key-based close, the accepting party's for a keyless
+//! one) and every signature it puts on the witness. A refund path checks only
+//! the refund signatures it combines. No path checks the funding witnesses,
+//! and the refund paths check no CET adaptor signature or announcement, so a
+//! contract can be refunded even when its oracle never produces a usable
+//! attestation. A caller that wants the full check on the three messages
+//! should run `verify_signed_contract` first.
 //!
 //! None of these functions enforces *when* a transaction may be broadcast.
 //! CETs carry the offer's `cet_locktime` and the refund its `refund_locktime`;
@@ -192,8 +216,9 @@ pub use settle::{settle_cet_from_messages, settle_refund_from_messages, sign_cet
 pub use sign::{sign_accept, sign_accept_spliced};
 pub use splice::{create_dlc_splice_input, DLC_INPUT_MAX_WITNESS_LEN};
 pub use types::{
-    chain_hash_from_network, funding_input, AcceptOfferParams, AcceptResult, CreateOfferParams,
-    DescriptorInput, DlcInputSigningKey, InputDerivation, Party, PartyParams, SignResult,
+    chain_hash_from_network, funding_input, AcceptOfferParams, AcceptResult, CetSettlement,
+    CreateOfferParams, DescriptorInput, DlcInputSigningKey, InputDerivation, Party, PartyParams,
+    SignResult,
 };
 
 /// The current DLC protocol version used by DDK.

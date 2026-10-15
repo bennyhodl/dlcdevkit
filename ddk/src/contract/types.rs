@@ -121,6 +121,21 @@ pub struct SignResult {
     pub transactions: DlcTransactions,
 }
 
+/// The result of
+/// [`settle_cet_from_messages`](super::settle_cet_from_messages).
+#[derive(Clone, Debug)]
+pub struct CetSettlement {
+    /// The CET with both halves of the 2-of-2 funding spend on its witness,
+    /// ready to broadcast.
+    pub transaction: Transaction,
+    /// The CET's position in the contract's CETs, as in the
+    /// [`DlcTransactions::cets`] that
+    /// [`create_signed_dlc_transactions`](super::create_signed_dlc_transactions)
+    /// rebuilds. For a contract with several disjoint contract infos the CETs
+    /// of each follow those of the one before.
+    pub cet_index: usize,
+}
+
 /// Identifies a funding input and the BIP32 path that derives its key.
 ///
 /// Inputs are identified by their funding input serial id, not by transaction

@@ -1653,10 +1653,19 @@ impl FundedContract {
     }
 
     /// Settles `attestations` from the messages alone and checks the result is
-    /// the transaction either party signs with its key, with a valid witness.
+    /// the transaction either party signs with its key, with a valid witness,
+    /// and that its index names it among the contract's CETs.
     fn settle_cet_without_a_key(&self, attestations: &[(usize, OracleAttestation)]) -> Transaction {
         let (offer, accept, sign) = (&self.offer, &self.accept, &self.sign);
-        let keyless = settle_cet_from_messages(offer, accept, sign, attestations).unwrap();
+        let settled = settle_cet_from_messages(offer, accept, sign, attestations).unwrap();
+        let cets = create_signed_dlc_transactions(offer, accept, sign)
+            .unwrap()
+            .cets;
+        assert_eq!(
+            cets[settled.cet_index].compute_txid(),
+            settled.transaction.compute_txid()
+        );
+        let keyless = settled.transaction;
         self.assert_valid_witness(&keyless);
         for key in [
             self.offerer.funding_secret_key,
@@ -1751,6 +1760,88 @@ fn settling_from_the_messages_rejects_a_forged_attestation() {
         matches!(error, ContractError::InvalidAttestation(_)),
         "unexpected error: {error}"
     );
+}
+
+#[test]
+fn settling_from_the_messages_rejects_an_attestation_for_another_event() {
+    let contract = FundedContract::new(
+        enum_contract_info(TOTAL_COLLATERAL),
+        Amount::from_sat(50_000),
+    );
+
+    // The contract's oracle, key and nonce, but an attestation that names a
+    // different event than the one announced.
+    let mut other_event = oracle_attestation(vec!["up".to_string()]);
+    other_event.event_id = "another-event".to_string();
+
+    let error = settle_cet_from_messages(
+        &contract.offer,
+        &contract.accept,
+        &contract.sign,
+        &[(0, other_event)],
+    )
+    .unwrap_err();
+    match error {
+        ContractError::InvalidAttestation(message) => {
+            assert!(message.contains("event id"), "{message}");
+        }
+        other => panic!("expected an invalid attestation error, got {other:?}"),
+    }
+}
+
+#[test]
+fn settling_from_the_messages_rejects_a_per_outcome_enum_announcement() {
+    let mut contract = FundedContract::new(
+        enum_contract_info(TOTAL_COLLATERAL),
+        Amount::from_sat(50_000),
+    );
+
+    // The per-outcome convention: the oracle announces one nonce for each of
+    // "up" and "down", and attests "down" with the second. The event is
+    // re-signed, so only the nonce count is wrong. The funding transaction,
+    // and so the sign message's contract id, does not depend on it.
+    let per_outcome = oracle_announcement_by(
+        0,
+        EventDescriptor::EnumEvent(EnumEventDescriptor {
+            outcomes: vec!["up".to_string(), "down".to_string()],
+        }),
+        2,
+    );
+    contract.offer.contract_info = enum_contract_info_over(
+        TOTAL_COLLATERAL,
+        TOTAL_COLLATERAL,
+        OracleInfo::Single(SingleOracleInfo {
+            oracle_announcement: per_outcome,
+        }),
+    );
+    let secp = Secp256k1::new();
+    let (oracle_key, down_nonce) = (oracle_secrets(0, 0).0, oracle_secrets(0, 1).1);
+    let oracle_key = Keypair::from_secret_key(&secp, &oracle_key);
+    let down = OracleAttestation {
+        event_id: "stateless-test".to_string(),
+        oracle_public_key: XOnlyPublicKey::from_keypair(&oracle_key).0,
+        signatures: vec![ddk_dlc::secp_utils::schnorrsig_sign_with_nonce(
+            &secp,
+            &tagged_attestation_msg("down"),
+            &oracle_key,
+            &down_nonce.secret_bytes(),
+        )],
+        outcomes: vec!["down".to_string()],
+    };
+
+    let error = settle_cet_from_messages(
+        &contract.offer,
+        &contract.accept,
+        &contract.sign,
+        &[(0, down)],
+    )
+    .unwrap_err();
+    match error {
+        ContractError::InvalidOffer(message) => {
+            assert!(message.contains("nonces"), "{message}");
+        }
+        other => panic!("expected an invalid offer error, got {other:?}"),
+    }
 }
 
 #[test]
@@ -2542,7 +2633,9 @@ fn a_pre_rc4_single_funded_contract_settles_from_the_messages() {
         contract.refund_signed_by_accepter.compute_txid()
     );
     let attestations = vec![(0, oracle_attestation(vec!["up".to_string()]))];
-    let cet = settle_cet_from_messages(offer, accept, sign, &attestations).unwrap();
+    let cet = settle_cet_from_messages(offer, accept, sign, &attestations)
+        .unwrap()
+        .transaction;
     assert_eq!(
         cet.compute_txid(),
         contract.cet_up_signed_by_offerer.compute_txid()
