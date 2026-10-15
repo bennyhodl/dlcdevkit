@@ -355,7 +355,9 @@ pub struct OracleAttestation {
 }
 
 impl OracleAttestation {
-    /// Returns whether the attestation satisfy validity checks.
+    /// Returns whether the attestation satisfy validity checks: it comes from
+    /// the announcement's oracle and event, each signature verifies over its
+    /// outcome, and the signatures use the announced nonces in order.
     pub fn validate<C: Verification>(
         &self,
         secp: &Secp256k1<C>,
@@ -374,6 +376,14 @@ impl OracleAttestation {
                 "Oracle public key is not equal to announcement oracle public key. oracle_public_key={} announcement_oracle_public_key={}",
                 self.oracle_public_key,
                 announcement.oracle_public_key
+            )));
+        }
+
+        if self.event_id != announcement.oracle_event.event_id {
+            return Err(Error::InvalidArgument(format!(
+                "Event id is not equal to announcement event id. event_id={} announcement_event_id={}",
+                self.event_id,
+                announcement.oracle_event.event_id
             )));
         }
 
@@ -850,6 +860,49 @@ mod tests {
 
         let attestation = OracleAttestation {
             event_id: "test".to_string(),
+            oracle_public_key: oracle_pubkey,
+            signatures: vec![sig],
+            outcomes: vec!["1".to_string()],
+        };
+
+        let validation = attestation.validate(SECP256K1, &valid_announcement);
+
+        assert!(validation.is_err())
+    }
+
+    #[test]
+    fn invalid_attestation_incorrect_event_id() {
+        let key_pair = Keypair::new(SECP256K1, &mut thread_rng());
+        let oracle_pubkey = XOnlyPublicKey::from_keypair(&key_pair).0;
+        let (nonce_secret, nonce_xpub) = create_nonce_key();
+
+        let oracle_event = OracleEvent {
+            event_id: "test".to_string(),
+            event_maturity_epoch: 10,
+            oracle_nonces: vec![nonce_xpub],
+            event_descriptor: EventDescriptor::EnumEvent(enum_descriptor()),
+        };
+
+        let msg = tagged_announcement_msg(&oracle_event);
+        let sig = SECP256K1.sign_schnorr(&msg, &key_pair);
+
+        let valid_announcement = OracleAnnouncement {
+            oracle_public_key: oracle_pubkey,
+            announcement_signature: sig,
+            oracle_event,
+        };
+
+        // Signed with the announced key and nonce, but for another event.
+        let msg = tagged_attestation_msg("1");
+        let sig = ddk_dlc::secp_utils::schnorrsig_sign_with_nonce(
+            SECP256K1,
+            &msg,
+            &key_pair,
+            &nonce_secret.secret_bytes(),
+        );
+
+        let attestation = OracleAttestation {
+            event_id: "other".to_string(),
             oracle_public_key: oracle_pubkey,
             signatures: vec![sig],
             outcomes: vec!["1".to_string()],

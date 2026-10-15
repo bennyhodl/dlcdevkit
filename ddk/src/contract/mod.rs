@@ -26,11 +26,19 @@
 //! │
 //! └─ sign_cet / sign_refund ──► Transaction   sign_cet / sign_refund ──► Transaction
 //!    broadcast via chain client               broadcast via chain client
+//!
+//!            anyone holding the three messages, with no key:
+//!            settle_cet_from_messages ──► CetSettlement
+//!            settle_refund_from_messages ──► Transaction
 //! ```
 //!
 //! Either party can settle on its own, and neither needs the other's
 //! cooperation to do it: the counterparty's half of the 2-of-2 spend was
-//! committed in the messages it already sent.
+//! committed in the messages it already sent. Since both parties' halves are in
+//! the messages,
+//! [`settle_cet_from_messages`](crate::contract::settle_cet_from_messages) and
+//! [`settle_refund_from_messages`](crate::contract::settle_refund_from_messages)
+//! settle with no key at all.
 //!
 //! Each party retains only the three wire messages, its DLC funding secret key,
 //! and access to the keys of its funding inputs. Everything else — the funding
@@ -39,7 +47,8 @@
 //!
 //! The `SignDlc` matters to each side differently: the accepting party settles
 //! with the signatures it carries, while for the offering party it only
-//! confirms that the three messages describe one contract.
+//! confirms that the three messages describe one contract. Keyless settlement
+//! uses the signatures of both the accept and the sign message.
 //!
 //! # PSBT as the signing boundary
 //!
@@ -101,23 +110,56 @@
 //! A funded contract ends in one of two transactions, both of which spend the
 //! 2-of-2 funding output and are built entirely from the wire messages:
 //!
-//! | Outcome | Function | Counterparty's half comes from |
-//! |---------|----------|-------------------------------|
-//! | the oracles attest | [`sign_cet`](crate::contract::sign_cet) | its CET adaptor signature, decrypted with the oracle signatures |
-//! | nobody attests | [`sign_refund`](crate::contract::sign_refund) | its refund signature, sent with the accept or sign message |
+//! | Outcome | With a funding key | Without a key |
+//! |---------|--------------------|---------------|
+//! | the oracles attest | [`sign_cet`](crate::contract::sign_cet) | [`settle_cet_from_messages`](crate::contract::settle_cet_from_messages) |
+//! | nobody attests | [`sign_refund`](crate::contract::sign_refund) | [`settle_refund_from_messages`](crate::contract::settle_refund_from_messages) |
 //!
-//! Both take the settling party's DLC funding secret key, which supplies this
-//! party's half of the 2-of-2 spend and identifies which side is settling — so
-//! the same call works for either party. [`sign_cet`](crate::contract::sign_cet)
-//! additionally takes the oracle attestations, each paired with the index of
-//! its oracle in the contract's announcements; it selects the matching CET,
-//! verifies the attestations against the announcements they claim to come from,
-//! and returns the signed transaction.
+//! Every party's half of either spend is already in the messages: its CET
+//! adaptor signatures, which decrypt with the oracle signatures, and its refund
+//! signature, both sent with the accept message (accepting party) or the sign
+//! message (offering party). The two columns differ only in where the settling
+//! party's half comes from.
 //!
-//! Neither function enforces *when* a transaction may be broadcast. CETs carry
-//! the offer's `cet_locktime` and the refund its `refund_locktime`; the chain
-//! enforces those, and deciding which settlement path to take is the caller's
-//! policy.
+//! The key-based functions take the settling party's DLC funding secret key,
+//! which signs this party's half and identifies which side is settling — so
+//! the same call works for either party. The keyless functions take both halves
+//! from the messages, so a watchtower, a server, or a party without its key can
+//! settle. Both produce the same transaction, with the same txid.
+//!
+//! The CET functions additionally take the oracle attestations, each paired
+//! with the index of its oracle in the contract's announcements. They validate
+//! the contract's announcements, select the matching CET, verify the
+//! attestations against the announcements they claim to come from, verify
+//! every signature taken from the messages, and return the signed transaction;
+//! [`settle_cet_from_messages`](crate::contract::settle_cet_from_messages) also
+//! returns the CET's index, as a [`CetSettlement`](crate::contract::CetSettlement).
+//!
+//! Enum announcements must carry exactly one nonce, as the DLC spec requires.
+//! The per-outcome convention, where an oracle announces one nonce per outcome
+//! and signs with that outcome's nonce, is not supported: the CET functions
+//! refuse such an announcement with
+//! [`ContractError::InvalidOffer`](crate::contract::ContractError::InvalidOffer)
+//! before doing any other work.
+//!
+//! ## What settlement verifies
+//!
+//! Settlement verifies what it needs to close, not the whole signed contract.
+//! Every path rebuilds the contract from the messages and checks the sign
+//! message's contract id. A CET path also checks the oracle announcements, the
+//! attestations, one party's full set of CET adaptor signatures (the
+//! counterparty's for a key-based close, the accepting party's for a keyless
+//! one) and every signature it puts on the witness. A refund path checks only
+//! the refund signatures it combines. No path checks the funding witnesses,
+//! and the refund paths check no CET adaptor signature or announcement, so a
+//! contract can be refunded even when its oracle never produces a usable
+//! attestation. A caller that wants the full check on the three messages
+//! should run `verify_signed_contract` first.
+//!
+//! None of these functions enforces *when* a transaction may be broadcast.
+//! CETs carry the offer's `cet_locktime` and the refund its `refund_locktime`;
+//! the chain enforces those, and deciding which settlement path to take is the
+//! caller's policy.
 //!
 //! Settling is the most expensive operation in the module: selecting a CET
 //! means reconstructing the contract's adaptor information, which for a
@@ -170,12 +212,13 @@ pub use error::ContractError;
 pub use finalize::{finalize_sign, finalize_sign_spliced};
 pub use keys::{ContractKeyProvider, KeyScheme};
 pub use psbt::create_funding_psbt;
-pub use settle::{sign_cet, sign_refund};
+pub use settle::{settle_cet_from_messages, settle_refund_from_messages, sign_cet, sign_refund};
 pub use sign::{sign_accept, sign_accept_spliced};
 pub use splice::{create_dlc_splice_input, DLC_INPUT_MAX_WITNESS_LEN};
 pub use types::{
-    chain_hash_from_network, funding_input, AcceptOfferParams, AcceptResult, CreateOfferParams,
-    DescriptorInput, DlcInputSigningKey, InputDerivation, Party, PartyParams, SignResult,
+    chain_hash_from_network, funding_input, AcceptOfferParams, AcceptResult, CetSettlement,
+    CreateOfferParams, DescriptorInput, DlcInputSigningKey, InputDerivation, Party, PartyParams,
+    SignResult,
 };
 
 /// The current DLC protocol version used by DDK.
