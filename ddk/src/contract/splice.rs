@@ -9,10 +9,11 @@
 //! Only the offering party may contribute a DLC input; the accepting party's
 //! funding inputs must be ordinary wallet UTXOs.
 
-use bitcoin::ScriptBuf;
+use bitcoin::{OutPoint, ScriptBuf};
 use ddk_messages::{AcceptDlc, DlcInput, FundingInput, OfferDlc, SignDlc};
 
 use super::accept::create_signed_dlc_transactions;
+use super::context::decode_previous_transaction;
 use super::error::ContractError;
 use super::types::{random_serial_id, Party};
 
@@ -71,4 +72,24 @@ pub fn create_dlc_splice_input(
             contract_id,
         }),
     })
+}
+
+/// The temporary id of the contract a splice input spends, from the input
+/// alone: the input names that contract by contract id and carries its
+/// funding transaction.
+///
+/// The funding keys of the previous contract derive from its temporary id, so
+/// this is what lets a key provider sign a splice input it holds no record of.
+pub(crate) fn prior_temporary_contract_id(
+    input: &FundingInput,
+    dlc_input: &DlcInput,
+) -> Result<[u8; 32], ContractError> {
+    let funding_outpoint = OutPoint::new(
+        decode_previous_transaction(input)?.compute_txid(),
+        input.prev_tx_vout,
+    );
+    Ok(ddk_manager::contract::temporary_contract_id_from_outpoint(
+        funding_outpoint,
+        &dlc_input.contract_id,
+    ))
 }

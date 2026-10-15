@@ -6,14 +6,15 @@
 
 use bitcoin::consensus::Decodable;
 use bitcoin::{Amount, OutPoint, ScriptBuf, Transaction, TxOut, Witness};
-use ddk_dlc::secp256k1_zkp::{All, EcdsaAdaptorSignature, PublicKey, Secp256k1, SecretKey};
+use ddk_dlc::secp256k1_zkp::{
+    ecdsa::Signature, All, EcdsaAdaptorSignature, PublicKey, Secp256k1, SecretKey,
+};
 use ddk_dlc::{DlcTransactions, FeeRule, PartyParams as DlcPartyParams, TxInputInfo};
 use ddk_manager::contract::contract_info::ContractInfo as ExecutionContractInfo;
 use ddk_manager::contract::transactions::{build_contract_transactions, ContractTransactions};
 use ddk_manager::contract::AdaptorInfo;
 use ddk_messages::{
-    AcceptDlc, CetAdaptorSignatures, DlcInput, FundingInput, FundingSignature, FundingSignatures,
-    OfferDlc, SignDlc,
+    AcceptDlc, DlcInput, FundingInput, FundingSignature, FundingSignatures, OfferDlc, SignDlc,
 };
 
 use super::error::ContractError;
@@ -88,7 +89,7 @@ fn context_from_messages_with_fee_rule(
     }
     validate_offer_funding_inputs(&offer.funding_inputs)?;
     ensure_no_dlc_inputs(&accept.funding_inputs)?;
-    ensure_unique_input_serial_ids(offer, accept)?;
+    ensure_unique_input_serial_ids(offer, &accept.funding_inputs)?;
 
     let accept_params = dlc_party_params(
         accept.funding_pubkey,
@@ -213,87 +214,91 @@ fn previous_output(input: &FundingInput) -> Result<(OutPoint, TxOut), ContractEr
     Ok((outpoint, prevout))
 }
 
-/// Creates this party's CET adaptor signatures and groups them per execution info.
-pub(crate) fn create_adaptor_signatures(
-    secp: &Secp256k1<All>,
-    context: &ContractContext,
-    funding_secret_key: &SecretKey,
-    total_collateral: Amount,
-) -> Result<Vec<EcdsaAdaptorSignature>, ContractError> {
-    let mut signatures = Vec::new();
-    for (info, range) in context.execution_infos.iter().zip(&context.cet_ranges) {
-        let (_, mut info_signatures) = info.get_adaptor_info(
-            secp,
-            total_collateral,
-            funding_secret_key,
-            &context.transactions.funding_witness_script,
-            context.transactions.get_fund_output().value,
-            &context.transactions.cets[range.clone()],
-            signatures.len(),
-        )?;
-        signatures.append(&mut info_signatures);
-    }
-    Ok(signatures)
-}
-
-/// Creates this party's refund transaction signature.
-pub(crate) fn create_refund_signature(
-    secp: &Secp256k1<All>,
-    context: &ContractContext,
-    funding_secret_key: &SecretKey,
-) -> Result<ddk_dlc::secp256k1_zkp::ecdsa::Signature, ContractError> {
-    Ok(ddk_dlc::util::get_raw_sig_for_tx_input(
-        secp,
-        &context.transactions.refund,
-        0,
-        &context.transactions.funding_witness_script,
-        context.transactions.get_fund_output().value,
-        funding_secret_key,
-    )?)
-}
-
-/// Verifies one party's refund and CET adaptor signatures.
+/// The adaptor point of every CET adaptor signature a contract needs, in
+/// signature order, each with the index of the CET it signs.
 ///
-/// `error` attributes failures to the message that carried the signatures
-/// (accept or sign).
-pub(crate) fn verify_party_signatures(
-    secp: &Secp256k1<All>,
-    context: &ContractContext,
+/// The points depend only on the offer: its oracle announcements, outcomes and
+/// total collateral. Both parties' adaptor signatures are made over the same
+/// points, so one computation serves verifying the counterparty's signatures
+/// and asking for this party's.
+pub(crate) fn cet_adaptor_points(
+    execution_infos: &[ExecutionContractInfo],
     total_collateral: Amount,
-    funding_pubkey: PublicKey,
-    refund_signature: &ddk_dlc::secp256k1_zkp::ecdsa::Signature,
-    adaptor_signatures: &CetAdaptorSignatures,
+) -> Result<Vec<(usize, PublicKey)>, ContractError> {
+    let secp = Secp256k1::verification_only();
+    let mut points = Vec::new();
+    // Each contract info's CETs follow the previous one's, one per payout, as
+    // `ddk_manager::contract::transactions::build_contract_transactions` lays
+    // them out.
+    let mut first_cet = 0;
+    for info in execution_infos {
+        points.extend(
+            info.get_adaptor_points(&secp, total_collateral)?
+                .into_iter()
+                .map(|(cet_index, point)| (first_cet + cet_index, point)),
+        );
+        first_cet += info.get_payouts(total_collateral)?.len();
+    }
+    Ok(points)
+}
+
+/// Verifies one party's refund signature and CET adaptor signatures against
+/// the contract's transactions and adaptor points.
+///
+/// `error` attributes failures to where the signatures came from: the
+/// counterparty's accept or sign message, or this party's own signer.
+pub(crate) fn verify_contract_signatures(
+    secp: &Secp256k1<All>,
+    transactions: &DlcTransactions,
+    adaptor_points: &[(usize, PublicKey)],
+    funding_pubkey: &PublicKey,
+    refund_signature: &Signature,
+    adaptor_signatures: &[EcdsaAdaptorSignature],
     error: fn(String) -> ContractError,
 ) -> Result<(), ContractError> {
-    verify_refund_signature(secp, context, funding_pubkey, refund_signature, error)?;
-    let adaptor_signatures: Vec<EcdsaAdaptorSignature> = adaptor_signatures.into();
-    verify_adaptor_signatures(
-        secp,
-        context,
-        total_collateral,
-        funding_pubkey,
-        &adaptor_signatures,
-        error,
-    )?;
+    verify_refund_signature(secp, transactions, funding_pubkey, refund_signature, error)?;
+    if adaptor_signatures.len() != adaptor_points.len() {
+        return Err(error(format!(
+            "expected {} CET adaptor signatures, received {}",
+            adaptor_points.len(),
+            adaptor_signatures.len()
+        )));
+    }
+    let funding_script = &transactions.funding_witness_script;
+    let funding_value = transactions.get_fund_output().value;
+    for (index, ((cet_index, adaptor_point), signature)) in
+        adaptor_points.iter().zip(adaptor_signatures).enumerate()
+    {
+        ddk_dlc::verify_cet_adaptor_sig_from_point(
+            secp,
+            signature,
+            &transactions.cets[*cet_index],
+            adaptor_point,
+            funding_pubkey,
+            funding_script,
+            funding_value,
+        )
+        .map_err(|e| error(format!("invalid CET adaptor signature {index}: {e}")))?;
+    }
     Ok(())
 }
 
 /// Verifies one party's refund transaction signature.
 pub(crate) fn verify_refund_signature(
     secp: &Secp256k1<All>,
-    context: &ContractContext,
-    funding_pubkey: PublicKey,
-    refund_signature: &ddk_dlc::secp256k1_zkp::ecdsa::Signature,
+    transactions: &DlcTransactions,
+    funding_pubkey: &PublicKey,
+    refund_signature: &Signature,
     error: fn(String) -> ContractError,
 ) -> Result<(), ContractError> {
     ddk_dlc::verify_tx_input_sig(
         secp,
         refund_signature,
-        &context.transactions.refund,
+        &transactions.refund,
         0,
-        &context.transactions.funding_witness_script,
-        context.transactions.get_fund_output().value,
-        &funding_pubkey,
+        &transactions.funding_witness_script,
+        transactions.get_fund_output().value,
+        funding_pubkey,
     )
     .map_err(|e| error(format!("invalid refund signature: {e}")))
 }
@@ -341,42 +346,42 @@ pub(crate) fn verify_adaptor_signatures(
     Ok(adaptor_infos)
 }
 
-/// Verifies the offering party's funding witnesses carried by the sign
-/// message against the funding transaction.
+/// Verifies one party's funding signatures, one per funding input of that
+/// party in message order, against the unsigned funding transaction.
 ///
 /// Each ordinary input's witness must spend its previous output (see
-/// [`ddk_dlc::verify_funding_witness`]). Each splice input carries the
-/// offering party's half of the previous contract's 2-of-2 signature, which
-/// must verify against that contract's offer-side funding key
-/// (`local_fund_pubkey`). The accepting party's funding witnesses never travel
-/// in the messages, so they cannot be checked here.
+/// [`ddk_dlc::verify_funding_witness`]). Each splice input, which only the
+/// offering party contributes, carries the offering party's half of the
+/// previous contract's 2-of-2 signature (see [`splice_half`]), which must
+/// verify against that contract's offer-side funding key
+/// (`local_fund_pubkey`).
 ///
 /// A witness whose script type cannot be checked fails with
 /// [`ContractError::UnverifiableFundingWitness`], and one longer than its
 /// input's `max_witness_len` with [`ContractError::FundingWitnessTooLong`].
-pub(crate) fn verify_offer_funding_signatures(
+/// `error` attributes any other failure to where the signatures came from:
+/// the counterparty's sign message, or this party's own signer.
+pub(crate) fn verify_funding_signatures(
     secp: &Secp256k1<All>,
     offer: &OfferDlc,
     accept: &AcceptDlc,
+    party: Party,
     funding_transaction: &Transaction,
     signatures: &FundingSignatures,
+    error: fn(String) -> ContractError,
 ) -> Result<(), ContractError> {
+    let inputs = party_funding_inputs(offer, accept, party);
     let signatures = &signatures.funding_signatures;
-    if signatures.len() != offer.funding_inputs.len() {
-        return Err(ContractError::InvalidSign(format!(
-            "sign message carries {} funding signatures but the offer has {} funding inputs",
-            signatures.len(),
-            offer.funding_inputs.len()
+    if signatures.len() != inputs.len() {
+        return Err(error(format!(
+            "expected {} funding signatures, one per funding input, received {}",
+            inputs.len(),
+            signatures.len()
         )));
     }
     let prevouts = funding_prevouts(offer, accept)?;
-    let (input_infos, _) = tx_input_infos(&offer.funding_inputs)?;
-    for ((input, input_info), signature) in offer
-        .funding_inputs
-        .iter()
-        .zip(&input_infos)
-        .zip(signatures)
-    {
+    let (input_infos, _) = tx_input_infos(inputs)?;
+    for ((input, input_info), signature) in inputs.iter().zip(&input_infos).zip(signatures) {
         let input_serial_id = input.input_serial_id;
         let input_index = funding_input_index(offer, accept, input_serial_id)?;
         let result = match &input.dlc_input {
@@ -385,7 +390,7 @@ pub(crate) fn verify_offer_funding_signatures(
                 funding_transaction,
                 input_index,
                 &input.into(),
-                splice_half(input_serial_id, dlc_input, signature)?.to_vec(),
+                splice_half(input_serial_id, dlc_input, signature, error)?.to_vec(),
                 &dlc_input.local_fund_pubkey,
             ),
             None => ddk_dlc::verify_funding_witness(
@@ -409,7 +414,7 @@ pub(crate) fn verify_offer_funding_signatures(
                 witness_len,
                 max_witness_len,
             },
-            e => ContractError::InvalidSign(format!(
+            e => error(format!(
                 "invalid funding signature for input serial id {input_serial_id}: {e}"
             )),
         })?;
@@ -418,20 +423,22 @@ pub(crate) fn verify_offer_funding_signatures(
 }
 
 /// The offering party's half of a splice input's 2-of-2 signature, from its
-/// funding signature in the sign message.
+/// funding signature for the input.
 ///
 /// The funding signature is the half alone, or the half followed by the
 /// serialized offer-side funding key it is checked against (the shape some
-/// wallets send). Anything else is rejected rather than silently dropped.
+/// wallets send). Anything else is rejected rather than silently dropped, and
+/// `error` attributes the rejection to where the funding signature came from.
 pub(crate) fn splice_half<'a>(
     input_serial_id: u64,
     dlc_input: &DlcInput,
     signature: &'a FundingSignature,
+    error: fn(String) -> ContractError,
 ) -> Result<&'a [u8], ContractError> {
     match signature.witness_elements.as_slice() {
         [half] => Ok(&half.witness),
         [half, key] if key.witness == dlc_input.local_fund_pubkey.serialize() => Ok(&half.witness),
-        elements => Err(ContractError::InvalidSign(format!(
+        elements => Err(error(format!(
             "DLC input serial id {input_serial_id}: expected the half signature, optionally \
              followed by the offer's previous funding key, got {} witness elements",
             elements.len()
@@ -465,9 +472,8 @@ fn funding_prevouts(offer: &OfferDlc, accept: &AcceptDlc) -> Result<Vec<TxOut>, 
 
 /// Applies one party's funding witnesses to the funding transaction.
 ///
-/// The witnesses are copied, not checked. The offering party's come from the
-/// sign message and are checked by [`verify_offer_funding_signatures`] first;
-/// the accepting party's are its own.
+/// The witnesses are copied, not checked: verify them with
+/// [`verify_funding_signatures`] first.
 pub(crate) fn apply_funding_signatures(
     transaction: &mut Transaction,
     offer: &OfferDlc,
@@ -476,24 +482,11 @@ pub(crate) fn apply_funding_signatures(
     signatures: &FundingSignatures,
 ) -> Result<(), ContractError> {
     let inputs = party_funding_inputs(offer, accept, party);
-    if inputs.len() != signatures.funding_signatures.len() {
-        return Err(ContractError::InvalidFundingInput(format!(
-            "expected {} funding signatures, received {}",
-            inputs.len(),
-            signatures.funding_signatures.len()
-        )));
-    }
     for (input, signature) in inputs.iter().zip(&signatures.funding_signatures) {
-        // DLC (splice) inputs are 2-of-2 and completed by the combine step in
-        // `finalize`; their positional signature slot is consumed but skipped here.
+        // DLC (splice) inputs are 2-of-2 and completed by combining both
+        // halves; their positional signature slot is consumed but skipped here.
         if input.dlc_input.is_some() {
             continue;
-        }
-        if signature.witness_elements.is_empty() {
-            return Err(ContractError::InvalidFundingInput(format!(
-                "funding signature for input serial id {} has no witness elements",
-                input.input_serial_id
-            )));
         }
         let index = funding_input_index(offer, accept, input.input_serial_id)?;
         transaction.input[index].witness = funding_witness(signature);
@@ -501,18 +494,31 @@ pub(crate) fn apply_funding_signatures(
     Ok(())
 }
 
-/// Maps a funding input serial id to its index in the funding transaction.
+/// Maps a funding input serial id to its index in the funding transaction and
+/// in the funding PSBT.
 ///
-/// Funding inputs are ordered by ascending serial id across both parties.
-pub(crate) fn funding_input_index(
+/// Funding inputs are ordered by ascending serial id across both parties, so an
+/// input's position is only known once both messages exist. Fails when the
+/// serial id is missing or not unique.
+pub fn funding_input_index(
     offer: &OfferDlc,
     accept: &AcceptDlc,
+    input_serial_id: u64,
+) -> Result<usize, ContractError> {
+    funding_input_position(offer, &accept.funding_inputs, input_serial_id)
+}
+
+/// [`funding_input_index`] from the accepting party's funding inputs, for
+/// before the accept message exists.
+pub(crate) fn funding_input_position(
+    offer: &OfferDlc,
+    accept_funding_inputs: &[FundingInput],
     input_serial_id: u64,
 ) -> Result<usize, ContractError> {
     let mut serial_ids = offer
         .funding_inputs
         .iter()
-        .chain(&accept.funding_inputs)
+        .chain(accept_funding_inputs)
         .map(|input| input.input_serial_id)
         .collect::<Vec<_>>();
     if serial_ids
@@ -656,12 +662,12 @@ pub(crate) fn validate_offer_funding_inputs(
 
 pub(crate) fn ensure_unique_input_serial_ids(
     offer: &OfferDlc,
-    accept: &AcceptDlc,
+    accept_funding_inputs: &[FundingInput],
 ) -> Result<(), ContractError> {
     let mut serial_ids = offer
         .funding_inputs
         .iter()
-        .chain(&accept.funding_inputs)
+        .chain(accept_funding_inputs)
         .map(|input| input.input_serial_id)
         .collect::<Vec<_>>();
     serial_ids.sort_unstable();
@@ -673,9 +679,12 @@ pub(crate) fn ensure_unique_input_serial_ids(
     Ok(())
 }
 
-pub(crate) fn decode_previous_transaction(
-    input: &FundingInput,
-) -> Result<Transaction, ContractError> {
+/// Decodes the transaction whose output a funding input spends.
+///
+/// A funding input carries its previous transaction as consensus bytes so that
+/// each party can check the output it spends: its value, its script, and for a
+/// splice input, that it is the previous contract's 2-of-2.
+pub fn decode_previous_transaction(input: &FundingInput) -> Result<Transaction, ContractError> {
     Transaction::consensus_decode(&mut input.prev_tx.as_slice()).map_err(|e| {
         ContractError::InvalidFundingInput(format!(
             "could not decode the previous transaction of funding input serial id {}: {e}",
@@ -684,20 +693,17 @@ pub(crate) fn decode_previous_transaction(
     })
 }
 
-/// Computes the contract id from the funding transaction and temporary contract id.
+/// Computes the contract id from the rebuilt transactions and the temporary
+/// contract id.
 pub(crate) fn contract_id_from_transactions(
     transactions: &DlcTransactions,
     temporary_contract_id: &[u8; 32],
 ) -> [u8; 32] {
-    let fund_txid = transactions.fund.compute_txid();
-    let fund_output_index = transactions.get_fund_output_index() as u16;
-    let mut contract_id = [0; 32];
-    for i in 0..32 {
-        contract_id[i] = fund_txid[31 - i] ^ temporary_contract_id[i];
-    }
-    contract_id[30] ^= ((fund_output_index >> 8) & 0xff) as u8;
-    contract_id[31] ^= (fund_output_index & 0xff) as u8;
-    contract_id
+    let funding_outpoint = OutPoint::new(
+        transactions.fund.compute_txid(),
+        transactions.get_fund_output_index() as u32,
+    );
+    ddk_manager::contract::contract_id_from_outpoint(funding_outpoint, temporary_contract_id)
 }
 
 #[cfg(test)]
@@ -754,8 +760,19 @@ mod tests {
         let secp = Secp256k1::new();
         sign.contract_id =
             contract_id_from_transactions(&legacy.transactions, &offer.temporary_contract_id);
-        sign.refund_signature = create_refund_signature(&secp, &legacy, &offer_key).unwrap();
-        accept.refund_signature = create_refund_signature(&secp, &legacy, &accept_key).unwrap();
+        let refund_signature = |key: &SecretKey| {
+            ddk_dlc::util::get_raw_sig_for_tx_input(
+                &secp,
+                &legacy.transactions.refund,
+                0,
+                &legacy.transactions.funding_witness_script,
+                legacy.transactions.get_fund_output().value,
+                key,
+            )
+            .unwrap()
+        };
+        sign.refund_signature = refund_signature(&offer_key);
+        accept.refund_signature = refund_signature(&accept_key);
         let refund = crate::contract::sign_refund(&offer, &accept, &sign, &accept_key).unwrap();
         assert_eq!(
             refund.compute_txid(),

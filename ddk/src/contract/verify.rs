@@ -4,8 +4,11 @@ use ddk_dlc::secp256k1_zkp::Secp256k1;
 use ddk_dlc::DlcTransactions;
 use ddk_messages::{AcceptDlc, OfferDlc, SignDlc};
 
-use super::context::{signed_context, verify_offer_funding_signatures, verify_party_signatures};
+use super::context::{
+    cet_adaptor_points, signed_context, verify_contract_signatures, verify_funding_signatures,
+};
 use super::error::ContractError;
+use super::types::Party;
 
 /// A contract whose offer, accept and sign messages were checked against each
 /// other by [`verify_signed_contract`].
@@ -82,31 +85,34 @@ pub fn verify_signed_contract(
 ) -> Result<VerifiedContract, ContractError> {
     let context = signed_context(offer, accept, sign)?;
     let secp = Secp256k1::new();
-    let total_collateral = offer.get_total_collateral();
-    verify_party_signatures(
+    let adaptor_points =
+        cet_adaptor_points(&context.execution_infos, offer.get_total_collateral())?;
+    verify_contract_signatures(
         &secp,
-        &context,
-        total_collateral,
-        accept.funding_pubkey,
+        &context.transactions,
+        &adaptor_points,
+        &accept.funding_pubkey,
         &accept.refund_signature,
-        &accept.cet_adaptor_signatures,
+        &Vec::from(&accept.cet_adaptor_signatures),
         ContractError::InvalidAccept,
     )?;
-    verify_party_signatures(
+    verify_contract_signatures(
         &secp,
-        &context,
-        total_collateral,
-        offer.funding_pubkey,
+        &context.transactions,
+        &adaptor_points,
+        &offer.funding_pubkey,
         &sign.refund_signature,
-        &sign.cet_adaptor_signatures,
+        &Vec::from(&sign.cet_adaptor_signatures),
         ContractError::InvalidSign,
     )?;
-    verify_offer_funding_signatures(
+    verify_funding_signatures(
         &secp,
         offer,
         accept,
+        Party::Offer,
         &context.transactions.fund,
         &sign.funding_signatures,
+        ContractError::InvalidSign,
     )?;
     Ok(VerifiedContract {
         contract_id: sign.contract_id,
