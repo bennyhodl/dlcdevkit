@@ -16,8 +16,9 @@ use ddk::contract::{
     accept_offer, chain_hash_from_network, create_dlc_splice_input, create_dlc_transactions,
     create_funding_psbt, create_offer, create_signed_dlc_transactions, finalize_sign,
     finalize_sign_spliced, funding_input, sign_accept, sign_accept_spliced, sign_cet, sign_refund,
-    signing, validate_offer, AcceptOfferParams, ContractError, CreateOfferParams, DescriptorInput,
-    DlcInputSigningKey, InputDerivation, Party, PartyParams, DLC_INPUT_MAX_WITNESS_LEN,
+    signing, validate_accept, validate_offer, validate_offer_structure, AcceptOfferParams,
+    ContractError, CreateOfferParams, DescriptorInput, DlcInputSigningKey, InputDerivation, Party,
+    PartyParams, DLC_INPUT_MAX_WITNESS_LEN,
 };
 use ddk_dlc::secp256k1_zkp::{All, Keypair, PublicKey, Secp256k1, SecretKey, XOnlyPublicKey};
 use ddk_messages::contract_msgs::{
@@ -277,11 +278,22 @@ fn enum_contract_info(total_collateral: Amount) -> ContractInfo {
 /// An enum contract paying `up_offer_payout` of `total_collateral` to the
 /// offering party on "up", and nothing on "down".
 fn enum_contract_info_paying(total_collateral: Amount, up_offer_payout: Amount) -> ContractInfo {
+    enum_contract_info_with_nonces(total_collateral, up_offer_payout, 1)
+}
+
+/// [`enum_contract_info_paying`] over an announcement that commits to
+/// `nonce_count` nonces. The DLC specification uses one; some oracles commit
+/// one per outcome.
+fn enum_contract_info_with_nonces(
+    total_collateral: Amount,
+    up_offer_payout: Amount,
+    nonce_count: usize,
+) -> ContractInfo {
     let announcement = oracle_announcement(
         EventDescriptor::EnumEvent(EnumEventDescriptor {
             outcomes: vec!["up".to_string(), "down".to_string()],
         }),
-        1,
+        nonce_count,
     );
     ContractInfo::SingleContractInfo(SingleContractInfo {
         total_collateral,
@@ -590,6 +602,202 @@ fn an_offer_with_a_cet_locktime_after_maturity_is_not_created() {
 
     params.cet_locktime = Some(maturity);
     create_offer(params).expect("a CET locktime at maturity");
+}
+
+/// A valid enum offer, as a receiver would get it.
+fn received_offer(secp: &Secp256k1<All>) -> OfferDlc {
+    let offerer = PartySetup::new(secp, 1, NETWORK, Amount::from_sat(150_000), 1);
+    create_offer(offer_params(
+        secp,
+        &offerer,
+        enum_contract_info(TOTAL_COLLATERAL),
+        Amount::from_sat(50_000),
+        NETWORK,
+        vec![offerer.funding_input.clone()],
+    ))
+    .unwrap()
+}
+
+#[test]
+fn offer_structure_is_validated_without_a_timeout_policy() {
+    let secp = Secp256k1::new();
+    let offer = received_offer(&secp);
+    validate_offer_structure(&offer).expect("an offer built by create_offer");
+
+    // Structurally valid contracts that an application may still refuse as
+    // policy: the accepting party funds the whole contract, and CETs that are
+    // not time-locked.
+    let mut accept_funded = offer.clone();
+    accept_funded.offer_collateral = Amount::ZERO;
+    validate_offer_structure(&accept_funded).expect("zero offer collateral");
+    let mut no_cet_locktime = offer.clone();
+    no_cet_locktime.cet_locktime = 0;
+    validate_offer_structure(&no_cet_locktime).expect("a zero CET locktime");
+
+    let defects: Vec<(&str, fn(&mut OfferDlc))> = vec![
+        ("duplicate funding input serial ids", |offer| {
+            let duplicate = offer.funding_inputs[0].clone();
+            offer.funding_inputs.push(duplicate);
+        }),
+        ("change and fund output serial ids collide", |offer| {
+            offer.change_serial_id = offer.fund_output_serial_id;
+        }),
+        ("offer collateral above the total", |offer| {
+            offer.offer_collateral = offer.get_total_collateral() + Amount::from_sat(1);
+        }),
+        ("non-zero offer collateral below dust", |offer| {
+            offer.offer_collateral = Amount::from_sat(999);
+        }),
+        ("refund locktime before the CET locktime", |offer| {
+            offer.refund_locktime = offer.cet_locktime - 1;
+        }),
+        ("mixed locktime units", |offer| {
+            offer.refund_locktime = 1_700_000_000;
+        }),
+        ("OP_RETURN payout script", |offer| {
+            offer.payout_spk = ScriptBuf::new_op_return([1; 20]);
+        }),
+        ("25-byte version 0 witness program", |offer| {
+            offer.change_spk = ScriptBuf::from_bytes([&[0x00, 25][..], &[7; 25]].concat());
+        }),
+        ("announcement signature over a different event", |offer| {
+            let ContractInfo::SingleContractInfo(single) = &mut offer.contract_info else {
+                unreachable!("enum_contract_info is a single contract");
+            };
+            let OracleInfo::Single(oracle) = &mut single.contract_info.oracle_info else {
+                unreachable!("enum_contract_info has one oracle");
+            };
+            oracle.oracle_announcement.oracle_event.event_id = "tampered".to_string();
+        }),
+    ];
+    for (defect, apply) in defects {
+        let mut invalid = offer.clone();
+        apply(&mut invalid);
+        assert!(
+            matches!(
+                validate_offer_structure(&invalid),
+                Err(ContractError::InvalidOffer(_))
+            ),
+            "{defect} must be rejected"
+        );
+    }
+}
+
+#[test]
+fn validate_offer_adds_the_timeout_policy_to_the_structure() {
+    let secp = Secp256k1::new();
+    let offer = received_offer(&secp);
+    let maturity = offer.contract_info.get_closest_maturity_date();
+    let timeout = offer.refund_locktime - maturity;
+
+    validate_offer(&offer, MIN_TIMEOUT, MAX_TIMEOUT, NOW_UNIX).expect("a valid offer");
+    validate_offer(&offer, timeout + 1, MAX_TIMEOUT, NOW_UNIX)
+        .expect_err("a refund sooner than the minimum timeout");
+    validate_offer(&offer, MIN_TIMEOUT, timeout - 1, NOW_UNIX)
+        .expect_err("a refund later than the maximum timeout");
+    validate_offer(&offer, MIN_TIMEOUT, MAX_TIMEOUT, maturity.into())
+        .expect_err("an event that has matured");
+
+    let mut duplicate_inputs = offer.clone();
+    duplicate_inputs
+        .funding_inputs
+        .push(offer.funding_inputs[0].clone());
+    validate_offer(&duplicate_inputs, MIN_TIMEOUT, MAX_TIMEOUT, NOW_UNIX)
+        .expect_err("a structural defect");
+}
+
+/// The offering party, or anyone holding the pair, checks an accept without a
+/// funding key or a policy. The signatures are checked as well as the terms.
+#[test]
+fn validate_accept_checks_an_accept_against_its_offer() {
+    let secp = Secp256k1::new();
+    let (_, _, offer, accept) = enum_contract(&secp, NETWORK);
+    validate_accept(&offer, &accept).expect("an accept built by accept_offer");
+
+    let mut reordered_signatures = accept;
+    reordered_signatures
+        .cet_adaptor_signatures
+        .ecdsa_adaptor_signatures
+        .reverse();
+    assert!(matches!(
+        validate_accept(&offer, &reordered_signatures),
+        Err(ContractError::InvalidAccept(_))
+    ));
+}
+
+/// An enum event commits to one nonce. An oracle that commits one per outcome
+/// is refused when the offer is created, as the receiving party would refuse
+/// it, so creation and validation agree.
+#[test]
+fn an_offer_with_a_nonce_per_enum_outcome_is_not_created() {
+    let secp = Secp256k1::new();
+    let offerer = PartySetup::new(&secp, 1, NETWORK, Amount::from_sat(150_000), 1);
+    let result = create_offer(offer_params(
+        &secp,
+        &offerer,
+        enum_contract_info_with_nonces(TOTAL_COLLATERAL, TOTAL_COLLATERAL, 2),
+        Amount::from_sat(50_000),
+        NETWORK,
+        vec![offerer.funding_input.clone()],
+    ));
+    assert!(
+        matches!(result, Err(ContractError::InvalidOffer(_))),
+        "unexpected result: {result:?}"
+    );
+}
+
+/// Payout data comes from the counterparty, so a payout the conversion cannot
+/// represent is an error, not a panic.
+#[test]
+fn unrepresentable_payouts_are_rejected() {
+    let secp = Secp256k1::new();
+    let accepter = PartySetup::new(&secp, 2, NETWORK, Amount::from_sat(150_000), 2);
+
+    let mut payout_above_total = received_offer(&secp);
+    let ContractInfo::SingleContractInfo(single) = &mut payout_above_total.contract_info else {
+        unreachable!("enum_contract_info is a single contract");
+    };
+    let ContractDescriptor::EnumeratedContractDescriptor(enumerated) =
+        &mut single.contract_info.contract_descriptor
+    else {
+        unreachable!("enum_contract_info is an enum contract");
+    };
+    enumerated.payouts[0].offer_payout = TOTAL_COLLATERAL + Amount::from_sat(1);
+
+    let offerer = PartySetup::new(&secp, 11, NETWORK, Amount::from_sat(150_000), 1);
+    let mut empty_curve = create_offer(offer_params(
+        &secp,
+        &offerer,
+        numerical_contract_info(Amount::from_sat(50_000), Amount::from_sat(50_000)),
+        Amount::from_sat(50_000),
+        NETWORK,
+        vec![offerer.funding_input.clone()],
+    ))
+    .unwrap();
+    let ContractInfo::SingleContractInfo(single) = &mut empty_curve.contract_info else {
+        unreachable!("numerical_contract_info is a single contract");
+    };
+    let ContractDescriptor::NumericOutcomeContractDescriptor(numeric) =
+        &mut single.contract_info.contract_descriptor
+    else {
+        unreachable!("numerical_contract_info is a numeric contract");
+    };
+    numeric.payout_function.payout_function_pieces.clear();
+
+    for offer in [payout_above_total, empty_curve] {
+        assert!(validate_offer_structure(&offer).is_err());
+        let accept = accept_offer(
+            &offer,
+            AcceptOfferParams {
+                party: accepter.party_params(&secp, vec![accepter.funding_input.clone()]),
+                min_timeout_interval: MIN_TIMEOUT,
+                max_timeout_interval: MAX_TIMEOUT,
+                now_unix: NOW_UNIX,
+            },
+            &accepter.funding_secret_key,
+        );
+        assert!(accept.is_err());
+    }
 }
 
 #[test]

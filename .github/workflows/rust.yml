@@ -102,9 +102,8 @@ jobs:
             target/debug/build
           key: test-cache-${{ github.run_id }}-${{ github.run_number }}
       # Not --all-features: that turns on ddk-manager's `fuzztarget`, which
-      # replaces the contract id and serial id generators with constants. A test
-      # that creates a second contract, as every splice does, then collides with
-      # the first. The features named here are the ones the integration tests
+      # draws temporary and serial ids from a fixed seed instead of the system
+      # RNG. The features named here are the ones the integration tests
       # actually want.
       - id: set-matrix
         run: cargo test --no-run --features ddk-manager/parallel,ddk-manager/use-serde && echo "matrix=$(testenv/scripts/get_test_list.sh manager_execution manager_tests contract_updater stateless_execution)" >> "$GITHUB_OUTPUT"
