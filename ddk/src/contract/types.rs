@@ -19,6 +19,16 @@ pub enum Party {
     Accept,
 }
 
+impl Party {
+    /// The other side of the contract.
+    pub(crate) fn counterparty(self) -> Party {
+        match self {
+            Party::Offer => Party::Accept,
+            Party::Accept => Party::Offer,
+        }
+    }
+}
+
 /// One party's Bitcoin-level contract data.
 ///
 /// The funding public key is the DLC funding key used for the multisig funding
@@ -109,6 +119,21 @@ pub struct SignResult {
     pub sign: SignDlc,
     /// The unsigned funding, CET, and refund transactions.
     pub transactions: DlcTransactions,
+}
+
+/// The result of
+/// [`settle_cet_from_messages`](super::settle_cet_from_messages).
+#[derive(Clone, Debug)]
+pub struct CetSettlement {
+    /// The CET with both halves of the 2-of-2 funding spend on its witness,
+    /// ready to broadcast.
+    pub transaction: Transaction,
+    /// The CET's position in the contract's CETs, as in the
+    /// [`DlcTransactions::cets`] that
+    /// [`create_signed_dlc_transactions`](super::create_signed_dlc_transactions)
+    /// rebuilds. For a contract with several disjoint contract infos the CETs
+    /// of each follow those of the one before.
+    pub cet_index: usize,
 }
 
 /// Identifies a funding input and the BIP32 path that derives its key.
