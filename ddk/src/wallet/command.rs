@@ -1,5 +1,5 @@
-use super::contract_tracker::ContractUtxoTracker;
 use super::WalletStorage;
+use crate::contract::tracker::ContractUtxoTracker;
 use crate::error::WalletError;
 use crate::logger::{log_debug, log_error, WriteLog};
 use crate::{chain::EsploraClient, logger::Logger};
@@ -129,9 +129,12 @@ pub async fn sync(
         .persist_async(storage)
         .await
         .map_err(|e| WalletError::WalletPersistanceError(e.to_string()))?;
-    if let Some(changeset) = tracker.take_staged() {
-        storage.0.persist_contract_tracker(&changeset).await?;
+    // Clear the staged changes only once they are stored: a failed write
+    // keeps them for the next sync.
+    if let Some(changeset) = tracker.staged() {
+        storage.0.persist_contract_tracker(changeset).await?;
     }
+    tracker.take_staged();
     Ok(())
 }
 
@@ -200,10 +203,13 @@ async fn sync_contract_utxos(
         return Ok(());
     }
 
+    // As for the wallet sync above: expected txids that no longer show up
+    // come back evicted, so a replaced or dropped close leaves the graph.
     let request = SyncRequest::builder()
         .chain_tip(wallet.latest_checkpoint())
         .spks(spks)
         .outpoints(tracker.sync_outpoints())
+        .expected_spk_txids(tracker.expected_spk_txids(wallet.local_chain()))
         .build();
     let response = blockchain
         .async_client
