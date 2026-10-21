@@ -272,16 +272,72 @@ where
         contract_id: &ContractId,
         oracle_announcements: Vec<Vec<OracleAnnouncement>>,
     ) -> Result<OfferDlc, Error> {
-        let confirmed_contract =
-            get_contract_in_state!(self, contract_id, Confirmed, Some(counter_party))?;
+        self.send_merge_splice_offer_with_announcements(
+            contract_input,
+            counter_party,
+            std::slice::from_ref(contract_id),
+            oracle_announcements,
+        )
+        .await
+    }
 
-        let dlc_input = confirmed_contract.get_dlc_input();
+    /// Create a new spliced offer that spends several existing DLCs at once,
+    /// merging them into one contract.
+    #[tracing::instrument(skip_all)]
+    pub async fn send_merge_splice_offer(
+        &self,
+        contract_input: &ContractInput,
+        counter_party: PublicKey,
+        contract_ids: &[ContractId],
+    ) -> Result<OfferDlc, Error> {
+        let oracle_announcements = self.oracle_announcements(contract_input).await?;
+
+        self.send_merge_splice_offer_with_announcements(
+            contract_input,
+            counter_party,
+            contract_ids,
+            oracle_announcements,
+        )
+        .await
+    }
+
+    /// Creates a new offer DLC using several existing DLCs as inputs: the
+    /// funding transaction spends every one of their funding outputs, so the
+    /// new contract replaces all of them. Every input MUST be a Confirmed
+    /// contract with `counter_party`, and a contract may be named only once.
+    /// A single id is an ordinary splice.
+    #[tracing::instrument(skip_all)]
+    pub async fn send_merge_splice_offer_with_announcements(
+        &self,
+        contract_input: &ContractInput,
+        counter_party: PublicKey,
+        contract_ids: &[ContractId],
+        oracle_announcements: Vec<Vec<OracleAnnouncement>>,
+    ) -> Result<OfferDlc, Error> {
+        if contract_ids.is_empty() {
+            return Err(Error::InvalidParameters(
+                "A splice offer needs at least one contract to spend.".to_string(),
+            ));
+        }
+
+        let mut dlc_inputs = Vec::with_capacity(contract_ids.len());
+        for (index, contract_id) in contract_ids.iter().enumerate() {
+            if contract_ids[..index].contains(contract_id) {
+                return Err(Error::InvalidParameters(format!(
+                    "Contract {} is named twice in the same splice offer.",
+                    contract_id.to_lower_hex_string()
+                )));
+            }
+            let confirmed_contract =
+                get_contract_in_state!(self, contract_id, Confirmed, Some(counter_party))?;
+            dlc_inputs.push(confirmed_contract.get_dlc_input());
+        }
 
         let (offered_contract, offer_msg) = crate::contract_updater::offer_contract(
             &self.secp,
             contract_input,
             oracle_announcements,
-            vec![dlc_input],
+            dlc_inputs,
             REFUND_DELAY,
             &counter_party,
             &self.wallet,
