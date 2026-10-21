@@ -231,6 +231,14 @@ pub enum Error {
     Miniscript(miniscript::Error),
     /// Error attempting to do an out of bounds access on the transaction inputs vector.
     InputsIndex(bitcoin::transaction::InputsIndexError),
+    /// A party's inputs hold less than its collateral plus its share of the
+    /// fees. See [`PartyParams::funding_requirements`].
+    InsufficientFunds {
+        /// The input total the party needs.
+        required: Amount,
+        /// The input total the party has.
+        available: Amount,
+    },
 }
 
 impl From<secp256k1_zkp::Error> for Error {
@@ -271,6 +279,13 @@ impl fmt::Display for Error {
             Error::P2wpkh(ref e) => write!(f, "Error while computing p2wpkh sighash: {e}"),
             Error::InputsIndex(ref e) => write!(f, "Error ordering inputs: {e}"),
             Error::Miniscript(_) => write!(f, "Error within miniscript"),
+            Error::InsufficientFunds {
+                required,
+                available,
+            } => write!(
+                f,
+                "Insufficient funds: the inputs hold {available} but {required} is required"
+            ),
         }
     }
 }
@@ -284,7 +299,37 @@ impl std::error::Error for Error {
             Error::InputsIndex(e) => Some(e),
             Error::InvalidArgument(_) => None,
             Error::Miniscript(e) => Some(e),
+            Error::InsufficientFunds { .. } => None,
         }
+    }
+}
+
+/// What one party's inputs must hold to fund its side of a contract, and the
+/// fees that side pays. See [`PartyParams::funding_requirements`].
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct FundingRequirements {
+    /// The input total that exactly funds this party: its collateral plus
+    /// `fund_fee`, `cet_fee` and any extra fee.
+    pub required: Amount,
+    /// This party's share of the funding transaction fee.
+    pub fund_fee: Amount,
+    /// This party's share of the CET or refund transaction fee. The funding
+    /// output carries it until the contract settles.
+    pub cet_fee: Amount,
+}
+
+impl FundingRequirements {
+    /// The change left from `available` input funds once this share is paid.
+    ///
+    /// Fails with [`Error::InsufficientFunds`] when `available` is below
+    /// [`FundingRequirements::required`].
+    pub fn change(&self, available: Amount) -> Result<Amount, Error> {
+        available
+            .checked_sub(self.required)
+            .ok_or(Error::InsufficientFunds {
+                required: self.required,
+                available,
+            })
     }
 }
 
@@ -323,73 +368,75 @@ impl PartyParams {
     /// they are required to pay for the fund transaction and the cet or refund transaction.
     /// The change output value already accounts for the required fees.
     /// If input amount (sum of all input values) is lower than the sum of the collateral
-    /// plus the required fees, an error is returned.
+    /// plus the required fees, [`Error::InsufficientFunds`] is returned.
+    ///
+    /// The CET fee is priced as under [`FeeRule::OwnPayoutOnly`]; see
+    /// [`PartyParams::funding_requirements`] for the other rule.
     pub fn get_change_output_and_fees(
         &self,
         total_collateral: Amount,
         fee_rate_per_vb: u64,
         extra_fee: Amount,
     ) -> Result<(TxOut, Amount, Amount), Error> {
-        self.get_change_output_and_fees_with_counterparty(
-            total_collateral,
-            fee_rate_per_vb,
-            extra_fee,
-            None,
-        )
-    }
-
-    /// Like [`PartyParams::get_change_output_and_fees`], but when this party
-    /// funds the whole contract its CET fee also prices the counterparty's
-    /// payout output.
-    ///
-    /// `CET_BASE_WEIGHT` covers everything in a CET except the payout script
-    /// bytes. In a dual funded contract each party pays half the base weight
-    /// plus its own payout script, which sums to the full CET. In a single
-    /// funded contract the zero-collateral party pays nothing, so the funding
-    /// party must also pay for the counterparty's payout script, otherwise the
-    /// pre-signed CETs carry a lower fee rate than the one negotiated.
-    /// [`create_dlc_transactions`] always passes the counterparty script.
-    pub fn get_change_output_and_fees_with_counterparty(
-        &self,
-        total_collateral: Amount,
-        fee_rate_per_vb: u64,
-        extra_fee: Amount,
-        counterparty_payout_script_pubkey: Option<&Script>,
-    ) -> Result<(TxOut, Amount, Amount), Error> {
-        self.change_output_and_fees(
+        let requirements = self.funding_requirements(
             total_collateral,
             fee_rate_per_vb,
             extra_fee,
             self.payout_script_pubkey.len(),
-            counterparty_payout_script_pubkey.map(|script_pubkey| script_pubkey.len()),
-        )
+            0,
+            FeeRule::OwnPayoutOnly,
+        )?;
+        Ok((
+            self.change_output(&requirements)?,
+            requirements.fund_fee,
+            requirements.cet_fee,
+        ))
     }
 
-    /// [`PartyParams::get_change_output_and_fees_with_counterparty`] with the
-    /// CET fee priced from script lengths: `payout_script_len` is the longest
-    /// script a CET pays this party, and `counterparty_payout_script_len` the
-    /// longest a CET pays the counterparty.
-    fn change_output_and_fees(
+    /// What this party's inputs must hold to fund its side of a contract with
+    /// `total_collateral`, and the fees that side pays.
+    ///
+    /// This is the fee formula the transaction constructors use, so a coin
+    /// selector can be exact without building a transaction. The result
+    /// depends on the inputs' weights and the script lengths, never on
+    /// [`PartyParams::input_amount`]. A party with no collateral pays nothing,
+    /// and the constructors give it a zero-value change output whatever its
+    /// inputs hold.
+    ///
+    /// A splicing party is priced on [`PartyParams::spliced`], as the spliced
+    /// constructors fund it.
+    ///
+    /// The CET fee is priced from script lengths: `payout_script_len` is the
+    /// longest script a CET pays this party, and
+    /// `counterparty_payout_script_len` the longest a CET pays the
+    /// counterparty. Either is the party's payout script, or a longer one a
+    /// CET may pay in its place; see [`create_dlc_transactions_with_fee_rule`].
+    ///
+    /// `CET_BASE_WEIGHT` covers everything in a CET except the payout script
+    /// bytes. In a dual funded contract each party pays half the base weight
+    /// plus its own payout script, which sums to the full CET. In a single
+    /// funded contract the zero-collateral party pays nothing, so under
+    /// [`FeeRule::CounterpartyPayout`] the funding party also pays for the
+    /// counterparty's script, otherwise the pre-signed CETs carry a lower fee
+    /// rate than the one negotiated. [`FeeRule::OwnPayoutOnly`] ignores
+    /// `counterparty_payout_script_len`.
+    ///
+    /// `extra_fee` is added to the requirement of a party with collateral;
+    /// pass [`Amount::ZERO`] for none.
+    pub fn funding_requirements(
         &self,
         total_collateral: Amount,
         fee_rate_per_vb: u64,
         extra_fee: Amount,
         payout_script_len: usize,
-        counterparty_payout_script_len: Option<usize>,
-    ) -> Result<(TxOut, Amount, Amount), Error> {
-        let mut inputs_weight: usize = 0;
-
-        // first check if a party does not need to fund the contract if so, then it is zero
+        counterparty_payout_script_len: usize,
+        fee_rule: FeeRule,
+    ) -> Result<FundingRequirements, Error> {
         if self.collateral == Amount::ZERO {
-            // We use a zero value output to indicate that the party does not need to fund the contract
-            let change_output = TxOut {
-                value: Amount::ZERO,
-                script_pubkey: self.change_script_pubkey.clone(),
-            };
-            return Ok((change_output, Amount::ZERO, Amount::ZERO));
+            return Ok(FundingRequirements::default());
         }
 
-        inputs_weight += dlc_input::get_dlc_inputs_weight(&self.dlc_inputs);
+        let mut inputs_weight = dlc_input::get_dlc_inputs_weight(&self.dlc_inputs);
 
         for w in &self.inputs {
             let script_weight = util::redeem_script_to_script_sig(&w.redeem_script)?
@@ -452,13 +499,15 @@ impl PartyParams {
             )))?;
         // A party funding the whole contract also pays for the counterparty's
         // payout output, which nobody else prices.
-        let counterparty_spk_weight = match counterparty_payout_script_len {
-            Some(script_len) if self.collateral == total_collateral => script_len
-                .checked_mul(4)
-                .ok_or(Error::InvalidArgument(format!(
-                    "Counterparty output spk checked multiplication failed: {} * 4",
-                    script_len
-                )))?,
+        let counterparty_spk_weight = match fee_rule {
+            FeeRule::CounterpartyPayout if self.collateral == total_collateral => {
+                counterparty_payout_script_len
+                    .checked_mul(4)
+                    .ok_or(Error::InvalidArgument(format!(
+                        "Counterparty output spk checked multiplication failed: {} * 4",
+                        counterparty_payout_script_len
+                    )))?
+            }
             _ => 0,
         };
         let total_cet_weight = checked_add!(
@@ -466,23 +515,80 @@ impl PartyParams {
             output_spk_weight,
             counterparty_spk_weight
         )?;
-        let cet_or_refund_fee = util::weight_to_fee(total_cet_weight, fee_rate_per_vb)?;
+        let cet_fee = util::weight_to_fee(total_cet_weight, fee_rate_per_vb)?;
 
-        let required_input_funds =
-            checked_add!(self.collateral, fund_fee, cet_or_refund_fee, extra_fee)?;
-        if self.input_amount < required_input_funds {
-            return Err(Error::InvalidArgument(format!(
-                "Input amount is less than required input funds. input_amount={} required_input_funds={}",
-                self.input_amount, required_input_funds
-            )));
+        Ok(FundingRequirements {
+            required: checked_add!(self.collateral, fund_fee, cet_fee, extra_fee)?,
+            fund_fee,
+            cet_fee,
+        })
+    }
+
+    /// These params with their inputs laid out as
+    /// [`create_spliced_dlc_transactions`] funds them, which is also how a
+    /// splicing party's [`PartyParams::funding_requirements`] must be priced.
+    ///
+    /// A splice input is listed both in `inputs` and in `dlc_inputs`. Each DLC
+    /// input replaces the ordinary input with its outpoint and is listed after
+    /// the remaining ordinary inputs, whatever their witness size.
+    pub fn spliced(&self) -> PartyParams {
+        self.with_dlc_inputs_listed(|input, dlc_inputs| {
+            dlc_inputs
+                .iter()
+                .all(|dlc_input| dlc_input.outpoint != input.outpoint)
+        })
+    }
+
+    /// These params with their inputs laid out as spliced contracts built by
+    /// ddk-dlc 2.0.0-rc.8 and earlier were funded. Use it only to rebuild such
+    /// a contract; new contracts use [`PartyParams::spliced`].
+    ///
+    /// The duplicate of a splice input was removed by dropping every ordinary
+    /// input whose witness is larger than a P2WPKH witness, so an ordinary
+    /// input with a larger witness was dropped too. For any other inputs the
+    /// two layouts are identical.
+    pub fn legacy_spliced(&self) -> PartyParams {
+        self.with_dlc_inputs_listed(|input, _| input.max_witness_len <= P2WPKH_WITNESS_SIZE)
+    }
+
+    /// These params with the ordinary inputs `keep` accepts, followed by the
+    /// DLC inputs listed as ordinary inputs.
+    fn with_dlc_inputs_listed(
+        &self,
+        keep: impl Fn(&TxInputInfo, &[TxInputInfo]) -> bool,
+    ) -> PartyParams {
+        let dlc_inputs = self
+            .dlc_inputs
+            .iter()
+            .map(TxInputInfo::from)
+            .collect::<Vec<_>>();
+        let mut inputs = self
+            .inputs
+            .iter()
+            .filter(|input| keep(input, &dlc_inputs))
+            .cloned()
+            .collect::<Vec<_>>();
+        inputs.extend(dlc_inputs);
+        PartyParams {
+            inputs,
+            dlc_inputs: Vec::new(),
+            ..self.clone()
         }
+    }
 
-        let change_output = TxOut {
-            value: self.input_amount - required_input_funds,
-            script_pubkey: self.change_script_pubkey.clone(),
+    /// The change output this party's inputs leave once `requirements` are
+    /// paid. A party without collateral funds nothing and gets a zero-value
+    /// change output, which the funding transaction discards as dust.
+    fn change_output(&self, requirements: &FundingRequirements) -> Result<TxOut, Error> {
+        let value = if self.collateral == Amount::ZERO {
+            Amount::ZERO
+        } else {
+            requirements.change(self.input_amount)?
         };
-
-        Ok((change_output, fund_fee, cet_or_refund_fee))
+        Ok(TxOut {
+            value,
+            script_pubkey: self.change_script_pubkey.clone(),
+        })
     }
 
     fn get_unsigned_tx_inputs_and_serial_ids(
@@ -554,43 +660,9 @@ pub fn create_spliced_dlc_transactions_with_fee_rule(
     fee_rule: FeeRule,
     accept_cet_script_len: usize,
 ) -> Result<DlcTransactions, Error> {
-    // Create enhanced party parameters that include DLC inputs as regular inputs
-    let mut enhanced_offer_params = offer_params.clone();
-    let mut enhanced_accept_params = accept_params.clone();
-
-    // Filter out DLC inputs from regular inputs to avoid duplicates
-    // DLC inputs are already included in the inputs[] array, so we need to remove them
-    // before adding them back from dlc_inputs[] to avoid double-counting
-    enhanced_offer_params
-        .inputs
-        .retain(|input| input.max_witness_len <= 108);
-    enhanced_accept_params
-        .inputs
-        .retain(|input| input.max_witness_len <= 108);
-
-    let offer_dlc_tx_inputs = offer_params
-        .dlc_inputs
-        .iter()
-        .map(|input| input.into())
-        .collect::<Vec<TxInputInfo>>();
-
-    let accept_dlc_tx_inputs = accept_params
-        .dlc_inputs
-        .iter()
-        .map(|input| input.into())
-        .collect::<Vec<TxInputInfo>>();
-
-    // Add DLC inputs to regular inputs
-    enhanced_offer_params.inputs.extend(offer_dlc_tx_inputs);
-    enhanced_accept_params.inputs.extend(accept_dlc_tx_inputs);
-
-    // Clear DLC inputs from enhanced params since they're now regular inputs
-    enhanced_offer_params.dlc_inputs.clear();
-    enhanced_accept_params.dlc_inputs.clear();
-
     create_dlc_transactions_with_fee_rule(
-        &enhanced_offer_params,
-        &enhanced_accept_params,
+        &offer_params.spliced(),
+        &accept_params.spliced(),
         payouts,
         refund_lock_time,
         fee_rate_per_vb,
@@ -727,36 +799,34 @@ pub fn create_fund_transaction_with_fees_and_rule(
 ) -> Result<(Transaction, ScriptBuf), Error> {
     let total_collateral = checked_add!(offer_params.collateral, accept_params.collateral)?;
 
-    let counterparty_payout = |script_len| match fee_rule {
-        FeeRule::CounterpartyPayout => Some(script_len),
-        FeeRule::OwnPayoutOnly => None,
-    };
-    let (offer_change_output, offer_fund_fee, offer_cet_fee) = offer_params
-        .change_output_and_fees(
-            total_collateral,
-            fee_rate_per_vb,
-            extra_fee,
-            offer_params.payout_script_pubkey.len(),
-            counterparty_payout(accept_cet_script_len),
-        )?;
-    let (accept_change_output, accept_fund_fee, accept_cet_fee) = accept_params
-        .change_output_and_fees(
-            total_collateral,
-            fee_rate_per_vb,
-            extra_fee,
-            accept_cet_script_len,
-            counterparty_payout(offer_params.payout_script_pubkey.len()),
-        )?;
+    let offer_requirements = offer_params.funding_requirements(
+        total_collateral,
+        fee_rate_per_vb,
+        extra_fee,
+        offer_params.payout_script_pubkey.len(),
+        accept_cet_script_len,
+        fee_rule,
+    )?;
+    let offer_change_output = offer_params.change_output(&offer_requirements)?;
+    let accept_requirements = accept_params.funding_requirements(
+        total_collateral,
+        fee_rate_per_vb,
+        extra_fee,
+        accept_cet_script_len,
+        offer_params.payout_script_pubkey.len(),
+        fee_rule,
+    )?;
+    let accept_change_output = accept_params.change_output(&accept_requirements)?;
 
     let fund_output_value = checked_add!(offer_params.input_amount, accept_params.input_amount)?
         - offer_change_output.value
         - accept_change_output.value
-        - offer_fund_fee
-        - accept_fund_fee
+        - offer_requirements.fund_fee
+        - accept_requirements.fund_fee
         - extra_fee;
 
     assert_eq!(
-        total_collateral + offer_cet_fee + accept_cet_fee + extra_fee,
+        total_collateral + offer_requirements.cet_fee + accept_requirements.cet_fee + extra_fee,
         fund_output_value
     );
 
@@ -765,8 +835,8 @@ pub fn create_fund_transaction_with_fees_and_rule(
         fund_output_value
             + offer_change_output.value
             + accept_change_output.value
-            + offer_fund_fee
-            + accept_fund_fee
+            + offer_requirements.fund_fee
+            + accept_requirements.fund_fee
             + extra_fee
     );
 
@@ -1788,22 +1858,28 @@ mod tests {
         let (zero_collateral_party, _) = get_party_params(Amount::ZERO, Amount::ZERO, Some(2));
         let total_collateral = Amount::ONE_BTC;
 
-        let (_, _, cet_fee) = funding_party
-            .get_change_output_and_fees_with_counterparty(
+        let cet_fee = funding_party
+            .funding_requirements(
                 total_collateral,
                 fee_rate,
                 Amount::ZERO,
-                Some(&zero_collateral_party.payout_script_pubkey),
+                funding_party.payout_script_pubkey.len(),
+                zero_collateral_party.payout_script_pubkey.len(),
+                FeeRule::CounterpartyPayout,
             )
-            .unwrap();
-        let (_, _, counterparty_cet_fee) = zero_collateral_party
-            .get_change_output_and_fees_with_counterparty(
+            .unwrap()
+            .cet_fee;
+        let counterparty_cet_fee = zero_collateral_party
+            .funding_requirements(
                 total_collateral,
                 fee_rate,
                 Amount::ZERO,
-                Some(&funding_party.payout_script_pubkey),
+                zero_collateral_party.payout_script_pubkey.len(),
+                funding_party.payout_script_pubkey.len(),
+                FeeRule::CounterpartyPayout,
             )
-            .unwrap();
+            .unwrap()
+            .cet_fee;
 
         // The whole CET, both payout scripts included, is paid by the one
         // party that funds it.
@@ -1825,14 +1901,17 @@ mod tests {
             get_party_params(Amount::from_sat(150_000_000), Amount::ONE_BTC, Some(2));
         let total_collateral = Amount::ONE_BTC + Amount::ONE_BTC;
 
-        let (_, _, cet_fee) = party
-            .get_change_output_and_fees_with_counterparty(
+        let cet_fee = party
+            .funding_requirements(
                 total_collateral,
                 fee_rate,
                 Amount::ZERO,
-                Some(&counterparty.payout_script_pubkey),
+                party.payout_script_pubkey.len(),
+                counterparty.payout_script_pubkey.len(),
+                FeeRule::CounterpartyPayout,
             )
-            .unwrap();
+            .unwrap()
+            .cet_fee;
         let (_, _, legacy_cet_fee) = party
             .get_change_output_and_fees(total_collateral, fee_rate, Amount::ZERO)
             .unwrap();
@@ -1931,6 +2010,21 @@ mod tests {
         fee_rule: FeeRule,
         accept_cet_script_len: usize,
     ) -> DlcTransactions {
+        try_build_for_accept_cet_script(
+            offer_params,
+            accept_params,
+            fee_rule,
+            accept_cet_script_len,
+        )
+        .unwrap()
+    }
+
+    fn try_build_for_accept_cet_script(
+        offer_params: &PartyParams,
+        accept_params: &PartyParams,
+        fee_rule: FeeRule,
+        accept_cet_script_len: usize,
+    ) -> Result<DlcTransactions, Error> {
         let total = offer_params.collateral + accept_params.collateral;
         let payouts = vec![
             Payout {
@@ -1955,7 +2049,6 @@ mod tests {
             fee_rule,
             accept_cet_script_len,
         )
-        .unwrap()
     }
 
     #[test]
@@ -2046,6 +2139,231 @@ mod tests {
                 extra_fee
             );
             assert_eq!(change(&own.fund, other), change(&longer.fund, other));
+        }
+    }
+
+    /// A party without collateral pays no fee and gets no change, whatever its
+    /// inputs hold: here they pay exactly the extra fee, and the funding
+    /// transaction keeps only the fund output and the funding party's change.
+    #[test]
+    fn a_zero_collateral_party_gets_no_change() {
+        let extra_fee = Amount::from_sat(10_000);
+        let (offer_params, _) =
+            get_party_params(Amount::from_sat(150_000_000), Amount::ONE_BTC, None);
+        let (accept_params, _) = get_party_params(extra_fee, Amount::ZERO, Some(2));
+        let offer = offer_params
+            .funding_requirements(
+                Amount::ONE_BTC,
+                4,
+                extra_fee,
+                offer_params.payout_script_pubkey.len(),
+                accept_params.payout_script_pubkey.len(),
+                FeeRule::CounterpartyPayout,
+            )
+            .unwrap();
+
+        let (fund, funding_witness_script) =
+            create_fund_transaction_with_fees(&offer_params, &accept_params, 4, 0, 0, extra_fee)
+                .unwrap();
+
+        assert_eq!(fund.input.len(), 2);
+        let output = |script_pubkey: &Script| {
+            fund.output
+                .iter()
+                .find(|output| output.script_pubkey == *script_pubkey)
+                .map(|output| output.value)
+        };
+        assert_eq!(fund.output.len(), 2);
+        assert_eq!(
+            output(&funding_witness_script.to_p2wsh()),
+            Some(Amount::ONE_BTC + offer.cet_fee + extra_fee)
+        );
+        assert_eq!(
+            output(&offer_params.change_script_pubkey),
+            Some(offer_params.input_amount - offer.required)
+        );
+        assert_eq!(output(&accept_params.change_script_pubkey), None);
+    }
+
+    /// `PartyParams::spliced` drops the ordinary copy of a splice input by its
+    /// outpoint and keeps an ordinary input with a witness above P2WPKH's,
+    /// which the legacy layout drops. The spliced constructor funds those
+    /// inputs, so a splicing party priced on them and funded at exactly that
+    /// requirement builds with no change, and one sat less fails with it.
+    #[test]
+    fn a_splicing_party_is_priced_on_its_spliced_inputs() {
+        let (mut offer_params, _) = get_party_params(Amount::ZERO, Amount::ONE_BTC, None);
+        let (accept_params, _) = get_party_params(Amount::ZERO, Amount::ZERO, Some(2));
+        let splice_amount = Amount::from_sat(50_000_000);
+        let splice = dlc_input::DlcInputInfo {
+            fund_tx: Transaction {
+                version: TX_VERSION,
+                lock_time: LockTime::ZERO,
+                input: vec![TxIn::default()],
+                output: vec![TxOut {
+                    value: splice_amount,
+                    script_pubkey: make_funding_redeemscript(
+                        &offer_params.fund_pubkey,
+                        &accept_params.fund_pubkey,
+                    )
+                    .to_p2wsh(),
+                }],
+            },
+            fund_vout: 0,
+            local_fund_pubkey: offer_params.fund_pubkey,
+            remote_fund_pubkey: accept_params.fund_pubkey,
+            fund_amount: splice_amount,
+            max_witness_len: 220,
+            input_serial_id: 9,
+            contract_id: [1; 32],
+        };
+        // A splice input is listed both as an ordinary input and a DLC input.
+        offer_params.inputs.push(TxInputInfo::from(&splice));
+        offer_params.dlc_inputs.push(splice);
+        let wide_outpoint = OutPoint {
+            txid: Txid::from_byte_array([7; 32]),
+            vout: 0,
+        };
+        offer_params.inputs.push(TxInputInfo {
+            outpoint: wide_outpoint,
+            max_witness_len: 200,
+            redeem_script: ScriptBuf::new(),
+            serial_id: 7,
+        });
+        let serial_ids = |params: PartyParams| {
+            assert!(params.dlc_inputs.is_empty());
+            params
+                .inputs
+                .iter()
+                .map(|input| input.serial_id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(serial_ids(offer_params.legacy_spliced()), vec![1, 9]);
+
+        let spliced = offer_params.spliced();
+        assert_eq!(serial_ids(spliced.clone()), vec![1, 7, 9]);
+        let required = spliced
+            .funding_requirements(
+                Amount::ONE_BTC,
+                4,
+                Amount::ZERO,
+                spliced.payout_script_pubkey.len(),
+                accept_params.payout_script_pubkey.len(),
+                FeeRule::CounterpartyPayout,
+            )
+            .unwrap()
+            .required;
+
+        let payouts = vec![
+            Payout {
+                offer: Amount::ONE_BTC,
+                accept: Amount::ZERO,
+            },
+            Payout {
+                offer: Amount::ZERO,
+                accept: Amount::ONE_BTC,
+            },
+        ];
+        let build = |input_amount| {
+            create_spliced_dlc_transactions(
+                &PartyParams {
+                    input_amount,
+                    ..offer_params.clone()
+                },
+                &accept_params,
+                &payouts,
+                100,
+                4,
+                0,
+                10,
+                0,
+                0,
+            )
+        };
+        let exact = build(required).unwrap();
+        assert_eq!(exact.fund.output.len(), 1);
+        assert_eq!(
+            exact.fund.input.len(),
+            spliced.inputs.len() + accept_params.inputs.len(),
+            "the funding transaction spends the splice input once"
+        );
+        assert!(exact
+            .fund
+            .input
+            .iter()
+            .any(|input| input.previous_output == wide_outpoint));
+        let one_sat_short = required - Amount::from_sat(1);
+        assert!(matches!(
+            build(one_sat_short),
+            Err(Error::InsufficientFunds { required: r, available })
+                if r == required && available == one_sat_short
+        ));
+    }
+
+    /// Inputs holding exactly what `funding_requirements` asks for build the
+    /// contract with nothing left over; one sat less on either side fails with
+    /// that side's requirement and what it had.
+    #[test]
+    fn funding_requirements_are_exactly_sufficient() {
+        let one_sat = Amount::from_sat(1);
+        for (offer_params, accept_params) in single_and_dual_funded_params() {
+            let total = offer_params.collateral + accept_params.collateral;
+            for fee_rule in [FeeRule::CounterpartyPayout, FeeRule::OwnPayoutOnly] {
+                let requirements = |party: &PartyParams, counterparty: &PartyParams| {
+                    party
+                        .funding_requirements(
+                            total,
+                            4,
+                            Amount::ZERO,
+                            party.payout_script_pubkey.len(),
+                            counterparty.payout_script_pubkey.len(),
+                            fee_rule,
+                        )
+                        .unwrap()
+                };
+                let offer = requirements(&offer_params, &accept_params);
+                let accept = requirements(&accept_params, &offer_params);
+                let funded = |party: &PartyParams, input_amount| PartyParams {
+                    input_amount,
+                    ..party.clone()
+                };
+
+                let exact = try_build_for_accept_cet_script(
+                    &funded(&offer_params, offer.required),
+                    &funded(&accept_params, accept.required),
+                    fee_rule,
+                    accept_params.payout_script_pubkey.len(),
+                )
+                .unwrap();
+                assert_eq!(exact.fund.output.len(), 1, "no change is left over");
+
+                let short_offer = try_build_for_accept_cet_script(
+                    &funded(&offer_params, offer.required - one_sat),
+                    &funded(&accept_params, accept.required),
+                    fee_rule,
+                    accept_params.payout_script_pubkey.len(),
+                );
+                assert!(matches!(
+                    short_offer,
+                    Err(Error::InsufficientFunds { required, available })
+                        if required == offer.required && available == offer.required - one_sat
+                ));
+
+                if accept.required > Amount::ZERO {
+                    let short_accept = try_build_for_accept_cet_script(
+                        &funded(&offer_params, offer.required),
+                        &funded(&accept_params, accept.required - one_sat),
+                        fee_rule,
+                        accept_params.payout_script_pubkey.len(),
+                    );
+                    assert!(matches!(
+                        short_accept,
+                        Err(Error::InsufficientFunds { required, available })
+                            if required == accept.required
+                                && available == accept.required - one_sat
+                    ));
+                }
+            }
         }
     }
 

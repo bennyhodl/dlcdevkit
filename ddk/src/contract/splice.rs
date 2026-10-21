@@ -18,10 +18,11 @@ use super::types::{random_serial_id, Party};
 
 /// Maximum witness length reported for a DLC (2-of-2 P2WSH) funding input.
 ///
-/// Must exceed 108 so that [`ddk_dlc::create_spliced_dlc_transactions`]
-/// separates DLC inputs from ordinary P2WPKH wallet inputs. The value matches
-/// `ddk-manager`, so a stateful counterparty rebuilds an identical funding
-/// transaction.
+/// Must exceed 108, the P2WPKH witness size: spliced contracts built by
+/// ddk-dlc 2.0.0-rc.8 and earlier told a DLC input from an ordinary wallet
+/// input by that size (see [`ddk_dlc::PartyParams::legacy_spliced`]). The
+/// value matches `ddk-manager`, so a stateful counterparty rebuilds an
+/// identical funding transaction.
 pub const DLC_INPUT_MAX_WITNESS_LEN: u16 = 220;
 
 /// Builds a splice (DLC) funding input from a previous contract's messages.

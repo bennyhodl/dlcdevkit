@@ -1,12 +1,15 @@
 //! Errors returned by the stateless contract API.
 
+use bitcoin::Amount;
 use thiserror::Error;
 
 /// Errors returned by the stateless contract functions.
 ///
 /// Variants carry plain strings so they can cross FFI and binding boundaries
-/// without exposing internal library error types.
+/// without exposing internal library error types. New variants may be added
+/// in a minor release, so a `match` on it needs a wildcard arm.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum ContractError {
     /// The offer message, or data used to build one, is invalid.
     #[error("invalid offer: {0}")]
@@ -52,6 +55,16 @@ pub enum ContractError {
     /// BIP32 key derivation failed.
     #[error("BIP32 error: {0}")]
     Bip32(String),
+    /// A party's funding inputs hold less than its collateral plus its share
+    /// of the fees. [`funding_requirements`](super::funding_requirements)
+    /// gives the offering party's requirement before the contract is built.
+    #[error("insufficient funds: the funding inputs hold {available} but {required} is required")]
+    InsufficientFunds {
+        /// The input total the party needs.
+        required: Amount,
+        /// The input total the party has.
+        available: Amount,
+    },
     /// A DLC transaction or signature operation failed.
     #[error("DLC error: {0}")]
     Dlc(String),
@@ -69,13 +82,25 @@ impl From<bitcoin::bip32::Error> for ContractError {
 
 impl From<ddk_dlc::Error> for ContractError {
     fn from(error: ddk_dlc::Error) -> Self {
-        ContractError::Dlc(error.to_string())
+        match error {
+            ddk_dlc::Error::InsufficientFunds {
+                required,
+                available,
+            } => ContractError::InsufficientFunds {
+                required,
+                available,
+            },
+            error => ContractError::Dlc(error.to_string()),
+        }
     }
 }
 
 impl From<ddk_manager::error::Error> for ContractError {
     fn from(error: ddk_manager::error::Error) -> Self {
-        ContractError::Dlc(error.to_string())
+        match error {
+            ddk_manager::error::Error::DlcError(error) => error.into(),
+            error => ContractError::Dlc(error.to_string()),
+        }
     }
 }
 
