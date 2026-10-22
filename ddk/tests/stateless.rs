@@ -1595,6 +1595,11 @@ struct PreparedSplice {
 /// whose offer spends A's funding output as a splice input, and produces the
 /// offering party's sign message (with its half of the splice signature).
 fn prepare_splice(splice_in: bool) -> PreparedSplice {
+    prepare_splice_with_flags(splice_in, 0)
+}
+
+/// [`prepare_splice`] with contract B offered under `contract_flags`.
+fn prepare_splice_with_flags(splice_in: bool, contract_flags: u8) -> PreparedSplice {
     let secp = Secp256k1::new();
 
     // Contract A: an ordinary dual-funded enum contract, fully signed.
@@ -1633,15 +1638,16 @@ fn prepare_splice(splice_in: bool) -> PreparedSplice {
         (fund_value_a - splice_amount, vec![splice_input.clone()])
     };
 
-    let offer_b = create_offer(offer_params(
+    let mut offer_params_b = offer_params(
         &secp,
         &offerer_b,
         enum_contract_info(offer_collateral_b),
         offer_collateral_b,
         NETWORK,
         offer_funding_inputs,
-    ))
-    .unwrap();
+    );
+    offer_params_b.contract_flags = contract_flags;
+    let offer_b = create_offer(offer_params_b).unwrap();
     let accept_b = accept_offer(
         &offer_b,
         AcceptOfferParams {
@@ -1705,7 +1711,15 @@ fn prepare_splice(splice_in: bool) -> PreparedSplice {
 /// Runs [`prepare_splice`] and completes the funding transaction on the
 /// accepting side, contributing its half of the splice signature.
 fn complete_splice(splice_in: bool) -> (Transaction, PreparedSplice) {
-    let prepared = prepare_splice(splice_in);
+    complete_splice_with_flags(splice_in, 0)
+}
+
+/// [`complete_splice`] with contract B offered under `contract_flags`.
+fn complete_splice_with_flags(
+    splice_in: bool,
+    contract_flags: u8,
+) -> (Transaction, PreparedSplice) {
+    let prepared = prepare_splice_with_flags(splice_in, contract_flags);
     let accept_splice_key = DlcInputSigningKey {
         input_serial_id: prepared.splice_serial,
         prior_funding_secret_key: prepared.prior_accept_key,
@@ -1798,6 +1812,130 @@ fn splice_out_completes_the_lifecycle() {
         fund_value_b < prepared.fund_value_a,
         "splice-out must decrease the funded amount"
     );
+}
+
+/// With `FUND_LOCKTIME_AT_CET_FLAG`, a splice's funding transaction is locked
+/// to the CET locktime and every funding input, the DLC input included,
+/// enables it. Both parties sign over those fields, so the completed
+/// transaction is still the one rebuilt from the messages.
+#[test]
+fn held_splice_locks_the_funding_transaction_to_the_cet_locktime() {
+    for splice_in in [true, false] {
+        for flags in [
+            ddk_dlc::FUND_LOCKTIME_AT_CET_FLAG,
+            ddk_dlc::FUND_LOCKTIME_AT_CET_FLAG | ddk_dlc::REFUND_TO_ACCEPTER_FLAG,
+        ] {
+            let (funding_tx_b, prepared) = complete_splice_with_flags(splice_in, flags);
+            assert_splice_input_signed(&funding_tx_b, &prepared);
+            assert_eq!(
+                funding_tx_b.lock_time,
+                LockTime::from_consensus(prepared.offer_b.cet_locktime)
+            );
+            assert_ne!(funding_tx_b.lock_time, LockTime::ZERO);
+            assert!(funding_tx_b
+                .input
+                .iter()
+                .all(|input| input.sequence == Sequence::ENABLE_LOCKTIME_NO_RBF));
+            assert_eq!(prepared.unsigned_fund_b.lock_time, funding_tx_b.lock_time);
+        }
+    }
+}
+
+/// Without the flag a splice's funding transaction keeps locktime 0 and final
+/// sequences, as every splice signed before the flag existed.
+#[test]
+fn splice_without_the_flag_keeps_locktime_zero() {
+    let (funding_tx_b, _) = complete_splice(true);
+    assert_eq!(funding_tx_b.lock_time, LockTime::ZERO);
+    assert!(funding_tx_b
+        .input
+        .iter()
+        .all(|input| input.sequence == Sequence::MAX));
+}
+
+/// The flag only holds a successor. A contract with no DLC input is funded
+/// at once, flag or not.
+#[test]
+fn the_held_flag_does_not_lock_a_contract_without_a_dlc_input() {
+    let secp = Secp256k1::new();
+    let offerer = PartySetup::new(&secp, 1, NETWORK, Amount::from_sat(150_000), 1);
+    let accepter = PartySetup::new(&secp, 2, NETWORK, Amount::from_sat(150_000), 2);
+    let mut params = offer_params(
+        &secp,
+        &offerer,
+        enum_contract_info(TOTAL_COLLATERAL),
+        Amount::from_sat(50_000),
+        NETWORK,
+        vec![offerer.funding_input.clone()],
+    );
+    params.contract_flags = ddk_dlc::FUND_LOCKTIME_AT_CET_FLAG;
+    let offer = create_offer(params).unwrap();
+    let accept = accept_offer(
+        &offer,
+        AcceptOfferParams {
+            party: accepter.party_params(&secp, vec![accepter.funding_input.clone()]),
+            min_timeout_interval: MIN_TIMEOUT,
+            max_timeout_interval: MAX_TIMEOUT,
+            now_unix: NOW_UNIX,
+        },
+        &accepter.funding_secret_key,
+    )
+    .unwrap()
+    .accept;
+    let fund = create_dlc_transactions(&offer, &accept).unwrap().fund;
+    assert_eq!(fund.lock_time, LockTime::ZERO);
+    assert!(fund
+        .input
+        .iter()
+        .all(|input| input.sequence == Sequence::MAX));
+}
+
+/// The held flag travels on the wire with the refund flag.
+#[test]
+fn held_successor_contract_flags_survive_the_wire() {
+    use ddk_messages::lightning::util::ser::{Readable, Writeable};
+    let prepared = prepare_splice_with_flags(
+        true,
+        ddk_dlc::FUND_LOCKTIME_AT_CET_FLAG | ddk_dlc::REFUND_TO_ACCEPTER_FLAG,
+    );
+    let bytes = prepared.offer_b.encode();
+    let read = OfferDlc::read(&mut ddk_messages::lightning::io::Cursor::new(&bytes)).unwrap();
+    assert_eq!(read.contract_flags, 0x05);
+    assert_eq!(read, prepared.offer_b);
+}
+
+/// A contract flag ddk gives no meaning to is refused when creating an offer
+/// and when validating one: bit 1 would be misread from storage, and any
+/// other unknown bit asks for transactions this side does not build.
+#[test]
+fn offers_with_unknown_contract_flags_are_rejected() {
+    let secp = Secp256k1::new();
+    let offerer = PartySetup::new(&secp, 1, NETWORK, Amount::from_sat(150_000), 1);
+    for flags in [0x02, 0x03, 0x06, 0x08, 0x80] {
+        let mut params = offer_params(
+            &secp,
+            &offerer,
+            enum_contract_info(TOTAL_COLLATERAL),
+            Amount::from_sat(50_000),
+            NETWORK,
+            vec![offerer.funding_input.clone()],
+        );
+        params.contract_flags = flags;
+        assert!(
+            matches!(create_offer(params), Err(ContractError::InvalidOffer(_))),
+            "creating an offer with flags {flags:#04x} must fail"
+        );
+
+        let (_, _, mut offer, _) = enum_contract(&secp, NETWORK);
+        offer.contract_flags = flags;
+        assert!(
+            matches!(
+                validate_offer(&offer, MIN_TIMEOUT, MAX_TIMEOUT, NOW_UNIX),
+                Err(ContractError::InvalidOffer(_))
+            ),
+            "an offer with flags {flags:#04x} must be refused"
+        );
+    }
 }
 
 #[test]

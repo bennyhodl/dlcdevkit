@@ -656,7 +656,24 @@ where
             .update_contract(&Contract::Signed(signed_contract.clone()))
             .await?;
 
-        self.blockchain.send_transaction(&fund_tx).await?;
+        if let Err(e) = self.blockchain.send_transaction(&fund_tx).await {
+            if !is_held_fund_transaction(&fund_tx) {
+                return Err(e);
+            }
+            // A successor's funding transaction is locked until its CET
+            // locktime and the network rejects it as non-final before then.
+            // The contract stays Signed, its previous contracts stay as they
+            // are, and the periodic check broadcasts it once it can.
+            log_info!(
+                self.logger,
+                "Holding the funding transaction until its locktime. contract_id={} fund_txid={} lock_time={} error={}",
+                signed_contract.accepted_contract.get_contract_id_string(),
+                fund_tx.compute_txid().to_string(),
+                fund_tx.lock_time.to_string(),
+                e.to_string(),
+            );
+            return Ok(());
+        }
 
         // Check if there are any DLC inputs in the funding inputs of the contract.
         // If there are, mark the contract as pre-closed.
@@ -665,6 +682,47 @@ where
         self.preclose_spliced_contracts(&signed_contract).await?;
 
         Ok(())
+    }
+
+    /// Broadcasts the funding transaction of a signed contract that was held
+    /// until its locktime, and pre-closes the contracts it splices.
+    ///
+    /// Only the accepting party holds every signature of the funding
+    /// transaction, so only it broadcasts. A broadcast the network refuses,
+    /// for one still before its locktime for example, leaves the contract as
+    /// it is for the next periodic check.
+    async fn broadcast_held_fund_transaction(
+        &self,
+        contract: &SignedContract,
+    ) -> Result<(), Error> {
+        let fund_tx = crate::contract_updater::sign_fund_transaction(
+            &self.secp,
+            &contract.accepted_contract,
+            &contract.funding_signatures,
+            &self.wallet,
+            &self.store,
+            &self.signer_provider,
+            &self.logger,
+        )
+        .await?;
+        if let Err(e) = self.blockchain.send_transaction(&fund_tx).await {
+            log_debug!(
+                self.logger,
+                "Held funding transaction not accepted yet. contract_id={} fund_txid={} lock_time={} error={}",
+                contract.accepted_contract.get_contract_id_string(),
+                fund_tx.compute_txid().to_string(),
+                fund_tx.lock_time.to_string(),
+                e.to_string(),
+            );
+            return Ok(());
+        }
+        log_info!(
+            self.logger,
+            "Broadcast the held funding transaction. contract_id={} fund_txid={}",
+            contract.accepted_contract.get_contract_id_string(),
+            fund_tx.compute_txid().to_string(),
+        );
+        self.preclose_spliced_contracts(contract).await
     }
 
     /// Marks every Confirmed contract that `signed_contract` spends through a
@@ -806,6 +864,12 @@ where
             .get_transaction_confirmations(&fund_txid)
             .await?;
         if status == ConfirmationStatus::NotFound {
+            if !contract.accepted_contract.offered_contract.is_offer_party
+                && contract.channel_id.is_none()
+                && is_held_fund_transaction(&contract.accepted_contract.dlc_transactions.fund)
+            {
+                return self.broadcast_held_fund_transaction(contract).await;
+            }
             log_warn!(self.logger,
                 "Funding transaction not found in mempool or on-chain. Not confirming contract. fund_txid={} contract_id={}",
                 fund_txid.to_string(),
@@ -1789,4 +1853,12 @@ where
             .await?;
         Ok(announcements)
     }
+}
+
+/// Whether a funding transaction is held until a locktime: a successor
+/// contract's, built under
+/// [`FUND_LOCKTIME_AT_CET_FLAG`](ddk_dlc::FUND_LOCKTIME_AT_CET_FLAG). Every
+/// other funding transaction has locktime 0.
+fn is_held_fund_transaction(fund_tx: &Transaction) -> bool {
+    fund_tx.lock_time != bitcoin::absolute::LockTime::ZERO
 }

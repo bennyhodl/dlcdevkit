@@ -393,6 +393,23 @@ impl OfferDlc {
         Ok(())
     }
 
+    /// Returns an error when `contract_flags` sets a bit ddk gives no meaning
+    /// to.
+    ///
+    /// Bit 1 in particular can never be accepted: a stored offered contract
+    /// whose `contract_flags` is 0x02 or 0x03 reads back as a different format.
+    /// Any other unknown bit would ask for behaviour this side does not build,
+    /// and the two parties would sign different transactions.
+    pub fn validate_contract_flags(&self) -> Result<(), Error> {
+        let unknown = self.contract_flags & !ddk_dlc::KNOWN_CONTRACT_FLAGS;
+        if unknown != 0 {
+            return Err(Error::InvalidArgument(format!(
+                "unsupported contract flags {unknown:#04x}"
+            )));
+        }
+        Ok(())
+    }
+
     /// Returns whether the message satisfies validity requirements.
     ///
     /// `now_unix` is the receiver's clock as a unix timestamp. An offer whose
@@ -421,6 +438,7 @@ impl OfferDlc {
             }
         }
 
+        self.validate_contract_flags()?;
         self.validate_cet_locktime()?;
 
         let closest_maturity_date = self.contract_info.get_closest_maturity_date();

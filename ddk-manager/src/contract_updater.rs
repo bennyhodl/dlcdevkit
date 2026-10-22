@@ -810,6 +810,60 @@ where
         accepted_contract.adaptor_infos.len(),
     );
 
+    let transaction = sign_fund_transaction(
+        secp,
+        accepted_contract,
+        funding_signatures,
+        wallet,
+        storage,
+        signer_provider,
+        logger,
+    )
+    .await?;
+
+    let signed_contract = SignedContract {
+        accepted_contract: accepted_contract.clone(),
+        adaptor_signatures: cet_adaptor_signatures.to_vec(),
+        offer_refund_signature: *refund_signature,
+        funding_signatures: funding_signatures.clone(),
+        channel_id,
+        tlvs: Default::default(),
+    };
+
+    Ok((signed_contract, transaction))
+}
+
+/// Builds the accepting party's fully signed funding transaction from the
+/// offering party's funding signatures: verifies and completes any DLC input,
+/// and signs the accepting party's own inputs with the wallet.
+///
+/// [`verify_signed_contract`] calls this once the rest of the sign message
+/// checks out. The [`Manager`](crate::manager::Manager) calls it again for a
+/// signed contract whose funding transaction it holds until its locktime,
+/// since a [`SignedContract`] keeps the offering party's signatures but not
+/// the signed transaction.
+pub(crate) async fn sign_fund_transaction<
+    W: Deref,
+    SP: Deref,
+    S: Deref,
+    X: ContractSigner,
+    L: Deref,
+>(
+    secp: &Secp256k1<All>,
+    accepted_contract: &AcceptedContract,
+    funding_signatures: &FundingSignatures,
+    wallet: &W,
+    storage: &S,
+    signer_provider: &SP,
+    logger: &L,
+) -> Result<Transaction, Error>
+where
+    W::Target: Wallet,
+    S::Target: Storage,
+    SP::Target: ContractSignerProvider<Signer = X>,
+    L::Target: Logger,
+{
+    let offered_contract = &accepted_contract.offered_contract;
     let fund_tx = &accepted_contract.dlc_transactions.fund;
     let mut fund_psbt = Psbt::from_unsigned_tx(unsigned_funding_transaction(fund_tx))
         .map_err(|_| Error::InvalidState("Tried to create PSBT from signed tx".to_string()))?;
@@ -955,19 +1009,8 @@ where
         wallet.sign_psbt_input(&mut fund_psbt, input_index).await?;
     }
 
-    let signed_contract = SignedContract {
-        accepted_contract: accepted_contract.clone(),
-        adaptor_signatures: cet_adaptor_signatures.to_vec(),
-        offer_refund_signature: *refund_signature,
-        funding_signatures: funding_signatures.clone(),
-        channel_id,
-        tlvs: Default::default(),
-    };
-
     restore_p2sh_script_sigs(&mut fund_psbt, &all_funding_inputs)?;
-    let transaction = fund_psbt.extract_tx_unchecked_fee_rate();
-
-    Ok((signed_contract, transaction))
+    Ok(fund_psbt.extract_tx_unchecked_fee_rate())
 }
 
 /// Signs and return the CET that can be used to close the given contract.
