@@ -909,8 +909,10 @@ fn splice_out() -> TestPath {
 ///
 /// The accepting party, the only one holding every funding signature, keeps
 /// the contract Signed and the contract it replaces Confirmed while the
-/// network refuses the funding transaction as non-final, then broadcasts it
-/// from the periodic check once it is final. The manager takes the CET
+/// network would refuse the funding transaction as non-final, then broadcasts
+/// it from the periodic check once it is final. The accepting party funds part
+/// of the successor, and the transaction mined is the one it signed and stored
+/// when it signed, not a new signature. The manager takes the CET
 /// locktime from its clock, and a locktime under 500,000,000 is a block
 /// height, so the test sets the clock to a height a few blocks ahead.
 async fn held_splice_path(
@@ -931,6 +933,10 @@ async fn held_splice_path(
     )
     .await;
     splice_params.contract_input.contract_flags = ddk_dlc::FUND_LOCKTIME_AT_CET_FLAG;
+    // Dual funded, so the accepting party signs wallet inputs of its own.
+    let accept_share = Amount::from_sat(5_000_000);
+    splice_params.contract_input.offer_collateral = total_collateral - accept_share;
+    splice_params.contract_input.accept_collateral = accept_share;
 
     let tip = ctx.electrs.async_client.get_height().await.unwrap();
     let hold_height = tip + HOLD_BLOCKS;
@@ -963,6 +969,14 @@ async fn held_splice_path(
 
     let spliced = signed_or_confirmed(ctx.contract(acceptor, &splice_contract_id).await);
     let fund_tx = spliced.accepted_contract.dlc_transactions.fund.clone();
+    assert!(
+        !spliced.accepted_contract.funding_inputs.is_empty(),
+        "the accepting party must fund part of the successor"
+    );
+    assert!(
+        fund_tx.input.iter().all(|input| !input.witness.is_empty()),
+        "the accepting party must store the signed funding transaction it holds"
+    );
     assert_eq!(
         fund_tx.lock_time,
         bitcoin::absolute::LockTime::from_height(hold_height).unwrap(),
@@ -1005,13 +1019,25 @@ async fn held_splice_path(
     let mined = ctx
         .electrs
         .async_client
-        .get_tx_status(&fund_tx.compute_txid())
+        .get_tx(&fund_tx.compute_txid())
+        .await
+        .unwrap()
+        .expect("the held funding transaction must be mined");
+    assert_eq!(
+        mined.compute_wtxid(),
+        fund_tx.compute_wtxid(),
+        "the transaction mined must be the one signed and stored at signing"
+    );
+
+    // A time locktime is gated on the tip's median time past; the backend's
+    // must be the node's.
+    let node_median_time_past = bitcoincore_rpc::RpcApi::get_blockchain_info(ctx.sink.as_ref())
+        .unwrap()
+        .median_time;
+    let median_time_past = ddk_manager::Blockchain::get_median_time_past(ctx.electrs.as_ref())
         .await
         .unwrap();
-    assert!(
-        mined.confirmed,
-        "the held funding transaction must be mined"
-    );
+    assert_eq!(u64::from(median_time_past), node_median_time_past);
 }
 
 #[tokio::test]

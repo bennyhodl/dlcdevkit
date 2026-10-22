@@ -627,7 +627,7 @@ where
     ) -> Result<(), Error> {
         let accepted_contract =
             get_contract_in_state!(self, &sign_message.contract_id, Accepted, Some(*peer_id))?;
-        let (signed_contract, fund_tx) = match crate::contract_updater::verify_signed_contract(
+        let (mut signed_contract, fund_tx) = match crate::contract_updater::verify_signed_contract(
             &self.secp,
             &accepted_contract,
             sign_message,
@@ -652,28 +652,34 @@ where
             }
         };
 
+        // A successor's funding transaction is held until its CET locktime.
+        // This party is the only one holding every signature of it, so it
+        // keeps the signed transaction to broadcast later without signing
+        // again.
+        let held = is_held_fund_transaction(&fund_tx);
+        if held {
+            signed_contract.accepted_contract.dlc_transactions.fund = fund_tx.clone();
+        }
+
         self.store
             .update_contract(&Contract::Signed(signed_contract.clone()))
             .await?;
 
-        if let Err(e) = self.blockchain.send_transaction(&fund_tx).await {
-            if !is_held_fund_transaction(&fund_tx) {
-                return Err(e);
-            }
-            // A successor's funding transaction is locked until its CET
-            // locktime and the network rejects it as non-final before then.
-            // The contract stays Signed, its previous contracts stay as they
-            // are, and the periodic check broadcasts it once it can.
+        // The network refuses a transaction before its locktime. Until then
+        // the contract stays Signed, its previous contracts stay as they are,
+        // and the periodic check broadcasts it once it is final.
+        if held && !self.is_final(&fund_tx).await? {
             log_info!(
                 self.logger,
-                "Holding the funding transaction until its locktime. contract_id={} fund_txid={} lock_time={} error={}",
+                "Holding the funding transaction until its locktime. contract_id={} fund_txid={} lock_time={}",
                 signed_contract.accepted_contract.get_contract_id_string(),
                 fund_tx.compute_txid().to_string(),
                 fund_tx.lock_time.to_string(),
-                e.to_string(),
             );
             return Ok(());
         }
+
+        self.blockchain.send_transaction(&fund_tx).await?;
 
         // Check if there are any DLC inputs in the funding inputs of the contract.
         // If there are, mark the contract as pre-closed.
@@ -685,37 +691,28 @@ where
     }
 
     /// Broadcasts the funding transaction of a signed contract that was held
-    /// until its locktime, and pre-closes the contracts it splices.
+    /// until its locktime, once it is final, and pre-closes the contracts it
+    /// splices.
     ///
     /// Only the accepting party holds every signature of the funding
-    /// transaction, so only it broadcasts. A broadcast the network refuses,
-    /// for one still before its locktime for example, leaves the contract as
-    /// it is for the next periodic check.
+    /// transaction, and it stored the signed transaction when it signed, so
+    /// only it broadcasts, without signing again.
     async fn broadcast_held_fund_transaction(
         &self,
         contract: &SignedContract,
     ) -> Result<(), Error> {
-        let fund_tx = crate::contract_updater::sign_fund_transaction(
-            &self.secp,
-            &contract.accepted_contract,
-            &contract.funding_signatures,
-            &self.wallet,
-            &self.store,
-            &self.signer_provider,
-            &self.logger,
-        )
-        .await?;
-        if let Err(e) = self.blockchain.send_transaction(&fund_tx).await {
+        let fund_tx = &contract.accepted_contract.dlc_transactions.fund;
+        if !self.is_final(fund_tx).await? {
             log_debug!(
                 self.logger,
-                "Held funding transaction not accepted yet. contract_id={} fund_txid={} lock_time={} error={}",
+                "Held funding transaction is not final yet. contract_id={} fund_txid={} lock_time={}",
                 contract.accepted_contract.get_contract_id_string(),
                 fund_tx.compute_txid().to_string(),
                 fund_tx.lock_time.to_string(),
-                e.to_string(),
             );
             return Ok(());
         }
+        self.blockchain.send_transaction(fund_tx).await?;
         log_info!(
             self.logger,
             "Broadcast the held funding transaction. contract_id={} fund_txid={}",
@@ -723,6 +720,18 @@ where
             fund_tx.compute_txid().to_string(),
         );
         self.preclose_spliced_contracts(contract).await
+    }
+
+    /// Whether `tx` may enter the next block as far as its locktime goes.
+    async fn is_final(&self, tx: &Transaction) -> Result<bool, Error> {
+        let tip_height = self.blockchain.get_blockchain_height().await?;
+        let median_time_past = match tx.lock_time {
+            bitcoin::absolute::LockTime::Seconds(_) => {
+                self.blockchain.get_median_time_past().await?
+            }
+            bitcoin::absolute::LockTime::Blocks(_) => 0,
+        };
+        Ok(is_final_at(tx.lock_time, tip_height, median_time_past))
     }
 
     /// Marks every Confirmed contract that `signed_contract` spends through a
@@ -1861,4 +1870,50 @@ where
 /// other funding transaction has locktime 0.
 fn is_held_fund_transaction(fund_tx: &Transaction) -> bool {
     fund_tx.lock_time != bitcoin::absolute::LockTime::ZERO
+}
+
+/// Whether a transaction with `lock_time` may enter the block after a tip at
+/// `tip_height` whose median time past is `median_time_past`.
+///
+/// A height locktime must be below the next block's height, and a time
+/// locktime below the tip's median time past (BIP 113), both strictly.
+fn is_final_at(
+    lock_time: bitcoin::absolute::LockTime,
+    tip_height: u64,
+    median_time_past: u32,
+) -> bool {
+    match lock_time {
+        bitcoin::absolute::LockTime::Blocks(height) => {
+            u64::from(height.to_consensus_u32()) < tip_height + 1
+        }
+        bitcoin::absolute::LockTime::Seconds(time) => time.to_consensus_u32() < median_time_past,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_final_at;
+    use bitcoin::absolute::LockTime;
+
+    #[test]
+    fn a_height_locktime_is_final_once_the_tip_reaches_it() {
+        let lock_time = LockTime::from_height(100).unwrap();
+        assert!(!is_final_at(lock_time, 98, 0));
+        assert!(!is_final_at(lock_time, 99, 0));
+        assert!(is_final_at(lock_time, 100, 0));
+        assert!(is_final_at(lock_time, 101, 0));
+    }
+
+    #[test]
+    fn a_time_locktime_is_final_once_the_median_time_past_is_beyond_it() {
+        let lock_time = LockTime::from_time(1_700_000_000).unwrap();
+        assert!(!is_final_at(lock_time, 1_000_000, 1_699_999_999));
+        assert!(!is_final_at(lock_time, 1_000_000, 1_700_000_000));
+        assert!(is_final_at(lock_time, 1_000_000, 1_700_000_001));
+    }
+
+    #[test]
+    fn locktime_zero_is_always_final() {
+        assert!(is_final_at(LockTime::ZERO, 0, 0));
+    }
 }
