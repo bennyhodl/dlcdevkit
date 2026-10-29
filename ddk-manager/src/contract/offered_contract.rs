@@ -69,6 +69,21 @@ pub struct OfferedContract {
     pub tlvs: TlvStream,
 }
 
+/// Returns an error when `contract_flags` sets a bit ddk gives no meaning to.
+///
+/// Bit 1 in particular can never be stored: an offered contract whose
+/// `contract_flags` is 0x02 or 0x03 reads back as an older format (see
+/// `contract/ser.rs`).
+pub(crate) fn validate_contract_flags(contract_flags: u8) -> Result<(), Error> {
+    let unknown = contract_flags & !ddk_dlc::KNOWN_CONTRACT_FLAGS;
+    if unknown != 0 {
+        return Err(Error::InvalidParameters(format!(
+            "unsupported contract flags {unknown:#04x}"
+        )));
+    }
+    Ok(())
+}
+
 impl OfferedContract {
     /// Validate that the contract info covers all the possible outcomes that
     /// can be attested by the oracle(s).
@@ -76,6 +91,7 @@ impl OfferedContract {
         ddk_dlc::util::validate_fee_rate(self.fee_rate_per_vb).map_err(|_| {
             crate::error::Error::InvalidParameters("Fee rate is too high".to_string())
         })?;
+        validate_contract_flags(self.contract_flags)?;
 
         for info in &self.contract_info {
             info.validate()?;

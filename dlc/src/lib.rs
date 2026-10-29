@@ -57,6 +57,17 @@ pub const DUST_LIMIT: Amount = Amount::from_sat(1000);
 /// Bit 0 of `contract_flags`: redirect all refund proceeds to the accepter.
 pub const REFUND_TO_ACCEPTER_FLAG: u8 = 0x01;
 
+/// Bit 2 of `contract_flags`: a spliced contract's funding transaction takes
+/// nLockTime = the offer's CET locktime, so a successor contract can be signed
+/// now and held until then. Bit 1 is skipped: stored offered contracts tell
+/// formats apart by reading a first byte of 0x02 or 0x03 as a compressed
+/// public key (ddk-manager `contract/ser.rs`), so `contract_flags` values
+/// 0x02 and 0x03 would be misread.
+pub const FUND_LOCKTIME_AT_CET_FLAG: u8 = 0x04;
+
+/// Every `contract_flags` bit this crate gives a meaning to.
+pub const KNOWN_CONTRACT_FLAGS: u8 = REFUND_TO_ACCEPTER_FLAG | FUND_LOCKTIME_AT_CET_FLAG;
+
 /// The transaction version
 /// See: https://github.com/discreetlogcontracts/dlcspecs/blob/master/Transactions.md#funding-transaction
 const TX_VERSION: Version = Version::TWO;
