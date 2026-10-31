@@ -143,8 +143,8 @@ pub fn sign_refund(
 
     verify_refund_signature(
         &secp,
-        &context,
-        counterparty_pubkey,
+        &context.transactions,
+        &counterparty_pubkey,
         &counterparty_signature,
         counterparty_error(party),
     )?;
