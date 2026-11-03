@@ -477,9 +477,7 @@ where
     /// Lists the tracked contract funding outputs with their chain state,
     /// so a consumer (node, FFI) can show locked collateral per contract
     /// and observe a close.
-    pub async fn contract_utxos(
-        &self,
-    ) -> Result<Vec<crate::wallet::contract_tracker::ContractUtxo>> {
+    pub async fn contract_utxos(&self) -> Result<Vec<crate::contract::tracker::ContractUtxo>> {
         Ok(self.wallet.contract_utxos().await?)
     }
 

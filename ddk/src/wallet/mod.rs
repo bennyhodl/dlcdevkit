@@ -23,10 +23,14 @@
 
 pub mod address;
 mod command;
-pub mod contract_tracker;
+/// The contract UTXO tracker, kept at this path for manager users. It lives
+/// in [`crate::contract::tracker`] so it is available without the `manager`
+/// feature.
+pub use crate::contract::tracker as contract_tracker;
 
 pub use command::{CoinControl, Spend};
 
+use crate::contract::tracker::{ContractUtxo, ContractUtxoTracker};
 use crate::contract::ContractKeyProvider;
 use crate::error::{wallet_err_to_manager_err, WalletError};
 use crate::logger::Logger;
@@ -229,7 +233,7 @@ pub enum WalletCommand {
     ListLockedOutpoints(oneshot::Sender<Vec<bitcoin::OutPoint>>),
 
     /// List the tracked contract funding outputs with their chain state
-    ContractUtxos(oneshot::Sender<Vec<contract_tracker::ContractUtxo>>),
+    ContractUtxos(oneshot::Sender<Vec<ContractUtxo>>),
 }
 
 /// The main wallet implementation that provides Bitcoin functionality for DDK.
@@ -374,9 +378,8 @@ impl DlcDevKitWallet {
         let (events, _) = tokio::sync::broadcast::channel(256);
         let blockchain_handle = blockchain.clone();
 
-        let mut tracker = contract_tracker::ContractUtxoTracker::from_changeset(
-            storage.0.initialize_contract_tracker().await?,
-        );
+        let mut tracker =
+            ContractUtxoTracker::from_changeset(storage.0.initialize_contract_tracker().await?);
 
         let events_clone = events.clone();
         let logger_clone = logger.clone();
@@ -861,7 +864,7 @@ impl DlcDevKitWallet {
     /// so a consumer can show locked collateral per contract and observe
     /// a close.
     #[tracing::instrument(skip(self))]
-    pub async fn contract_utxos(&self) -> Result<Vec<contract_tracker::ContractUtxo>> {
+    pub async fn contract_utxos(&self) -> Result<Vec<ContractUtxo>> {
         let (tx, rx) = oneshot::channel();
         self.sender.send(WalletCommand::ContractUtxos(tx)).await?;
         rx.await.map_err(WalletError::Receiver)

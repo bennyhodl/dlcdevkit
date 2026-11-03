@@ -7,7 +7,7 @@ use std::sync::RwLock;
 #[derive(Default, Debug)]
 pub struct MemoryStorage {
     bdk_data: RwLock<Option<bdk_wallet::ChangeSet>>,
-    contract_tracker: RwLock<crate::wallet::contract_tracker::ChangeSet>,
+    contract_tracker: RwLock<crate::contract::tracker::ChangeSet>,
     labels: RwLock<std::collections::BTreeMap<String, bip329::Label>>,
     contracts: RwLock<HashMap<ContractId, Contract>>,
 }
@@ -36,13 +36,13 @@ impl Storage for MemoryStorage {
 
     async fn initialize_contract_tracker(
         &self,
-    ) -> Result<crate::wallet::contract_tracker::ChangeSet, crate::error::WalletError> {
+    ) -> Result<crate::contract::tracker::ChangeSet, crate::error::WalletError> {
         Ok(self.contract_tracker.read().unwrap().clone())
     }
 
     async fn persist_contract_tracker(
         &self,
-        changeset: &crate::wallet::contract_tracker::ChangeSet,
+        changeset: &crate::contract::tracker::ChangeSet,
     ) -> Result<(), crate::error::WalletError> {
         self.contract_tracker
             .write()

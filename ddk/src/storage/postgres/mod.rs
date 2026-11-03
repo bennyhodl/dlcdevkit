@@ -385,7 +385,7 @@ impl Storage for PostgresStore {
 
     async fn initialize_contract_tracker(
         &self,
-    ) -> Result<crate::wallet::contract_tracker::ChangeSet, WalletError> {
+    ) -> Result<crate::contract::tracker::ChangeSet, WalletError> {
         let row = sqlx::query("SELECT changeset FROM contract_tracker WHERE wallet_name = $1")
             .bind(&self.wallet_name)
             .fetch_optional(&self.pool)
@@ -397,13 +397,13 @@ impl Storage for PostgresStore {
                 let changeset: serde_json::Value = row.get("changeset");
                 Ok(serde_json::from_value(changeset)?)
             }
-            None => Ok(crate::wallet::contract_tracker::ChangeSet::default()),
+            None => Ok(crate::contract::tracker::ChangeSet::default()),
         }
     }
 
     async fn persist_contract_tracker(
         &self,
-        changeset: &crate::wallet::contract_tracker::ChangeSet,
+        changeset: &crate::contract::tracker::ChangeSet,
     ) -> Result<(), WalletError> {
         let mut tx = self
             .pool
@@ -423,9 +423,9 @@ impl Storage for PostgresStore {
         let mut merged = match stored {
             Some(row) => {
                 let value: serde_json::Value = row.get("changeset");
-                serde_json::from_value::<crate::wallet::contract_tracker::ChangeSet>(value)?
+                serde_json::from_value::<crate::contract::tracker::ChangeSet>(value)?
             }
-            None => crate::wallet::contract_tracker::ChangeSet::default(),
+            None => crate::contract::tracker::ChangeSet::default(),
         };
         merged.merge(changeset.clone());
 
@@ -1384,13 +1384,13 @@ mod tests {
 
     #[tokio::test]
     async fn contract_tracker_round_trips() {
-        use crate::wallet::contract_tracker;
+        use crate::contract::tracker;
         use crate::Storage as DdkStorage;
 
         let (_server, db) = seed_db().await;
 
         let spk = ScriptBuf::new_p2wsh(&bitcoin::WScriptHash::from_byte_array([0xCD; 32]));
-        let mut changeset = contract_tracker::ChangeSet::default();
+        let mut changeset = tracker::ChangeSet::default();
         changeset.spks.insert([0x5A; 32], spk.clone());
         changeset
             .tx_graph
@@ -1403,7 +1403,7 @@ mod tests {
         assert_eq!(read, changeset);
 
         // A second persist merges instead of overwriting.
-        let mut more = contract_tracker::ChangeSet::default();
+        let mut more = tracker::ChangeSet::default();
         more.spks.insert([0x5B; 32], spk);
         DdkStorage::persist_contract_tracker(&db, &more)
             .await
