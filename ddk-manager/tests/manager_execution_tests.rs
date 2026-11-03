@@ -203,6 +203,9 @@ enum TestPath {
     /// Splice the funded contract, then settle whatever the last round
     /// produced.
     Splice(SplicePath),
+    /// Fund a second contract, splice both into one, then settle the merged
+    /// contract from the given party.
+    MergeSplice(Party),
     BadAcceptCetSignature,
     BadAcceptRefundSignature,
     BadSignCetSignature,
@@ -1097,6 +1100,42 @@ async fn splice_out_by_accept_party_test() {
 /// The accepting party splicing a contract that several oracles settle.
 #[tokio::test]
 #[ignore]
+async fn merge_splice_enum_single_oracle_test() {
+    manager_execution_test(
+        get_enum_test_params(1, 1, None).await,
+        TestPath::MergeSplice(Party::Bob),
+        false,
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn merge_splice_enum_single_oracle_by_accept_party_test() {
+    manager_execution_test(
+        get_enum_test_params(1, 1, None).await,
+        TestPath::MergeSplice(Party::Alice),
+        false,
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn merge_splice_numerical_3_of_3_test() {
+    numerical_common(
+        3,
+        3,
+        get_polynomial_payout_curve_pieces,
+        None,
+        false,
+        TestPath::MergeSplice(Party::Bob),
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore]
 async fn splice_in_enum_3_of_5_by_accept_party_test() {
     manager_execution_test(
         get_enum_test_params(5, 3, None).await,
@@ -1452,7 +1491,9 @@ async fn manager_execution_test_inner(test_params: TestParams, path: TestPath, m
     // A splice chain has to stay below every maturity in the chain until the
     // last contract is the one being settled, so it starts further back.
     let initial_time = match path {
-        TestPath::Splice(_) => (EVENT_MATURITY as u64) - SPLICE_TIME_HEADROOM,
+        TestPath::Splice(_) | TestPath::MergeSplice(_) => {
+            (EVENT_MATURITY as u64) - SPLICE_TIME_HEADROOM
+        }
         _ => (EVENT_MATURITY as u64) - 1,
     };
 
@@ -1663,6 +1704,10 @@ async fn manager_execution_test_inner(test_params: TestParams, path: TestPath, m
         TestPath::Splice(splice) => {
             fund_contract(&mut ctx, contract_id, accept_msg).await;
             splice_path(&mut ctx, &test_params, contract_id, splice, manual_close).await
+        }
+        TestPath::MergeSplice(closer) => {
+            fund_contract(&mut ctx, contract_id, accept_msg).await;
+            merge_splice_path(&mut ctx, &test_params, contract_id, *closer, manual_close).await
         }
     }
 
@@ -2254,6 +2299,273 @@ async fn splice_round(
     }
 
     (splice_contract_id, splice_params)
+}
+
+/// Offers a second contract from Bob and drives it to Confirmed, so the test
+/// holds two funded contracts with the same oracles and the same counterparty.
+async fn fund_second_contract(ctx: &mut TestContext, params: &TestParams) -> ContractId {
+    let offer_msg = ctx
+        .bob
+        .lock()
+        .await
+        .send_offer(&params.contract_input, counter_party())
+        .await
+        .expect("Send second offer error");
+    let temporary_contract_id = offer_msg.temporary_contract_id;
+    ctx.send(Party::Bob, Message::Offer(offer_msg)).await;
+
+    assert_contract_state!(ctx.bob, temporary_contract_id, Offered);
+    ctx.sync().await;
+    assert_contract_state!(ctx.alice, temporary_contract_id, Offered);
+
+    let (contract_id, _, accept_msg) = ctx
+        .alice
+        .lock()
+        .await
+        .accept_contract_offer(&temporary_contract_id)
+        .await
+        .expect("Error accepting second contract offer");
+
+    assert_contract_state!(ctx.alice, contract_id, Accepted);
+
+    fund_contract(ctx, contract_id, accept_msg).await;
+
+    contract_id
+}
+
+/// Funds a second contract, then splices both confirmed contracts into one
+/// offered by `closer`: the merged funding transaction spends both previous
+/// funding outputs, both previous contracts pre-close against it and close
+/// once it confirms, and the merged contract locks the sum of their
+/// collateral. The merged contract is then settled from `closer`.
+async fn merge_splice_path(
+    ctx: &mut TestContext,
+    test_params: &TestParams,
+    first_contract_id: ContractId,
+    closer: Party,
+    manual_close: bool,
+) {
+    let initiator = closer;
+    let acceptor = initiator.other();
+
+    let second_params = splice_test_params(
+        test_params,
+        1,
+        TOTAL_COLLATERAL,
+        EVENT_MATURITY + SPLICE_MATURITY_STEP,
+    )
+    .await;
+    let second_contract_id = fund_second_contract(ctx, &second_params).await;
+
+    let previous_ids = [first_contract_id, second_contract_id];
+    let mut previous_funding_txids = Vec::with_capacity(previous_ids.len());
+    for contract_id in &previous_ids {
+        let previous = signed_or_confirmed(ctx.contract(initiator, contract_id).await);
+        previous_funding_txids.push(
+            previous
+                .accepted_contract
+                .dlc_transactions
+                .fund
+                .compute_txid(),
+        );
+    }
+
+    let merged_total = TOTAL_COLLATERAL * 2;
+    let merged_maturity = EVENT_MATURITY + 2 * SPLICE_MATURITY_STEP;
+    let merged_params = splice_test_params(test_params, 2, merged_total, merged_maturity).await;
+
+    // A merge names each contract it spends once, and only contracts this node
+    // holds.
+    ctx.manager(initiator)
+        .lock()
+        .await
+        .send_merge_splice_offer(
+            &merged_params.contract_input,
+            counter_party(),
+            &[first_contract_id, first_contract_id],
+        )
+        .await
+        .expect_err("a splice offer naming the same contract twice must be refused");
+    ctx.manager(initiator)
+        .lock()
+        .await
+        .send_merge_splice_offer(
+            &merged_params.contract_input,
+            counter_party(),
+            &[first_contract_id, [0xff; 32]],
+        )
+        .await
+        .expect_err("a splice offer naming an unknown contract must be refused");
+    ctx.manager(initiator)
+        .lock()
+        .await
+        .send_merge_splice_offer(&merged_params.contract_input, counter_party(), &[])
+        .await
+        .expect_err("a splice offer naming no contract must be refused");
+
+    let balance_before = ctx.confirmed_balance(initiator).await;
+
+    let offer_msg = ctx
+        .manager(initiator)
+        .lock()
+        .await
+        .send_merge_splice_offer(
+            &merged_params.contract_input,
+            counter_party(),
+            &previous_ids,
+        )
+        .await
+        .expect("Send merge splice offer error");
+
+    let temporary_contract_id = offer_msg.temporary_contract_id;
+    ctx.send(initiator, Message::Offer(offer_msg)).await;
+
+    assert_contract_state!(ctx.manager(initiator), temporary_contract_id, Offered);
+    ctx.sync().await;
+    assert_contract_state!(ctx.manager(acceptor), temporary_contract_id, Offered);
+
+    let (merged_contract_id, _, accept_msg) = ctx
+        .manager(acceptor)
+        .lock()
+        .await
+        .accept_contract_offer(&temporary_contract_id)
+        .await
+        .expect("Error accepting merge splice offer");
+
+    assert_contract_state!(ctx.manager(acceptor), merged_contract_id, Accepted);
+
+    ctx.send(acceptor, Message::Accept(accept_msg)).await;
+    ctx.sync().await;
+
+    // The merge is signed but not yet mined, so both contracts it replaces are
+    // spent but not yet closed.
+    periodic_check!(ctx.manager(initiator), merged_contract_id, Signed);
+    for contract_id in &previous_ids {
+        assert_contract_state!(ctx.manager(initiator), *contract_id, PreClosed);
+    }
+
+    ctx.sync().await;
+
+    periodic_check!(ctx.manager(acceptor), merged_contract_id, Signed);
+    for contract_id in &previous_ids {
+        assert_contract_state!(ctx.manager(acceptor), *contract_id, PreClosed);
+    }
+
+    ctx.sync_wallets().await;
+    ctx.mine(10).await;
+    ctx.sync_wallets().await;
+
+    periodic_check!(ctx.manager(initiator), merged_contract_id, Confirmed);
+    periodic_check!(ctx.manager(acceptor), merged_contract_id, Confirmed);
+    for contract_id in &previous_ids {
+        periodic_check!(ctx.manager(initiator), *contract_id, Closed);
+        periodic_check!(ctx.manager(acceptor), *contract_id, Closed);
+    }
+
+    let merged = signed_or_confirmed(ctx.contract(initiator, &merged_contract_id).await);
+    let merged_funding_transaction = merged.accepted_contract.dlc_transactions.fund.clone();
+    let merged_funding_txid = merged_funding_transaction.compute_txid();
+
+    for previous_funding_txid in &previous_funding_txids {
+        assert!(
+            merged_funding_transaction
+                .input
+                .iter()
+                .any(|input| input.previous_output.txid == *previous_funding_txid),
+            "the merged funding transaction must spend every previous funding transaction"
+        );
+    }
+
+    let mut dlc_input_ids: Vec<ContractId> = merged
+        .accepted_contract
+        .offered_contract
+        .funding_inputs
+        .iter()
+        .filter_map(|input| input.dlc_input.as_ref())
+        .map(|dlc_input| dlc_input.contract_id)
+        .collect();
+    dlc_input_ids.sort();
+    let mut expected_ids = previous_ids.to_vec();
+    expected_ids.sort();
+    assert_eq!(
+        dlc_input_ids, expected_ids,
+        "the merged offer must carry one DLC input per contract it replaces"
+    );
+
+    assert_eq!(
+        merged.accepted_contract.offered_contract.total_collateral, merged_total,
+        "the merged contract must lock the requested collateral"
+    );
+    // The funding output carries the collateral plus the reserve for the CET
+    // and refund fees, so it is a little above the sum of what was merged.
+    let merged_fund_value = merged
+        .accepted_contract
+        .dlc_transactions
+        .get_fund_output()
+        .value;
+    assert!(
+        merged_fund_value >= merged_total && merged_fund_value <= merged_total + FEE_SLACK,
+        "the merged funding output must hold the merged collateral: {merged_total} -> {merged_fund_value}"
+    );
+
+    // Both replaced contracts close against the transaction that funded the
+    // merge.
+    for contract_id in &previous_ids {
+        let closed_previous = ctx.contract(initiator, contract_id).await;
+        assert_eq!(
+            closed_previous.get_cet_txid().unwrap(),
+            merged_funding_txid,
+            "a replaced contract must close against the merged funding transaction"
+        );
+    }
+
+    // The collateral comes from the two funding outputs, so the splicing
+    // party's wallet pays only the fee.
+    let balance_after = ctx.confirmed_balance(initiator).await;
+    let paid = balance_before.checked_sub(balance_after).unwrap_or_else(|| {
+        panic!("a merge must not grow the splicing party's wallet: {balance_before} -> {balance_after}")
+    });
+    assert!(
+        paid <= FEE_SLACK,
+        "a merge must cost the splicing party no more than the fee, paid {paid}"
+    );
+
+    test_utils::set_time(merged_maturity as u64 + ddk_manager::manager::MATURITY_SKEW_SECS + 1);
+
+    // A replaced contract cannot be spliced a second time, alone or as part of
+    // another merge.
+    for contract_id in &previous_ids {
+        ctx.manager(initiator)
+            .lock()
+            .await
+            .send_splice_offer(&merged_params.contract_input, counter_party(), contract_id)
+            .await
+            .expect_err("a splice offer for an already replaced contract must be refused");
+    }
+    ctx.manager(initiator)
+        .lock()
+        .await
+        .send_merge_splice_offer(
+            &merged_params.contract_input,
+            counter_party(),
+            &previous_ids,
+        )
+        .await
+        .expect_err("a merge of already replaced contracts must be refused");
+
+    settle_spliced_contract(
+        ctx,
+        &merged_params,
+        merged_contract_id,
+        closer,
+        manual_close,
+    )
+    .await;
+
+    for contract_id in &previous_ids {
+        assert_contract_state!(ctx.bob, *contract_id, Closed);
+        assert_contract_state!(ctx.alice, *contract_id, Closed);
+    }
 }
 
 /// Splices a confirmed contract once per round, then settles the contract the
