@@ -90,16 +90,23 @@ jobs:
       # rust-cache is declared first so that its post-step (which prunes target/)
       # runs AFTER the run_id cache below saves the freshly compiled test binaries.
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-      # `target/debug/build` carries the bitcoind and electrs executables that
-      # the build scripts downloaded. The test binaries resolve them through the
-      # OUT_DIR path baked in at compile time, so both directories have to be
-      # restored together for the matrix jobs to find them.
+      # Only what the matrix jobs execute: the four integration test binaries
+      # (statically linked, so nothing else in deps/ is needed) and the bitcoind
+      # and electrs executables the build scripts downloaded. The test binaries
+      # resolve those through the OUT_DIR path baked in at compile time, so the
+      # out/ directories are restored at the same path. Caching all of
+      # target/debug instead runs the runner out of disk while saving.
+      # The path list must match the restore step in `integration_tests`.
       - name: Cache compiled test binaries for the matrix jobs
         uses: actions/cache@v4
         with:
           path: |
-            target/debug/deps
-            target/debug/build
+            target/debug/deps/manager_execution*
+            target/debug/deps/manager_tests*
+            target/debug/deps/contract_updater*
+            target/debug/deps/stateless_execution*
+            target/debug/build/bitcoind-*/out
+            target/debug/build/electrsd-*/out
           key: test-cache-${{ github.run_id }}-${{ github.run_number }}
       # Not --all-features: that turns on ddk-manager's `fuzztarget`, which
       # replaces the contract id and serial id generators with constants. A test
@@ -118,12 +125,19 @@ jobs:
         tests: ${{ fromJson(needs.integration_tests_prepare.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
+      # fail-on-cache-miss: a failed save in the prepare job only warns, and
+      # without this every matrix job then fails with "No such file".
       - uses: actions/cache@v4
         with:
           path: |
-            target/debug/deps
-            target/debug/build
+            target/debug/deps/manager_execution*
+            target/debug/deps/manager_tests*
+            target/debug/deps/contract_updater*
+            target/debug/deps/stateless_execution*
+            target/debug/build/bitcoind-*/out
+            target/debug/build/electrsd-*/out
           key: test-cache-${{ github.run_id }}-${{ github.run_number }}
+          fail-on-cache-miss: true
       # --exact, because a matrix entry names one test. Without it the name is
       # a substring filter, and a job for `enum_single_oracle_test` would also
       # run `splice_in_enum_single_oracle_test`.
