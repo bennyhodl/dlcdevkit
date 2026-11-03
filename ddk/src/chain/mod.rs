@@ -1,3 +1,4 @@
+mod broadcasts;
 mod esplora;
 mod fees;
 mod zmq;
