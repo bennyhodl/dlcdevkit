@@ -147,6 +147,15 @@ impl From<BuildError> for Error {
 /// fee rule is the one the contract was funded under: [`FeeRule::default`]
 /// for a new contract, and whichever rule reproduces a signed contract's
 /// funding transaction for an existing one.
+///
+/// The funding transaction's locktime is 0, except for a splice whose terms
+/// carry [`FUND_LOCKTIME_AT_CET_FLAG`](ddk_dlc::FUND_LOCKTIME_AT_CET_FLAG):
+/// its funding transaction takes the CET locktime, and with it every funding
+/// input, a DLC input included, takes sequence 0xfffffffe. That lets a
+/// successor contract be signed now and held until the CET locktime. The flag
+/// does nothing without a DLC input. The flag travels on the offer and is
+/// stored with the contract, so both parties, and a stored contract rebuilt
+/// later, get the same bytes.
 pub fn build_contract_transactions(
     offer: &PartyParams,
     accept: &PartyParams,
@@ -185,13 +194,18 @@ pub fn build_contract_transactions(
     // built through the spliced constructor.
     let has_dlc_inputs = !offer.dlc_inputs.is_empty() || !accept.dlc_inputs.is_empty();
     let mut transactions = if has_dlc_inputs {
+        let fund_lock_time = if terms.contract_flags & ddk_dlc::FUND_LOCKTIME_AT_CET_FLAG != 0 {
+            terms.cet_locktime
+        } else {
+            0
+        };
         ddk_dlc::create_spliced_dlc_transactions_with_fee_rule(
             offer,
             accept,
             &payouts,
             terms.refund_locktime,
             terms.fee_rate_per_vb,
-            0,
+            fund_lock_time,
             terms.cet_locktime,
             terms.fund_output_serial_id,
             terms.contract_flags,

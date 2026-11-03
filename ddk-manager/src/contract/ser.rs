@@ -133,7 +133,9 @@ impl Readable for OfferedContract {
         // Backward compatibility: contract_flags (u8) and later chain_hash
         // ([u8; 32]) were inserted between refund_locktime and counter_party,
         // and either may be absent in a stored contract. A compressed pubkey
-        // starts with 0x02/0x03, while contract_flags is 0x00/0x01 and no
+        // starts with 0x02/0x03, while contract_flags only ever sets bits 0
+        // and 2 (0x00/0x01/0x04/0x05; bit 1 is reserved and rejected on every
+        // offer for exactly this reason, see `validate_contract_flags`) and no
         // supported network's chain hash starts with those bytes (see the
         // chain_hash_first_byte_is_not_a_pubkey_prefix test), so peeking one
         // byte tells the formats apart at each step.
@@ -924,6 +926,56 @@ mod tests {
         assert_eq!(read.contract_flags, 0);
         assert_eq!(read.counter_party, contract.counter_party);
         assert_eq!(read.keys_id, contract.keys_id);
+    }
+
+    /// The held-successor bit, alone or with the refund bit, reads back from
+    /// both formats that carry `contract_flags`.
+    #[test]
+    fn held_successor_contract_flags_survive_storage_round_trip() {
+        for flags in [
+            ddk_dlc::FUND_LOCKTIME_AT_CET_FLAG,
+            ddk_dlc::FUND_LOCKTIME_AT_CET_FLAG | ddk_dlc::REFUND_TO_ACCEPTER_FLAG,
+        ] {
+            let mut contract = offered_contract();
+            contract.contract_flags = flags;
+            contract.chain_hash = Some(chain_hash_from_network(Network::Bitcoin));
+            let serialized = contract.serialize().unwrap();
+            let read = OfferedContract::deserialize(&mut Cursor::new(&serialized)).unwrap();
+            assert_eq!(read.contract_flags, flags);
+            assert_eq!(read.chain_hash, contract.chain_hash);
+            assert_eq!(read.counter_party, contract.counter_party);
+
+            let stored = serialize_pre_chain_hash(&contract, true);
+            let read = OfferedContract::deserialize(&mut Cursor::new(&stored)).unwrap();
+            assert_eq!(read.contract_flags, flags);
+            assert_eq!(read.chain_hash, None);
+            assert_eq!(read.counter_party, contract.counter_party);
+        }
+    }
+
+    /// Bit 1 of `contract_flags` reads back as the first byte of a pubkey, so
+    /// no offer that sets it is ever accepted, and with it never stored.
+    #[test]
+    fn contract_flags_with_bit_one_are_rejected() {
+        for flags in [0x02, 0x03] {
+            let mut contract = offered_contract();
+            contract.contract_flags = flags;
+            let stored = serialize_pre_chain_hash(&contract, true);
+            let misread = OfferedContract::deserialize(&mut Cursor::new(&stored))
+                .map(|read| read.contract_flags);
+            assert_ne!(
+                misread.ok(),
+                Some(flags),
+                "{flags:#04x} should not read back"
+            );
+
+            assert!(super::super::offered_contract::validate_contract_flags(flags).is_err());
+            assert!(contract.validate().is_err());
+        }
+        for flags in [0x00, 0x01, 0x04, 0x05] {
+            assert!(super::super::offered_contract::validate_contract_flags(flags).is_ok());
+        }
+        assert!(super::super::offered_contract::validate_contract_flags(0x80).is_err());
     }
 
     /// A contract with no chain hash writes the bytes it was stored as, so

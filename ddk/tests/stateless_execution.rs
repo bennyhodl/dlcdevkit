@@ -23,8 +23,10 @@
 
 mod stateless_utils;
 
-use bitcoin::Amount;
+use bitcoin::absolute::LockTime;
+use bitcoin::{Amount, Sequence};
 use ddk::contract::Party;
+use ddk_manager::Blockchain;
 use stateless_utils::*;
 
 /// Runs an enum contract to a confirmed funding transaction and settles it with
@@ -663,6 +665,92 @@ async fn assert_splice(
             "a splice-out must decrease the funded amount"
         );
     }
+}
+
+/// A successor offered with `FUND_LOCKTIME_AT_CET_FLAG` is signed now and
+/// held: the network refuses its funding transaction as non-final until the
+/// CET locktime, then takes the very same bytes, and the successor settles as
+/// usual. A CET locktime under 500,000,000 is a block height, so the test holds
+/// the successor for a few blocks.
+#[tokio::test]
+#[ignore]
+async fn held_splice_broadcasts_at_the_cet_locktime() {
+    const HOLD_BLOCKS: u32 = 3;
+    let label = "held_splice_broadcasts_at_the_cet_locktime";
+    let shape = ContractShape::enums(1, 1);
+    let ctx = ChainContext::new(label).await;
+
+    let first_label = format!("{label}-0");
+    let first_id = temporary_contract_id(&first_label);
+    let first = ShapedContract::new(shape, &first_label, OFFER_COLLATERAL, ACCEPT_COLLATERAL).await;
+    let previous = fund_contract(
+        &ctx,
+        ContractSetup::new(
+            first.contract_info.clone(),
+            OFFER_COLLATERAL,
+            first_id,
+            TestParty::new(&ctx, PartySpec::new(Party::Offer, 41, 1), first_id).await,
+            TestParty::new(&ctx, PartySpec::new(Party::Accept, 42, 2), first_id).await,
+        ),
+    )
+    .await;
+
+    let round_label = format!("{label}-1");
+    let collateral = SpliceDelta::In(SPLICE_AMOUNT).apply(previous.fund_value());
+    let offer_share = collateral / 2;
+    let spliced_shape =
+        ShapedContract::new(shape, &round_label, offer_share, collateral - offer_share).await;
+    let spliced_id = temporary_contract_id(&round_label);
+    // Funding a party mines blocks, so the tip is read once both exist.
+    let offerer = TestParty::new(&ctx, PartySpec::new(Party::Offer, 43, 21), spliced_id).await;
+    let accepter = TestParty::new(&ctx, PartySpec::unfunded(Party::Accept, 44), spliced_id).await;
+    let hold_height = ctx.esplora.async_client.get_height().await.unwrap() + HOLD_BLOCKS;
+    let spliced = sign_contract(
+        ContractSetup::new(
+            spliced_shape.contract_info.clone(),
+            collateral,
+            spliced_id,
+            offerer,
+            accepter,
+        )
+        .with_splice(previous.splice_setup_by(Party::Offer, 901))
+        .with_cet_locktime(Some(hold_height))
+        .with_contract_flags(ddk_dlc::FUND_LOCKTIME_AT_CET_FLAG),
+    )
+    .await;
+
+    let funding_transaction = &spliced.funding_transaction;
+    assert_eq!(
+        funding_transaction.lock_time,
+        LockTime::from_height(hold_height).unwrap()
+    );
+    assert!(
+        funding_transaction
+            .input
+            .iter()
+            .all(|input| input.sequence == Sequence::ENABLE_LOCKTIME_NO_RBF),
+        "every funding input, the DLC input included, must enable the locktime"
+    );
+
+    // A transaction locked to height H may enter block H + 1 at the earliest,
+    // so the mempool refuses it until the tip reaches H.
+    ctx.generate_blocks(HOLD_BLOCKS - 1).await;
+    let refused = ctx
+        .esplora
+        .send_transaction(funding_transaction)
+        .await
+        .expect_err("a funding transaction before its locktime must be refused");
+    assert!(
+        refused.to_string().contains("non-final"),
+        "expected a non-final rejection, got: {refused}"
+    );
+
+    ctx.generate_blocks(1).await;
+    ctx.broadcast_and_confirm(funding_transaction, 6).await;
+    assert_splice(&ctx, &previous, &spliced, true).await;
+
+    let attestations = spliced_shape.attest().await;
+    close_with_cet(&ctx, &spliced, Party::Offer, &attestations).await;
 }
 
 // Enum contracts, one and several oracles.
