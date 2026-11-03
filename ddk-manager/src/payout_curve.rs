@@ -484,7 +484,7 @@ impl Evaluable for HyperbolaPayoutCurvePiece {
 /// Provides information on if and how to round the payouts of a payout function
 /// to reduce the number of adaptor signatures required. A `rounding_mod` value
 /// of 1 indicates that no rounding is performed.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(
     feature = "use-serde",
     derive(Serialize, Deserialize),
@@ -498,7 +498,7 @@ pub struct RoundingInterval {
 }
 
 /// A set of rounding intervals.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(
     feature = "use-serde",
     derive(Serialize, Deserialize),

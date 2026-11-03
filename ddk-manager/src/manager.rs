@@ -19,7 +19,7 @@ use bitcoin::hex::DisplayHex;
 use bitcoin::Transaction;
 use bitcoin::{Address, Amount};
 use ddk_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
-use ddk_messages::{AcceptDlc, CloseDlc, Message as DlcMessage, OfferDlc, SignDlc};
+use ddk_messages::{AcceptDlc, CloseDlc, Message as DlcMessage, OfferDlc, SignDlc, TlvStream};
 use futures::stream;
 use futures::stream::FuturesUnordered;
 use futures::{StreamExt, TryStreamExt};
@@ -115,6 +115,7 @@ pub struct Manager<
     time: T,
     logger: L,
     close_approver: Option<Arc<dyn CooperativeCloseApprover>>,
+    allowed_offer_tlv_types: Vec<u16>,
 }
 
 macro_rules! get_contract_in_state {
@@ -172,7 +173,39 @@ where
             time,
             logger,
             close_approver,
+            allowed_offer_tlv_types: Vec::new(),
         })
+    }
+
+    /// Allows TLV records of `tlv_types` on offers. An offer, received or
+    /// committed, carrying a record of any other type is rejected; no type is
+    /// allowed by default.
+    ///
+    /// A record on an offer can change the contract: a
+    /// [`PayoutScriptOverrides`](ddk_messages::PayoutScriptOverrides) record
+    /// redirects what the accepting party is paid. Allowing a type is opting
+    /// in to it. Checking the records an offer carries before accepting it is
+    /// still the application's job.
+    pub fn with_allowed_offer_tlv_types(mut self, tlv_types: &[u16]) -> Self {
+        self.allowed_offer_tlv_types = tlv_types.to_vec();
+        self
+    }
+
+    /// Rejects an offer's TLV stream if it carries a record of a type this
+    /// manager does not allow.
+    fn check_offer_tlv_types(&self, tlvs: &TlvStream) -> Result<(), Error> {
+        let allowed = |tlv_type: u64| {
+            self.allowed_offer_tlv_types
+                .iter()
+                .any(|allowed| u64::from(*allowed) == tlv_type)
+        };
+        match tlvs.raw().find(|record| !allowed(record.tlv_type)) {
+            Some(record) => Err(Error::InvalidParameters(format!(
+                "offer carries a TLV record of type {}, which this node does not allow",
+                record.tlv_type
+            ))),
+            None => Ok(()),
+        }
     }
 
     /// Get the store from the Manager to access contracts.
@@ -384,6 +417,7 @@ where
     /// stored contract so the store matches what goes out on the wire.
     #[tracing::instrument(skip_all)]
     pub async fn commit_offer(&self, offer_msg: &OfferDlc) -> Result<(), Error> {
+        self.check_offer_tlv_types(&offer_msg.tlvs)?;
         let mut offered_contract = get_contract_in_state!(
             self,
             &offer_msg.temporary_contract_id,
@@ -452,6 +486,7 @@ where
         offered_message: &OfferDlc,
         counter_party: PublicKey,
     ) -> Result<(), Error> {
+        self.check_offer_tlv_types(&offered_message.tlvs)?;
         offered_message.validate(
             &self.secp,
             REFUND_DELAY,

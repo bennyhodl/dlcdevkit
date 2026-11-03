@@ -186,7 +186,9 @@ async fn commit_offer_stores_the_message_stream() {
     let mut offer: ddk_messages::OfferDlc =
         serde_json::from_str(include_str!("../test_inputs/offer_contract.json")).unwrap();
 
-    let manager = get_manager(logger).await;
+    let manager = get_manager(logger)
+        .await
+        .with_allowed_offer_tlv_types(&[65007]);
     manager
         .on_dlc_message(&Message::Offer(offer.clone()), pubkey())
         .await
@@ -210,4 +212,56 @@ async fn commit_offer_stores_the_message_stream() {
         panic!("contract is not offered")
     };
     assert_eq!(offered.tlvs, offer.tlvs);
+}
+
+/// A record of type 65007 with a one-byte body.
+fn tlv_stream_with_a_record() -> ddk_messages::tlv_stream::TlvStream {
+    ddk_messages::tlv_stream::TlvStream::read_to_end(&mut ddk_messages::lightning::io::Cursor::new(
+        [0xfd, 0xfd, 0xef, 0x01, 7],
+    ))
+    .unwrap()
+}
+
+/// A record on an offer can change the contract, so a manager takes only the
+/// TLV types it was told to allow.
+#[tokio::test]
+async fn reject_offer_carrying_a_tlv_type_not_allowed() {
+    let logger = Arc::new(Logger::disabled("test_manager".to_string()));
+    let mut offer: ddk_messages::OfferDlc =
+        serde_json::from_str(include_str!("../test_inputs/offer_contract.json")).unwrap();
+    offer.tlvs = tlv_stream_with_a_record();
+
+    get_manager(logger.clone())
+        .await
+        .on_dlc_message(&Message::Offer(offer.clone()), pubkey())
+        .await
+        .expect_err("To reject an offer carrying a TLV type no one allowed");
+
+    get_manager(logger)
+        .await
+        .with_allowed_offer_tlv_types(&[65007])
+        .on_dlc_message(&Message::Offer(offer), pubkey())
+        .await
+        .expect("To accept an offer carrying an allowed TLV type");
+}
+
+/// The offering side is held to the same list: a record goes out only if the
+/// manager that builds the contract from it allows its type.
+#[tokio::test]
+async fn reject_commit_offer_carrying_a_tlv_type_not_allowed() {
+    let logger = Arc::new(Logger::disabled("test_manager".to_string()));
+    let mut offer: ddk_messages::OfferDlc =
+        serde_json::from_str(include_str!("../test_inputs/offer_contract.json")).unwrap();
+
+    let manager = get_manager(logger).await;
+    manager
+        .on_dlc_message(&Message::Offer(offer.clone()), pubkey())
+        .await
+        .unwrap();
+
+    offer.tlvs = tlv_stream_with_a_record();
+    manager
+        .commit_offer(&offer)
+        .await
+        .expect_err("To reject committing an offer carrying a TLV type no one allowed");
 }

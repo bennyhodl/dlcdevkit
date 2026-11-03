@@ -1,9 +1,10 @@
 //! Module for working with DLC inputs
 
 use bitcoin::{Amount, EcdsaSighashType, OutPoint, ScriptBuf, Transaction, Witness};
-use secp256k1_zkp::{ecdsa::Signature, PublicKey, Secp256k1, SecretKey, Signing, Verification};
+use secp256k1_zkp::{PublicKey, Secp256k1, SecretKey, Signing, Verification};
 
-use crate::{util::finalize_sig, Error, TxInputInfo};
+use crate::util::{finalize_sig, multisig_witness, sighash_all_signature};
+use crate::{Error, TxInputInfo};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "use-serde", derive(serde::Serialize, serde::Deserialize))]
@@ -79,6 +80,16 @@ pub fn create_dlc_funding_input_signature<C: Signing>(
 }
 
 /// Verify a DLC funding input signature
+///
+/// `signature` is one party's half of the 2-of-2 witness as it goes on chain:
+/// a DER signature followed by the `SIGHASH_ALL` byte, as produced by
+/// [`create_dlc_funding_input_signature`]. Any other encoding or sighash type
+/// is rejected, since it could not be combined into a valid witness.
+///
+/// Changed in 2.0.0: a 64-byte compact signature, or a DER signature with a
+/// sighash byte other than `SIGHASH_ALL`, used to be accepted. Callers that
+/// hold a raw [`Signature`](secp256k1_zkp::ecdsa::Signature) pass
+/// `util::finalize_sig(&signature, EcdsaSighashType::All)` instead.
 pub fn verify_dlc_funding_input_signature<V: Verification>(
     secp: &Secp256k1<V>,
     fund_transaction: &Transaction,
@@ -88,15 +99,7 @@ pub fn verify_dlc_funding_input_signature<V: Verification>(
     pubkey: &PublicKey,
 ) -> Result<(), Error> {
     let funding_script = create_dlc_input_funding_script(dlc_input);
-
-    // Parse DER signature instead of compact
-    let signature = if signature.len() == 64 {
-        Signature::from_compact(&signature)?
-    } else {
-        // Remove sighash type byte and parse DER
-        let sig_bytes = &signature[..signature.len() - 1];
-        Signature::from_der(sig_bytes)?
-    };
+    let signature = sighash_all_signature(&signature)?;
 
     super::verify_tx_input_sig(
         secp,
@@ -110,27 +113,25 @@ pub fn verify_dlc_funding_input_signature<V: Verification>(
 }
 
 /// Combine both parties' signatures for a DLC input
+///
+/// Both signatures are encoded as [`create_dlc_funding_input_signature`]
+/// produces them (DER followed by `SIGHASH_ALL`); anything else is an error
+/// rather than a witness that fails on chain. The witness is built by
+/// [`multisig_witness`](crate::util::multisig_witness).
+///
+/// Changed in 2.0.0: the signatures are `&[u8]` (was `&Vec<u8>`, which still
+/// coerces, so call sites compile unchanged) and the result is
+/// `Result<Witness, Error>` (was `Witness`): add `?` at the call site.
 pub fn combine_dlc_input_signatures(
     dlc_input: &DlcInputInfo,
-    my_signature: &Vec<u8>,
-    other_signature: &Vec<u8>,
+    my_signature: &[u8],
+    other_signature: &[u8],
     my_pubkey: &PublicKey,
     other_pubkey: &PublicKey,
-) -> Witness {
-    let funding_script = create_dlc_input_funding_script(dlc_input);
-
-    // Order signatures based on pubkey order
-    let (first_sig, second_sig) = if my_pubkey <= other_pubkey {
-        (my_signature, other_signature)
-    } else {
-        (other_signature, my_signature)
-    };
-
-    let mut witness = Witness::new();
-    witness.push([]);
-    witness.push(first_sig);
-    witness.push(second_sig);
-    witness.push(funding_script.to_bytes());
-
-    witness
+) -> Result<Witness, Error> {
+    Ok(multisig_witness(
+        &create_dlc_input_funding_script(dlc_input),
+        (*my_pubkey, sighash_all_signature(my_signature)?),
+        (*other_pubkey, sighash_all_signature(other_signature)?),
+    ))
 }

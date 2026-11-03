@@ -3,20 +3,12 @@ use std::ops::Deref;
 
 use bitcoin::{consensus::Encodable, Amount, ScriptBuf, Txid};
 use ddk_dlc::{dlc_input::DlcInputInfo, util::get_common_fee, PartyParams, TxInputInfo};
-use ddk_messages::{
-    oracle_msgs::{OracleAnnouncement, OracleAttestation},
-    DlcInput, FundingInput,
-};
-use ddk_trie::RangeInfo;
+use ddk_messages::{oracle_msgs::OracleAnnouncement, DlcInput, FundingInput};
 #[cfg(not(feature = "fuzztarget"))]
 use secp256k1_zkp::rand::{thread_rng, Rng, RngCore};
 use secp256k1_zkp::{Secp256k1, Signing};
 
-use crate::{
-    contract::{contract_info::ContractInfo, ser::Serializable, AdaptorInfo},
-    error::Error,
-    Blockchain, ContractSigner, Wallet,
-};
+use crate::{contract::ser::Serializable, error::Error, Blockchain, ContractSigner, Wallet};
 
 macro_rules! get_object_in_state {
     ($manager: expr, $id: expr, $state: ident, $peer_id: expr, $object_type: ident, $get_call: ident) => {{
@@ -226,24 +218,6 @@ fn get_approximate_required_amount(
 pub(crate) fn get_half_common_fee(fee_rate: u64) -> Result<Amount, Error> {
     let common_fee = ddk_dlc::util::get_common_fee(fee_rate)?;
     Ok(common_fee / 2)
-}
-
-/// Finds the CET for the attested outcomes and the oracle signatures that
-/// decrypt its adaptor signature.
-///
-/// Attestations must bind one to one to the oracles of the matched
-/// combination; see
-/// [`ContractInfo::get_range_info_and_oracle_signatures`].
-pub(crate) fn get_range_info_and_oracle_sigs(
-    contract_info: &ContractInfo,
-    adaptor_info: &AdaptorInfo,
-    attestations: &[(usize, OracleAttestation)],
-) -> Result<(RangeInfo, Vec<Vec<secp256k1_zkp::schnorr::Signature>>), Error> {
-    contract_info
-        .get_range_info_and_oracle_signatures(adaptor_info, attestations, 0)?
-        .ok_or_else(|| {
-            Error::InvalidState("Could not find closing info for given outcomes".to_string())
-        })
 }
 
 pub(crate) fn get_latest_maturity_date(

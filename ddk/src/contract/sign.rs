@@ -8,8 +8,8 @@ use ddk_messages::{AcceptDlc, CetAdaptorSignatures, FundingSignatures, OfferDlc,
 
 use super::context::{
     context_from_messages, contract_id_from_transactions, create_adaptor_signatures,
-    create_refund_signature, ensure_funding_key, funding_input_index,
-    verify_counterparty_signatures, ContractContext,
+    create_refund_signature, ensure_funding_key, funding_input_index, verify_party_signatures,
+    ContractContext,
 };
 use super::error::ContractError;
 use super::psbt::{ensure_psbt_matches_funding_transaction, funding_signature_from_witness};
@@ -164,7 +164,7 @@ fn sign_with_context(
         &offer.funding_pubkey,
         ContractError::InvalidOffer,
     )?;
-    verify_counterparty_signatures(
+    verify_party_signatures(
         &secp,
         &context,
         offer.get_total_collateral(),

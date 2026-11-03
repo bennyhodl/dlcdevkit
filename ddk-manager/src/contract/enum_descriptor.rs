@@ -17,7 +17,7 @@ use secp256k1_zkp::{
 use serde::{Deserialize, Serialize};
 
 /// A descriptor for a contract whose outcomes are represented as an enumeration.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(
     feature = "use-serde",
     derive(Serialize, Deserialize),

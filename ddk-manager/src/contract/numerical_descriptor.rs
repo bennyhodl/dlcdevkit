@@ -13,7 +13,7 @@ use secp256k1_zkp::{All, EcdsaAdaptorSignature, PublicKey, Secp256k1, SecretKey}
 use serde::{Deserialize, Serialize};
 
 /// Information about the allowed deviation in outcome value between the oracles.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(
     feature = "use-serde",
     derive(Serialize, Deserialize),
@@ -31,7 +31,7 @@ pub struct DifferenceParams {
     pub maximize_coverage: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(
     feature = "use-serde",
     derive(Serialize, Deserialize),

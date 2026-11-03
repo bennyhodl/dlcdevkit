@@ -4,11 +4,10 @@ use crate::error::Error;
 
 use super::ContractDescriptor;
 use bitcoin::Amount;
+use ddk_dlc::DUST_LIMIT;
 use secp256k1_zkp::XOnlyPublicKey;
 #[cfg(feature = "use-serde")]
 use serde::{Deserialize, Serialize};
-
-const DUST_LIMIT: Amount = Amount::from_sat(1000);
 
 /// Oracle information required for the initial creation of a contract.
 #[derive(Debug, Clone)]

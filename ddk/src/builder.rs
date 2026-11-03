@@ -45,6 +45,7 @@ pub struct Builder<T, S, O> {
     wallet_config: crate::wallet::WalletConfig,
     logger: Option<Arc<Logger>>,
     close_approver: Option<Arc<dyn CooperativeCloseApprover>>,
+    allowed_offer_tlv_types: Vec<u16>,
 }
 
 /// Defaults when creating a DDK application
@@ -67,6 +68,7 @@ impl<T: Transport, S: Storage, O: Oracle> Default for Builder<T, S, O> {
             wallet_config: crate::wallet::WalletConfig::default(),
             logger: None,
             close_approver: None,
+            allowed_offer_tlv_types: Vec::new(),
         }
     }
 }
@@ -184,6 +186,14 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
         self
     }
 
+    /// Allow TLV records of `tlv_types` on offers. An offer carrying a record
+    /// of any other type is rejected; no type is allowed by default. See
+    /// [`Manager::with_allowed_offer_tlv_types`].
+    pub fn set_allowed_offer_tlv_types(&mut self, tlv_types: &[u16]) -> &mut Self {
+        self.allowed_offer_tlv_types = tlv_types.to_vec();
+        self
+    }
+
     /// Setup the logger based on the provided logger or use default console logging
     fn setup_logger(&self, name: &str) -> Result<Arc<Logger>, Error> {
         match &self.logger {
@@ -263,7 +273,8 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
                 logger.clone(),
                 self.close_approver.clone(),
             )
-            .await?,
+            .await?
+            .with_allowed_offer_tlv_types(&self.allowed_offer_tlv_types),
         );
 
         let manager_clone = manager.clone();

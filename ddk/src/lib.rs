@@ -57,7 +57,8 @@ pub use bip329;
 /// The DLC message types, and the macros for defining a TLV record to attach to one.
 ///
 /// Re-exported so an application can define its own record without depending on
-/// `ddk-messages` or `lightning` directly:
+/// `ddk-messages` or `lightning` directly. A manager receiving the offer rejects it
+/// unless the record's type is allowed with `Builder::set_allowed_offer_tlv_types`:
 ///
 /// ```
 /// use ddk::ddk_messages::{impl_dlc_tlv_record, impl_dlc_writeable};
