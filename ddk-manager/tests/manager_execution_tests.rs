@@ -30,7 +30,7 @@ use ddk_messages::{CetAdaptorSignatures, Message};
 use lightning::ln::wire::Type;
 use lightning::util::ser::Writeable;
 use secp256k1_zkp::rand::{thread_rng, RngCore};
-use secp256k1_zkp::{ecdsa::Signature, EcdsaAdaptorSignature, PublicKey};
+use secp256k1_zkp::{ecdsa::Signature, EcdsaAdaptorSignature, PublicKey, XOnlyPublicKey};
 use serde_json::from_str;
 use std::collections::HashMap;
 use std::sync::{
@@ -287,13 +287,16 @@ const SPLICE_MATURITY_STEP: u32 = 60;
 /// paths do.
 const SPLICE_TIME_HEADROOM: u64 = 3600;
 
+/// The oracle both managers fetch announcements and attestations from.
+type TestOracle = Arc<dyn Oracle + Send + Sync>;
+
 /// The manager the tests drive, with the concrete backends `test_utils` builds.
 type TestManager = Manager<
     Arc<DlcDevKitWallet>,
     Arc<CachedContractSignerProvider<Arc<DlcDevKitWallet>, SimpleSigner>>,
     Arc<EsploraClient>,
     Arc<MemoryStorage>,
-    Arc<MemoryOracle>,
+    TestOracle,
     Arc<test_utils::MockTime>,
     SimpleSigner,
     Arc<Logger>,
@@ -478,6 +481,17 @@ async fn enum_single_oracle_test() {
         false,
     )
     .await;
+}
+
+/// An oracle that rotates its key keeps serving the events of its retired
+/// keys. A contract on an event announced under the oracle's old key closes
+/// at maturity on that key's attestation, through the same oracle that now
+/// announces under a new key.
+#[tokio::test]
+#[ignore]
+async fn enum_rotated_oracle_key_test() {
+    let (test_params, oracle) = get_rotated_oracle_test_params().await;
+    manager_execution_test_with_oracle(test_params, Arc::new(oracle), TestPath::Close, false).await;
 }
 
 #[tokio::test]
@@ -1394,7 +1408,9 @@ async fn get_attestations(test_params: &TestParams) -> Vec<(usize, OracleAttesta
                 .iter()
                 .find(|x| x.get_public_key() == *pk);
             if let Some(o) = oracle {
-                if let Ok(attestation) = o.get_attestation(&contract_info.oracles.event_id).await {
+                if let Ok(attestation) =
+                    o.get_attestation(pk, &contract_info.oracles.event_id).await
+                {
                     attestations.push((i, attestation));
                 }
             }
@@ -1407,19 +1423,42 @@ async fn get_attestations(test_params: &TestParams) -> Vec<(usize, OracleAttesta
     panic!("No attestations found");
 }
 
-/// Runs one execution path end to end against its own regtest backends.
+/// Runs one execution path end to end against its own regtest backends, with
+/// the managers routing to `test_params.oracles` by key.
+async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_close: bool) {
+    let oracles: HashMap<XOnlyPublicKey, Arc<MemoryOracle>> = test_params
+        .oracles
+        .iter()
+        .map(|oracle| (oracle.get_public_key(), Arc::new(oracle.clone())))
+        .collect();
+    manager_execution_test_with_oracle(test_params, Arc::new(oracles), path, manual_close).await
+}
+
+/// Runs one execution path end to end against its own regtest backends, with
+/// the managers fetching from `oracle`.
 ///
 /// The body runs on a thread of its own so it gets a stack sized for the nested
 /// async state machines it drives; see [`test_utils::on_big_stack`].
-async fn manager_execution_test(test_params: TestParams, path: TestPath, manual_close: bool) {
+async fn manager_execution_test_with_oracle(
+    test_params: TestParams,
+    oracle: TestOracle,
+    path: TestPath,
+    manual_close: bool,
+) {
     test_utils::on_big_stack(manager_execution_test_inner(
         test_params,
+        oracle,
         path,
         manual_close,
     ))
 }
 
-async fn manager_execution_test_inner(test_params: TestParams, path: TestPath, manual_close: bool) {
+async fn manager_execution_test_inner(
+    test_params: TestParams,
+    oracle: TestOracle,
+    path: TestPath,
+    manual_close: bool,
+) {
     env_logger::try_init().ok();
     let logger = Arc::new(Logger::disabled("test_manager_execution".to_string()));
     // Held for the whole test: these assertions depend on the chain advancing
@@ -1438,15 +1477,6 @@ async fn manager_execution_test_inner(test_params: TestParams, path: TestPath, m
     let alice_wallet = Arc::new(alice_wallet);
     let bob_wallet = Arc::new(bob_wallet);
     let sink = Arc::new(sink_rpc);
-
-    let mut alice_oracles = HashMap::with_capacity(1);
-    let mut bob_oracles = HashMap::with_capacity(1);
-
-    for oracle in test_params.oracles.clone() {
-        let oracle = Arc::new(oracle);
-        alice_oracles.insert(oracle.get_public_key(), Arc::clone(&oracle));
-        bob_oracles.insert(oracle.get_public_key(), Arc::clone(&oracle));
-    }
 
     let mock_time = Arc::new(test_utils::MockTime {});
     // A splice chain has to stay below every maturity in the chain until the
@@ -1473,7 +1503,7 @@ async fn manager_execution_test_inner(test_params: TestParams, path: TestPath, m
             Arc::clone(&alice_wallet),
             Arc::clone(&electrs),
             Arc::clone(&alice_storage),
-            alice_oracles,
+            Arc::clone(&oracle),
             Arc::clone(&mock_time),
             logger.clone(),
             Some(close_approver.clone()),
@@ -1491,7 +1521,7 @@ async fn manager_execution_test_inner(test_params: TestParams, path: TestPath, m
             Arc::clone(&bob_wallet),
             Arc::clone(&electrs),
             Arc::clone(&bob_storage),
-            bob_oracles,
+            oracle,
             Arc::clone(&mock_time),
             logger.clone(),
             Some(close_approver.clone()),

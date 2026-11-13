@@ -7,7 +7,7 @@ use ddk::oracle::memory::MemoryOracle;
 use ddk::storage::memory::MemoryStorage;
 use ddk::wallet::DlcDevKitWallet;
 use ddk::{chain::EsploraClient, logger::Logger};
-use ddk_manager::{manager::Manager, CachedContractSignerProvider, Oracle, SimpleSigner};
+use ddk_manager::{manager::Manager, CachedContractSignerProvider, SimpleSigner};
 use ddk_messages::Message;
 use ddk_testenv::dlc::{announce_enum_event, contract_input, enum_descriptor, ContractLeg};
 use secp256k1_zkp::{rand::Fill, PublicKey, XOnlyPublicKey};
@@ -19,7 +19,7 @@ type TestManager = Manager<
     Arc<CachedContractSignerProvider<Arc<DlcDevKitWallet>, SimpleSigner>>,
     Arc<EsploraClient>,
     Arc<MemoryStorage>,
-    Arc<MemoryOracle>,
+    Arc<HashMap<XOnlyPublicKey, Arc<MemoryOracle>>>,
     Arc<MockTime>,
     SimpleSigner,
     Arc<Logger>,
@@ -67,7 +67,7 @@ async fn get_manager(logger: Arc<Logger>) -> TestManager {
         wallet.clone(),
         blockchain.clone(),
         store.clone(),
-        oracles,
+        Arc::new(oracles),
         time,
         logger,
         None,

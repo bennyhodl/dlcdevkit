@@ -28,7 +28,7 @@ Users must implement these traits for their specific backends:
 | `Storage` | Persist and retrieve contracts |
 | `Wallet` | Address generation, UTXO management, PSBT signing |
 | `Blockchain` | Transaction broadcasting, block fetching, confirmations |
-| `Oracle` | Fetch oracle announcements and attestations |
+| `Oracle` | Fetch oracle announcements and attestations by announcing key and event id. One oracle may sign under several keys over time; `HashMap<XOnlyPublicKey, _>` routes to several single-key oracles |
 | `ContractSignerProvider` | Derive contract signing keys |
 
 ## Manager API

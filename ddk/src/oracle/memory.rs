@@ -22,6 +22,13 @@ impl Default for MemoryOracle {
     }
 }
 
+impl MemoryOracle {
+    /// The key this oracle announces and attests with.
+    pub fn get_public_key(&self) -> bitcoin::XOnlyPublicKey {
+        self.oracle.public_key()
+    }
+}
+
 impl Oracle for MemoryOracle {
     fn name(&self) -> String {
         "kormir".to_string()
@@ -30,12 +37,9 @@ impl Oracle for MemoryOracle {
 
 #[async_trait::async_trait]
 impl ddk_manager::Oracle for MemoryOracle {
-    fn get_public_key(&self) -> bitcoin::XOnlyPublicKey {
-        self.oracle.public_key()
-    }
-
     async fn get_announcement(
         &self,
+        _oracle_public_key: &bitcoin::XOnlyPublicKey,
         event_id: &str,
     ) -> Result<OracleAnnouncement, ddk_manager::error::Error> {
         Ok(self
@@ -50,6 +54,7 @@ impl ddk_manager::Oracle for MemoryOracle {
 
     async fn get_attestation(
         &self,
+        _oracle_public_key: &bitcoin::XOnlyPublicKey,
         event_id: &str,
     ) -> Result<OracleAttestation, ddk_manager::error::Error> {
         let event = self
@@ -116,7 +121,10 @@ mod tests {
             .unwrap();
 
         let ann = oracle
-            .get_announcement(&announcement.oracle_event.event_id)
+            .get_announcement(
+                &announcement.oracle_public_key,
+                &announcement.oracle_event.event_id,
+            )
             .await
             .unwrap();
 
@@ -132,7 +140,10 @@ mod tests {
             .unwrap();
 
         let att = oracle
-            .get_attestation(&announcement.oracle_event.event_id)
+            .get_attestation(
+                &announcement.oracle_public_key,
+                &announcement.oracle_event.event_id,
+            )
             .await
             .unwrap();
 

@@ -189,20 +189,23 @@ impl DdkRpc for DdkNode {
         } = request.into_inner();
         let contract_input: ContractInput = serde_json::from_slice(&contract_input)
             .map_err(|e| Status::invalid_argument(format!("contract input is not valid: {e}")))?;
+        // One announcement per oracle key, in contract input order.
         let mut oracle_announcements = Vec::new();
         for info in &contract_input.contract_infos {
-            let announcement = self
-                .node
-                .oracle
-                .get_announcement(&info.oracles.event_id)
-                .await
-                .map_err(|e| {
-                    Status::not_found(format!(
-                        "oracle announcement for event {} could not be fetched: {e}",
-                        info.oracles.event_id
-                    ))
-                })?;
-            oracle_announcements.push(announcement)
+            for public_key in &info.oracles.public_keys {
+                let announcement = self
+                    .node
+                    .oracle
+                    .get_announcement(public_key, &info.oracles.event_id)
+                    .await
+                    .map_err(|e| {
+                        Status::not_found(format!(
+                            "oracle announcement for event {} under key {public_key} could not be fetched: {e}",
+                            info.oracles.event_id
+                        ))
+                    })?;
+                oracle_announcements.push(announcement)
+            }
         }
 
         let counter_party = PublicKey::from_str(&counter_party)
@@ -435,7 +438,7 @@ impl DdkRpc for DdkNode {
         let oracle_announcement = self
             .node
             .oracle
-            .get_announcement(&event_id)
+            .get_announcement(&self.node.oracle.get_public_key(), &event_id)
             .await
             .map_err(|e| Status::not_found(format!("announcement {event_id}: {e}")))?;
         let announcement = serde_json::to_vec(&oracle_announcement).map_err(internal)?;

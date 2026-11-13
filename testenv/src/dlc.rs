@@ -219,8 +219,9 @@ pub async fn attestations(
 ) -> Vec<(usize, OracleAttestation)> {
     let mut attestations = Vec::with_capacity(signers.len());
     for index in signers {
-        let attestation = oracles[*index]
-            .get_attestation(event_id)
+        let oracle = &oracles[*index];
+        let attestation = oracle
+            .get_attestation(&oracle.get_public_key(), event_id)
             .await
             .expect("oracle could not produce an attestation");
         assert!(

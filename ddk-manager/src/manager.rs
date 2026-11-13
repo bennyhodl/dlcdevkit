@@ -26,9 +26,7 @@ use futures::{StreamExt, TryStreamExt};
 use lightning::util::logger::Logger;
 use lightning::{log_debug, log_error, log_info, log_trace, log_warn};
 use once_cell::sync::Lazy;
-use secp256k1_zkp::XOnlyPublicKey;
 use secp256k1_zkp::{All, PublicKey, Secp256k1};
-use std::collections::HashMap;
 use std::ops::Deref;
 use std::string::ToString;
 use std::sync::Arc;
@@ -106,7 +104,7 @@ pub struct Manager<
     T::Target: Time,
     L::Target: Logger,
 {
-    oracles: HashMap<XOnlyPublicKey, O>,
+    oracle: O,
     wallet: W,
     signer_provider: SP,
     blockchain: B,
@@ -144,6 +142,10 @@ where
 {
     /// Create a new Manager struct.
     ///
+    /// `oracle` serves the announcements and attestations of every contract.
+    /// To use several oracles that each sign under one key, pass an
+    /// `Arc<HashMap<XOnlyPublicKey, _>>` of them, which routes by key.
+    ///
     /// `close_approver` is consulted before a counterparty's cooperative close
     /// proposal is broadcast; with `None`, [`Manager::accept_cooperative_close`]
     /// rejects every proposal.
@@ -154,7 +156,7 @@ where
         signer_provider: SP,
         blockchain: B,
         store: S,
-        oracles: HashMap<XOnlyPublicKey, O>,
+        oracle: O,
         time: T,
         logger: L,
         close_approver: Option<Arc<dyn CooperativeCloseApprover>>,
@@ -169,7 +171,7 @@ where
             signer_provider,
             blockchain,
             store,
-            oracles,
+            oracle,
             time,
             logger,
             close_approver,
@@ -739,11 +741,10 @@ where
     ) -> Result<Vec<OracleAnnouncement>, Error> {
         let mut announcements = Vec::new();
         for pubkey in &oracle_inputs.public_keys {
-            let oracle = self
-                .oracles
-                .get(pubkey)
-                .ok_or_else(|| Error::InvalidParameters("Unknown oracle public key".to_string()))?;
-            let announcement = oracle.get_announcement(&oracle_inputs.event_id).await?;
+            let announcement = self
+                .oracle
+                .get_announcement(pubkey, &oracle_inputs.event_id)
+                .await?;
             announcements.push(announcement);
         }
 
@@ -947,32 +948,23 @@ where
                             contract.accepted_contract.get_contract_id_string(),
                             announcement.oracle_event.event_id
                         );
-                        // First try to get the oracle
-                        let oracle = match self.oracles.get(&announcement.oracle_public_key) {
-                            Some(oracle) => oracle,
-                            None => {
-                                log_debug!(self.logger,
-                                    "Oracle not found. pubkey={}. contract_id={} event_id={}", 
-                                    announcement.oracle_public_key,
-                                    contract.accepted_contract.get_contract_id_string(),
-                                    announcement.oracle_event.event_id
-                                );
-                                return None;
-                            }
-                        };
-                        // Then try to get the attestation
-                        let attestation = match oracle
-                            .get_attestation(&announcement.oracle_event.event_id)
+                        let attestation = match self
+                            .oracle
+                            .get_attestation(
+                                &announcement.oracle_public_key,
+                                &announcement.oracle_event.event_id,
+                            )
                             .await
                         {
                             Ok(attestation) => attestation,
-                            Err(_) => {
-                                // log_error!(self.logger,
-                                //     "Attestation not found for event. pubkey={} event_id={} error={}",
-                                //     announcement.oracle_public_key,
-                                //     announcement.oracle_event.event_id,
-                                //     e.to_string()
-                                // );
+                            Err(e) => {
+                                log_debug!(self.logger,
+                                    "Could not get attestation. pubkey={} contract_id={} event_id={} error={}",
+                                    announcement.oracle_public_key,
+                                    contract.accepted_contract.get_contract_id_string(),
+                                    announcement.oracle_event.event_id,
+                                    e
+                                );
                                 return None;
                             }
                         };

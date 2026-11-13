@@ -83,6 +83,11 @@ impl P2PDOracleClient {
 
         Ok(P2PDOracleClient { host, public_key })
     }
+
+    /// The key the oracle reported when this client connected.
+    pub fn get_public_key(&self) -> XOnlyPublicKey {
+        self.public_key
+    }
 }
 
 fn parse_event_id(event_id: &str) -> Result<(String, DateTime<Utc>), OracleError> {
@@ -100,12 +105,9 @@ fn parse_event_id(event_id: &str) -> Result<(String, DateTime<Utc>), OracleError
 
 #[async_trait::async_trait]
 impl ddk_manager::Oracle for P2PDOracleClient {
-    fn get_public_key(&self) -> XOnlyPublicKey {
-        self.public_key
-    }
-
     async fn get_announcement(
         &self,
+        _oracle_public_key: &XOnlyPublicKey,
         event_id: &str,
     ) -> Result<OracleAnnouncement, DlcManagerError> {
         let (asset_id, date_time) =
@@ -119,6 +121,7 @@ impl ddk_manager::Oracle for P2PDOracleClient {
 
     async fn get_attestation(
         &self,
+        _oracle_public_key: &XOnlyPublicKey,
         event_id: &str,
     ) -> Result<OracleAttestation, ddk_manager::error::Error> {
         let (asset_id, date_time) =

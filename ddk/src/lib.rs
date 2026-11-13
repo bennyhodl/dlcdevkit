@@ -276,7 +276,8 @@ pub trait KeyStorage {
 /// Interface for DLC oracle implementations.
 ///
 /// This trait extends the Rust-DLC oracle trait (`ddk_manager::Oracle`) and provides
-/// a way to identify different oracle implementations. Oracles are responsible for:
+/// a way to identify different oracle implementations. An oracle is named, not
+/// keyed: it may sign under several keys over time. Oracles are responsible for:
 /// - Providing event announcements
 /// - Publishing attestations
 /// - Maintaining cryptographic proofs

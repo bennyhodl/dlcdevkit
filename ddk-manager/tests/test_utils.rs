@@ -19,11 +19,13 @@ use ddk_manager::{
     },
     payout_curve::HyperbolaPayoutCurvePiece,
 };
-use ddk_messages::oracle_msgs::OracleAnnouncement;
+use ddk_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
 use ddk_testenv::dlc::{self, ContractLeg};
 use ddk_testenv::TestEnv;
 use ddk_trie::OracleNumericInfo;
 use secp256k1_zkp::rand::{seq::SliceRandom, thread_rng, Fill, RngCore};
+use secp256k1_zkp::XOnlyPublicKey;
+use std::collections::HashMap;
 use std::fmt::Write;
 use std::{cell::RefCell, sync::Arc};
 
@@ -298,6 +300,130 @@ pub async fn get_enum_test_params(
     }
 }
 
+/// An oracle that rotates its signing key, as the Chainlink oracle does every
+/// quarter.
+///
+/// Every key it has used stays live: it serves each event from the key that
+/// announced it, looked up by event id alone, and ignores the key it is asked
+/// under.
+#[derive(Debug)]
+pub struct RotatingOracle {
+    /// Every key the oracle has used, oldest first. The last is current.
+    keys: Vec<MemoryOracle>,
+    /// The index in `keys` of the key that announced each event.
+    announced_by: HashMap<String, usize>,
+}
+
+/// An oracle on its first key.
+impl Default for RotatingOracle {
+    fn default() -> Self {
+        Self {
+            keys: vec![MemoryOracle::default()],
+            announced_by: HashMap::new(),
+        }
+    }
+}
+
+impl RotatingOracle {
+    /// The key the oracle announces new events with.
+    pub fn current_key(&self) -> XOnlyPublicKey {
+        self.current().get_public_key()
+    }
+
+    /// Retires the current key and moves to a new one.
+    pub fn rotate(&mut self) {
+        self.keys.push(MemoryOracle::default());
+    }
+
+    /// Announces `event_id` under the current key.
+    pub async fn announce_enum_event(
+        &mut self,
+        event_id: &str,
+        maturity: u32,
+    ) -> OracleAnnouncement {
+        let announcement =
+            announce_enum_event(std::slice::from_ref(self.current()), event_id, maturity)
+                .await
+                .remove(0);
+        self.announced_by
+            .insert(event_id.to_string(), self.keys.len() - 1);
+        announcement
+    }
+
+    /// Attests `outcome` for `event_id` with the key that announced it.
+    pub async fn attest_enum_event(&self, event_id: &str, outcome: &str) {
+        let signer = self
+            .signer(event_id)
+            .expect("the oracle announced the event it attests");
+        dlc::sign_enum_event(std::slice::from_ref(signer), event_id, &[0], outcome).await;
+    }
+
+    /// The key that announced `event_id`.
+    pub fn signer(&self, event_id: &str) -> Result<&MemoryOracle, ddk_manager::error::Error> {
+        self.announced_by
+            .get(event_id)
+            .map(|index| &self.keys[*index])
+            .ok_or_else(|| {
+                ddk_manager::error::Error::OracleError(format!(
+                    "event {event_id} was not announced"
+                ))
+            })
+    }
+
+    fn current(&self) -> &MemoryOracle {
+        self.keys.last().expect("an oracle always has a key")
+    }
+}
+
+#[async_trait::async_trait]
+impl Oracle for RotatingOracle {
+    async fn get_announcement(
+        &self,
+        oracle_public_key: &XOnlyPublicKey,
+        event_id: &str,
+    ) -> Result<OracleAnnouncement, ddk_manager::error::Error> {
+        self.signer(event_id)?
+            .get_announcement(oracle_public_key, event_id)
+            .await
+    }
+
+    async fn get_attestation(
+        &self,
+        oracle_public_key: &XOnlyPublicKey,
+        event_id: &str,
+    ) -> Result<OracleAttestation, ddk_manager::error::Error> {
+        self.signer(event_id)?
+            .get_attestation(oracle_public_key, event_id)
+            .await
+    }
+}
+
+/// Params for a single oracle enum contract on an event announced and
+/// attested under one key, by an oracle that has since rotated to another.
+///
+/// The returned oracle is the one the manager has to settle through.
+pub async fn get_rotated_oracle_test_params() -> (TestParams, RotatingOracle) {
+    let mut oracle = RotatingOracle::default();
+    let announcement = oracle.announce_enum_event(EVENT_ID, EVENT_MATURITY).await;
+    oracle.rotate();
+    assert_ne!(
+        oracle.current_key(),
+        announcement.oracle_public_key,
+        "the oracle has moved off the key that announced the contract's event"
+    );
+
+    let outcomes = enum_outcomes();
+    let outcome = &outcomes[(thread_rng().next_u32() as usize) % outcomes.len()];
+    oracle.attest_enum_event(EVENT_ID, outcome).await;
+
+    let leg = ContractLeg::new(get_enum_contract_descriptor(), vec![announcement], 1);
+    let test_params = TestParams {
+        contract_input: contract_input(&[leg]),
+        oracles: vec![oracle.signer(EVENT_ID).expect("announced above").clone()],
+    };
+    (test_params, oracle)
+}
+
 /// The announcements `oracles` made for `event_id`.
 ///
 /// A [`ContractLeg`] is built from them: they name the oracles the manager has
@@ -307,7 +433,7 @@ pub async fn announcements(oracles: &[MemoryOracle], event_id: &str) -> Vec<Orac
     for oracle in oracles {
         announcements.push(
             oracle
-                .get_announcement(event_id)
+                .get_announcement(&oracle.get_public_key(), event_id)
                 .await
                 .expect("oracle announced this event"),
         );
