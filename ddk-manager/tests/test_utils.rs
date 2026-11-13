@@ -398,6 +398,38 @@ impl Oracle for RotatingOracle {
     }
 }
 
+/// An oracle that answers only after `delay`, as a distant one does.
+#[derive(Debug)]
+pub struct SlowOracle {
+    pub oracle: MemoryOracle,
+    pub delay: std::time::Duration,
+}
+
+#[async_trait::async_trait]
+impl Oracle for SlowOracle {
+    async fn get_announcement(
+        &self,
+        oracle_public_key: &XOnlyPublicKey,
+        event_id: &str,
+    ) -> Result<OracleAnnouncement, ddk_manager::error::Error> {
+        tokio::time::sleep(self.delay).await;
+        self.oracle
+            .get_announcement(oracle_public_key, event_id)
+            .await
+    }
+
+    async fn get_attestation(
+        &self,
+        oracle_public_key: &XOnlyPublicKey,
+        event_id: &str,
+    ) -> Result<OracleAttestation, ddk_manager::error::Error> {
+        tokio::time::sleep(self.delay).await;
+        self.oracle
+            .get_attestation(oracle_public_key, event_id)
+            .await
+    }
+}
+
 /// Params for a single oracle enum contract on an event announced and
 /// attested under one key, by an oracle that has since rotated to another.
 ///

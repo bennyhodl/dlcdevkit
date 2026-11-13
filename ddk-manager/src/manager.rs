@@ -21,7 +21,7 @@ use bitcoin::{Address, Amount};
 use ddk_messages::oracle_msgs::{OracleAnnouncement, OracleAttestation};
 use ddk_messages::{AcceptDlc, CloseDlc, Message as DlcMessage, OfferDlc, SignDlc, TlvStream};
 use futures::stream;
-use futures::stream::FuturesUnordered;
+use futures::stream::{FuturesOrdered, FuturesUnordered};
 use futures::{StreamExt, TryStreamExt};
 use lightning::util::logger::Logger;
 use lightning::{log_debug, log_error, log_info, log_trace, log_warn};
@@ -1766,6 +1766,8 @@ where
     T::Target: Time,
     L::Target: Logger,
 {
+    /// The announcements of every contract info, in contract info order: the
+    /// offer pairs each list with its contract info by position.
     async fn oracle_announcements(
         &self,
         contract_input: &ContractInput,
@@ -1783,7 +1785,7 @@ where
                     }
                 }
             })
-            .collect::<FuturesUnordered<_>>()
+            .collect::<FuturesOrdered<_>>()
             .await
             .try_collect::<Vec<_>>()
             .await?;

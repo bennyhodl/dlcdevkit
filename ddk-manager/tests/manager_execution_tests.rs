@@ -848,6 +848,41 @@ async fn second_contract_info_common(numerical_second: bool, manual_close: bool)
     }
 }
 
+/// The oracle of a disjoint contract's first contract info answers after the
+/// second's. The offer still pairs each contract info with its own
+/// announcements, and the contract settles on its second contract info.
+#[tokio::test]
+#[ignore]
+async fn second_enum_contract_info_slow_first_oracle_test() {
+    let test_params = get_second_contract_info_test_params(false).await;
+    let first_key = test_params.contract_input.contract_infos[0]
+        .oracles
+        .public_keys[0];
+    let oracles: HashMap<XOnlyPublicKey, TestOracle> = test_params
+        .oracles
+        .iter()
+        .map(|oracle| {
+            let key = oracle.get_public_key();
+            let oracle: TestOracle = if key == first_key {
+                Arc::new(SlowOracle {
+                    oracle: oracle.clone(),
+                    delay: std::time::Duration::from_millis(500),
+                })
+            } else {
+                Arc::new(oracle.clone())
+            };
+            (key, oracle)
+        })
+        .collect();
+    manager_execution_test_with_oracle(
+        test_params,
+        Arc::new(oracles),
+        TestPath::CloseBy(Party::Bob),
+        false,
+    )
+    .await;
+}
+
 #[tokio::test]
 #[ignore]
 async fn second_enum_contract_info_test() {
