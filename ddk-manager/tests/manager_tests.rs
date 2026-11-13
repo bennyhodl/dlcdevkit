@@ -177,6 +177,70 @@ async fn reject_offer_creation_with_mismatched_announcements() {
     );
 }
 
+/// Asserts `result` is the offer construction's rejection of announcements
+/// that do not match the contract input.
+fn assert_rejects_unasked_announcement(
+    result: Result<ddk_messages::OfferDlc, ddk_manager::error::Error>,
+) {
+    match result {
+        Err(ddk_manager::error::Error::InvalidParameters(message))
+            if message.starts_with("expected an announcement of event") => {}
+        other => panic!("unexpected result: {other:?}"),
+    }
+}
+
+/// An oracle that rotated its key announces the same event under its new key.
+/// An offer whose input names the old key does not take the new announcement.
+#[tokio::test]
+async fn reject_offer_creation_with_announcement_under_another_key() {
+    let logger = Arc::new(Logger::disabled("test_manager".to_string()));
+    let manager = get_manager(logger).await;
+
+    let old_key = vec![MemoryOracle::default()];
+    let new_key = vec![MemoryOracle::default()];
+    let asked = announce_enum_event(&old_key, "rotated", 2_000_000_000).await;
+    let given = announce_enum_event(&new_key, "rotated", 2_000_000_000).await;
+    let total = bitcoin::Amount::from_sat(100_000);
+    let input = contract_input(
+        &[ContractLeg::new(enum_descriptor(total), asked, 1)],
+        total,
+        bitcoin::Amount::ZERO,
+        2,
+    );
+
+    let result = manager
+        .send_offer_with_announcements(&input, pubkey(), vec![given])
+        .await;
+    assert_rejects_unasked_announcement(result);
+}
+
+/// Two contract infos on one oracle's two events are given each other's
+/// announcement. The keys match, so the events tell them apart.
+#[tokio::test]
+async fn reject_offer_creation_with_swapped_contract_info_announcements() {
+    let logger = Arc::new(Logger::disabled("test_manager".to_string()));
+    let manager = get_manager(logger).await;
+
+    let oracle = vec![MemoryOracle::default()];
+    let first = announce_enum_event(&oracle, "first", 2_000_000_000).await;
+    let second = announce_enum_event(&oracle, "second", 2_000_000_000).await;
+    let total = bitcoin::Amount::from_sat(100_000);
+    let input = contract_input(
+        &[
+            ContractLeg::new(enum_descriptor(total), first.clone(), 1),
+            ContractLeg::new(enum_descriptor(total), second.clone(), 1),
+        ],
+        total,
+        bitcoin::Amount::ZERO,
+        2,
+    );
+
+    let result = manager
+        .send_offer_with_announcements(&input, pubkey(), vec![second, first])
+        .await;
+    assert_rejects_unasked_announcement(result);
+}
+
 #[tokio::test]
 async fn commit_offer_stores_the_message_stream() {
     use ddk_manager::contract::Contract;

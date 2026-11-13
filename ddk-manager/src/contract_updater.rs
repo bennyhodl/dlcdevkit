@@ -77,6 +77,13 @@ where
             contract_input.contract_infos.len()
         )));
     }
+    for (info, announcements) in contract_input
+        .contract_infos
+        .iter()
+        .zip(oracle_announcements.iter())
+    {
+        info.oracles.check_announcements(announcements)?;
+    }
 
     let id = crate::utils::get_new_temporary_id();
     let keys_id = signer_provider.derive_signer_key_id(id);

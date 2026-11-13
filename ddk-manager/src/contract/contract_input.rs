@@ -5,6 +5,7 @@ use crate::error::Error;
 use super::ContractDescriptor;
 use bitcoin::Amount;
 use ddk_dlc::DUST_LIMIT;
+use ddk_messages::oracle_msgs::OracleAnnouncement;
 use secp256k1_zkp::XOnlyPublicKey;
 #[cfg(feature = "use-serde")]
 use serde::{Deserialize, Serialize};
@@ -48,6 +49,34 @@ impl OracleInput {
             ));
         }
 
+        Ok(())
+    }
+
+    /// Checks that `announcements` are the ones this input asks for: one per
+    /// public key, in the same order, each announced under that key for this
+    /// input's event.
+    pub fn check_announcements(&self, announcements: &[OracleAnnouncement]) -> Result<(), Error> {
+        if announcements.len() != self.public_keys.len() {
+            return Err(Error::InvalidParameters(format!(
+                "expected {} announcements for event {}, got {}",
+                self.public_keys.len(),
+                self.event_id,
+                announcements.len()
+            )));
+        }
+        for (public_key, announcement) in self.public_keys.iter().zip(announcements) {
+            if announcement.oracle_public_key != *public_key
+                || announcement.oracle_event.event_id != self.event_id
+            {
+                return Err(Error::InvalidParameters(format!(
+                    "expected an announcement of event {} under key {}, got event {} under key {}",
+                    self.event_id,
+                    public_key,
+                    announcement.oracle_event.event_id,
+                    announcement.oracle_public_key
+                )));
+            }
+        }
         Ok(())
     }
 }

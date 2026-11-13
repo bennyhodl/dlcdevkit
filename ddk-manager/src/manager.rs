@@ -266,6 +266,9 @@ where
 
     /// Creates a new offer DLC using an existing DLC as an input.
     /// The new DLC MUST use a Confirmed contract as an input.
+    ///
+    /// `oracle_announcements` must be laid out as for
+    /// [`Manager::send_offer_with_announcements`].
     #[tracing::instrument(skip_all)]
     pub async fn send_splice_offer_with_announcements(
         &self,
@@ -324,7 +327,12 @@ where
     /// and an OfferDlc message returned.
     ///
     /// This function allows to pass the oracle announcements directly instead of
-    /// fetching them from the oracle.
+    /// fetching them from the oracle. `oracle_announcements` holds one list per
+    /// contract info, in order, and each list one announcement per public key
+    /// of that info's [`OracleInput`], in order, of that info's event under
+    /// that key. Anything else is rejected before any wallet input is reserved.
+    ///
+    /// [`OracleInput`]: crate::contract::contract_input::OracleInput
     #[tracing::instrument(skip_all)]
     pub async fn send_offer_with_announcements(
         &self,
