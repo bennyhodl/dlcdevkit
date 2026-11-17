@@ -75,7 +75,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.theseus/postgresql
-          key: theseus-postgresql-${{ runner.os }}
+          key: theseus-postgresql-${{ runner.os }}-${{ hashFiles('testenv/src/postgres.rs') }}
       - name: Run unit tests
         run: cargo test --all-features
   integration_tests_prepare:
