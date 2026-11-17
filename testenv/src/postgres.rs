@@ -3,7 +3,16 @@
 //! The server binaries are downloaded on first use and cached under
 //! `~/.theseus/postgresql`; subsequent runs start from that cache.
 
-use postgresql_embedded::{PostgreSQL, Settings};
+use postgresql_embedded::{PostgreSQL, Settings, VersionReq};
+
+/// The PostgreSQL release the tests run against.
+///
+/// Pinned so every run uses the same server. Releases from 18.6.1 on bundle
+/// their shared libraries and timezone data, so they run on hosts without a
+/// matching system `libxml2`.
+///
+/// CI keys its binary cache on this file, so changing the version refreshes it.
+const POSTGRES_VERSION: &str = "=18.7.0";
 
 /// A running PostgreSQL server with one database created.
 ///
@@ -18,6 +27,7 @@ impl TestPostgres {
     /// Starts a server on an ephemeral port and creates `database`.
     pub async fn start(database: &str) -> TestPostgres {
         let settings = Settings {
+            version: VersionReq::parse(POSTGRES_VERSION).expect("valid version requirement"),
             temporary: true,
             ..Default::default()
         };
