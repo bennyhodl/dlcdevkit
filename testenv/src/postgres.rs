@@ -8,12 +8,11 @@ use postgresql_embedded::{PostgreSQL, Settings, VersionReq};
 /// The PostgreSQL release the tests run against.
 ///
 /// Pinned so every run uses the same server. Releases from 18.6.1 on bundle
-/// their timezone data as tar hardlinks, which `postgresql_embedded` before
-/// 0.22 does not extract, so the server rejects `TimeZone=UTC`. 0.22 needs a
-/// newer compiler than the workspace's minimum supported version.
+/// their shared libraries and timezone data, so they run on hosts without a
+/// matching system `libxml2`.
 ///
 /// CI keys its binary cache on this file, so changing the version refreshes it.
-const POSTGRES_VERSION: &str = "=18.6.0";
+const POSTGRES_VERSION: &str = "=18.7.0";
 
 /// A running PostgreSQL server with one database created.
 ///

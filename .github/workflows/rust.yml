@@ -44,8 +44,11 @@ jobs:
       # RUSTSEC-2023-0071 (rsa, Marvin attack) has no fixed release. rsa only
       # enters the lockfile through sqlx-mysql, which no crate here enables, so
       # it is never compiled.
+      # RUSTSEC-2026-0459 (libsqlite3-sys, bundled SQLite) is the same case: it
+      # only enters the lockfile through sqlx-sqlite, which no crate here
+      # enables. The fixed libsqlite3-sys needs sqlx 0.9.
       - name: Check advisories
-        run: cargo audit --ignore RUSTSEC-2023-0071
+        run: cargo audit --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2026-0459
   msrv:
     name: msrv
     runs-on: ubuntu-latest
@@ -61,8 +64,10 @@ jobs:
       - name: Install Rust
         run: rustup toolchain install ${{ steps.msrv.outputs.version }} --profile minimal
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      # ddk-testenv is a test-only crate that is never published and declares
+      # its own, newer rust-version.
       - name: cargo check on the minimum supported version
-        run: cargo +${{ steps.msrv.outputs.version }} check --all-features
+        run: cargo +${{ steps.msrv.outputs.version }} check --workspace --exclude ddk-testenv --all-features
   unit-tests:
     name: unit tests
     runs-on: ubuntu-latest
