@@ -115,6 +115,8 @@ impl ContractInput {
             contract_info.oracles.validate()?;
         }
 
+        crate::contract::offered_contract::validate_contract_flags(self.contract_flags)?;
+
         ddk_dlc::util::validate_fee_rate(self.fee_rate)
             .map_err(|_| Error::InvalidParameters("Fee rate too high.".to_string()))
     }

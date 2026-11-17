@@ -1034,6 +1034,8 @@ pub struct ContractSetup {
     /// maturity unless a test sets it, since the fixture events matured long
     /// ago. `None` lets `create_offer` use the time of creation.
     pub cet_locktime: Option<u32>,
+    /// The offer's `contract_flags`.
+    pub contract_flags: u8,
 }
 
 impl ContractSetup {
@@ -1052,6 +1054,7 @@ impl ContractSetup {
             offerer,
             accepter,
             splice: None,
+            contract_flags: 0,
         }
     }
 
@@ -1062,6 +1065,11 @@ impl ContractSetup {
 
     pub fn with_cet_locktime(mut self, cet_locktime: Option<u32>) -> Self {
         self.cet_locktime = cet_locktime;
+        self
+    }
+
+    pub fn with_contract_flags(mut self, contract_flags: u8) -> Self {
+        self.contract_flags = contract_flags;
         self
     }
 }
@@ -1190,6 +1198,15 @@ pub fn splice_from(
 /// Runs a contract from `create_offer` through to a confirmed funding
 /// transaction, using only the stateless API and the wire messages.
 pub async fn fund_contract(ctx: &ChainContext, setup: ContractSetup) -> FundedContract {
+    let contract = sign_contract(setup).await;
+    ctx.broadcast_and_confirm(&contract.funding_transaction, 6)
+        .await;
+    contract
+}
+
+/// Runs a contract from `create_offer` through to a funding transaction both
+/// parties have signed, without broadcasting it.
+pub async fn sign_contract(setup: ContractSetup) -> FundedContract {
     let ContractSetup {
         contract_info,
         offer_collateral,
@@ -1198,6 +1215,7 @@ pub async fn fund_contract(ctx: &ChainContext, setup: ContractSetup) -> FundedCo
         accepter,
         splice,
         cet_locktime,
+        contract_flags,
     } = setup;
     let maturity = contract_info.get_closest_maturity_date();
 
@@ -1224,7 +1242,7 @@ pub async fn fund_contract(ctx: &ChainContext, setup: ContractSetup) -> FundedCo
         fee_rate_per_vb: FEE_RATE_PER_VB,
         cet_locktime,
         refund_locktime: maturity + REFUND_DELAY,
-        contract_flags: 0,
+        contract_flags,
     })
     .expect("could not create the offer");
 
@@ -1284,8 +1302,6 @@ pub async fn fund_contract(ctx: &ChainContext, setup: ContractSetup) -> FundedCo
             .all(|input| !input.witness.is_empty()),
         "every funding input must carry a witness"
     );
-
-    ctx.broadcast_and_confirm(&funding_transaction, 6).await;
 
     FundedContract {
         offer,

@@ -199,6 +199,10 @@ pub trait Blockchain {
     async fn get_blockchain_height(&self) -> Result<u64, Error>;
     /// Returns the block at given height
     async fn get_block_at_height(&self, height: u64) -> Result<Block, Error>;
+    /// Returns the median time past of the chain tip: the median timestamp of
+    /// the last 11 blocks, which a time locktime must be below for a
+    /// transaction to enter the next block (BIP 113).
+    async fn get_median_time_past(&self) -> Result<u32, Error>;
     /// Get the transaction with given id.
     async fn get_transaction(&self, tx_id: &Txid) -> Result<Transaction, Error>;
     /// Get the confirmation status of the transaction with the given id.

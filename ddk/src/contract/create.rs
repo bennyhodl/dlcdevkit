@@ -81,6 +81,9 @@ pub fn create_offer(params: CreateOfferParams) -> Result<OfferDlc, ContractError
         ));
     }
     offer
+        .validate_contract_flags()
+        .map_err(|e| ContractError::InvalidOffer(e.to_string()))?;
+    offer
         .validate_cet_locktime()
         .map_err(|e| ContractError::InvalidOffer(e.to_string()))?;
     // Catch malformed payout or oracle data before the offer leaves this party.

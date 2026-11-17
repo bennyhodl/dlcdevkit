@@ -172,6 +172,21 @@ impl ddk_manager::Blockchain for EsploraClient {
     }
 
     #[tracing::instrument(skip(self))]
+    async fn get_median_time_past(&self) -> Result<u32, ManagerError> {
+        let tip = self
+            .async_client
+            .get_tip_hash()
+            .await
+            .map_err(esplora_err_to_manager_err)?;
+        let info = self
+            .async_client
+            .get_block_info(&tip)
+            .await
+            .map_err(esplora_err_to_manager_err)?;
+        Ok(info.mediantime as u32)
+    }
+
+    #[tracing::instrument(skip(self))]
     async fn get_blockchain_height(&self) -> Result<u64, ManagerError> {
         Ok(self
             .async_client
