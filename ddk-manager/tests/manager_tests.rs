@@ -7,7 +7,7 @@ use ddk::oracle::memory::MemoryOracle;
 use ddk::storage::memory::MemoryStorage;
 use ddk::wallet::DlcDevKitWallet;
 use ddk::{chain::EsploraClient, logger::Logger};
-use ddk_manager::{manager::Manager, CachedContractSignerProvider, Oracle, SimpleSigner};
+use ddk_manager::{manager::Manager, CachedContractSignerProvider, SimpleSigner};
 use ddk_messages::Message;
 use ddk_testenv::dlc::{announce_enum_event, contract_input, enum_descriptor, ContractLeg};
 use secp256k1_zkp::{rand::Fill, PublicKey, XOnlyPublicKey};
@@ -19,7 +19,7 @@ type TestManager = Manager<
     Arc<CachedContractSignerProvider<Arc<DlcDevKitWallet>, SimpleSigner>>,
     Arc<EsploraClient>,
     Arc<MemoryStorage>,
-    Arc<MemoryOracle>,
+    Arc<HashMap<XOnlyPublicKey, Arc<MemoryOracle>>>,
     Arc<MockTime>,
     SimpleSigner,
     Arc<Logger>,
@@ -67,7 +67,7 @@ async fn get_manager(logger: Arc<Logger>) -> TestManager {
         wallet.clone(),
         blockchain.clone(),
         store.clone(),
-        oracles,
+        Arc::new(oracles),
         time,
         logger,
         None,
@@ -175,6 +175,70 @@ async fn reject_offer_creation_with_mismatched_announcements() {
         matches!(result, Err(ddk_manager::error::Error::InvalidParameters(_))),
         "unexpected result: {result:?}"
     );
+}
+
+/// Asserts `result` is the offer construction's rejection of announcements
+/// that do not match the contract input.
+fn assert_rejects_unasked_announcement(
+    result: Result<ddk_messages::OfferDlc, ddk_manager::error::Error>,
+) {
+    match result {
+        Err(ddk_manager::error::Error::InvalidParameters(message))
+            if message.starts_with("expected an announcement of event") => {}
+        other => panic!("unexpected result: {other:?}"),
+    }
+}
+
+/// An oracle that rotated its key announces the same event under its new key.
+/// An offer whose input names the old key does not take the new announcement.
+#[tokio::test]
+async fn reject_offer_creation_with_announcement_under_another_key() {
+    let logger = Arc::new(Logger::disabled("test_manager".to_string()));
+    let manager = get_manager(logger).await;
+
+    let old_key = vec![MemoryOracle::default()];
+    let new_key = vec![MemoryOracle::default()];
+    let asked = announce_enum_event(&old_key, "rotated", 2_000_000_000).await;
+    let given = announce_enum_event(&new_key, "rotated", 2_000_000_000).await;
+    let total = bitcoin::Amount::from_sat(100_000);
+    let input = contract_input(
+        &[ContractLeg::new(enum_descriptor(total), asked, 1)],
+        total,
+        bitcoin::Amount::ZERO,
+        2,
+    );
+
+    let result = manager
+        .send_offer_with_announcements(&input, pubkey(), vec![given])
+        .await;
+    assert_rejects_unasked_announcement(result);
+}
+
+/// Two contract infos on one oracle's two events are given each other's
+/// announcement. The keys match, so the events tell them apart.
+#[tokio::test]
+async fn reject_offer_creation_with_swapped_contract_info_announcements() {
+    let logger = Arc::new(Logger::disabled("test_manager".to_string()));
+    let manager = get_manager(logger).await;
+
+    let oracle = vec![MemoryOracle::default()];
+    let first = announce_enum_event(&oracle, "first", 2_000_000_000).await;
+    let second = announce_enum_event(&oracle, "second", 2_000_000_000).await;
+    let total = bitcoin::Amount::from_sat(100_000);
+    let input = contract_input(
+        &[
+            ContractLeg::new(enum_descriptor(total), first.clone(), 1),
+            ContractLeg::new(enum_descriptor(total), second.clone(), 1),
+        ],
+        total,
+        bitcoin::Amount::ZERO,
+        2,
+    );
+
+    let result = manager
+        .send_offer_with_announcements(&input, pubkey(), vec![second, first])
+        .await;
+    assert_rejects_unasked_announcement(result);
 }
 
 #[tokio::test]

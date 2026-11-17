@@ -108,6 +108,11 @@ impl NostrOracle {
         })
     }
 
+    /// The oracle's key, as a Bitcoin x-only public key.
+    pub fn get_public_key(&self) -> XOnlyPublicKey {
+        self.xonly_oracle_pubkey
+    }
+
     /// Starts the oracle's event processing loop in a separate task.
     ///
     /// This function spawns a new tokio task that:
@@ -197,12 +202,12 @@ impl crate::Oracle for NostrOracle {
 
 #[async_trait::async_trait]
 impl ddk_manager::Oracle for NostrOracle {
-    fn get_public_key(&self) -> XOnlyPublicKey {
-        self.xonly_oracle_pubkey
-    }
-
     #[tracing::instrument(skip(self))]
-    async fn get_announcement(&self, event_id: &str) -> Result<OracleAnnouncement, ManagerError> {
+    async fn get_announcement(
+        &self,
+        _oracle_public_key: &XOnlyPublicKey,
+        event_id: &str,
+    ) -> Result<OracleAnnouncement, ManagerError> {
         let event_id = EventId::from_str(event_id)
             .map_err(|_| ManagerError::OracleError(format!("Invalid event id: {}", event_id)))?;
 
@@ -240,7 +245,11 @@ impl ddk_manager::Oracle for NostrOracle {
     }
 
     #[tracing::instrument(skip(self))]
-    async fn get_attestation(&self, event_id: &str) -> Result<OracleAttestation, ManagerError> {
+    async fn get_attestation(
+        &self,
+        _oracle_public_key: &XOnlyPublicKey,
+        event_id: &str,
+    ) -> Result<OracleAttestation, ManagerError> {
         let event_id = EventId::from_str(event_id)
             .map_err(|_| ManagerError::OracleError(format!("Invalid event id: {}", event_id)))?;
         if let Ok(event) = self.db.event_by_id(&event_id).await {

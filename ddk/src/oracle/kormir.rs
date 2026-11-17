@@ -97,6 +97,11 @@ impl KormirOracleClient {
         })
     }
 
+    /// The key the Kormir server reported when this client connected.
+    pub fn get_public_key(&self) -> XOnlyPublicKey {
+        self.pubkey
+    }
+
     /// List all events stored with the connected Kormir server.
     ///
     /// Kormir events includes announcements info, signatures
@@ -303,13 +308,10 @@ impl KormirOracleClient {
 
 #[async_trait::async_trait]
 impl ddk_manager::Oracle for KormirOracleClient {
-    fn get_public_key(&self) -> bitcoin::key::XOnlyPublicKey {
-        self.pubkey
-    }
-
     #[tracing::instrument(skip(self))]
     async fn get_attestation(
         &self,
+        _oracle_public_key: &XOnlyPublicKey,
         event_id: &str,
     ) -> Result<ddk_messages::oracle_msgs::OracleAttestation, ddk_manager::error::Error> {
         let attestation = get::<OracleAttestation>(&self.host, &format!("attestation/{event_id}"))
@@ -330,6 +332,7 @@ impl ddk_manager::Oracle for KormirOracleClient {
     #[tracing::instrument(skip(self))]
     async fn get_announcement(
         &self,
+        _oracle_public_key: &XOnlyPublicKey,
         event_id: &str,
     ) -> Result<ddk_messages::oracle_msgs::OracleAnnouncement, ddk_manager::error::Error> {
         let announcement =

@@ -4,7 +4,6 @@ use bitcoin::key::rand::Fill;
 use bitcoin::Network;
 use ddk_manager::manager::{CooperativeCloseApprover, Manager};
 use ddk_manager::SystemTimeProvider;
-use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use crate::chain::{EsploraClient, ZeromqClient};
@@ -104,7 +103,9 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
     }
 
     /// Oracle implementation for the [ddk_manager::manager::Manager] to retrieve oracle attestations and announcements.
-    /// MUST implement [`crate::Oracle`].
+    /// MUST implement [`crate::Oracle`]. Every contract's events are fetched
+    /// from it, under whichever key announced them, so an oracle that rotates
+    /// its key keeps serving the contracts of its retired keys.
     pub fn set_oracle(&mut self, oracle: Arc<O>) -> &mut Self {
         self.oracle = Some(oracle);
         self
@@ -256,9 +257,6 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
             .await?,
         );
 
-        let mut oracles = HashMap::new();
-        oracles.insert(oracle.get_public_key(), oracle.clone());
-
         let (sender, mut receiver) = tokio::sync::mpsc::channel(100);
         let (stop_signal_sender, stop_signal) = tokio::sync::watch::channel(false);
 
@@ -268,7 +266,7 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
                 wallet.clone(),
                 esplora_client.clone(),
                 storage.clone(),
-                oracles,
+                oracle.clone(),
                 Arc::new(SystemTimeProvider {}),
                 logger.clone(),
                 self.close_approver.clone(),
@@ -360,7 +358,7 @@ impl<T: Transport, S: Storage, O: Oracle> Builder<T, S, O> {
             self.esplora_host,
             self.network,
             transport.name(),
-            oracle.get_public_key(),
+            oracle.name(),
             zmq_client.is_some()
         );
 

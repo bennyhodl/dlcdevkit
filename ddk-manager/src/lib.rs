@@ -232,15 +232,75 @@ pub trait Storage {
     async fn get_preclosed_contracts(&self) -> Result<Vec<PreClosedContract>, Error>;
 }
 
+/// Access to the announcements and attestations of one or more oracles.
+///
+/// An event is named by the key it was announced under and its event id.
+/// The key is routing information: a composite, such as the
+/// [`HashMap`] implementation, uses it to pick the oracle to ask. An oracle
+/// that signs under one key, or under several keys over time, may ignore it.
+///
+/// An oracle that rotates its key must keep serving the events of its
+/// retired keys: an event is attested by the key that announced it. The
+/// manager checks every announcement against the contract input and every
+/// attestation against its announcement, so implementations need not check
+/// the key they are given.
 #[async_trait::async_trait]
-/// Oracle trait provides access to oracle information.
 pub trait Oracle {
-    /// Returns the public key of the oracle.
-    fn get_public_key(&self) -> XOnlyPublicKey;
-    /// Returns the announcement for the event with the given id if found.
-    async fn get_announcement(&self, event_id: &str) -> Result<OracleAnnouncement, Error>;
-    /// Returns the attestation for the event with the given id if found.
-    async fn get_attestation(&self, event_id: &str) -> Result<OracleAttestation, Error>;
+    /// Returns the announcement of `event_id`, announced under
+    /// `oracle_public_key`.
+    async fn get_announcement(
+        &self,
+        oracle_public_key: &XOnlyPublicKey,
+        event_id: &str,
+    ) -> Result<OracleAnnouncement, Error>;
+    /// Returns the attestation of `event_id`, announced under
+    /// `oracle_public_key`.
+    async fn get_attestation(
+        &self,
+        oracle_public_key: &XOnlyPublicKey,
+        event_id: &str,
+    ) -> Result<OracleAttestation, Error>;
+}
+
+/// Several oracles, each filed under the key it announces with. Each call
+/// goes to the oracle filed under the requested key.
+#[async_trait::async_trait]
+impl<O> Oracle for HashMap<XOnlyPublicKey, O>
+where
+    O: Deref + Send + Sync,
+    O::Target: Oracle + Sync,
+{
+    async fn get_announcement(
+        &self,
+        oracle_public_key: &XOnlyPublicKey,
+        event_id: &str,
+    ) -> Result<OracleAnnouncement, Error> {
+        filed_oracle(self, oracle_public_key)?
+            .get_announcement(oracle_public_key, event_id)
+            .await
+    }
+
+    async fn get_attestation(
+        &self,
+        oracle_public_key: &XOnlyPublicKey,
+        event_id: &str,
+    ) -> Result<OracleAttestation, Error> {
+        filed_oracle(self, oracle_public_key)?
+            .get_attestation(oracle_public_key, event_id)
+            .await
+    }
+}
+
+fn filed_oracle<'a, O: Deref>(
+    oracles: &'a HashMap<XOnlyPublicKey, O>,
+    oracle_public_key: &XOnlyPublicKey,
+) -> Result<&'a O::Target, Error> {
+    oracles
+        .get(oracle_public_key)
+        .map(Deref::deref)
+        .ok_or_else(|| {
+            Error::InvalidParameters(format!("Unknown oracle public key {oracle_public_key}"))
+        })
 }
 
 /// Represents a UTXO.
