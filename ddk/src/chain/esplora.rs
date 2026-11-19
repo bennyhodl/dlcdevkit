@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crate::error::{esplora_err_to_manager_err, Error};
 use crate::logger::Logger;
 use crate::logger::{log_debug, log_error, log_info, log_warn, WriteLog};
+use bdk_chain::TxUpdate;
 use bdk_esplora::esplora_client::Error as EsploraError;
 use bdk_esplora::esplora_client::{AsyncClient, Builder};
 use bitcoin::Network;
@@ -40,6 +41,7 @@ pub struct EsploraClient {
     pub async_client: AsyncClient,
     network: Network,
     fees: super::FeeRateCache,
+    broadcasts: super::broadcasts::RecentBroadcasts,
     logger: Arc<Logger>,
 }
 
@@ -55,6 +57,7 @@ impl EsploraClient {
             async_client,
             network,
             fees: super::FeeRateCache::new(),
+            broadcasts: Default::default(),
             logger,
         })
     }
@@ -71,6 +74,27 @@ impl EsploraClient {
                 e.to_string()
             ),
         }
+    }
+
+    /// Broadcasts `transaction` and remembers it as this node's own, so a
+    /// wallet sync does not read esplora's indexing lag as its eviction.
+    /// Every broadcast goes through here. Returns the unix time of the
+    /// broadcast, the moment a wallet that records the transaction first
+    /// saw it.
+    pub async fn broadcast(&self, transaction: &Transaction) -> Result<u64, EsploraError> {
+        self.async_client.broadcast(transaction).await?;
+        let at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("the system clock is past the unix epoch")
+            .as_secs();
+        self.broadcasts.record(transaction.compute_txid(), at);
+        Ok(at)
+    }
+
+    /// Drops from a sync's `tx_update` the evictions of transactions this
+    /// node broadcast too recently for esplora to have indexed them.
+    pub(crate) fn drop_lagging_evictions<A>(&self, tx_update: &mut TxUpdate<A>) {
+        self.broadcasts.drop_lagging_evictions(tx_update);
     }
 }
 
@@ -133,7 +157,7 @@ impl ddk_manager::Blockchain for EsploraClient {
             }
         };
 
-        if let Err(e) = self.async_client.broadcast(transaction).await {
+        if let Err(e) = self.broadcast(transaction).await {
             log_error!(
                 self.logger,
                 "Could not broadcast transaction. txid={}, tx_hex={}, error={}",
